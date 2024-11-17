@@ -9,12 +9,13 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QListWidget, QMessageBox, QDialog, QFormLayout,
                             QComboBox, QMenu, QSpinBox, QDialogButtonBox,
                             QSplitter, QStyle, QSpacerItem, QFrame, QFileDialog)
-from PyQt5.QtCore import Qt, QSettings, QSize, QRect, QTimer
+from PyQt5.QtCore import Qt, QSettings, QSize, QRect, QTimer, PYQT_VERSION_STR
 from PyQt5.QtGui import QWindow, QScreen
 import vlc
 import subprocess
 import os
 import threading
+import platform
 
 def toggle_fullscreen(self):
     if not self.is_fullscreen:
@@ -318,6 +319,12 @@ class TVHeadendClient(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         
+        # Create menu bar
+        menubar = self.menuBar()
+        help_menu = menubar.addMenu('Help')
+        about_action = help_menu.addAction('About')
+        about_action.triggered.connect(self.show_about_dialog)
+        
         # Create splitter for resizable panels
         self.splitter = QSplitter(Qt.Horizontal)
         
@@ -446,7 +453,6 @@ class TVHeadendClient(QMainWindow):
         
         # Initialize server list
         self.update_server_list()
-
     def video_double_clicked(self, event):
         self.toggle_fullscreen()
 
@@ -871,6 +877,52 @@ class TVHeadendClient(QMainWindow):
                 
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"Failed to stop recording: {str(e)}")
+
+    def show_about_dialog(self):
+        about_text = f"""
+        <h2>TVHplayer v1.1</h2>
+        <p>A simple TVHeadend client</p>
+        <p><b>Developer: </b>mFat</p>
+        <p><b>Project Website:</b> <a href="https://github.com/mfat/tvhplayer">
+        https://github.com/mfat/tvhplayer</a></p>
+        <p><b>License:</b> GPL v3</p>
+        <p>Built with:</p>
+        <ul>
+            <li>Python {platform.python_version()}</li>
+            <li>PyQt {PYQT_VERSION_STR}</li>
+            <li>VLC {vlc.libvlc_get_version().decode()}</li>
+        </ul>
+    
+        """
+        
+        about_dialog = QDialog(self)
+        about_dialog.setWindowTitle("About TVHplayer")
+        about_dialog.setMinimumSize(400, 400)
+        about_dialog.setSizeGripEnabled(True)
+        
+        layout = QVBoxLayout()
+        
+        # Add icon
+        icon_label = QLabel()
+        icon_label.setPixmap(self.style().standardIcon(QStyle.SP_MediaPlay).pixmap(64, 64))
+        icon_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(icon_label)
+        
+        # Add text
+        text_label = QLabel(about_text)
+        text_label.setOpenExternalLinks(True)  # Make links clickable
+        text_label.setTextFormat(Qt.RichText)
+        text_label.setWordWrap(True)
+        text_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(text_label)
+        
+        # Add OK button
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok)
+        button_box.accepted.connect(about_dialog.accept)
+        layout.addWidget(button_box)
+        
+        about_dialog.setLayout(layout)
+        about_dialog.exec_()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
