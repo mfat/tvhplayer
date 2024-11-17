@@ -1,6 +1,9 @@
 # TVHplayer
 Desktop client for playback and recording with TVheadend
 
+![screenshot](https://github.com/user-attachments/assets/746b0643-d780-43a9-882b-e48424a21d8a)
+
+
 ## Features:
 - Add multiple servers
 - Play TV & radio channels
