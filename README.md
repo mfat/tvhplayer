@@ -13,4 +13,4 @@ Desktop client for playback and recording with TVheadend
 - Cross-platform - runs on linux, macOS and Windows
 
 ## Download
-- Head to [releases](/releases/) section to download
+- Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download
