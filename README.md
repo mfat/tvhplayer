@@ -12,4 +12,5 @@ Desktop client for playback and recording with TVheadend
 - Set custom duration for recordings
 - Cross-platform - runs on linux, macOS and Windows
 
-  
+## Download
+- Head to [releases](/releases/) section to download
