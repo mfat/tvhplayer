@@ -14,6 +14,8 @@ Desktop client for playback and recording with TVheadend
 
 ## Download
 - Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download
+- tvhplayer is the linux executable.
+- For windows download the exe file
 
 ## Requirements
 - VLC must be installed as it's used for playback. (on linux make sure to install vlc dev packages too)
