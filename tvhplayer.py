@@ -880,7 +880,7 @@ class TVHeadendClient(QMainWindow):
 
     def show_about_dialog(self):
         about_text = f"""
-        <h2>TVHplayer v1.1</h2>
+        <h2>TVHplayer v1.2</h2>
         <p>A simple TVHeadend client</p>
         <p><b>Developer: </b>mFat</p>
         <p><b>Project Website:</b> <a href="https://github.com/mfat/tvhplayer">
@@ -923,6 +923,13 @@ class TVHeadendClient(QMainWindow):
         
         about_dialog.setLayout(layout)
         about_dialog.exec_()
+
+    def keyPressEvent(self, event):
+        """Handle keyboard events"""
+        if event.key() == Qt.Key_Escape and self.is_fullscreen:
+            self.toggle_fullscreen()
+        else:
+            super().keyPressEvent(event)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
