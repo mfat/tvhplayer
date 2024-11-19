@@ -23,4 +23,4 @@ Desktop client for playback and recording live TV with TVheadend
 ## Requirements
 - VLC must be installed as it's used for playback. (on linux make sure to install vlc dev packages too)
 - FFMPEG (used for local recording feature if you need it)
-  - On Windows follow [this guide](https://phoenixnap.com/kb/ffmpeg-windows) to add ffmpeg to windows PATH
+  - On Windows follow [this guide](https://phoenixnap.com/kb/ffmpeg-windows) to add ffmpeg to windows PATH. You can also put ffmpeg.exe in the same directory as tvhplayer.
