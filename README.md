@@ -32,7 +32,7 @@ Desktop client for playback and recording live TV with TVheadend
 - You can run the code directly with python, thios way the app will start faster
 To do this:
 - install python
-- download the requirements.txt and run this command:
+- download the [requirements.txt](https://github.com/mfat/tvhplayer/blob/main/requirements.txt) and run this command:
   `pip install -r requirements.txt`
 - Download [necessary resources](https://github.com/mfat/tvhplayer/releases/download/v2.0/v2.0.zip) and put in the same directory as tvhplayer.py
 - Run the app withL
