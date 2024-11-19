@@ -4,7 +4,7 @@
 # TVHplayer
 Desktop client for playback and recording live TV with TVheadend
 
-![screenshot](https://github.com/user-attachments/assets/746b0643-d780-43a9-882b-e48424a21d8a)
+![Screenshot](https://github.com/user-attachments/assets/573b6563-0915-481b-ac02-d18bc8297526)
 
 
 ## Features:
