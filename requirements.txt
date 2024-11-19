@@ -1,0 +1,5 @@
+PyQt5>=5.15.0
+python-vlc>=3.0.0
+requests>=2.25.0
+pillow>=8.0.0  # For icon generation
+pyinstaller>=5.0.0  # For building executable
