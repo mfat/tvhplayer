@@ -28,4 +28,7 @@ Desktop client for playback and recording live TV with TVheadend
 ## Support
 - For any problems or bugs [create an issue](https://github.com/user/repository/issues/new)
 
-
+## Run the app with python (faster)
+- If you want to run the code directly with python, download the requirements.txt and run this command:
+  `pip install -r requirements.txt`
+  
