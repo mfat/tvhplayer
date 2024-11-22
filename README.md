@@ -18,7 +18,7 @@ Desktop client for playback and recording live TV with TVheadend
 ## Download
 - Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download
 - tvhplayer is the linux executable.
-- For windows download the exe file
+- For windows download the exe installer
 - For macOS run the app from source (see below) until an executable is ready for release.
 
 ## Requirements
@@ -35,7 +35,7 @@ To do this:
 - install python
 - download the [requirements.txt](https://github.com/mfat/tvhplayer/blob/main/requirements.txt) and run this command:
   `pip install -r requirements.txt`
-- Download [necessary resources](https://github.com/mfat/tvhplayer/releases/download/v2.0/v2.0.zip) and put in the same directory as tvhplayer.py
-- Run the app withL
+- Download the tvhplayer zip file from the latest release and extract to a folder.
+- Run the app with:
   `python3 tvhplayer.py`
   
