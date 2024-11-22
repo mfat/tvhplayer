@@ -9,10 +9,12 @@ Desktop client for playback and recording live TV with TVheadend
 
 ## Features:
 - Add multiple servers
-- Play TV & radio channels
+- Browse EPG for each channel and schedule recording your favorite shows
+- Play live TV & radio channels
 - Initiate instant records on your TVheadend server
 - Record live TV locally
 - Set custom duration for recordings
+- Monitor your server status, signal strength and DVR right from the app
 - Cross-platform - runs on linux, macOS and Windows
 
 ## Download
