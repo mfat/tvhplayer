@@ -41,3 +41,5 @@ To do this:
 - Run the app with:
   `python3 tvhplayer.py`
   
+## Support development
+BTC: `bc1qqtsyf0ft85zshsnw25jgsxnqy45rfa867zqk4t`
