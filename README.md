@@ -42,4 +42,4 @@ To do this:
   `python3 tvhplayer.py`
   
 ## Support development
-BTC: `bc1qqtsyf0ft85zshsnw25jgsxnqy45rfa867zqk4t`
+Bitcoin: `bc1qqtsyf0ft85zshsnw25jgsxnqy45rfa867zqk4t`
