@@ -32,7 +32,7 @@ Desktop client for playback and recording live TV with TVheadend
 ## Support
 - For any problems or bugs [create an issue](https://github.com/user/repository/issues/new)
 
-## Run the app from source (faster)
+## Run the app from source (for faster startup time)
 - You can run the code directly with python, this way the app will start faster. You may want to do this if you don't want to download the executable.
 To do this:
 - install python
