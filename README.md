@@ -15,7 +15,7 @@ Desktop client for playback and recording live TV with TVheadend
 - Record live TV locally
 - Set custom duration for recordings
 - Monitor your server status, signal strength and DVR right from the app
--Uses built-in VLC player for maximum compatibility 
+- Uses built-in VLC player for maximum compatibility 
 - Cross-platform - runs on linux, macOS and Windows
 
 ## Download
