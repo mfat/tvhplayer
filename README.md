@@ -19,10 +19,8 @@ Desktop client for playback and recording live TV with TVheadend
 - Cross-platform - runs on linux, macOS and Windows
 
 ## Download
-- Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download
-- tvhplayer is the linux executable.
-- For windows download the exe installer
-- For macOS either download the executable or run the app from source (see below).
+- Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download for your operating system
+  
 
 ## Requirements
 - VLC must be installed as it's used for playback. (on linux make sure to install vlc dev packages too)
