@@ -1168,28 +1168,18 @@ class TVHeadendClient(QMainWindow):
         
 
         # Volume slider and mute button
-        
         # Mute button with icons for different states
+        
+        
+        
         self.mute_btn = QPushButton()
-        self.mute_btn.setFixedSize(32, 32)
-        self.mute_btn.setCheckable(True)
         self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
         self.mute_btn.setIconSize(QSize(32, 32))
+        self.mute_btn.setFixedSize(32, 32)
+        self.mute_btn.setCheckable(True)  # Make the button checkable
+        self.mute_btn.clicked.connect(self.toggle_mute)
+        self.mute_btn.setToolTip("Toggle Mute")
         self.mute_btn.setStyleSheet("QPushButton { border: none; }")
-        self.mute_btn.setToolTip("Mute")
-        
-        # Connect toggled signal to handle icon changes
-        def on_mute_toggled(checked):
-            if checked:
-                self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/mute.svg"))
-                self.mute_btn.setToolTip("Unmute")
-            else:
-                self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
-                self.mute_btn.setToolTip("Mute")     
-        self.mute_btn.toggled.connect(on_mute_toggled)
-
-        # Replace the on_mute_toggled connection with:
-        self.mute_btn.toggled.connect(self.toggle_mute)
 
         
         self.volume_slider = QSlider(Qt.Horizontal)
@@ -1812,16 +1802,15 @@ class TVHeadendClient(QMainWindow):
     def toggle_mute(self):
         """Toggle audio mute state"""
         print("Debug: Toggling mute")
-        is_muted = self.mute_btn.isChecked()
+        is_muted = self.media_player.audio_get_mute()
+        self.media_player.audio_set_mute(not is_muted)
         
-        if is_muted:
-            self.media_player.audio_set_mute(True)
-            self.mute_btn.setText("🔇")  # Muted speaker icon
+        if not is_muted:  # Switching to muted
+            self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/mute.svg"))
             self.mute_btn.setToolTip("Unmute")
             print("Debug: Audio muted")
-        else:
-            self.media_player.audio_set_mute(False)
-            self.mute_btn.setText("🔊")  # Speaker icon
+        else:  # Switching to unmuted
+            self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
             self.mute_btn.setToolTip("Mute")
             print("Debug: Audio unmuted")
 
@@ -1831,7 +1820,7 @@ class TVHeadendClient(QMainWindow):
         about_text = (
             "<div style='text-align: center;'>"
             "<h2>TVHplayer</h2>"
-            "<p>Version 3.3</p>"
+            "<p>Version 3.4</p>"
             "<p>A powerful and user-friendly TVHeadend client application.</p>"
             "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
             "<p style='margin-top: 20px;'><b>Built with:</b><br>"
