@@ -8,9 +8,9 @@ from PyQt5.QtWidgets import (
     QListWidget, QDialog, QFormLayout, QLineEdit,
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QGridLayout, QMenuBar, QRadioButton, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
-    QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QShortcut  # Added QShortcut here
+    QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QShortcut, QCheckBox, QGroupBox  # Added QGroupBox here
 )
-from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect
+from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect, QCoreApplication
 from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence
 import json
 import requests
@@ -21,6 +21,8 @@ import os
 import traceback
 from pathlib import Path
 import logging
+
+
 
 
 class Logger:
@@ -879,6 +881,16 @@ class TVHeadendClient(QMainWindow):
                     os.environ['LD_LIBRARY_PATH'] = base_path
                     
                 print(f"Debug: VLC plugin path set to: {plugin_path}")
+            else:
+                # If running from source, use system VLC
+                if sys.platform == 'darwin':
+                    # On macOS, try to use VLC.app plugins
+                    plugin_path = '/Applications/VLC.app/Contents/MacOS/plugins'
+                    if os.path.exists(plugin_path):
+                        os.environ['VLC_PLUGIN_PATH'] = plugin_path
+                        print(f"Debug: Using system VLC plugins from: {plugin_path}")
+                    else:
+                        print("Debug: System VLC plugins not found, using default paths")
                 
             # Initialize VLC without arguments
             self.instance = vlc.Instance()
@@ -895,6 +907,8 @@ class TVHeadendClient(QMainWindow):
             
         except Exception as e:
             print(f"Error initializing VLC: {str(e)}")
+            print(f"Debug: Error type: {type(e)}")
+            print(f"Debug: Traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Failed to initialize VLC: {str(e)}")
         
         
@@ -975,6 +989,10 @@ class TVHeadendClient(QMainWindow):
         fullscreen_action.setShortcut("F")
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
+
+        # Add Settings action to View menu
+        #settings_action = QAction("Settings", self)
+        ##view_menu.addAction(settings_action)
         
         # Create actions
         exit_action = QAction("Exit", self)
@@ -996,6 +1014,7 @@ class TVHeadendClient(QMainWindow):
         # Left pane
         left_pane = QFrame()
         left_pane.setFrameStyle(QFrame.Panel | QFrame.Raised)
+        #left_pane.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
         left_layout = QVBoxLayout(left_pane)
         
         # Server selection with add/remove buttons
@@ -1019,7 +1038,8 @@ class TVHeadendClient(QMainWindow):
         server_layout.addWidget(manage_servers_btn)
         left_layout.addLayout(server_layout)
         
-        
+    
+
         # Channel list
         self.channel_list = QTableWidget()
         self.channel_list.setColumnCount(2)
@@ -1045,6 +1065,7 @@ class TVHeadendClient(QMainWindow):
         # Right pane
         right_pane = QFrame()
         right_pane.setFrameStyle(QFrame.Panel | QFrame.Raised)
+        #right_pane.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
         right_layout = QVBoxLayout(right_pane)
         right_layout.setObjectName("right_layout")
         
@@ -1061,9 +1082,9 @@ class TVHeadendClient(QMainWindow):
         
         # Player controls
         controls_layout = QHBoxLayout()
-        
        # Create frame for play/stop buttons
         playback_frame = QFrame()
+        playback_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
         playback_frame.setWindowTitle("Playback")
         playback_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
         playback_frame.setLineWidth(5)  # Make frame thicker
@@ -1096,6 +1117,7 @@ class TVHeadendClient(QMainWindow):
         
         # Create frame for record buttons
         record_frame = QFrame()
+        record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
         record_frame.setWindowTitle("Recording")
         record_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
         record_frame.setLineWidth(5)  # Make frame thicker
@@ -1125,6 +1147,7 @@ class TVHeadendClient(QMainWindow):
         
         # Create frame for local record buttons
         local_record_frame = QFrame()
+        local_record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
         local_record_frame.setWindowTitle("Local Recording")
         local_record_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
         local_record_frame.setLineWidth(5)  # Make frame thicker
@@ -1191,7 +1214,6 @@ class TVHeadendClient(QMainWindow):
         fullscreen_btn = QPushButton()
         fullscreen_btn.setIcon(QIcon(f"{self.icons_dir}/fullscreen.svg"))
         fullscreen_btn.setIconSize(QSize(32, 32))
-        fullscreen_btn.setFixedSize(32, 32)
         fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         fullscreen_btn.setToolTip("Toggle Fullscreen")
         fullscreen_btn.setStyleSheet("QPushButton { border: none; }")
@@ -1283,12 +1305,12 @@ class TVHeadendClient(QMainWindow):
         search_layout = QHBoxLayout()
         search_icon = QLabel("🔍")  # Unicode search icon
         self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Press ctrl+F to search channels...")
+        self.search_box.setPlaceholderText("Press S to search channels...")
         self.search_box.textChanged.connect(self.filter_channels)
         self.search_box.setClearButtonEnabled(True)  # Add clear button inside search box
         
         # Add Ctrl+F shortcut for search box
-        search_shortcut = QShortcut(QKeySequence("Ctrl+F"), self)
+        search_shortcut = QShortcut(QKeySequence(Qt.Key_S, Qt.NoModifier), self)
         search_shortcut.activated.connect(self.search_box.setFocus)
         
         # Create custom clear button action
@@ -1360,7 +1382,7 @@ class TVHeadendClient(QMainWindow):
             else:
                 base_url = f"http://{url}"
             
-            api_url = f'{base_url}/api/channel/grid'
+            api_url = f'{base_url}/api/channel/grid?limit=10000'
             print(f"Debug: Making request to: {api_url}")
             
             # Create auth tuple if credentials exist
@@ -1477,6 +1499,7 @@ class TVHeadendClient(QMainWindow):
                 self.statusbar.showMessage("Connection aborted")
                 self.channel_list.clear()
         
+
     def start_recording(self):
         print("Debug: Starting recording")
         try:
@@ -1510,7 +1533,7 @@ class TVHeadendClient(QMainWindow):
                 print(f"Debug: Using authentication with username: {server.get('username', '')}")
             
             # First, get channel UUID
-            api_url = f'{server["url"]}/api/channel/grid'
+            api_url = f'{server["url"]}/api/channel/grid?limit=10000'
             print(f"Debug: Getting channel UUID from: {api_url}")
             
             response = requests.get(api_url, auth=auth)
@@ -1579,46 +1602,14 @@ class TVHeadendClient(QMainWindow):
         self.statusbar.showMessage("Playback stopped")
 
     def toggle_fullscreen(self):
+        """Toggle fullscreen mode for just the video frame"""
         print(f"Debug: Toggling fullscreen. Current state: {self.is_fullscreen}")
-        """Toggle fullscreen mode for VLC player"""
-        if not self.is_fullscreen:
-            # Store the video frame's original parent and layout position
-            self.original_parent = self.video_frame.parent()
-            self.original_layout = self.findChild(QVBoxLayout, "right_layout")
-            
-            # Create a new fullscreen window
-            self.fullscreen_window = QWidget()
-            self.fullscreen_window.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-            self.fullscreen_window.installEventFilter(self)  # Add event filter to fullscreen window
-            layout = QVBoxLayout(self.fullscreen_window)
-            layout.setContentsMargins(0, 0, 0, 0)
-            
-            # Move video frame to fullscreen
-            self.video_frame.setParent(self.fullscreen_window)
-            layout.addWidget(self.video_frame)
-            
-            # Show fullscreen
-            self.fullscreen_window.showFullScreen()
-            self.video_frame.show()
-            
-            # Reset VLC window handle for fullscreen
-            if sys.platform.startswith('linux'):
-                self.media_player.set_xwindow(self.video_frame.winId().__int__())
-            elif sys.platform == "win32":
-                self.media_player.set_hwnd(self.video_frame.winId().__int__())
-            elif sys.platform == "darwin":
-                self.media_player.set_nsobject(self.video_frame.winId().__int__())
-        else:
-            # Remove from fullscreen layout
-            self.fullscreen_window.layout().removeWidget(self.video_frame)
-            
-            # Find the right pane's layout again (in case it was lost)
-            right_layout = self.findChild(QVBoxLayout, "right_layout")
-            
-            # Restore to right pane
-            self.video_frame.setParent(self.original_parent)
+        
+        if self.is_fullscreen:
+            # Exit fullscreen - restore video frame to original layout
+            self.video_frame.setParent(self.findChild(QFrame))
+            right_layout = self.findChild(QVBoxLayout, "right_layout") 
             right_layout.insertWidget(0, self.video_frame)
-            self.video_frame.show()
             
             # Reset VLC window handle for normal view
             if sys.platform.startswith('linux'):
@@ -1627,13 +1618,21 @@ class TVHeadendClient(QMainWindow):
                 self.media_player.set_hwnd(self.video_frame.winId().__int__())
             elif sys.platform == "darwin":
                 self.media_player.set_nsobject(self.video_frame.winId().__int__())
+        else:
+            # Enter fullscreen - make video frame fill screen
+            self.video_frame.setParent(None)
+            self.video_frame.setWindowFlags(Qt.Window)
+            self.video_frame.showFullScreen()
             
-            # Close fullscreen window
-            self.fullscreen_window.close()
-            self.fullscreen_window = None
-            
+            # Reset VLC window handle for fullscreen
+            if sys.platform.startswith('linux'):
+                self.media_player.set_xwindow(self.video_frame.winId().__int__())
+            elif sys.platform == "win32":
+                self.media_player.set_hwnd(self.video_frame.winId().__int__())
+            elif sys.platform == "darwin":
+                self.media_player.set_nsobject(self.video_frame.winId().__int__())
+        
         self.is_fullscreen = not self.is_fullscreen
-        print(f"Debug: New fullscreen state: {self.is_fullscreen}")    
 
     def load_servers(self):
         """Load TVHeadend server configurations"""
@@ -1804,7 +1803,7 @@ class TVHeadendClient(QMainWindow):
         about_text = (
             "<div style='text-align: center;'>"
             "<h2>TVHplayer</h2>"
-            "<p>Version 3.1</p>"
+            "<p>Version 3.3</p>"
             "<p>A powerful and user-friendly TVHeadend client application.</p>"
             "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
             "<p style='margin-top: 20px;'><b>Built with:</b><br>"
@@ -2038,7 +2037,7 @@ class TVHeadendClient(QMainWindow):
             server = self.servers[self.server_combo.currentIndex()]
             
             # Get channel UUID
-            api_url = f'{server["url"]}/api/channel/grid'
+            api_url = f'{server["url"]}/api/channel/grid?limit=10000'
             auth = None
             if server.get('username') or server.get('password'):
                 auth = (server.get('username', ''), server.get('password', ''))
@@ -2304,7 +2303,7 @@ class TVHeadendClient(QMainWindow):
                 print(f"Debug: Using authentication with username: {server.get('username', '')}")
             
             # First get channel UUID
-            api_url = f'{server["url"]}/api/channel/grid'
+            api_url = f'{server["url"]}/api/channel/grid?limit=10000'
             print(f"Debug: Getting channel UUID from: {api_url}")
             
             response = requests.get(api_url, auth=auth)
@@ -2566,8 +2565,21 @@ class EPGDialog(QDialog):
                 f"Failed to schedule recording: {str(e)}"
             )
 
-if __name__ == '__main__':
+def main():
     app = QApplication(sys.argv)
+    try:
+        # Try to set display name if supported
+        if hasattr(QCoreApplication, 'setApplicationDisplayName'):
+            QCoreApplication.setApplicationDisplayName("TVHplayer")
+    except Exception as e:
+        print(f"Debug: Could not set application display name: {e}")
+        
+    # Set application name (this should work on all versions)
+    app.setApplicationName("TVHplayer")
+    
     window = TVHeadendClient()
     window.show()
     sys.exit(app.exec_())
+
+if __name__ == '__main__':
+    main()

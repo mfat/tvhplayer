@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <rect x="0" y="0" width="48" height="48" rx="8" fill="#e0e0e0" />
+  <!-- Corner Arrows -->
+  <path d="M 14 20 L 14 14 L 20 14 M 28 14 L 34 14 L 34 20"
+        stroke="#333333" 
+        stroke-width="2.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        fill="none"/>
+  <path d="M 14 28 L 14 34 L 20 34 M 28 34 L 34 34 L 34 28"
+        stroke="#333333" 
+        stroke-width="2.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        fill="none"/>
+</svg>

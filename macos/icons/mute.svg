@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <rect x="0" y="0" width="48" height="48" rx="8" fill="#e0e0e0" />
+  <!-- Simple Speaker -->
+  <path d="M 16 20 h 4 l 8 -6 v 20 l -8 -6 h -4 z" fill="#333333"/>
+  <!-- X centered vertically -->
+  <path d="M 31 22 l 4 4 M 35 22 l -4 4" 
+        stroke="#333333" 
+        stroke-width="2.5" 
+        stroke-linecap="round"/>
+</svg>
