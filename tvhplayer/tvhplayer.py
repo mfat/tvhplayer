@@ -14,7 +14,16 @@ from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QA
 from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence
 import json
 import requests
-import resources_rc
+# Replace this line:
+#from . import resources_rc
+
+# With this more flexible import approach:
+try:
+    from . import resources_rc  # Try package import first
+except ImportError:
+    import resources_rc  # Fall back to direct import when running from source
+# or
+#from tvhplayer import resources_rc  # Use absolute import
 import time
 import subprocess
 import os
@@ -936,7 +945,33 @@ class TVHeadendClient(QMainWindow):
             # Try looking up one directory (in case we're in src/)
             self.icons_dir = self.app_dir.parent / 'icons'
             if not self.icons_dir.exists():
-                raise RuntimeError(f"Icons directory not found in {self.app_dir} or parent directory")
+                # Try system icon directories
+                system_icon_dirs = []
+                if sys.platform.startswith('linux'):
+                    system_icon_dirs = [
+                        Path('/usr/share/icons/tvhplayer'),
+                        Path('/usr/local/share/icons/tvhplayer'),
+                        Path(os.path.expanduser('~/.local/share/icons/tvhplayer'))
+                    ]
+                elif sys.platform == 'darwin':
+                    system_icon_dirs = [
+                        Path('/System/Library/Icons'),
+                        Path('/Library/Icons'),
+                        Path(os.path.expanduser('~/Library/Icons'))
+                    ]
+                elif sys.platform == 'win32':
+                    system_icon_dirs = [
+                        Path(os.environ.get('PROGRAMDATA', 'C:/ProgramData')) / 'Icons',
+                        Path(os.environ['SYSTEMROOT']) / 'System32' / 'icons'
+                    ]
+                
+                for dir in system_icon_dirs:
+                    if dir.exists():
+                        self.icons_dir = dir
+                        print(f"Using system icons directory: {self.icons_dir}")
+                        break
+                else:
+                    raise RuntimeError(f"Icons directory not found in {self.app_dir}, parent directory, or system locations")
         
         print(f"Debug: Using icons directory: {self.icons_dir}")
         
@@ -1175,7 +1210,7 @@ class TVHeadendClient(QMainWindow):
         self.mute_btn = QPushButton()
         self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
         self.mute_btn.setIconSize(QSize(32, 32))
-        self.mute_btn.setFixedSize(32, 32)
+        self.mute_btn.setFixedSize(32, 32)  
         self.mute_btn.setCheckable(True)  # Make the button checkable
         self.mute_btn.clicked.connect(self.toggle_mute)
         self.mute_btn.setToolTip("Toggle Mute")
@@ -1192,7 +1227,7 @@ class TVHeadendClient(QMainWindow):
         fullscreen_btn = QPushButton()
         fullscreen_btn.setIcon(QIcon(f"{self.icons_dir}/fullscreen.svg"))
         fullscreen_btn.setIconSize(QSize(32, 32))
-        fullscreen_btn.setFixedSize(32, 32)
+        fullscreen_btn.setFixedSize(32, 32) 
         fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         fullscreen_btn.setToolTip("Toggle Fullscreen")
         fullscreen_btn.setStyleSheet("QPushButton { border: none; }")
@@ -2582,8 +2617,17 @@ class EPGDialog(QDialog):
                 f"Failed to schedule recording: {str(e)}"
             )
 
+def main():
+    """Main entry point for the application"""
+    try:
+        app = QApplication(sys.argv)
+        player = TVHeadendClient()
+        player.show()
+        sys.exit(app.exec_())
+    except Exception as e:
+        print(f"Error starting application: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        sys.exit(1)
+
 if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    window = TVHeadendClient()
-    window.show()
-    sys.exit(app.exec_())
+    main()
