@@ -1853,7 +1853,7 @@ class TVHeadendClient(QMainWindow):
         about_text = (
             "<div style='text-align: center;'>"
             "<h2>TVHplayer</h2>"
-            "<p>Version 3.4</p>"
+            "<p>Version 3.5</p>"
             "<p>A powerful and user-friendly TVHeadend client application.</p>"
             "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
             "<p style='margin-top: 20px;'><b>Built with:</b><br>"
