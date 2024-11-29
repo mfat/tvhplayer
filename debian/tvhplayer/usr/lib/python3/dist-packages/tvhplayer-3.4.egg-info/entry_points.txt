@@ -1,0 +1,2 @@
+[console_scripts]
+tvhplayer = tvhplayer.tvhplayer:main

@@ -1,0 +1,2 @@
+include tvhplayer/resources_rc.py
+include tvhplayer/icons/* 

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=TVHPlayer
+GenericName=TVH Player
+Comment=Desktop client for TVHeadend
+Exec=tvhplayer
+Icon=/usr/share/icons/tvhplayer/tvhplayer.png
+Terminal=false
+Categories=AudioVideo;Video;Player;TV;
+Keywords=tvheadend;iptv;streaming;tv;television;
+StartupNotify=true 

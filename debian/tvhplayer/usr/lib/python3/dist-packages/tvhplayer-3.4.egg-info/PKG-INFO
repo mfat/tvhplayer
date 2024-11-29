@@ -1,0 +1,12 @@
+Metadata-Version: 2.1
+Name: tvhplayer
+Version: 3.4
+Summary: Desktop client for TVHeadend
+Home-page: https://github.com/mfat/tvhplayer
+Author: mFat
+Author-email: mah.fat@gmail.com
+Requires-Python: >=3.6
+Requires-Dist: PyQt5>=5.15.0
+Requires-Dist: python-vlc>=3.0.12122
+Requires-Dist: requests>=2.25.1
+Requires-Dist: python-dateutil>=2.8.2
