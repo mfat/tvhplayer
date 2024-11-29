@@ -10,11 +10,20 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QSlider, QStatusBar, QGridLayout, QMenuBar, QRadioButton, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QShortcut, QCheckBox, QGroupBox  # Added QGroupBox here
 )
-from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect, QCoreApplication
+from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect
 from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence
 import json
 import requests
-import resources_rc
+# Replace this line:
+#from . import resources_rc
+
+# With this more flexible import approach:
+try:
+    from . import resources_rc  # Try package import first
+except ImportError:
+    import resources_rc  # Fall back to direct import when running from source
+# or
+#from tvhplayer import resources_rc  # Use absolute import
 import time
 import subprocess
 import os
@@ -881,16 +890,6 @@ class TVHeadendClient(QMainWindow):
                     os.environ['LD_LIBRARY_PATH'] = base_path
                     
                 print(f"Debug: VLC plugin path set to: {plugin_path}")
-            else:
-                # If running from source, use system VLC
-                if sys.platform == 'darwin':
-                    # On macOS, try to use VLC.app plugins
-                    plugin_path = '/Applications/VLC.app/Contents/MacOS/plugins'
-                    if os.path.exists(plugin_path):
-                        os.environ['VLC_PLUGIN_PATH'] = plugin_path
-                        print(f"Debug: Using system VLC plugins from: {plugin_path}")
-                    else:
-                        print("Debug: System VLC plugins not found, using default paths")
                 
             # Initialize VLC without arguments
             self.instance = vlc.Instance()
@@ -907,8 +906,6 @@ class TVHeadendClient(QMainWindow):
             
         except Exception as e:
             print(f"Error initializing VLC: {str(e)}")
-            print(f"Debug: Error type: {type(e)}")
-            print(f"Debug: Traceback: {traceback.format_exc()}")
             raise RuntimeError(f"Failed to initialize VLC: {str(e)}")
         
         
@@ -948,7 +945,33 @@ class TVHeadendClient(QMainWindow):
             # Try looking up one directory (in case we're in src/)
             self.icons_dir = self.app_dir.parent / 'icons'
             if not self.icons_dir.exists():
-                raise RuntimeError(f"Icons directory not found in {self.app_dir} or parent directory")
+                # Try system icon directories
+                system_icon_dirs = []
+                if sys.platform.startswith('linux'):
+                    system_icon_dirs = [
+                        Path('/usr/share/icons/tvhplayer'),
+                        Path('/usr/local/share/icons/tvhplayer'),
+                        Path(os.path.expanduser('~/.local/share/icons/tvhplayer'))
+                    ]
+                elif sys.platform == 'darwin':
+                    system_icon_dirs = [
+                        Path('/System/Library/Icons'),
+                        Path('/Library/Icons'),
+                        Path(os.path.expanduser('~/Library/Icons'))
+                    ]
+                elif sys.platform == 'win32':
+                    system_icon_dirs = [
+                        Path(os.environ.get('PROGRAMDATA', 'C:/ProgramData')) / 'Icons',
+                        Path(os.environ['SYSTEMROOT']) / 'System32' / 'icons'
+                    ]
+                
+                for dir in system_icon_dirs:
+                    if dir.exists():
+                        self.icons_dir = dir
+                        print(f"Using system icons directory: {self.icons_dir}")
+                        break
+                else:
+                    raise RuntimeError(f"Icons directory not found in {self.app_dir}, parent directory, or system locations")
         
         print(f"Debug: Using icons directory: {self.icons_dir}")
         
@@ -1014,7 +1037,6 @@ class TVHeadendClient(QMainWindow):
         # Left pane
         left_pane = QFrame()
         left_pane.setFrameStyle(QFrame.Panel | QFrame.Raised)
-        #left_pane.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
         left_layout = QVBoxLayout(left_pane)
         
         # Server selection with add/remove buttons
@@ -1065,7 +1087,6 @@ class TVHeadendClient(QMainWindow):
         # Right pane
         right_pane = QFrame()
         right_pane.setFrameStyle(QFrame.Panel | QFrame.Raised)
-        #right_pane.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
         right_layout = QVBoxLayout(right_pane)
         right_layout.setObjectName("right_layout")
         
@@ -1098,8 +1119,8 @@ class TVHeadendClient(QMainWindow):
         self.play_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
         self.play_btn.clicked.connect(lambda: self.play_channel_by_data(
             self.channel_list.currentItem().data(Qt.UserRole) if self.channel_list.currentItem() 
-            else (self.channel_list.item(0, 1).data(Qt.UserRole) if self.channel_list.rowCount() > 0 
-            and self.channel_list.selectRow(0) or True else None)))
+            else self.channel_list.item(0, 1).data(Qt.UserRole) if self.channel_list.rowCount() > 0 
+            else None))
         self.play_btn.setToolTip("Play selected channel")
         playback_layout.addWidget(self.play_btn)
         
@@ -1125,7 +1146,7 @@ class TVHeadendClient(QMainWindow):
         
         # Start Record button
         self.start_record_btn = QPushButton()
-        self.start_record_btn.setFixedSize(48, 48)
+        self.start_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
         self.start_record_btn.setIcon(QIcon(f"{self.icons_dir}/record.svg"))
         self.start_record_btn.setIconSize(QSize(48, 48))
         self.start_record_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
@@ -1135,7 +1156,7 @@ class TVHeadendClient(QMainWindow):
 
         # Stop Record button 
         self.stop_record_btn = QPushButton()
-        self.stop_record_btn.setFixedSize(48, 48)
+        self.stop_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
         self.stop_record_btn.setIcon(QIcon(f"{self.icons_dir}/stoprec.svg"))
         self.stop_record_btn.setIconSize(QSize(48, 48))
         self.stop_record_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
@@ -1150,12 +1171,11 @@ class TVHeadendClient(QMainWindow):
         local_record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
         local_record_frame.setWindowTitle("Local Recording")
         local_record_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        local_record_frame.setLineWidth(5)  # Make frame thicker
         local_record_layout = QHBoxLayout(local_record_frame)
 
         # Start Local Record button
         self.start_local_record_btn = QPushButton()
-        self.start_local_record_btn.setFixedSize(48, 48)
+        self.start_local_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
         self.start_local_record_btn.setIcon(QIcon(f"{self.icons_dir}/reclocal.svg"))
         self.start_local_record_btn.setIconSize(QSize(48, 48))
         self.start_local_record_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
@@ -1163,13 +1183,12 @@ class TVHeadendClient(QMainWindow):
         self.start_local_record_btn.clicked.connect(
             lambda: self.start_local_recording(
                 self.channel_list.currentItem().text() if self.channel_list.currentItem() else None
-            )
-        )
+            ))
         local_record_layout.addWidget(self.start_local_record_btn)
 
         # Stop Local Record button
         self.stop_local_record_btn = QPushButton()
-        self.stop_local_record_btn.setFixedSize(48, 48)
+        self.stop_local_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
         self.stop_local_record_btn.setIcon(QIcon(f"{self.icons_dir}/stopreclocal.svg"))
         self.stop_local_record_btn.setIconSize(QSize(48, 48))
         self.stop_local_record_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
@@ -1182,26 +1201,18 @@ class TVHeadendClient(QMainWindow):
         
 
         # Volume slider and mute button
-        
         # Mute button with icons for different states
+        
+        
+        
         self.mute_btn = QPushButton()
-        self.mute_btn.setFixedSize(32, 32)
-        self.mute_btn.setCheckable(True)
         self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
         self.mute_btn.setIconSize(QSize(32, 32))
+        self.mute_btn.setFixedSize(32, 32)  # Remove extra parenthesis
+        self.mute_btn.setCheckable(True)  # Make the button checkable
+        self.mute_btn.clicked.connect(self.toggle_mute)
+        self.mute_btn.setToolTip("Toggle Mute")
         self.mute_btn.setStyleSheet("QPushButton { border: none; }")
-        self.mute_btn.setToolTip("Mute")
-        
-        # Connect toggled signal to handle icon changes
-        def on_mute_toggled(checked):
-            if checked:
-                self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/mute.svg"))
-                self.mute_btn.setToolTip("Unmute")
-            else:
-                self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
-                self.mute_btn.setToolTip("Mute")     
-        self.mute_btn.toggled.connect(on_mute_toggled)
-
 
         
         self.volume_slider = QSlider(Qt.Horizontal)
@@ -1214,6 +1225,7 @@ class TVHeadendClient(QMainWindow):
         fullscreen_btn = QPushButton()
         fullscreen_btn.setIcon(QIcon(f"{self.icons_dir}/fullscreen.svg"))
         fullscreen_btn.setIconSize(QSize(32, 32))
+        fullscreen_btn.setFixedSize(32, 32)  # Remove extra parenthesis
         fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         fullscreen_btn.setToolTip("Toggle Fullscreen")
         fullscreen_btn.setStyleSheet("QPushButton { border: none; }")
@@ -1601,6 +1613,7 @@ class TVHeadendClient(QMainWindow):
         self.media_player.stop()
         self.statusbar.showMessage("Playback stopped")
 
+                # Create a new fullscreen window
     def toggle_fullscreen(self):
         """Toggle fullscreen mode for just the video frame"""
         print(f"Debug: Toggling fullscreen. Current state: {self.is_fullscreen}")
@@ -1784,16 +1797,15 @@ class TVHeadendClient(QMainWindow):
     def toggle_mute(self):
         """Toggle audio mute state"""
         print("Debug: Toggling mute")
-        is_muted = self.mute_btn.isChecked()
+        is_muted = self.media_player.audio_get_mute()
+        self.media_player.audio_set_mute(not is_muted)
         
-        if is_muted:
-            self.media_player.audio_set_mute(True)
-            self.mute_btn.setText("🔇")  # Muted speaker icon
+        if not is_muted:  # Switching to muted
+            self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/mute.svg"))
             self.mute_btn.setToolTip("Unmute")
             print("Debug: Audio muted")
-        else:
-            self.media_player.audio_set_mute(False)
-            self.mute_btn.setText("🔊")  # Speaker icon
+        else:  # Switching to unmuted
+            self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
             self.mute_btn.setToolTip("Mute")
             print("Debug: Audio unmuted")
 
@@ -1803,7 +1815,7 @@ class TVHeadendClient(QMainWindow):
         about_text = (
             "<div style='text-align: center;'>"
             "<h2>TVHplayer</h2>"
-            "<p>Version 3.3</p>"
+            "<p>Version 3.5</p>"
             "<p>A powerful and user-friendly TVHeadend client application.</p>"
             "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
             "<p style='margin-top: 20px;'><b>Built with:</b><br>"
@@ -1870,7 +1882,6 @@ class TVHeadendClient(QMainWindow):
             
             # Look for recordings with status 'Running' (this seems to be the actual status used by TVHeadend)
             active_recordings = [r for r in recordings if r['status'] in ['Running', 'recording']]
-            
             if not active_recordings:
                 print("Debug: No active recordings found")
                 self.statusbar.showMessage("No active recordings to stop")
@@ -2127,12 +2138,16 @@ class TVHeadendClient(QMainWindow):
             # Start monitoring process
             self.recording_monitor = QTimer()
             self.recording_monitor.timeout.connect(
-                lambda: self.check_recording_status(file_path)
-            )
+                lambda: self.check_recording_status(file_path))  # Close parenthesis here
             self.recording_monitor.start(2000)  # Check every 2 seconds
             
             self.statusbar.showMessage(f"Local recording started: {file_path}")
             self.start_recording_indicator()
+            
+            # After starting ffmpeg process successfully:
+            self.recording_status_dialog = RecordingStatusDialog(channel_name, file_path, self)
+            self.recording_status_dialog.finished.connect(self.stop_local_recording)
+            self.recording_status_dialog.show()
             
         except Exception as e:
             print(f"Debug: Local recording error: {str(e)}")
@@ -2145,12 +2160,34 @@ class TVHeadendClient(QMainWindow):
         """Check if the recording is actually working"""
         try:
             import os
+            # Add start time tracking if not exists
+            if not hasattr(self, 'recording_start_time'):
+                self.recording_start_time = time.time()
+
+            # Calculate elapsed time
+            elapsed_time = time.time() - self.recording_start_time
+            
             if not os.path.exists(file_path):
                 print("Debug: Recording file does not exist")
-                return
+                # Only show warning if more than 10 seconds have passed
+                if elapsed_time > 10:
+                    if hasattr(self, 'recording_status_dialog'):
+                        self.recording_status_dialog.close()
+                    QMessageBox.warning(self, "Local Recording Status", "Recording file does not exist")
+                    return
+                else:
+                    print(f"Debug: Waiting for file creation ({int(elapsed_time)} seconds elapsed)")
+                    return
             
             file_size = os.path.getsize(file_path)
             print(f"Debug: Current recording file size: {file_size} bytes")
+            
+            # Update status dialog if it exists
+            if hasattr(self, 'recording_status_dialog'):
+                is_stalled = False
+                if hasattr(self, 'last_file_size') and file_size == self.last_file_size:
+                    is_stalled = True
+                self.recording_status_dialog.update_status(file_size, is_stalled)
             
             if hasattr(self, 'ffmpeg_process'):
                 return_code = self.ffmpeg_process.poll()
@@ -2164,7 +2201,8 @@ class TVHeadendClient(QMainWindow):
                     if file_size == 0 or return_code != 0:
                         print("Debug: Recording failed - stopping processes")
                         self.stop_local_recording()
-                        self.statusbar.showMessage("Recording failed - check console for errors")
+                        error_msg = "Recording failed - check console for errors"
+                        QMessageBox.critical(self, "Recording Error", error_msg)
                         return
                     
                 # Check if file is growing
@@ -2174,6 +2212,8 @@ class TVHeadendClient(QMainWindow):
                         self.stall_count = getattr(self, 'stall_count', 0) + 1
                         if self.stall_count > 5:  # After 10 seconds of no growth
                             print("Debug: Recording stalled - restarting")
+                            stall_msg = "Recording stalled - attempting restart"
+                            QMessageBox.warning(self, "Recording Status", stall_msg)
                             self.stop_local_recording()
                             self.start_local_recording(self.channel_list.currentItem().text())
                             return
@@ -2183,11 +2223,18 @@ class TVHeadendClient(QMainWindow):
                 self.last_file_size = file_size
             
         except Exception as e:
-            print(f"Debug: Error checking recording status: {str(e)}")
+            error_msg = f"Debug: Error checking recording status: {str(e)}"
+            print(error_msg)
+            QMessageBox.critical(self, "Recording Error", error_msg)
 
     def stop_local_recording(self):
         """Stop local recording"""
         try:
+            # Close status dialog if it exists
+            if hasattr(self, 'recording_status_dialog'):
+                self.recording_status_dialog.close()
+                delattr(self, 'recording_status_dialog')
+            
             print("Debug: Stopping local recording")
             
             # Stop monitoring
@@ -2490,8 +2537,7 @@ class EPGDialog(QDialog):
                 """)
                 record_btn.setToolTip("Schedule Recording")
                 record_btn.clicked.connect(
-                    lambda checked, e=entry: self.schedule_recording(e)
-                )
+                    lambda checked, e=entry: self.schedule_recording(e))
                 item_layout.addWidget(record_btn)
                 
                 # Create list item and set custom widget
@@ -2565,21 +2611,84 @@ class EPGDialog(QDialog):
                 f"Failed to schedule recording: {str(e)}"
             )
 
-def main():
-    app = QApplication(sys.argv)
-    try:
-        # Try to set display name if supported
-        if hasattr(QCoreApplication, 'setApplicationDisplayName'):
-            QCoreApplication.setApplicationDisplayName("TVHplayer")
-    except Exception as e:
-        print(f"Debug: Could not set application display name: {e}")
+class RecordingStatusDialog(QDialog):
+    def __init__(self, channel_name, file_path, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Recording Status")
+        self.setModal(False)  # Allow interaction with main window
+        self.resize(400, 200)
+        self.setup_ui(channel_name, file_path)
         
-    # Set application name (this should work on all versions)
-    app.setApplicationName("TVHplayer")
+    def setup_ui(self, channel_name, file_path):
+        layout = QVBoxLayout(self)
+        
+        # Channel name
+        channel_label = QLabel(f"Recording: {channel_name}")
+        channel_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(channel_label)
+        
+        # File path
+        path_label = QLabel(f"Saving to: {file_path}")
+        path_label.setWordWrap(True)
+        layout.addWidget(path_label)
+        
+        # Duration
+        self.duration_label = QLabel("Duration: 00:00:00")
+        layout.addWidget(self.duration_label)
+        
+        # File size
+        self.size_label = QLabel("File size: 0 MB")
+        layout.addWidget(self.size_label)
+        
+        # Status message
+        self.status_label = QLabel("Status: Recording")
+        self.status_label.setStyleSheet("color: green;")
+        layout.addWidget(self.status_label)
+        
+        # Stop button
+        stop_btn = QPushButton("Stop Recording")
+        stop_btn.clicked.connect(self.stop_requested)
+        layout.addWidget(stop_btn)
+        
+        # Start time for duration calculation
+        self.start_time = time.time()
+        
+    def update_status(self, file_size, is_stalled=False):
+        """Update the dialog with current recording status"""
+        # Update duration
+        duration = int(time.time() - self.start_time)
+        hours = duration // 3600
+        minutes = (duration % 3600) // 60
+        seconds = duration % 60
+        self.duration_label.setText(f"Duration: {hours:02d}:{minutes:02d}:{seconds:02d}")
+        
+        # Update file size
+        size_mb = file_size / (1024 * 1024)  # Convert to MB
+        self.size_label.setText(f"File size: {size_mb:.2f} MB")
+        
+        # Update status message
+        if is_stalled:
+            self.status_label.setText("Status: Stalled - Attempting recovery")
+            self.status_label.setStyleSheet("color: orange;")
+        else:
+            self.status_label.setText("Status: Recording")
+            self.status_label.setStyleSheet("color: green;")
     
-    window = TVHeadendClient()
-    window.show()
-    sys.exit(app.exec_())
+    def stop_requested(self):
+        """Signal that user wants to stop recording"""
+        self.accept()
+
+def main():
+    """Main entry point for the application"""
+    try:
+        app = QApplication(sys.argv)
+        player = TVHeadendClient()
+        player.show()
+        sys.exit(app.exec_())
+    except Exception as e:
+        print(f"Error starting application: {str(e)}")
+        print(f"Traceback: {traceback.format_exc()}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     main()
