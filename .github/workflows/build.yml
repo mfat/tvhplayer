@@ -4,7 +4,6 @@ on:
   push:
     tags:
       - '*'  # Trigger on tag pushes, for versioning
-
 jobs:
   build:
     runs-on: ${{ matrix.os }}
