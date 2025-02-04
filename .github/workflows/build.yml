@@ -1,0 +1,79 @@
+name: Build Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - name: Install dependencies
+        run: pip install pyinstaller
+        
+      - name: Build for macOS (${{ matrix.arch }})
+        run: |
+          pyinstaller --onefile \
+            --distpath ./dist \
+            --name "app_${GITHUB_REF_NAME}_macos_${{ matrix.arch }}" \
+            src/main.py
+            
+      - uses: actions/upload-artifact@v3
+        with:
+          name: app_${{ github.ref_name }}_macos_${{ matrix.arch }}
+          path: dist/
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - run: pip install pyinstaller
+      
+      - run: |
+          pyinstaller --onefile \
+            --distpath ./dist \
+            --name "app_${GITHUB_REF_NAME}_linux_x86_64" \
+            src/main.py
+            
+      - uses: actions/upload-artifact@v3
+        with:
+          name: app_${{ github.ref_name }}_linux_x86_64
+          path: dist/
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - run: pip install pyinstaller
+      
+      - run: |
+          pyinstaller --onefile \
+            --distpath ./dist \
+            --name "app_${env:GITHUB_REF_NAME}_windows_x86_64" \
+            src/main.py
+            
+      - uses: actions/upload-artifact@v3
+        with:
+          name: app_${{ github.ref_name }}_windows_x86_64
+          path: dist/
