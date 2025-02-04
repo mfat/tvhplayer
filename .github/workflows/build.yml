@@ -7,10 +7,14 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+<<<<<<< HEAD
     permissions:
       contents: write  # Explicitly set permissions for releases
     strategy:
       fail-fast: false  # Continue with other builds if one fails
+=======
+    strategy:
+>>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
@@ -29,15 +33,22 @@ jobs:
 
       - name: Get the version from the latest tag
         id: get_version
+<<<<<<< HEAD
         shell: bash
+=======
+>>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
         run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+<<<<<<< HEAD
           cache: 'pip'
           cache-dependency-path: 'requirements.txt'
+=======
+          cache: 'pip'  
+>>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
 
       - name: Install dependencies
         run: |
@@ -46,6 +57,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable
+<<<<<<< HEAD
         shell: bash
         run: |
           pyinstaller --clean --onefile tvhplayer.py \
@@ -59,11 +71,19 @@ jobs:
             mv "dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe" \
                "dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe"
           fi
+=======
+        run: pyinstaller --onefile tvhplayer.py --name=tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+
+      - name: Rename Windows executable
+        if: runner.os == 'Windows'
+        run: mv dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
+>>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+<<<<<<< HEAD
           path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}*
           if-no-files-found: error
           retention-days: 5  # Limit artifact retention to save storage
@@ -88,3 +108,19 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           generate_release_notes: true
+=======
+          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+          if-no-files-found: error
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          files: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+          tag_name: ${{ github.ref_name }}
+          name: "Release ${{ steps.get_version.outputs.version }}"
+          body: "Auto-generated release for version ${{ steps.get_version.outputs.version }}"
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+>>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
