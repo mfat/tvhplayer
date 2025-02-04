@@ -24,7 +24,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Get the version from the latest tag
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        id: get_version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,27 +40,27 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable
-        run: pyinstaller --onefile tvhplayer.py --name=tvhplayer-${{ env.VERSION }}-${{ matrix.artifact_suffix }}
+        run: pyinstaller --onefile tvhplayer.py --name=tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
 
       - name: Rename Windows executable
         if: runner.os == 'Windows'
-        run: mv dist/tvhplayer-${{ env.VERSION }}-windows.exe.exe dist/tvhplayer-${{ env.VERSION }}-windows.exe
+        run: mv dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tvhplayer-${{ env.VERSION }}-${{ matrix.artifact_suffix }}
-          path: dist/tvhplayer-${{ env.VERSION }}-${{ matrix.artifact_suffix }}
+          name: tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
           if-no-files-found: error
 
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          files: dist/tvhplayer-${{ env.VERSION }}-${{ matrix.artifact_suffix }}
+          files: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
           tag_name: ${{ github.ref_name }}
-          name: "Release ${{ env.VERSION }}"
-          body: "Auto-generated release for version ${{ env.VERSION }}"
+          name: "Release ${{ steps.get_version.outputs.version }}"
+          body: "Auto-generated release for version ${{ steps.get_version.outputs.version }}"
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
