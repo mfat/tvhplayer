@@ -64,9 +64,12 @@ jobs:
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
+          files: |
+            dist/tvhplayer-${{ steps.get_version.outputs.version }}-macos-intel-x86
+            dist/tvhplayer-${{ steps.get_version.outputs.version }}-linux
+            dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
           tag_name: ${{ github.ref_name }}
-          name: "Release ${{ github.ref_name }} (${{ steps.get_version.outputs.version }})"
-          body: "Auto-generated release for version ${{ github.ref_name }} (${{ steps.get_version.outputs.version }})"
-          files: dist/tvhplayer-${{ steps.get_version.outputs.version }}*
+          name: "Release ${{ steps.get_version.outputs.version }}"
+          body: "Auto-generated release for version ${{ steps.get_version.outputs.version }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
