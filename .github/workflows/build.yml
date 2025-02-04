@@ -1,13 +1,16 @@
 name: Build and Package Binaries
-
 on:
   push:
     tags:
       - '*'  # Trigger on tag pushes, for versioning
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write  # Explicitly set permissions for releases
     strategy:
+      fail-fast: false  # Continue with other builds if one fails
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
@@ -21,16 +24,20 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for proper versioning
 
       - name: Get the version from the latest tag
         id: get_version
+        shell: bash
         run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: 'pip'  
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
 
       - name: Install dependencies
         run: |
@@ -39,27 +46,45 @@ jobs:
           pip install pyinstaller
 
       - name: Build executable
-        run: pyinstaller --onefile tvhplayer.py --name=tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+        shell: bash
+        run: |
+          pyinstaller --clean --onefile tvhplayer.py \
+            --name=tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
 
-      - name: Rename Windows executable
+      - name: Rename Windows executable (if needed)
         if: runner.os == 'Windows'
-        run: mv dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
+        shell: bash
+        run: |
+          if [ -f "dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe" ]; then
+            mv "dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe" \
+               "dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
-          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}*
           if-no-files-found: error
+          retention-days: 5  # Limit artifact retention to save storage
 
-      - name: Upload to GitHub Releases
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+          files: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}*
           tag_name: ${{ github.ref_name }}
           name: "Release ${{ steps.get_version.outputs.version }}"
-          body: "Auto-generated release for version ${{ steps.get_version.outputs.version }}"
+          body: |
+            Release version ${{ steps.get_version.outputs.version }}
+            
+            ### Artifacts:
+            - Linux binary
+            - macOS Intel (x86) binary
+            - Windows executable
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
+          generate_release_notes: true
