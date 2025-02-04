@@ -8,13 +8,19 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
     permissions:
       contents: write  # Explicitly set permissions for releases
     strategy:
       fail-fast: false  # Continue with other builds if one fails
+<<<<<<< HEAD
 =======
     strategy:
 >>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
+=======
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
@@ -34,9 +40,13 @@ jobs:
       - name: Get the version from the latest tag
         id: get_version
 <<<<<<< HEAD
+<<<<<<< HEAD
         shell: bash
 =======
 >>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
+=======
+        shell: bash
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
         run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python
@@ -44,11 +54,16 @@ jobs:
         with:
           python-version: "3.11"
 <<<<<<< HEAD
+<<<<<<< HEAD
           cache: 'pip'
           cache-dependency-path: 'requirements.txt'
 =======
           cache: 'pip'  
 >>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
+=======
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
 
       - name: Install dependencies
         run: |
@@ -58,10 +73,14 @@ jobs:
 
       - name: Build executable
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
         shell: bash
         run: |
           pyinstaller --clean --onefile tvhplayer.py \
             --name=tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+<<<<<<< HEAD
 
       - name: Rename Windows executable (if needed)
         if: runner.os == 'Windows'
@@ -73,16 +92,28 @@ jobs:
           fi
 =======
         run: pyinstaller --onefile tvhplayer.py --name=tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+=======
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
 
-      - name: Rename Windows executable
+      - name: Rename Windows executable (if needed)
         if: runner.os == 'Windows'
+<<<<<<< HEAD
         run: mv dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
 >>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
+=======
+        shell: bash
+        run: |
+          if [ -f "dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe" ]; then
+            mv "dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe.exe" \
+               "dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe"
+          fi
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+<<<<<<< HEAD
 <<<<<<< HEAD
           path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}*
           if-no-files-found: error
@@ -110,17 +141,33 @@ jobs:
           generate_release_notes: true
 =======
           path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+=======
+          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}*
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
           if-no-files-found: error
+          retention-days: 5  # Limit artifact retention to save storage
 
-      - name: Upload to GitHub Releases
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         if: success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+          files: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}*
           tag_name: ${{ github.ref_name }}
           name: "Release ${{ steps.get_version.outputs.version }}"
-          body: "Auto-generated release for version ${{ steps.get_version.outputs.version }}"
+          body: |
+            Release version ${{ steps.get_version.outputs.version }}
+            
+            ### Artifacts:
+            - Linux binary
+            - macOS Intel (x86) binary
+            - Windows executable
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
+<<<<<<< HEAD
 >>>>>>> ff21e92c9d00fecab8f48e3246084953e183c9bd
+=======
+          generate_release_notes: true
+>>>>>>> 45794529c56a6dc0bfefc157a5a4f042b4c4ed2f
