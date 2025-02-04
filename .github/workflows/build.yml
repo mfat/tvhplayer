@@ -7,6 +7,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ secrets.VERSION }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -14,7 +17,7 @@ jobs:
       - name: Get the version from the latest tag
         id: get_version
         run: |
-          echo "version=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -70,5 +73,3 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: "Release ${{ steps.get_version.outputs.version }}"
           body: "Auto-generated release for version ${{ steps.get_version.outputs.version }}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
