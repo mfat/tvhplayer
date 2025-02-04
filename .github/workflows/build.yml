@@ -1,5 +1,4 @@
 name: Build and Package Binaries
-
 on:
   push:
     tags:
