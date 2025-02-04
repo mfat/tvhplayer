@@ -27,33 +27,50 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Build executable
+      - name: Build executable for macOS
+        if: runner.os == 'macOS'
         run: |
-          # Use the version from the previous step
           VERSION=${{ steps.get_version.outputs.version }}
-          echo "Building version: $VERSION"
+          pyinstaller --onefile setup.py --name=tvhplayer-${VERSION}-macos-intel-x86
           
-          # Build the executable for each OS
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            pyinstaller --onefile setup.py --name=tvhplayer-${VERSION}-macos-intel-x86
-          elif [[ "$RUNNER_OS" == "Linux" ]]; then
-            pyinstaller --onefile setup.py --name=tvhplayer-${VERSION}-linux
-          else
-            pyinstaller --onefile setup.py --name=tvhplayer-${VERSION}-windows.exe
-          fi
-        shell: bash
+      - name: Build executable for Linux
+        if: runner.os == 'Linux'
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          pyinstaller --onefile setup.py --name=tvhplayer-${VERSION}-linux
 
-      - name: Upload artifact
+      - name: Build executable for Windows
+        if: runner.os == 'Windows'
+        run: |
+          VERSION=${{ steps.get_version.outputs.version }}
+          pyinstaller --onefile setup.py --name=tvhplayer-${VERSION}-windows.exe
+
+      - name: Upload artifact for macOS
+        if: runner.os == 'macOS'
         uses: actions/upload-artifact@v3
         with:
-          name: tvhplayer-${{ steps.get_version.outputs.version }}
-          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}*
+          name: tvhplayer-${{ steps.get_version.outputs.version }}-macos
+          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-macos-intel-x86
+
+      - name: Upload artifact for Linux
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v3
+        with:
+          name: tvhplayer-${{ steps.get_version.outputs.version }}-linux
+          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-linux
+
+      - name: Upload artifact for Windows
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v3
+        with:
+          name: tvhplayer-${{ steps.get_version.outputs.version }}-windows
+          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
 
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "Release ${{ github.ref_name }} (${{ steps.get_version.outputs.version }})"
+          name: "Release ${{ github.ref_name }} (${VERSION})"
           body: "Auto-generated release for version ${{ github.ref_name }} (${VERSION})"
           files: dist/tvhplayer-${{ steps.get_version.outputs.version }}*
         env:
