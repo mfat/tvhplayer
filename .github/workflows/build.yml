@@ -6,67 +6,55 @@ on:
       - '*'  # Trigger on tag pushes, for versioning            
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_suffix: linux
+          - os: macos-latest
+            artifact_suffix: macos-intel-x86
+          - os: windows-latest
+            artifact_suffix: windows.exe
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Get the version from the latest tag
         id: get_version
-        run: |
-          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: 'pip'  # Enable pip caching for faster installations
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Build executable for macOS
-        if: runner.os == 'macOS'
         run: |
-          pyinstaller --onefile setup.py --name=tvhplayer-${{ steps.get_version.outputs.version }}-macos-intel-x86
-          
-      - name: Build executable for Linux
-        if: runner.os == 'Linux'
-        run: |
-          pyinstaller --onefile setup.py --name=tvhplayer-${{ steps.get_version.outputs.version }}-linux
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Build executable for Windows
-        if: runner.os == 'Windows'
-        run: |
-          pyinstaller --onefile setup.py --name=tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
+      - name: Build executable
+        run: pyinstaller --onefile setup.py --name=tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
 
-      - name: Upload artifact for macOS
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v3
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4  # Updated to v4
         with:
-          name: tvhplayer-${{ steps.get_version.outputs.version }}-macos
-          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-macos-intel-x86
-
-      - name: Upload artifact for Linux
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v3
-        with:
-          name: tvhplayer-${{ steps.get_version.outputs.version }}-linux
-          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-linux
-
-      - name: Upload artifact for Windows
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v3
-        with:
-          name: tvhplayer-${{ steps.get_version.outputs.version }}-windows
-          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
+          name: tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+          path: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
+          if-no-files-found: error  # Fail if no files are found
 
       - name: Upload to GitHub Releases
         uses: softprops/action-gh-release@v2
+        if: success()  # Only run if previous steps succeeded
         with:
-          files: |
-            dist/tvhplayer-${{ steps.get_version.outputs.version }}-macos-intel-x86
-            dist/tvhplayer-${{ steps.get_version.outputs.version }}-linux
-            dist/tvhplayer-${{ steps.get_version.outputs.version }}-windows.exe
+          files: dist/tvhplayer-${{ steps.get_version.outputs.version }}-${{ matrix.artifact_suffix }}
           tag_name: ${{ github.ref_name }}
           name: "Release ${{ steps.get_version.outputs.version }}"
           body: "Auto-generated release for version ${{ steps.get_version.outputs.version }}"
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
