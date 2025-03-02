@@ -1,0 +1,96 @@
+app-id: io.github.mfat.tvhplayer
+runtime: org.kde.Platform
+runtime-version: '5.15-24.08'
+sdk: org.kde.Sdk
+base: com.riverbankcomputing.PyQt.BaseApp
+base-version: '5.15-24.08'
+command: tvhplayer
+separate-locales: false
+cleanup-commands:
+  - /app/cleanup-BaseApp.sh
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=home
+  - --filesystem=xdg-videos
+  - --filesystem=xdg-download
+  - --talk-name=org.freedesktop.Notifications
+
+modules:
+  - name: python3-vlc
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app --no-deps .
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/c9/93/9f2c2f3a13e5260d0315ad6a5bb5e1c79336a1220e8c407e71edb86d53b3/python-vlc-3.0.20123.tar.gz
+        sha256: 8a98d16a0a8f8cb8f6b5c950b7a6c2afa1c8f6a9e4a02f4c8e1c2c0a6e2c6a9f
+
+  - name: ffmpeg
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/ffmpeg/examples
+    config-opts:
+      - --enable-shared
+      - --disable-static
+      - --enable-gpl
+      - --disable-doc
+      - --disable-programs
+      - --enable-ffmpeg
+      - --disable-debug
+      - --disable-everything
+      - --enable-decoder=h264,aac,mp3,ac3,hevc,vp8,vp9,opus
+      - --enable-parser=h264,aac,mp3,ac3,hevc,vp8,vp9,opus
+      - --enable-demuxer=mpegts,mp4,mov,matroska,webm
+      - --enable-protocol=file,http,https,tcp,udp,rtp
+    sources:
+      - type: archive
+        url: https://ffmpeg.org/releases/ffmpeg-6.1.1.tar.xz
+        sha256: 5e3133939a61ef64ac9b47ffd29a5ea6e337a4023ef0ad972094b4da844e3a20
+    buildsystem: autotools
+
+  - name: psutil
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app --no-deps .
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/90/c7/6dc0a455d111f68ee43f27793971cf03fe29b6ef972042549db29eec39a2/psutil-5.9.8.tar.gz
+        sha256: 6be126e3225486dff286a8fb9a06246a5253f4c7c53b475ea5f5ac934e64194c
+
+  - name: requests
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=/app --no-deps .
+    sources:
+      - type: archive
+        url: https://files.pythonhosted.org/packages/9d/be/10918a2eac4ae9f02f6cfe6414b7a155ccd8f7f9d4380d62fd5b955065c3/requests-2.31.0.tar.gz
+        sha256: 942c5a758f98d790eaed1a29cb6eefc7ffb0d1cf7af05c3d2791656dbd6ad1e1
+
+  - name: tvhplayer
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/share/tvhplayer
+      - mkdir -p /app/share/tvhplayer/icons
+      - cp -r tvhplayer/* /app/share/tvhplayer/
+      - cp -r icons/* /app/share/tvhplayer/icons/
+      - install -D -m755 tvhplayer.sh /app/bin/tvhplayer
+      - install -D -m644 io.github.mfat.tvhplayer.desktop -t /app/share/applications/
+      - install -D icons/tvhplayer_icon_64x64.png /app/share/icons/hicolor/64x64/apps/io.github.mfat.tvhplayer.png
+      - install -D icons/tvhplayer_icon_128x128.png /app/share/icons/hicolor/128x128/apps/io.github.mfat.tvhplayer.png
+      - install -D -m644 io.github.mfat.tvhplayer.metainfo.xml -t /app/share/metainfo/
+    sources:
+      - type: git
+        url: "https://github.com/mfat/tvhplayer.git"
+        # Replace with actual tag/commit when available
+        branch: main
+      - type: file
+        path: tvhplayer.sh
+      - type: file
+        path: io.github.mfat.tvhplayer.desktop
+      - type: file
+        path: io.github.mfat.tvhplayer.metainfo.xml 
