@@ -23,16 +23,6 @@ else
   echo "Warning: FFmpeg not found. Local recording functionality will be unavailable."
 fi
 
-# Fix Qt platform plugin issue - use a single platform
-export QT_QPA_PLATFORM=xcb
-
-# Set VLC environment variables
-export VLC_PLUGIN_PATH=/app/lib/vlc/plugins
-export LD_LIBRARY_PATH=/app/lib:$LD_LIBRARY_PATH
-
-# Make sure Qt can find its plugins
-export QT_PLUGIN_PATH=/app/lib/qt5/plugins:/app/lib/plugins:/usr/lib/qt5/plugins
-
 # Set XDG_RUNTIME_DIR if not set
 if [ -z "$XDG_RUNTIME_DIR" ]; then
   export XDG_RUNTIME_DIR=/tmp/runtime-$USER
@@ -40,8 +30,27 @@ if [ -z "$XDG_RUNTIME_DIR" ]; then
   chmod 700 $XDG_RUNTIME_DIR
 fi
 
+# Make sure Qt can find its plugins
+export QT_PLUGIN_PATH=/app/lib/qt5/plugins:/app/lib/plugins:/usr/lib/qt5/plugins
+
+# Set VLC environment variables
+export VLC_PLUGIN_PATH=/app/lib/vlc/plugins
+export LD_LIBRARY_PATH=/app/lib:$LD_LIBRARY_PATH
+
+# Try to detect the display environment
+if [ -z "$DISPLAY" ] && [ -n "$WAYLAND_DISPLAY" ]; then
+  # We're on Wayland
+  export QT_QPA_PLATFORM=wayland
+  echo "Detected Wayland environment, using wayland platform"
+else
+  # Default to X11
+  export QT_QPA_PLATFORM=xcb
+  echo "Using X11 platform"
+fi
+
 # Debug info
 echo "Display: $DISPLAY"
+echo "Wayland Display: $WAYLAND_DISPLAY"
 echo "XDG_RUNTIME_DIR: $XDG_RUNTIME_DIR"
 echo "QT_PLUGIN_PATH: $QT_PLUGIN_PATH"
 echo "QT_QPA_PLATFORM: $QT_QPA_PLATFORM"
