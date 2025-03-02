@@ -14,8 +14,32 @@ else
   echo "Warning: FFmpeg not found. Local recording functionality will be unavailable."
 fi
 
-# Fix Qt platform plugin issue - use a single platform
-export QT_QPA_PLATFORM=xcb
+# Set VLC environment variables
+export VLC_PLUGIN_PATH=/app/lib/vlc/plugins
+export LD_LIBRARY_PATH=/app/lib:$LD_LIBRARY_PATH
+
+# Fix Qt platform plugin issues
+# Try wayland first, then fall back to xcb if needed
+export QT_QPA_PLATFORM=wayland
+
+# Make sure Qt can find its plugins
+export QT_PLUGIN_PATH=/app/lib/qt5/plugins:/app/lib/plugins:/usr/lib/qt5/plugins
+
+# Set XDG_RUNTIME_DIR if not set
+if [ -z "$XDG_RUNTIME_DIR" ]; then
+  export XDG_RUNTIME_DIR=/tmp/runtime-$USER
+  mkdir -p $XDG_RUNTIME_DIR
+  chmod 700 $XDG_RUNTIME_DIR
+fi
+
+# Debug info
+echo "Display: $DISPLAY"
+echo "XDG_RUNTIME_DIR: $XDG_RUNTIME_DIR"
+echo "QT_PLUGIN_PATH: $QT_PLUGIN_PATH"
+echo "QT_QPA_PLATFORM: $QT_QPA_PLATFORM"
+echo "VLC_PLUGIN_PATH: $VLC_PLUGIN_PATH"
+echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
 
 # Run the application
-python3 /app/share/tvhplayer/tvhplayer.py "$@" 
+cd /app/share/tvhplayer
+python3 tvhplayer.py "$@" 
