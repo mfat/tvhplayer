@@ -13,6 +13,8 @@ if [ -d "/app/lib/vlc" ]; then
   echo "Using VLC from Flatpak extension"
 else
   echo "Warning: VLC extension not found. Please install the VLC Flatpak extension."
+  echo "Run: flatpak install flathub org.videolan.VLC"
+  exit 1
 fi
 
 # Print FFmpeg version for debugging
@@ -32,10 +34,6 @@ fi
 
 # Make sure Qt can find its plugins
 export QT_PLUGIN_PATH=/app/lib/qt5/plugins:/app/lib/plugins:/usr/lib/qt5/plugins
-
-# Set VLC environment variables
-export VLC_PLUGIN_PATH=/app/lib/vlc/plugins
-export LD_LIBRARY_PATH=/app/lib:$LD_LIBRARY_PATH
 
 # Try to detect the display environment
 if [ -z "$DISPLAY" ] && [ -n "$WAYLAND_DISPLAY" ]; then
