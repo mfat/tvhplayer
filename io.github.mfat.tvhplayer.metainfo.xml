@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.mfat.tvhplayer</id>
+  <name>TVHplayer</name>
+  <summary>A powerful and user-friendly TVHeadend client application</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0+</project_license>
+  <description>
+    <p>
+      TVHplayer is a client application for TVHeadend, allowing you to watch and record TV channels from your TVHeadend server.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Watch live TV channels from TVHeadend servers</li>
+      <li>Record TV shows directly on the server</li>
+      <li>Record streams locally to your computer</li>
+      <li>View EPG (Electronic Program Guide) data</li>
+      <li>Monitor server status and signal quality</li>
+      <li>Support for multiple TVHeadend servers</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.mfat.tvhplayer.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <caption>TVHplayer main interface</caption>
+      <image>https://raw.githubusercontent.com/mfat/tvhplayer/main/screenshots/main.png</image>
+    </screenshot>
+  </screenshots>
+  <url type="homepage">https://github.com/mfat/tvhplayer</url>
+  <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="3.5" date="2023-12-01">
+      <description>
+        <p>Initial Flatpak release</p>
+      </description>
+    </release>
+  </releases>
+  <developer_name>mFat</developer_name>
+  <update_contact>mfat@example.com</update_contact>
+</component> 

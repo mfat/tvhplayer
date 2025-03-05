@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=TVHplayer
+Comment=A powerful and user-friendly TVHeadend client application
+Exec=tvhplayer
+Icon=io.github.mfat.tvhplayer
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;TV;
+Keywords=tvheadend;tv;player;streaming;
+StartupNotify=true

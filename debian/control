@@ -20,6 +20,7 @@ Depends: ${python3:Depends},
          python3-requests,
          python3-urllib3,
          python3-pil
+         python3-tk
 Description: TVheadend Desktop Client
  A desktop client for TVheadend for live TV playback and recording.
  .
