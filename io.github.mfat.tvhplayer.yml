@@ -95,7 +95,7 @@ modules:
       - type: git
         url: "https://github.com/mfat/tvhplayer.git"
         # Replace with actual tag/commit when available
-        branch: testing
+        branch: main
       - type: file
         path: tvhplayer.sh
       - type: file
