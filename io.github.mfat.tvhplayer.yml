@@ -13,12 +13,8 @@ finish-args:
   - --share=ipc
   - --socket=wayland
   - --socket=fallback-x11
-  - --device=dri
   - --device=all
   - --socket=pulseaudio
-  - --filesystem=home
-  - --filesystem=xdg-videos
-  - --filesystem=xdg-download
   - --talk-name=org.freedesktop.Notifications
 
 
@@ -75,7 +71,7 @@ modules:
           project-id: 6504
           stable-only: true
           url-template: https://get.videolan.org/vlc/$version/vlc-$version.tar.xz
-      # You'll need to create these patch files
+      
 
 
   - pypi-dependencies.yaml # Generated file from flatpak-pip-generator
@@ -83,7 +79,6 @@ modules:
   - name: tvhplayer
     buildsystem: simple
     build-commands:
-      - mkdir -p /app/share/tvhplayer
       - mkdir -p /app/share/tvhplayer/icons
       - cp -r tvhplayer/* /app/share/tvhplayer/
       - cp -r icons/* /app/share/tvhplayer/icons/
@@ -94,10 +89,8 @@ modules:
     sources:
       - type: git
         url: "https://github.com/mfat/tvhplayer.git"
-        # Use either tag or commit hash
-        tag: v3.5.1  # Replace with actual tag from git describe --tags --abbrev=0
-        # or
-        commit: 24705b10ac5bb56a022dc794ae0e4881e16f888e  # Replace with actual commit hash from git rev-parse HEAD
+        tag: v3.5.1 
+        commit: 24705b10ac5bb56a022dc794ae0e4881e16f888e
       - type: file
         path: tvhplayer.sh
       - type: file
