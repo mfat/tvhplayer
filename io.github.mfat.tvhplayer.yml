@@ -16,6 +16,7 @@ finish-args:
   - --device=all
   - --socket=pulseaudio
   - --talk-name=org.freedesktop.Notifications
+  - --env=PYTHONPATH=/app/lib/python3.11/site-packages:/app/share/tvhplayer
 
 
 modules:
@@ -74,7 +75,7 @@ modules:
       
 
 
-  - pypi-dependencies.yaml # Generated file from flatpak-pip-generator
+  - pypi-dependencies.yaml
 
   - name: tvhplayer
     buildsystem: simple
@@ -89,8 +90,8 @@ modules:
     sources:
       - type: git
         url: "https://github.com/mfat/tvhplayer.git"
-        tag: v3.5.2 
-        commit: a280303db948e69965ce625e22cbafca4d99d191
+        tag: v3.5.3
+        commit: f974a361476fe623f63b88c8c6361125f4fcd1bb  
       - type: file
         path: tvhplayer.sh
       - type: file
