@@ -30,12 +30,12 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="3.5" date="2023-12-01">
+    <release version="3.5.1" date="2023-12-01">
       <description>
         <p>Initial Flatpak release</p>
       </description>
     </release>
   </releases>
   <developer_name>mFat</developer_name>
-  <update_contact>mfat@example.com</update_contact>
+  <update_contact>newmfat@gmail.com</update_contact>
 </component> 
