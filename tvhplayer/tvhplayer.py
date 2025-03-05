@@ -30,7 +30,6 @@ import os
 import traceback
 from pathlib import Path
 import logging
-from xdg import BaseDirectory
 import platform
 
 
@@ -840,26 +839,20 @@ class TVHeadendClient(QMainWindow):
         super().__init__()
         self.setup_paths()
         
-        # Get OS-specific config path
-        system = platform.system()
-        if system == "Linux":
-            # Use XDG config directory on Linux
-            config_dir = Path(os.path.join(BaseDirectory.xdg_config_home, 'tvhplayer'))
-        elif system == "Windows":
-            # Use AppData\Roaming on Windows
-            config_dir = Path(os.getenv('APPDATA')) / 'TVHplayer'
-        elif system == "Darwin":  # macOS
-            # Use ~/Library/Application Support on macOS
-            config_dir = Path.home() / 'Library' / 'Application Support' / 'TVHplayer'
-        else:
-            # Fallback to home directory for other systems
-            config_dir = Path.home() / '.tvhplayer'
+        # Get OS-specific config path using sys.platform
+        if sys.platform == 'darwin':  # macOS
+            self.config_dir = os.path.join(os.path.expanduser('~/Library/Application Support'), 'TVHplayer')
+        elif sys.platform == 'win32':  # Windows
+            self.config_dir = os.path.join(os.getenv('APPDATA'), 'TVHplayer')
+        else:  # Linux/Unix
+            CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+            self.config_dir = os.path.join(CONFIG_HOME, "tvhplayer")
         
         # Ensure config directory exists
-        config_dir.mkdir(parents=True, exist_ok=True)
+        os.makedirs(self.config_dir, exist_ok=True)
         
         # Set config file path
-        self.config_file = config_dir / 'tvhplayer.conf'
+        self.config_file = os.path.join(self.config_dir, 'tvhplayer.conf')
         print(f"Debug: Config file location: {self.config_file}")
         self.config = self.load_config()
         print(f"Debug: Current config: {json.dumps(self.config, indent=2)}")
