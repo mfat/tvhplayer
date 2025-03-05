@@ -30,7 +30,7 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="3.5.1" date="2023-12-01">
+    <release version="3.5.3" date="2025-03-06">
       <description>
         <p>Initial Flatpak release</p>
       </description>
