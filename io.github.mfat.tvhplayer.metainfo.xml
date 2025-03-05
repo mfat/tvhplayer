@@ -2,12 +2,12 @@
 <component type="desktop-application">
   <id>io.github.mfat.tvhplayer</id>
   <name>TVHplayer</name>
-  <summary>A powerful and user-friendly TVHeadend client application</summary>
+  <summary>A powerful and user-friendly Tvheadend client application</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0+</project_license>
   <description>
     <p>
-      TVHplayer is a client application for TVHeadend, allowing you to watch and record TV channels from your TVHeadend server.
+      TVHplayer is a desktop client for Tvheadend, allowing you to watch and record TV channels from your Tvheadend server.
     </p>
     <p>Features include:</p>
     <ul>
