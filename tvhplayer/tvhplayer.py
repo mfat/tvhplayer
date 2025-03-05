@@ -30,6 +30,8 @@ import os
 import traceback
 from pathlib import Path
 import logging
+from xdg import BaseDirectory
+import platform
 
 
 
@@ -837,7 +839,27 @@ class TVHeadendClient(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setup_paths()
-        self.config_file = os.path.join(str(Path.home()), '.tvhplayer.conf')
+        
+        # Get OS-specific config path
+        system = platform.system()
+        if system == "Linux":
+            # Use XDG config directory on Linux
+            config_dir = Path(os.path.join(BaseDirectory.xdg_config_home, 'tvhplayer'))
+        elif system == "Windows":
+            # Use AppData\Roaming on Windows
+            config_dir = Path(os.getenv('APPDATA')) / 'TVHplayer'
+        elif system == "Darwin":  # macOS
+            # Use ~/Library/Application Support on macOS
+            config_dir = Path.home() / 'Library' / 'Application Support' / 'TVHplayer'
+        else:
+            # Fallback to home directory for other systems
+            config_dir = Path.home() / '.tvhplayer'
+        
+        # Ensure config directory exists
+        config_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Set config file path
+        self.config_file = config_dir / 'tvhplayer.conf'
         print(f"Debug: Config file location: {self.config_file}")
         self.config = self.load_config()
         print(f"Debug: Current config: {json.dumps(self.config, indent=2)}")
@@ -1853,7 +1875,7 @@ class TVHeadendClient(QMainWindow):
         about_text = (
             "<div style='text-align: center;'>"
             "<h2>TVHplayer</h2>"
-            "<p>Version 3.5</p>"
+            "<p>Version 3.5.3</p>"
             "<p>A powerful and user-friendly TVHeadend client application.</p>"
             "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
             "<p style='margin-top: 20px;'><b>Built with:</b><br>"
