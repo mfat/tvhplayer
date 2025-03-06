@@ -92,9 +92,3 @@ modules:
         url: "https://github.com/mfat/tvhplayer.git"
         tag: v3.5.3
         commit: 4fa41252510b7fb3795c47fee3fc2e44c472bd85  
-      - type: file
-        path: tvhplayer.sh
-      - type: file
-        path: io.github.mfat.tvhplayer.desktop
-      - type: file
-        path: io.github.mfat.tvhplayer.metainfo.xml 
