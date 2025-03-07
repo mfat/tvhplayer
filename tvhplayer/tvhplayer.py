@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QSlider, QStatusBar, QGridLayout, QMenuBar, QRadioButton, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QShortcut, QCheckBox, QGroupBox  # Added QGroupBox here
 )
-from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect
+from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect, QCoreApplication
 from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence
 import json
 import requests
@@ -2774,6 +2774,11 @@ class RecordingStatusDialog(QDialog):
 def main():
     """Main entry point for the application"""
     try:
+        # Force the application to use XCB instead of Wayland
+        # This helps with VLC integration under Wayland
+        QCoreApplication.setAttribute(Qt.AA_X11InitThreads, True)
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        
         app = QApplication(sys.argv)
         player = TVHeadendClient()
         player.show()
