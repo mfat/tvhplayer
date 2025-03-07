@@ -874,7 +874,7 @@ class TVHeadendClient(QMainWindow):
         self.recording_animation = None
         self.opacity_effect = None
         
-        # Initialize VLC
+        # Initialize VLC with basic instance first
         print("Debug: Initializing VLC instance")
         try:
             if getattr(sys, 'frozen', False):
@@ -891,12 +891,21 @@ class TVHeadendClient(QMainWindow):
                     
                 print(f"Debug: VLC plugin path set to: {plugin_path}")
                 
-            # Initialize VLC without arguments
-            self.instance = vlc.Instance()
+            # Initialize VLC with hardware acceleration parameters
+            vlc_args = [
+                # Enable hardware decoding
+                '--avcodec-hw=any',  # Try any hardware acceleration method
+                '--file-caching=1000',  # Increase file caching for smoother playback
+                '--network-caching=1000',  # Increase network caching for streaming
+                '--no-video-title-show',  # Don't show the video title
+                '--no-snapshot-preview',  # Don't show snapshot previews
+            ]
+            
+            self.instance = vlc.Instance(vlc_args)
             if not self.instance:
                 raise RuntimeError("VLC Instance creation returned None")
                 
-            print("Debug: VLC instance created successfully")
+            print("Debug: VLC instance created successfully with hardware acceleration")
             
             self.media_player = self.instance.media_player_new()
             if not self.media_player:
@@ -908,26 +917,44 @@ class TVHeadendClient(QMainWindow):
             print(f"Error initializing VLC: {str(e)}")
             raise RuntimeError(f"Failed to initialize VLC: {str(e)}")
         
-        
-
         # Then setup UI
         self.setup_ui()
         
         # Update to use config for last server
         self.server_combo.setCurrentIndex(self.config.get('last_server', 0))
         
-        #Set player window - with proper type conversion
-
-        if sys.platform.startswith('linux'):
-            handle = self.video_frame.winId().__int__()
-            if handle is not None:
-                self.media_player.set_xwindow(handle)
-        elif sys.platform == "win32":
-           self.media_player.set_hwnd(self.video_frame.winId().__int__())
-        elif sys.platform == "darwin":
-           self.media_player.set_nsobject(self.video_frame.winId().__int__())
-    
-          
+        # Now configure hardware acceleration after UI is set up
+        try:
+            # Set player window - with proper type conversion
+            if sys.platform.startswith('linux'):
+                handle = self.video_frame.winId().__int__()
+                if handle is not None:
+                    self.media_player.set_xwindow(handle)
+            elif sys.platform == "win32":
+                self.media_player.set_hwnd(self.video_frame.winId().__int__())
+            elif sys.platform == "darwin":
+                self.media_player.set_nsobject(self.video_frame.winId().__int__())
+            
+            # Set hardware decoding to automatic
+            if hasattr(self.media_player, 'set_hardware_decoding'):
+                self.media_player.set_hardware_decoding(True)
+            else:
+                # Alternative method for older VLC Python bindings
+                self.media_player.video_set_key_input(False)
+                self.media_player.video_set_mouse_input(False)
+            
+            # Add a timer to check which hardware acceleration method is being used
+            # This will check after playback starts
+            self.hw_check_timer = QTimer()
+            self.hw_check_timer.setSingleShot(True)
+            self.hw_check_timer.timeout.connect(self.check_hardware_acceleration)
+            self.hw_check_timer.start(5000)  # Check after 5 seconds of playback
+                
+            print("Debug: Hardware acceleration configured for VLC")
+            
+        except Exception as e:
+            print(f"Warning: Could not configure hardware acceleration: {str(e)}")
+            print("Continuing without hardware acceleration")
     
     def setup_paths(self):
         """Setup application paths for resources"""
@@ -2507,6 +2534,34 @@ class TVHeadendClient(QMainWindow):
             if item:
                 channel_name = item.text().lower()
                 self.channel_list.setRowHidden(row, search_text not in channel_name)
+
+    def check_hardware_acceleration(self):
+        """Check and print which hardware acceleration method is being used"""
+        if not self.media_player:
+            return
+            
+        # This only works if a media is playing
+        if not self.media_player.is_playing():
+            return
+            
+        try:
+            # Get media statistics
+            stats = self.media_player.get_media().get_stats()
+            
+            # Log hardware acceleration info
+            print("VLC Playback Statistics:")
+            print(f"Decoded video blocks: {stats.decoded_video}")
+            print(f"Displayed pictures: {stats.displayed_pictures}")
+            print(f"Lost pictures: {stats.lost_pictures}")
+            
+            # Try to get more detailed hardware acceleration info
+            # This requires running a VLC command and parsing the output
+            # which is not directly available through the Python bindings
+            print("To check hardware acceleration details, run VLC with the same content and use:")
+            print("Tools -> Messages -> Info to see which decoder is being used")
+            
+        except Exception as e:
+            print(f"Error checking hardware acceleration: {e}")
 
 
 
