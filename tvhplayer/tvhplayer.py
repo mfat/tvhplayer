@@ -2545,23 +2545,41 @@ class TVHeadendClient(QMainWindow):
             return
             
         try:
-            # Get media statistics
-            stats = self.media_player.get_media().get_stats()
+            # Get media statistics - handle different VLC Python binding versions
+            media = self.media_player.get_media()
+            if not media:
+                print("No media currently playing")
+                return
+                
+            # Different versions of python-vlc have different APIs for get_stats
+            try:
+                # Newer versions (direct call)
+                stats = media.get_stats()
+                print("VLC Playback Statistics:")
+                print(f"Decoded video blocks: {stats.decoded_video}")
+                print(f"Displayed pictures: {stats.displayed_pictures}")
+                print(f"Lost pictures: {stats.lost_pictures}")
+            except TypeError:
+                # Older versions (requiring a stats object parameter)
+                stats = vlc.MediaStats()
+                media.get_stats(stats)
+                print("VLC Playback Statistics:")
+                print(f"Decoded video blocks: {stats.decoded_video}")
+                print(f"Displayed pictures: {stats.displayed_pictures}")
+                print(f"Lost pictures: {stats.lost_pictures}")
             
-            # Log hardware acceleration info
-            print("VLC Playback Statistics:")
-            print(f"Decoded video blocks: {stats.decoded_video}")
-            print(f"Displayed pictures: {stats.displayed_pictures}")
-            print(f"Lost pictures: {stats.lost_pictures}")
+            # Check if hardware decoding is enabled
+            if hasattr(self.media_player, 'get_role'):
+                print(f"Media player role: {self.media_player.get_role()}")
             
             # Try to get more detailed hardware acceleration info
-            # This requires running a VLC command and parsing the output
-            # which is not directly available through the Python bindings
-            print("To check hardware acceleration details, run VLC with the same content and use:")
+            print("Hardware acceleration is active if you see 'Using ... for hardware decoding' in the logs above")
+            print("For more details, run VLC with the same content and use:")
             print("Tools -> Messages -> Info to see which decoder is being used")
             
         except Exception as e:
             print(f"Error checking hardware acceleration: {e}")
+            print(f"Traceback: {traceback.format_exc()}")
 
 
 
