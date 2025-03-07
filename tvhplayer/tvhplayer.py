@@ -1360,6 +1360,11 @@ class TVHeadendClient(QMainWindow):
             QLineEdit:focus {
                 border-color: #0078d4;
             }
+            QLineEdit::placeholder {
+                color: #555;
+                font-weight: bold;
+                opacity: 0.8;
+            }
             QLineEdit QToolButton {  /* Style for the clear button */
                 background: none;
                 border: none;
