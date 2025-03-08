@@ -1052,11 +1052,18 @@ class TVHeadendClient(QMainWindow):
         file_menu = menubar.addMenu("File")
         view_menu = menubar.addMenu("View")
         help_menu = menubar.addMenu("Help")
+
+        # Add User Guide action to Help menu
+        user_guide_action = QAction("User Guide", self)
+        user_guide_action.triggered.connect(self.show_user_guide)
+        help_menu.addAction(user_guide_action)
         
         # Add About action to Help menu
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+        
+        
         
         # Add Fullscreen action to View menu
         fullscreen_action = QAction("Fullscreen", self)
@@ -1911,6 +1918,36 @@ class TVHeadendClient(QMainWindow):
         msg.setMinimumWidth(400)  # Make dialog wider to prevent text wrapping
         msg.exec_()
 
+    def show_user_guide(self):
+        """Open the user guide documentation"""
+        print("Debug: Opening user guide")
+        try:
+            # Open the GitHub wiki URL in the default web browser
+            url = "https://github.com/mfat/tvhplayer/wiki/User-Guide"
+            
+            # Open URL in the default web browser based on platform
+            if platform.system() == "Linux":
+                subprocess.Popen(["xdg-open", url])
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.Popen(["open", url])
+            elif platform.system() == "Windows":
+                os.startfile(url)
+            else:
+                # Fallback using webbrowser module
+                import webbrowser
+                webbrowser.open(url)
+                
+            print(f"Opened user guide URL: {url}")
+            
+        except Exception as e:
+            print(f"Error opening user guide URL: {str(e)}")
+            QMessageBox.critical(
+                self, 
+                "Error",
+                f"Failed to open user guide: {str(e)}",
+                QMessageBox.Ok
+            )
+
     def toggle_recording(self):
         """Toggle between starting and stopping recording"""
         if self.record_btn.isChecked():
@@ -2695,7 +2732,7 @@ class EPGDialog(QDialog):
             print(f"Debug: Recording data: {data}")
             
             # Make recording request
-            record_url = f'http://{self.server["url"]}/api/dvr/entry/create'
+            record_url = f'{self.server["url"]}/api/dvr/entry/create'
             print(f"Debug: Sending recording request to: {record_url}")
             
             response = requests.post(record_url, data=data, auth=auth)
