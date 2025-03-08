@@ -1888,7 +1888,7 @@ class TVHeadendClient(QMainWindow):
         about_text = (
             "<div style='text-align: center;'>"
             "<h2>TVHplayer</h2>"
-            "<p>Version 3.5.4</p>"
+            "<p>Version 3.5.5</p>"
             "<p>A powerful and user-friendly TVHeadend client application.</p>"
             "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
             "<p style='margin-top: 20px;'><b>Built with:</b><br>"
@@ -2717,13 +2717,17 @@ class EPGDialog(QDialog):
             if self.server.get('username') or self.server.get('password'):
                 auth = (self.server.get('username', ''), self.server.get('password', ''))
             
-            # Prepare recording request
+            # Prepare recording request with proper language object structure
             conf_data = {
                 "start": entry['start'],
                 "stop": entry['stop'],
                 "channel": entry['channelUuid'],
-                "title": entry.get('title', {"eng": "Scheduled Recording"}),
-                "description": entry.get('description', {"eng": ""}),
+                "title": {
+                    "eng": entry.get('title', 'Scheduled Recording')
+                },
+                "description": {
+                    "eng": entry.get('description', '')
+                },
                 "comment": "Scheduled via TVHplayer"
             }
             
