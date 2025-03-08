@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QShortcut, QCheckBox, QGroupBox  # Added QGroupBox here
 )
 from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect, QCoreApplication
-from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence
+from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence, QPalette
 import json
 import requests
 # Replace this line:
@@ -448,12 +448,21 @@ class ServerConfigDialog(QDialog):
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
         
+        # Style placeholder text
+        placeholder_color = QColor(100, 100, 100)  # Dark gray color
+        palette = self.palette()
+        palette.setColor(QPalette.PlaceholderText, placeholder_color)
+        self.setPalette(palette)
+        
+        # Apply placeholder text
         layout.addRow("Name:", self.name_input)
         self.name_input.setPlaceholderText("My Server")
         layout.addRow("Server address:", self.url_input)
         self.url_input.setPlaceholderText("http://127.0.0.1:9981")
         layout.addRow("Username:", self.username_input)
+        self.username_input.setPlaceholderText("Optional")
         layout.addRow("Password:", self.password_input)
+        self.password_input.setPlaceholderText("Optional")
         
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -1359,6 +1368,13 @@ class TVHeadendClient(QMainWindow):
         search_layout = QHBoxLayout()
         search_icon = QLabel("🔍")  # Unicode search icon
         self.search_box = QLineEdit()
+        
+        # Style placeholder text
+        placeholder_color = QColor(100, 100, 100)  # Dark gray color
+        search_palette = self.search_box.palette()
+        search_palette.setColor(QPalette.PlaceholderText, placeholder_color)
+        self.search_box.setPalette(search_palette)
+        
         self.search_box.setPlaceholderText("Press S to search channels...")
         self.search_box.textChanged.connect(self.filter_channels)
         self.search_box.setClearButtonEnabled(True)  # Add clear button inside search box
@@ -1376,42 +1392,7 @@ class TVHeadendClient(QMainWindow):
         left_layout.addLayout(search_layout)  # Add to left pane layout
         
         # Now style the search box with custom clear button styling
-        self.search_box.setStyleSheet("""
-            QLineEdit {
-                padding: 6px;
-                padding-right: 25px;  /* Make room for clear button */
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-            }
-            QLineEdit::placeholder {
-                color: #555;
-                font-weight: bold;
-                opacity: 0.8;
-            }
-            QLineEdit QToolButton {  /* Style for the clear button */
-                background: none;
-                border: none;
-                padding: 0px 6px;
-                color: #666;
-                font-size: 16px;
-            }
-            QLineEdit QToolButton:hover {
-                background-color: #e0e0e0;
-                border-radius: 2px;
-            }
-        """)
         
-        # Style the search icon
-        search_icon.setStyleSheet("""
-            QLabel {
-                color: #666;
-                padding: 0 5px;
-            }
-        """)
         
         # Add margins to search layout
         search_layout.setContentsMargins(0, 5, 0, 5)
@@ -1900,7 +1881,7 @@ class TVHeadendClient(QMainWindow):
         about_text = (
             "<div style='text-align: center;'>"
             "<h2>TVHplayer</h2>"
-            "<p>Version 3.5.3</p>"
+            "<p>Version 3.5.4</p>"
             "<p>A powerful and user-friendly TVHeadend client application.</p>"
             "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
             "<p style='margin-top: 20px;'><b>Built with:</b><br>"
