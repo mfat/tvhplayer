@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.github.mfat.tvhplayer</id>
   <name>TVHplayer</name>
-  <summary>A powerful and user-friendly Tvheadend client application</summary>
+  <summary>A desktop client for Tvheadend for watching and recording live TV channels</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0+</project_license>
   <description>
@@ -11,26 +11,30 @@
     </p>
     <p>Features include:</p>
     <ul>
-      <li>Watch live TV channels from TVHeadend servers</li>
+      <li>Watch live TV</li>
       <li>Record TV shows directly on the server</li>
       <li>Record streams locally to your computer</li>
       <li>View EPG (Electronic Program Guide) data</li>
       <li>Monitor server status and signal quality</li>
       <li>Support for multiple TVHeadend servers</li>
+      <li>Cross-platform: runs on GNU/Linux, Windows and MacOS</li>
     </ul>
+    <p>For more information, and instructions for setting up your server please visit the <a href="https://tvheadend.org/">Tvheqadend official website.</a>.</p>
   </description>
   <launchable type="desktop-id">io.github.mfat.tvhplayer.desktop</launchable>
   <screenshots>
     <screenshot type="default">
-      <caption>TVHplayer main interface</caption>
-      <image>https://raw.githubusercontent.com/mfat/tvhplayer/377184d967e798e093c8523fd32e8cd427e0b883/Screenshots/Screenshot_1.png</image>
+      <image>https://raw.githubusercontent.com/mfat/tvhplayer/0a6a8ae6b722e72ce661aa1694e56ac41c943f3c/Screenshots/Screenshot_3.png</image>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/mfat/tvhplayer/0a6a8ae6b722e72ce661aa1694e56ac41c943f3c/Screenshots/Screenshot_2.png</image>
     </screenshot>
   </screenshots>
   <url type="homepage">https://github.com/mfat/tvhplayer</url>
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="3.5.3" date="2025-03-06">
+    <release version="3.5.4" date="2025-03-08">
       <description>
         <p>Initial Flatpak release</p>
       </description>
