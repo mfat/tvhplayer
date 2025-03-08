@@ -5,7 +5,7 @@
 Desktop client for playback and recording live TV with TVheadend
 
 
-![Screenshot2](https://github.com/user-attachments/assets/281563a5-54e2-4b58-a4f3-3a59c8830c24)
+![Screenshot](Screenshots/Screenshot_3.png)
 
 
 
