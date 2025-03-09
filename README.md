@@ -2,7 +2,7 @@
 ![tvhplayer](https://github.com/user-attachments/assets/96b567e2-3ce7-45dd-aad8-b64239a54f2c)
 
 # TVHplayer
-Desktop TVheadend client for watching and recording live TV 
+A TVheadend client for watching and recording live TV on PC.
 
 
 ![Screenshot](Screenshots/Screenshot_3.png)
