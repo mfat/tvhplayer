@@ -29,7 +29,8 @@ Desktop client for playback and recording live TV with TVheadend
 - FFMPEG (used for local recording feature if you need it)
   - On Windows follow [this guide](https://phoenixnap.com/kb/ffmpeg-windows) to add ffmpeg to windows PATH. You can also put ffmpeg.exe in the same directory as tvhplayer.
  
-## Support
+## Help and Support
+- Reger to the [User Guide](https://github.com/mfat/tvhplayer/wiki/User-Guide) for more information about using the app. 
 - For any problems or bugs [create an issue](https://github.com/user/repository/issues/new)
 
 ## Run the app from source 
