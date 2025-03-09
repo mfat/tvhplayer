@@ -24,9 +24,11 @@
   <launchable type="desktop-id">io.github.mfat.tvhplayer.desktop</launchable>
   <screenshots>
     <screenshot type="default">
+      <caption>TVHplayer main interface</caption>
       <image>https://raw.githubusercontent.com/mfat/tvhplayer/0a6a8ae6b722e72ce661aa1694e56ac41c943f3c/Screenshots/Screenshot_3.png</image>
     </screenshot>
     <screenshot>
+      <caption>TVHplayer user interface</caption>
       <image>https://raw.githubusercontent.com/mfat/tvhplayer/0a6a8ae6b722e72ce661aa1694e56ac41c943f3c/Screenshots/Screenshot_2.png</image>
     </screenshot>
   </screenshots>
