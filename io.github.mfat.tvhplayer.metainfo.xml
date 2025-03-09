@@ -19,7 +19,7 @@
       <li>Support for multiple TVHeadend servers</li>
       <li>Cross-platform: runs on GNU/Linux, Windows and MacOS</li>
     </ul>
-    <p>For more information, and instructions for setting up your ownserver please visit Tvheadend official website.</p>
+    <p>For more information, and instructions for setting up your own server please visit Tvheadend official website.</p>
   </description>
   <launchable type="desktop-id">io.github.mfat.tvhplayer.desktop</launchable>
   <screenshots>
