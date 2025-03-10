@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QShortcut, QCheckBox, QGroupBox  # Added QGroupBox here
 )
 from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect, QCoreApplication
-from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence
+from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence, QPalette
 import json
 import requests
 # Replace this line:
@@ -30,6 +30,7 @@ import os
 import traceback
 from pathlib import Path
 import logging
+import platform
 
 
 
@@ -447,12 +448,21 @@ class ServerConfigDialog(QDialog):
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.Password)
         
+        # Style placeholder text
+        placeholder_color = QColor(100, 100, 100)  # Dark gray color
+        palette = self.palette()
+        palette.setColor(QPalette.PlaceholderText, placeholder_color)
+        self.setPalette(palette)
+        
+        # Apply placeholder text
         layout.addRow("Name:", self.name_input)
         self.name_input.setPlaceholderText("My Server")
         layout.addRow("Server address:", self.url_input)
         self.url_input.setPlaceholderText("http://127.0.0.1:9981")
         layout.addRow("Username:", self.username_input)
+        self.username_input.setPlaceholderText("Optional")
         layout.addRow("Password:", self.password_input)
+        self.password_input.setPlaceholderText("Optional")
         
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -837,7 +847,21 @@ class TVHeadendClient(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setup_paths()
-        self.config_file = os.path.join(str(Path.home()), '.tvhplayer.conf')
+        
+        # Get OS-specific config path using sys.platform
+        if sys.platform == 'darwin':  # macOS
+            self.config_dir = os.path.join(os.path.expanduser('~/Library/Application Support'), 'TVHplayer')
+        elif sys.platform == 'win32':  # Windows
+            self.config_dir = os.path.join(os.getenv('APPDATA'), 'TVHplayer')
+        else:  # Linux/Unix
+            CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config"))
+            self.config_dir = os.path.join(CONFIG_HOME, "tvhplayer")
+        
+        # Ensure config directory exists
+        os.makedirs(self.config_dir, exist_ok=True)
+        
+        # Set config file path
+        self.config_file = os.path.join(self.config_dir, 'tvhplayer.conf')
         print(f"Debug: Config file location: {self.config_file}")
         self.config = self.load_config()
         print(f"Debug: Current config: {json.dumps(self.config, indent=2)}")
@@ -1028,11 +1052,18 @@ class TVHeadendClient(QMainWindow):
         file_menu = menubar.addMenu("File")
         view_menu = menubar.addMenu("View")
         help_menu = menubar.addMenu("Help")
+
+        # Add User Guide action to Help menu
+        user_guide_action = QAction("User Guide", self)
+        user_guide_action.triggered.connect(self.show_user_guide)
+        help_menu.addAction(user_guide_action)
         
         # Add About action to Help menu
         about_action = QAction("About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+        
+        
         
         # Add Fullscreen action to View menu
         fullscreen_action = QAction("Fullscreen", self)
@@ -1344,6 +1375,13 @@ class TVHeadendClient(QMainWindow):
         search_layout = QHBoxLayout()
         search_icon = QLabel("🔍")  # Unicode search icon
         self.search_box = QLineEdit()
+        
+        # Style placeholder text
+        placeholder_color = QColor(100, 100, 100)  # Dark gray color
+        search_palette = self.search_box.palette()
+        search_palette.setColor(QPalette.PlaceholderText, placeholder_color)
+        self.search_box.setPalette(search_palette)
+        
         self.search_box.setPlaceholderText("Press S to search channels...")
         self.search_box.textChanged.connect(self.filter_channels)
         self.search_box.setClearButtonEnabled(True)  # Add clear button inside search box
@@ -1361,37 +1399,7 @@ class TVHeadendClient(QMainWindow):
         left_layout.addLayout(search_layout)  # Add to left pane layout
         
         # Now style the search box with custom clear button styling
-        self.search_box.setStyleSheet("""
-            QLineEdit {
-                padding: 6px;
-                padding-right: 25px;  /* Make room for clear button */
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border-color: #0078d4;
-            }
-            QLineEdit QToolButton {  /* Style for the clear button */
-                background: none;
-                border: none;
-                padding: 0px 6px;
-                color: #666;
-                font-size: 16px;
-            }
-            QLineEdit QToolButton:hover {
-                background-color: #e0e0e0;
-                border-radius: 2px;
-            }
-        """)
         
-        # Style the search icon
-        search_icon.setStyleSheet("""
-            QLabel {
-                color: #666;
-                padding: 0 5px;
-            }
-        """)
         
         # Add margins to search layout
         search_layout.setContentsMargins(0, 5, 0, 5)
@@ -1880,7 +1888,7 @@ class TVHeadendClient(QMainWindow):
         about_text = (
             "<div style='text-align: center;'>"
             "<h2>TVHplayer</h2>"
-            "<p>Version 3.5</p>"
+            "<p>Version 3.5.5</p>"
             "<p>A powerful and user-friendly TVHeadend client application.</p>"
             "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
             "<p style='margin-top: 20px;'><b>Built with:</b><br>"
@@ -1909,6 +1917,36 @@ class TVHeadendClient(QMainWindow):
         msg.setTextFormat(Qt.RichText)
         msg.setMinimumWidth(400)  # Make dialog wider to prevent text wrapping
         msg.exec_()
+
+    def show_user_guide(self):
+        """Open the user guide documentation"""
+        print("Debug: Opening user guide")
+        try:
+            # Open the GitHub wiki URL in the default web browser
+            url = "https://github.com/mfat/tvhplayer/wiki/User-Guide"
+            
+            # Open URL in the default web browser based on platform
+            if platform.system() == "Linux":
+                subprocess.Popen(["xdg-open", url])
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.Popen(["open", url])
+            elif platform.system() == "Windows":
+                os.startfile(url)
+            else:
+                # Fallback using webbrowser module
+                import webbrowser
+                webbrowser.open(url)
+                
+            print(f"Opened user guide URL: {url}")
+            
+        except Exception as e:
+            print(f"Error opening user guide URL: {str(e)}")
+            QMessageBox.critical(
+                self, 
+                "Error",
+                f"Failed to open user guide: {str(e)}",
+                QMessageBox.Ok
+            )
 
     def toggle_recording(self):
         """Toggle between starting and stopping recording"""
@@ -2679,13 +2717,17 @@ class EPGDialog(QDialog):
             if self.server.get('username') or self.server.get('password'):
                 auth = (self.server.get('username', ''), self.server.get('password', ''))
             
-            # Prepare recording request
+            # Prepare recording request with proper language object structure
             conf_data = {
                 "start": entry['start'],
                 "stop": entry['stop'],
                 "channel": entry['channelUuid'],
-                "title": entry.get('title', {"eng": "Scheduled Recording"}),
-                "description": entry.get('description', {"eng": ""}),
+                "title": {
+                    "eng": entry.get('title', 'Scheduled Recording')
+                },
+                "description": {
+                    "eng": entry.get('description', '')
+                },
                 "comment": "Scheduled via TVHplayer"
             }
             
@@ -2694,7 +2736,7 @@ class EPGDialog(QDialog):
             print(f"Debug: Recording data: {data}")
             
             # Make recording request
-            record_url = f'http://{self.server["url"]}/api/dvr/entry/create'
+            record_url = f'{self.server["url"]}/api/dvr/entry/create'
             print(f"Debug: Sending recording request to: {record_url}")
             
             response = requests.post(record_url, data=data, auth=auth)

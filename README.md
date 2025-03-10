@@ -1,36 +1,46 @@
 
-![tvhplayer](https://github.com/user-attachments/assets/96b567e2-3ce7-45dd-aad8-b64239a54f2c)
+<a href='https://flathub.org/apps/io.github.mfat.tvhplayer'>
+    <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
+  </a>
 
 # TVHplayer
-Desktop client for playback and recording live TV with TVheadend
+A TVheadend client for watching and recording live TV on PC
 
 
-![Screenshot2](https://github.com/user-attachments/assets/281563a5-54e2-4b58-a4f3-3a59c8830c24)
+![Screenshot](Screenshots/Screenshot_3.png)
 
 
 
 ## Features:
-- Add multiple servers
-- Browse EPG for each channel and schedule recording your favorite shows
+
+With TVHplayer you can:
 - Play live TV & radio channels
-- Initiate instant records on your TVheadend server
-- Record live TV locally
-- Set custom duration for recordings
-- Monitor your server status, signal strength and DVR right from the app
-- Uses built-in VLC player for maximum compatibility 
-- Cross-platform - runs on linux, macOS and Windows
+- Browse EPG
+- Schedule recordings
+- Initiate instant recordings with custom duration 
+- Record live TV locally on your computer 
+- Monitor your server status, signal strength and DVR
+- TVHplayer is cross-platform - runs on linux, macOS and Windows
 
 ## Download
-- Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download for your operating system
-  
+- Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download the app for your operating system (Linux, MacOS or Windows)
+- Linux users can also install the app from [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer)
+
+<a href='https://flathub.org/apps/io.github.mfat.tvhplayer'>
+    <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
+  </a>
+
 
 ## Requirements
-- VLC must be installed as it's used for playback. (on linux make sure to install vlc dev packages too)
+- Make sure both digest and plane authentication are enabled in your server
+- See requirements.txt for requred python modules
+- VLC 
 - FFMPEG (used for local recording feature if you need it)
   - On Windows follow [this guide](https://phoenixnap.com/kb/ffmpeg-windows) to add ffmpeg to windows PATH. You can also put ffmpeg.exe in the same directory as tvhplayer.
  
-## Support
-- For any problems or bugs [create an issue](https://github.com/user/repository/issues/new)
+## Help and Support
+- Refer to the [User Guide](https://github.com/mfat/tvhplayer/wiki/User-Guide) for more information about using the app. 
+- If you encounter any problems [open a bug report](https://github.com/user/repository/issues/new)
 
 ## Run the app from source 
 - You can run the code directly with python. You may want to do this if you don't want to download an executable.
@@ -43,6 +53,10 @@ To do this:
 - cd into the folder
 - Run the app with:
   `python3 tvhplayer/tvhplayer.py`
+
+## Technical information 
+- TVHplayer uses Tvheadend's http API (no htsp support yet)
+- For playback, it uses libvlc 
   
 ## Support development
 Bitcoin: `bc1qqtsyf0ft85zshsnw25jgsxnqy45rfa867zqk4t`
