@@ -52,6 +52,10 @@ To do this:
 - cd into the folder
 - Run the app with:
   `python3 tvhplayer/tvhplayer.py`
+
+## Technical information 
+- TVHplayer uses Tvheadend's http API (no htsp support yet)
+- For playback, it uses libvlc 
   
 ## Support development
 Bitcoin: `bc1qqtsyf0ft85zshsnw25jgsxnqy45rfa867zqk4t`
