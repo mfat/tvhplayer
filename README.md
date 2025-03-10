@@ -1,5 +1,5 @@
 
-<a href='https://flathub.org/apps/org.gimp.GIMP'>
+<a href='https://flathub.org/apps/io.github.mfat.tvhplayer'>
     <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
   </a>
 
