@@ -1,5 +1,7 @@
 
-![tvhplayer](https://github.com/user-attachments/assets/96b567e2-3ce7-45dd-aad8-b64239a54f2c)
+<a href='https://flathub.org/apps/org.gimp.GIMP'>
+    <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
+  </a>
 
 # TVHplayer
 A TVheadend client for watching and recording live TV on PC
@@ -22,7 +24,12 @@ A TVheadend client for watching and recording live TV on PC
 
 ## Download
 - Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download for your operating system
-  
+- Linux users can install the app from [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer)
+
+<a href='https://flathub.org/apps/org.gimp.GIMP'>
+    <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
+  </a>
+
 
 ## Requirements
 - See requirements.txt for requred python modules
