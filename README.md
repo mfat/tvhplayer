@@ -13,14 +13,14 @@ A TVheadend client for watching and recording live TV on PC
 
 ## Features:
 
+With TVHplayer you can:
 - Play live TV & radio channels
 - Browse EPG
 - Schedule recordings
 - Initiate instant recordings with custom duration 
 - Record live TV locally
 - Monitor your server status, signal strength and DVR
-- Uses built-in VLC player for maximum compatibility 
-- Cross-platform - runs on linux, macOS and Windows
+- TVHplayer is cross-platform - runs on linux, macOS and Windows
 
 ## Download
 - Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download the app for your operating system (Linux, MacOS or Windows)
