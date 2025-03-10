@@ -15,7 +15,6 @@ A TVheadend client for watching and recording live TV on PC
 
 - Play live TV & radio channels
 - Browse EPG for each channel and schedule recording your favorite shows
-
 - Initiate instant recordings on your TVheadend server
 - Record live TV locally
 - Set custom duration for recordings
@@ -24,8 +23,8 @@ A TVheadend client for watching and recording live TV on PC
 - Cross-platform - runs on linux, macOS and Windows
 
 ## Download
-- Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download for your operating system
-- Linux users can install the app from [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer)
+- Head to [releases](https://github.com/mfat/tvhplayer/releases) section to download the app for your operating system (Linux, MacOS or Windows)
+- Linux users can also install the app from [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer)
 
 <a href='https://flathub.org/apps/org.gimp.GIMP'>
     <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
