@@ -18,7 +18,7 @@ With TVHplayer you can:
 - Browse EPG
 - Schedule recordings
 - Initiate instant recordings with custom duration 
-- Record live TV locally
+- Record live TV locally on your computer 
 - Monitor your server status, signal strength and DVR
 - TVHplayer is cross-platform - runs on linux, macOS and Windows
 
