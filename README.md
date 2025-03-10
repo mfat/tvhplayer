@@ -14,10 +14,10 @@ A TVheadend client for watching and recording live TV on PC
 ## Features:
 
 - Play live TV & radio channels
-- Browse EPG for each channel and schedule recording your favorite shows
-- Initiate instant recordings on your TVheadend server
+- Browse EPG
+- Schedule recordings
+- Initiate instant recordings with custom duration 
 - Record live TV locally
-- Set custom duration for recordings
 - Monitor your server status, signal strength and DVR
 - Uses built-in VLC player for maximum compatibility 
 - Cross-platform - runs on linux, macOS and Windows
