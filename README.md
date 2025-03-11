@@ -6,7 +6,8 @@
 # TVHplayer
 A TVheadend client for watching and recording live TV on PC
 
-![Screenshot_20250311_0043134](https://github.com/user-attachments/assets/7f676d0b-495f-476d-932a-b436aa14fc2f)
+![Screenshot_4](https://github.com/user-attachments/assets/28f34c9c-b53c-4855-9a4c-2752668ac9fd)
+
 
 
 ## Features:
