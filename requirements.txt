@@ -7,3 +7,4 @@ pyinstaller>=5.13.0  # For building the executable
 pillow>=10.0.0  # For image handling
 pyqt5-tools>=5.15.0  # For Qt Designer
 pyxdg>=0.28
+m3u8>=6.0.0  # For M3U playlist support
