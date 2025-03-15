@@ -619,7 +619,7 @@ class ServerConfigDialog(QDialog):
         
         # Add fields
         layout.addRow("Name:", self.name_input)
-        self.name_input.setPlaceholderText("My Source")
+        self.name_input.setPlaceholderText("Name")
         layout.addRow("URL:", self.url_input)
         
         # TVHeadend specific fields
@@ -652,8 +652,8 @@ class ServerConfigDialog(QDialog):
             self.url_input.setPlaceholderText("http://example.com/playlist.m3u")
             # Show authentication fields for M3U sources as well
             self.tvheadend_widget.show()
-            self.username_input.setPlaceholderText("M3U username (optional)")
-            self.password_input.setPlaceholderText("M3U password (optional)")
+            self.username_input.setPlaceholderText("username")
+            self.password_input.setPlaceholderText("password")
         
     def get_server_config(self):
         return {
@@ -1487,10 +1487,10 @@ class TVHeadendClient(QMainWindow):
             # Set hardware decoding to automatic
             if hasattr(self.media_player, 'set_hardware_decoding'):
                 self.media_player.set_hardware_decoding(True)
-            else:
-                # Alternative method for older VLC Python bindings
-                self.media_player.video_set_key_input(False)
-                self.media_player.video_set_mouse_input(False)
+            # else:
+            #     # Alternative method for older VLC Python bindings
+            #     self.media_player.video_set_key_input(False)
+            #     self.media_player.video_set_mouse_input(False)
             
             # Add a timer to check which hardware acceleration method is being used
             # This will check after playback starts
