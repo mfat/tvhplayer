@@ -678,42 +678,46 @@ class ServerConfigDialog(QDialog):
 
     def validate_url(self, url):
         """Validate server URL format"""
-        source_type = self.source_type.currentData()
-        
-        if source_type == SourceType.TVHEADEND:
-            # Remove http:// or https:// for validation
-            if url.startswith('http://'):
-                url = url[7:]
-            elif url.startswith('https://'):  # Fixed to check for https:// properly
-                url = url[8:]
-            else:
-                return False, "URL must start with http:// or https://"
-                
-            # Check for valid hostname/IP and port
-            parts = url.split(':')
-            if len(parts) != 2:
-                return False, "URL must include port number (e.g., http://hostname:9981)"
-                
-            hostname, port = parts
+        if not url.startswith('http://') and not url.startswith('https://'):
+            return False, "URL must start with http:// or https://"
             
-            # Check if port is a number
-            if not port.isdigit():
-                return False, "Port must be a number"
-                
-            # Check if port is in valid range
-            port_num = int(port)
-            if port_num < 1 or port_num > 65535:
-                return False, "Port must be between 1 and 65535"
-                
-            return True, ""
-        else:  # M3U
-            # For M3U, just check if it's a valid URL or file path
-            if url.startswith(('http://', 'https://')):
-                # Simple URL validation
-                return True, ""
-            else:
-                # Check if it's a valid file path
-                return os.path.exists(url), "URL must be a valid URL or file path"
+        # Remove http:// or https:// for validation
+        if url.startswith('http://'):
+            url = url[7:]
+        else:  # https://
+            url = url[8:]
+            
+        # Split URL into host:port and path parts
+        url_parts = url.split('/', 1)
+        host_port = url_parts[0]
+            
+        # Split host and port
+        if ':' in host_port:
+            host, port = host_port.split(':')
+            # Validate port
+            try:
+                port = int(port)
+                if port < 1 or port > 65535:
+                    return False, "Port must be between 1 and 65535"
+            except ValueError:
+                return False, "Invalid port number"
+        else:
+            host = host_port
+            
+        # Validate IP address format if it looks like an IP
+        if all(c.isdigit() or c == '.' for c in host):
+            parts = host.split('.')
+            if len(parts) != 4:
+                return False, "Invalid IP address format"
+            for part in parts:
+                try:
+                    num = int(part)
+                    if num < 0 or num > 255:
+                        return False, "IP numbers must be between 0 and 255"
+                except ValueError:
+                    return False, "Invalid IP address format"
+                    
+        return True, ""
 
     def accept(self):
         print("Debug: Validating server configuration")
