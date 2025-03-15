@@ -2444,6 +2444,7 @@ class TVHeadendClient(QMainWindow):
         """Play a channel using its data"""
         try:
             print(f"Debug: Playing channel: {channel_data.get('name', 'Unknown')}")
+            print(f"Debug: Channel data: {channel_data}")  # Add this to see the full channel data
             
             # Get current server
             server = self.servers[self.server_combo.currentIndex()]
@@ -2474,7 +2475,7 @@ class TVHeadendClient(QMainWindow):
                     url = url.replace('://', f'://{username}:{password}@')
             elif source_type == SourceType.M3U:
                 # For M3U sources, the URL is stored directly in the channel data
-                url = channel_data.get('url')
+                url = channel_data.get('uri')  # FIXED: Changed 'url' to 'uri'
                 
                 # Add authentication if needed
                 if server.get('username') or server.get('password'):
@@ -2483,6 +2484,12 @@ class TVHeadendClient(QMainWindow):
                     print(f"Debug: Adding M3U authentication to playback URL")
                     # Add auth to URL for VLC
                     url = url.replace('://', f'://{username}:{password}@')
+            
+            # Handle relative URLs for M3U sources
+            if url and not url.startswith(('http://', 'https://')):
+                base_url = server['url']
+                base_dir = '/'.join(base_url.split('/')[:-1])
+                url = f"{base_dir}/{url}"
             
             if not url:
                 print(f"Debug: No URL found for channel: {channel_data.get('name', 'Unknown')}")
@@ -2948,33 +2955,27 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Traceback: {traceback.format_exc()}")
 
     def on_server_changed(self, index):
-        """
-        Handle when user switches to a different TVHeadend server in the dropdown.
-        Updates the config file with the newly selected server index and refreshes channel list.
-        
-        Args:
-            index (int): Index of the newly selected server in self.servers list
-        """
-        print(f"Debug: Server changed to index {index}")
-        if index >= 0:  # Valid index selected
-            print(f"Debug: Switching to server: {self.servers[index]['name']}")
+        """Handle server selection change"""
+        if index >= 0 and index < len(self.servers):
+            server = self.servers[index]
+            source_type = SourceType(server.get('type', SourceType.TVHEADEND.value))
             
-            # Update config with new server selection
-            self.config['last_server'] = index
+            # Show/hide EPG button based on source type
+            show_epg = (source_type == SourceType.TVHEADEND)
+            self.epg_frame.setVisible(show_epg)
             
-            # Save updated config to file
-            try:
-                with open(self.config_file, 'w') as f:
-                    json.dump(self.config, f, indent=2)
-                print(f"Debug: Saved server index {index} to config")
-            except Exception as e:
-                print(f"Debug: Error saving config: {e}")
-                
-            # Load channels from newly selected server
+            # Rest of your existing on_server_changed method...
+            self.statusbar.showMessage(f"Selected server: {server['name']}")
             self.fetch_channels()
             
-            # Fetch streaming profiles for TVHeadend sources
-            self.fetch_streaming_profiles()
+            # If it's a TVHeadend server, fetch streaming profiles
+            if source_type == SourceType.TVHEADEND:
+                self.fetch_streaming_profiles()
+                self.profile_combo.setVisible(True)
+                self.profile_frame.setVisible(True)
+            else:
+                self.profile_combo.setVisible(False)
+                self.profile_frame.setVisible(False)
 
     def manage_servers(self):
         """Open server management dialog"""
