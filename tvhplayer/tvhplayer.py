@@ -600,8 +600,8 @@ class ServerConfigDialog(QDialog):
         
         # Source type selection
         self.source_type = QComboBox()
-        self.source_type.addItem("TVHeadend Server", SourceType.TVHEADEND)
         self.source_type.addItem("M3U Playlist", SourceType.M3U)
+        self.source_type.addItem("TVHeadend Server", SourceType.TVHEADEND)
         self.source_type.currentIndexChanged.connect(self.on_source_type_changed)
         layout.addRow("Source Type:", self.source_type)
         
@@ -1657,8 +1657,8 @@ class TVHeadendClient(QMainWindow):
         
         server_layout.addWidget(QLabel("Server:"))
         server_layout.addWidget(self.server_combo)
-        manage_servers_btn.setText("⚙️")  # Unicode settings icon
-        manage_servers_btn.setStyleSheet("font-size: 18px;")  # Make icon bigger
+        manage_servers_btn.setText("⚙")  # Unicode settings icon
+        manage_servers_btn.setStyleSheet("font-size: 14px;")  # Make icon bigger
         manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(manage_servers_btn)
         left_layout.addLayout(server_layout)
