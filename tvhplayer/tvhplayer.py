@@ -2833,132 +2833,37 @@ class TVHeadendClient(QMainWindow):
         return super().eventFilter(obj, event)
 
     def toggle_fullscreen(self):
-        """Toggle fullscreen mode for VLC player"""
+        """Toggle fullscreen mode for just the video frame"""
         print(f"Debug: Toggling fullscreen. Current state: {self.is_fullscreen}")
         
-        # Debounce mechanism to prevent rapid toggling
-        current_time = time.time()
-        if current_time - self.fullscreen_toggle_time < 0.5:  # 500ms debounce
-            print("Debug: Ignoring rapid fullscreen toggle")
-            return
-        self.fullscreen_toggle_time = current_time
+        if self.is_fullscreen:
+            # Exit fullscreen - restore video frame to original layout
+            self.video_frame.setParent(self.findChild(QFrame))
+            right_layout = self.findChild(QVBoxLayout, "right_layout") 
+            right_layout.insertWidget(0, self.video_frame)
+            
+            # Reset VLC window handle for normal view
+            if sys.platform.startswith('linux'):
+                self.media_player.set_xwindow(self.video_frame.winId().__int__())
+            elif sys.platform == "win32":
+                self.media_player.set_hwnd(self.video_frame.winId().__int__())
+            elif sys.platform == "darwin":
+                self.media_player.set_nsobject(self.video_frame.winId().__int__())
+        else:
+            # Enter fullscreen - make video frame fill screen
+            self.video_frame.setParent(None)
+            self.video_frame.setWindowFlags(Qt.Window)
+            self.video_frame.showFullScreen()
+            
+            # Reset VLC window handle for fullscreen
+            if sys.platform.startswith('linux'):
+                self.media_player.set_xwindow(self.video_frame.winId().__int__())
+            elif sys.platform == "win32":
+                self.media_player.set_hwnd(self.video_frame.winId().__int__())
+            elif sys.platform == "darwin":
+                self.media_player.set_nsobject(self.video_frame.winId().__int__())
         
-        try:
-            if not self.is_fullscreen:
-                # Store the video frame's original parent and layout position
-                self.original_parent = self.video_frame.parent()
-                self.original_layout = self.findChild(QVBoxLayout, "right_layout")
-                
-                # Create a new fullscreen window
-                self.fullscreen_window = QWidget()
-                self.fullscreen_window.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-                self.fullscreen_window.installEventFilter(self)
-                self.fullscreen_window.setFocusPolicy(Qt.StrongFocus)  # Ensure window can receive keyboard focus
-                
-                # Override the closeEvent to exit fullscreen mode instead of closing the application
-                def fullscreen_close_event(event):
-                    print("Debug: Fullscreen window close event - exiting fullscreen mode")
-                    event.ignore()  # Ignore the close event
-                    self.toggle_fullscreen()  # Exit fullscreen mode instead
-                
-                self.fullscreen_window.closeEvent = fullscreen_close_event
-                
-                # Add global shortcuts to fullscreen window
-                space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self.fullscreen_window)
-                space_shortcut.activated.connect(self.toggle_play_pause)
-                
-                if sys.platform == "darwin":  # macOS
-                    next_channel_shortcut = QShortcut(QKeySequence("Cmd+N"), self.fullscreen_window)
-                    prev_channel_shortcut = QShortcut(QKeySequence("Cmd+P"), self.fullscreen_window)
-                else:  # Windows/Linux
-                    next_channel_shortcut = QShortcut(QKeySequence("Ctrl+N"), self.fullscreen_window)
-                    prev_channel_shortcut = QShortcut(QKeySequence("Ctrl+P"), self.fullscreen_window)
-                
-                next_channel_shortcut.activated.connect(self.play_next_channel)
-                prev_channel_shortcut.activated.connect(self.play_previous_channel)
-                
-                layout = QVBoxLayout(self.fullscreen_window)
-                layout.setContentsMargins(0, 0, 0, 0)
-                layout.setSpacing(0)  # Remove spacing between widgets
-                
-                # Move video frame to fullscreen
-                self.video_frame.setParent(self.fullscreen_window)
-                layout.addWidget(self.video_frame)
-                
-                # Update state before showing the window
-                self.is_fullscreen = True
-                
-                # Show OSD message for fullscreen
-                self.show_osd_message("Fullscreen mode")
-                
-                # Show fullscreen
-                QApplication.processEvents()  # Process any pending events
-                self.fullscreen_window.showFullScreen()
-                self.video_frame.show()
-                self.fullscreen_window.setFocus()  # Ensure window has focus to receive keyboard events
-                
-                # Reset VLC window handle for fullscreen
-                if sys.platform.startswith('linux'):
-                    QApplication.processEvents()  # Give X11 time to update
-                    self.media_player.set_xwindow(self.video_frame.winId().__int__())
-                elif sys.platform == "win32":
-                    self.media_player.set_hwnd(self.video_frame.winId().__int__())
-                elif sys.platform == "darwin":
-                    self.media_player.set_nsobject(self.video_frame.winId().__int__())
-            else:
-                # Remove from fullscreen layout
-                if hasattr(self, 'fullscreen_window') and self.fullscreen_window:
-                    if self.fullscreen_window.layout():
-                        self.fullscreen_window.layout().removeWidget(self.video_frame)
-                    
-                    # Find the right pane's layout again
-                    right_layout = self.findChild(QVBoxLayout, "right_layout")
-                    if right_layout:
-                        # Restore to right pane
-                        self.video_frame.setParent(self.original_parent)
-                        right_layout.insertWidget(0, self.video_frame)
-                        QApplication.processEvents()  # Process any pending events
-                        self.video_frame.show()
-                        
-                        # Check if media player exists, create it if it doesn't
-                        if not hasattr(self, 'media_player') or self.media_player is None:
-                            print("Debug: Media player is absent, creating a new one")
-                            self.vlc_instance = vlc.Instance()
-                            self.media_player = self.vlc_instance.media_player_new()
-                            self.event_manager = self.media_player.event_manager()
-                            self.event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, self.on_media_playing)
-                            self.event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, self.on_media_error)
-                        
-                        # Reset VLC window handle for normal view
-                        if sys.platform.startswith('linux'):
-                            QApplication.processEvents()  # Give X11 time to update
-                            self.media_player.set_xwindow(self.video_frame.winId().__int__())
-                        elif sys.platform == "win32":
-                            self.media_player.set_hwnd(self.video_frame.winId().__int__())
-                        elif sys.platform == "darwin":
-                            self.media_player.set_nsobject(self.video_frame.winId().__int__())
-                        
-                        # Update state before closing the window
-                        self.is_fullscreen = False
-                        
-                        # Show OSD message for exiting fullscreen
-                        self.show_osd_message("Exited fullscreen mode")
-                        
-                        # Close fullscreen window
-                        self.fullscreen_window.close()
-                        self.fullscreen_window = None
-                    else:
-                        print("Debug: Could not find right_layout")
-                else:
-                    print("Debug: Fullscreen window is None, already in normal mode")
-                    self.is_fullscreen = False
-                    return
-            
-            print(f"Debug: New fullscreen state: {self.is_fullscreen}")
-            
-        except Exception as e:
-            print(f"Debug: Error in toggle_fullscreen: {str(e)}")
-            print(f"Debug: Traceback: {traceback.format_exc()}")
+        self.is_fullscreen = not self.is_fullscreen
 
     def on_server_changed(self, index):
         """Handle server selection change"""
