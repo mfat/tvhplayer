@@ -1394,6 +1394,9 @@ class TVHeadendClient(QMainWindow):
         """Initialize TVHeadend client"""
         super().__init__()
         
+        # Set window title and geometry from config
+        self.setWindowTitle("TVHplayer")
+        
         # Initialize logger
         self.logger = Logger("TVHeadendClient")
         self.logger.debug("Initializing TVHeadendClient")
@@ -1446,6 +1449,15 @@ class TVHeadendClient(QMainWindow):
         print(f"Debug: Config file location: {self.config_file}")
         self.config = self.load_config()
         print(f"Debug: Current config: {json.dumps(self.config, indent=2)}")
+        
+        # Set window geometry from config
+        geometry = self.config.get('window_geometry', {'x': 100, 'y': 100, 'width': 1200, 'height': 700})
+        self.setGeometry(
+            geometry['x'],
+            geometry['y'],
+            geometry['width'],
+            geometry['height']
+        )
         
         # Initialize servers from config
         self.servers = self.config.get('servers', [])
