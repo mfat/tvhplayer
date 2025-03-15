@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
     QPushButton, QLabel, QSlider, QStatusBar, QGridLayout, QMenuBar, QRadioButton, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QShortcut, QCheckBox, QGroupBox, QInputDialog
 )
-from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect, QCoreApplication
+from PyQt5.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QAbstractAnimation, QRect, QCoreApplication, pyqtSignal
 from PyQt5.QtGui import QIcon, QPainter, QColor, QKeySequence, QPalette, QPixmap, QFont, QBrush  # Removed duplicate QColor
 import json
 import requests
@@ -1468,6 +1468,11 @@ class TVHeadendClient(QMainWindow):
         
         # Initialize servers from config
         self.servers = self.config.get('servers', [])
+        
+        # Initialize recording-related attributes
+        self.local_recording_process = None
+        self.recording_check_timer = None
+        self.recording_status_dialog = None
         
         # Then setup UI
         self.setup_ui()
@@ -3127,80 +3132,49 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage("Error stopping recording")
 
     def start_local_recording(self, channel_name):
-        """Record channel stream to local disk using VLC"""
+        """Start recording a channel locally using ffmpeg"""
         try:
-            if not channel_name:
-                print("Debug: No channel selected for local recording")
-                self.statusbar.showMessage("Please select a channel to record")
-                return
-
-            print(f"Debug: Starting local recording for channel: {channel_name}")
-            
-            # Get current server
-            server_index = self.server_combo.currentIndex()
-            if server_index < 0 or server_index >= len(self.servers):
-                print("Debug: Invalid server index")
-                return
+            # Check if already recording
+            if self.local_recording_process:
+                self.show_osd_message("Already recording")
+                return False
                 
-            server = self.servers[server_index]
-            source_type = SourceType(server.get('type', SourceType.TVHEADEND.value))
-            
-            # Get current channel URL
-            current_row = self.channel_list.currentRow()
-            if current_row < 0:
-                print("Debug: No channel selected")
-                return
-                
-            name_item = self.channel_list.item(current_row, 1)
-            if not name_item:
-                print("Debug: No channel item found")
-                return
-                
-            channel_data = name_item.data(Qt.UserRole)
-            if not channel_data:
-                print("Debug: No channel data found")
-                return
+            # Get current channel data
+            if not self.current_channel:
+                self.show_osd_message("No channel selected")
+                return False
                 
             # Get stream URL
             stream_url = None
+            server = self.servers[self.server_combo.currentIndex()]
+            source_type = SourceType(server.get('type', SourceType.TVHEADEND.value))
+            
             if source_type == SourceType.TVHEADEND:
-                # For TVHeadend, construct the stream URL
-                channel_uuid = channel_data.get('uuid')
-                if not channel_uuid:
-                    print(f"Debug: Channel UUID not found for: {channel_name}")
-                    self.statusbar.showMessage("Channel not found")
-                    return
-                    
+                # Construct TVHeadend stream URL
                 base_url = server['url']
                 if not base_url.startswith(('http://', 'https://')):
                     base_url = f"http://{base_url}"
                     
-                stream_url = f"{base_url}/stream/channel/{channel_uuid}"
+                stream_url = f"{base_url}/stream/channel/{self.current_channel['uuid']}"
                 
                 # Add selected profile if available
                 selected_profile = self.profile_combo.currentData()
                 if selected_profile:
                     stream_url = f"{stream_url}?profile={selected_profile}"
-                    print(f"Debug: Using streaming profile for recording: {selected_profile}")
                 
                 # Add authentication if needed
                 if server.get('username') or server.get('password'):
-                    auth = (server.get('username', ''), server.get('password', ''))
-                    # Add auth to URL for VLC
-                    stream_url = stream_url.replace('://', f'://{auth[0]}:{auth[1]}@')
-            else:
-                # For M3U, use the URI directly
-                stream_url = channel_data.get('uri')
-                if not stream_url:
-                    print(f"Debug: Stream URL not found for: {channel_name}")
-                    self.statusbar.showMessage("Stream URL not found")
-                    return
-                
-                # Add authentication to M3U stream URL if needed and not already present
-                if (server.get('username') or server.get('password')) and '@' not in stream_url:
                     username = server.get('username', '')
                     password = server.get('password', '')
-                    print(f"Debug: Adding M3U authentication to recording URL")
+                    stream_url = stream_url.replace('://', f'://{username}:{password}@')
+            else:  # M3U
+                # For M3U streams, use the URI directly
+                stream_url = self.current_channel.get('uri')
+                
+                # Add authentication if needed
+                if server.get('username') or server.get('password'):
+                    username = server.get('username', '')
+                    password = server.get('password', '')
                     
                     try:
                         # Parse the URL
@@ -3219,88 +3193,96 @@ class TVHeadendClient(QMainWindow):
                     except Exception as e:
                         print(f"Debug: Error adding authentication to recording URL: {str(e)}")
             
-            print(f"Debug: Recording stream URL: {stream_url}")
+            if not stream_url:
+                self.show_osd_message("No stream URL available")
+                return False
+                
+            # Get save path
+            file_path = self.get_save_path(channel_name)
+            if not file_path:
+                self.show_osd_message("Recording canceled")
+                return False
+                
+            # Prepare ffmpeg command
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-y',  # Overwrite output file if it exists
+                '-hide_banner',
+                '-loglevel', 'warning'
+            ]
             
-            # Show file save dialog
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_filename = f"recording_{channel_name.replace(' ', '_')}_{timestamp}.mp4"
+            # Add input options
+            ffmpeg_cmd.extend([
+                '-i', stream_url,
+                '-analyzeduration', '10M',  # Increase analyze duration
+                '-probesize', '10M'         # Increase probe size
+            ])
             
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save Recording As",
-                os.path.join(self.config.get('recording_path', str(Path.home())), default_filename),
-                "MP4 Files (*.mp4);;TS Files (*.ts);;All Files (*.*)"
+            # Add output options based on file extension
+            if file_path.lower().endswith('.mp4'):
+                ffmpeg_cmd.extend([
+                    '-c:v', 'copy',         # Copy video stream without transcoding
+                    '-c:a', 'aac',          # Transcode audio to AAC
+                    '-b:a', '192k',         # Audio bitrate
+                    '-movflags', '+faststart',
+                    '-f', 'mp4'
+                ])
+            else:  # Default to .ts
+                ffmpeg_cmd.extend([
+                    '-c', 'copy',           # Copy both streams without transcoding
+                    '-f', 'mpegts'          # Force MPEG-TS format
+                ])
+                
+            # Add output file
+            ffmpeg_cmd.append(file_path)
+            
+            print(f"Debug: Starting recording with command: {' '.join(ffmpeg_cmd)}")
+            
+            # Start ffmpeg process
+            self.local_recording_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
             )
+                
+            # Add to recordings list for tracking
+            recording_info = {
+                'type': 'local',
+                'channel': channel_name,
+                'file_path': file_path,
+                'start_time': time.time(),
+                'process': self.local_recording_process,
+                'size': 0
+            }
+            self.recordings.append(recording_info)
+            print(f"Debug: Added recording to tracking list. Total recordings: {len(self.recordings)}")
             
-            if not file_path:  # User cancelled
-                print("Debug: Recording cancelled - no file selected")
-                return
-                
-            # Save the directory for future recordings
-            self.config['recording_path'] = os.path.dirname(file_path)
-            self.save_config()
+            # Start recording indicator
+            self.start_recording_indicator()
             
-            # Start recording using VLC
-            print(f"Debug: Starting local recording of {stream_url} to {file_path}")
+            # Create recording status dialog
+            self.recording_status_dialog = RecordingStatusDialog(
+                channel_name,
+                file_path,
+                self
+            )
+            self.recording_status_dialog.stopRequested.connect(self.stop_local_recording)
+            self.recording_status_dialog.show()
             
-            # Stop any existing recording
-            if hasattr(self, 'recording_instance') and self.recording_instance:
-                print("Debug: Stopping existing recording instance")
-                try:
-                    if hasattr(self, 'recording_player') and self.recording_player:
-                        self.recording_player.stop()
-                    self.recording_instance.release()
-                except Exception as e:
-                    print(f"Debug: Error stopping existing recording: {str(e)}")
-                
-            # Create a new VLC instance for recording
-            try:
-                self.recording_instance = vlc.Instance()
-                self.recording_media = self.recording_instance.media_new(stream_url)
-                self.recording_player = self.recording_instance.media_player_new()
-                self.recording_player.set_media(self.recording_media)
-                
-                # Set up recording parameters
-                sout = f"#transcode{{vcodec=h264,acodec=mpga,ab=128,channels=2,samplerate=44100}}:std{{access=file,mux=mp4,dst='{file_path}'}}"
-                self.recording_media.add_option(f":sout={sout}")
-                self.recording_media.add_option(":sout-keep")
-                
-                # Start recording
-                self.recording_player.play()
-                
-                # Add to recordings list
-                self.recordings.append({
-                    'type': 'local',
-                    'file_path': file_path,
-                    'channel': channel_name,
-                    'start_time': time.time()
-                })
-                
-                # Show recording status dialog
-                self.recording_dialog = RecordingStatusDialog(channel_name, file_path, self)
-                self.recording_dialog.accepted.connect(self.stop_local_recording)
-                self.recording_dialog.show()
-                
-                # Start recording indicator
-                self.start_recording_indicator()
-                
-                # Start timer to update recording status
-                if hasattr(self, 'recording_timer') and self.recording_timer:
-                    self.recording_timer.stop()
-                
-                self.recording_timer = QTimer()
-                self.recording_timer.timeout.connect(lambda: self.check_recording_status(file_path))
-                self.recording_timer.start(1000)  # Update every second
-                
-                self.statusbar.showMessage(f"Local recording started: {os.path.basename(file_path)}")
-            except Exception as e:
-                print(f"Debug: Error creating VLC recording instance: {str(e)}")
-                self.statusbar.showMessage(f"Error starting recording: {str(e)}")
-                
+            # Start timer to check recording status
+            self.recording_check_timer = QTimer()
+            self.recording_check_timer.timeout.connect(lambda: self.check_recording_status(file_path))
+            self.recording_check_timer.start(1000)  # Check every second
+            
+            self.show_osd_message(f"Recording started: {channel_name}")
+            return True
+            
         except Exception as e:
-            print(f"Debug: Error starting local recording: {str(e)}")
-            self.statusbar.showMessage("Error starting local recording")
-            
+            print(f"Debug: Error starting recording: {str(e)}")
+            self.show_osd_message(f"Recording error: {str(e)}")
+            return False
+
     def check_recording_status(self, file_path):
         """Check status of local recording file"""
         try:
@@ -3310,8 +3292,14 @@ class TVHeadendClient(QMainWindow):
                 
             file_size = os.path.getsize(file_path)
             
+            # Update recording size in tracking list
+            for recording in self.recordings:
+                if recording.get('file_path') == file_path:
+                    recording['size'] = file_size
+                    break
+            
             # Find the recording dialog
-            if hasattr(self, 'recording_dialog') and self.recording_dialog and not self.recording_dialog.isHidden():
+            if hasattr(self, 'recording_status_dialog') and self.recording_status_dialog and not self.recording_status_dialog.isHidden():
                 # Check if file size is growing
                 is_stalled = False
                 if hasattr(self, 'last_file_size'):
@@ -3323,55 +3311,67 @@ class TVHeadendClient(QMainWindow):
                         self.stall_count = 0
                 
                 self.last_file_size = file_size
-                self.recording_dialog.update_status(file_size, is_stalled)
+                self.recording_status_dialog.update_status(file_size, is_stalled)
             else:
                 # Dialog closed, stop the timer
-                if hasattr(self, 'recording_timer') and self.recording_timer:
-                    self.recording_timer.stop()
+                if hasattr(self, 'recording_check_timer') and self.recording_check_timer:
+                    self.recording_check_timer.stop()
         
         except Exception as e:
             print(f"Debug: Error checking recording status: {str(e)}")
-            if hasattr(self, 'recording_timer') and self.recording_timer:
-                self.recording_timer.stop()
+            if hasattr(self, 'recording_check_timer') and self.recording_check_timer:
+                self.recording_check_timer.stop()
+                
+                self.last_file_size = file_size
+                self.recording_status_dialog.update_status(file_size, is_stalled)
+            else:
+                # Dialog closed, stop the timer
+                if hasattr(self, 'recording_check_timer') and self.recording_check_timer:
+                    self.recording_check_timer.stop()
+        
+        except Exception as e:
+            print(f"Debug: Error checking recording status: {str(e)}")
+            if hasattr(self, 'recording_check_timer') and self.recording_check_timer:
+                self.recording_check_timer.stop()
     
     def stop_local_recording(self):
         """Stop local recording"""
         try:
             # Stop recording instance
-            if hasattr(self, 'recording_instance') and self.recording_instance:
+            if hasattr(self, 'local_recording_process') and self.local_recording_process:
                 print("Debug: Stopping local recording")
                 try:
-                    if hasattr(self, 'recording_player') and self.recording_player:
-                        self.recording_player.stop()
-                    self.recording_instance.release()
+                    self.local_recording_process.terminate()
+                    self.local_recording_process.wait()
                 except Exception as e:
-                    print(f"Debug: Error stopping recording player: {str(e)}")
+                    print(f"Debug: Error stopping local recording: {str(e)}")
                 
-                self.recording_instance = None
-                self.recording_media = None
-                self.recording_player = None
+                # Remove from recordings list
+                for i, recording in enumerate(self.recordings):
+                    if recording.get('type') == 'local' and recording.get('process') == self.local_recording_process:
+                        print(f"Debug: Removing recording from tracking list: {recording.get('channel')}")
+                        self.recordings.pop(i)
+                        break
+                
+                self.local_recording_process = None
                 
                 # Stop timer
-                if hasattr(self, 'recording_timer') and self.recording_timer:
-                    self.recording_timer.stop()
-                    self.recording_timer = None
+                if hasattr(self, 'recording_check_timer') and self.recording_check_timer:
+                    self.recording_check_timer.stop()
+                    self.recording_check_timer = None
                     
-                # Note: We don't remove from recordings list here
-                # This is handled by the stop_job method that calls this function
-                
                 # Only stop recording indicator if no recordings are left
                 if not self.recordings:
                     self.stop_recording_indicator()
                 
                 # Close the recording dialog if it exists and wasn't closed by stop_job
-                # This handles the case when stop_local_recording is called directly
-                if hasattr(self, 'recording_dialog') and self.recording_dialog:
+                if hasattr(self, 'recording_status_dialog') and self.recording_status_dialog:
                     # Check if this was called from the dialog itself
                     caller = traceback.extract_stack()[-2]
                     if 'stop_requested' not in caller.name:  # Not called from dialog's stop button
                         print("Debug: Closing recording status dialog from stop_local_recording")
-                        self.recording_dialog.close()
-                        self.recording_dialog = None
+                        self.recording_status_dialog.close()
+                        self.recording_status_dialog = None
                 
                 self.statusbar.showMessage("Local recording stopped")
             else:
@@ -3894,70 +3894,72 @@ class EPGDialog(QDialog):
             )
 
 class RecordingStatusDialog(QDialog):
+    # Signal for stop request
+    stopRequested = pyqtSignal()
+    
     def __init__(self, channel_name, file_path, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Recording Status")
-        self.setModal(False)  # Allow interaction with main window
-        self.resize(400, 200)
         self.setup_ui(channel_name, file_path)
-        
+    
     def setup_ui(self, channel_name, file_path):
+        """Set up the recording status dialog UI"""
+        self.setWindowTitle(f"Recording: {channel_name}")
+        self.setMinimumWidth(400)
+        
+        # Create layout
         layout = QVBoxLayout(self)
         
+        # Add recording info
+        info_layout = QFormLayout()
+        
         # Channel name
-        channel_label = QLabel(f"Recording: {channel_name}")
+        channel_label = QLabel(channel_name)
         channel_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(channel_label)
+        info_layout.addRow("Channel:", channel_label)
         
         # File path
-        path_label = QLabel(f"Saving to: {file_path}")
+        path_label = QLabel(file_path)
         path_label.setWordWrap(True)
-        layout.addWidget(path_label)
+        info_layout.addRow("Saving to:", path_label)
         
-        # Duration
-        self.duration_label = QLabel("Duration: 00:00:00")
-        layout.addWidget(self.duration_label)
+        # Current size
+        self.size_label = QLabel("0 MB")
+        info_layout.addRow("Current size:", self.size_label)
         
-        # File size
-        self.size_label = QLabel("File size: 0 MB")
-        layout.addWidget(self.size_label)
+        # Status
+        self.status_label = QLabel("Recording...")
+        self.status_label.setStyleSheet("color: green; font-weight: bold;")
+        info_layout.addRow("Status:", self.status_label)
         
-        # Status message
-        self.status_label = QLabel("Status: Recording")
-        self.status_label.setStyleSheet("color: green;")
-        layout.addWidget(self.status_label)
+        layout.addLayout(info_layout)
         
-        # Stop button
-        stop_btn = QPushButton("Stop Recording")
-        stop_btn.clicked.connect(self.stop_requested)
-        layout.addWidget(stop_btn)
+        # Add stop button
+        self.stop_button = QPushButton("Stop Recording")
+        self.stop_button.setStyleSheet("background-color: #d9534f; color: white; font-weight: bold;")
+        self.stop_button.clicked.connect(self.stop_requested)
+        layout.addWidget(self.stop_button)
         
-        # Start time for duration calculation
-        self.start_time = time.time()
-        
+        # Set dialog properties
+        self.setModal(False)  # Non-modal dialog
+        self.resize(450, 200)
+    
     def update_status(self, file_size, is_stalled=False):
-        """Update the dialog with current recording status"""
-        # Update duration
-        duration = int(time.time() - self.start_time)
-        hours = duration // 3600
-        minutes = (duration % 3600) // 60
-        seconds = duration % 60
-        self.duration_label.setText(f"Duration: {hours:02d}:{minutes:02d}:{seconds:02d}")
+        """Update the recording status information"""
+        # Convert file size to MB
+        size_mb = file_size / (1024 * 1024)
+        self.size_label.setText(f"{size_mb:.2f} MB")
         
-        # Update file size
-        size_mb = file_size / (1024 * 1024)  # Convert to MB
-        self.size_label.setText(f"File size: {size_mb:.2f} MB")
-        
-        # Update status message
+        # Update status if stalled
         if is_stalled:
-            self.status_label.setText("Status: Stalled - Attempting recovery")
-            self.status_label.setStyleSheet("color: orange;")
+            self.status_label.setText("Stalled - No data received")
+            self.status_label.setStyleSheet("color: red; font-weight: bold;")
         else:
-            self.status_label.setText("Status: Recording")
-            self.status_label.setStyleSheet("color: green;")
+            self.status_label.setText("Recording...")
+            self.status_label.setStyleSheet("color: green; font-weight: bold;")
     
     def stop_requested(self):
         """Signal that user wants to stop recording"""
+        self.stopRequested.emit()  # Emit the signal
         self.accept()
 
 def parse_m3u(content, username='', password=''):
