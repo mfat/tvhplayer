@@ -1836,11 +1836,7 @@ class TVHeadendClient(QMainWindow):
         epg_layout.addWidget(self.epg_btn)
 
         controls_layout.addWidget(self.epg_frame)
-        
-        # Initially hide EPG button - will be shown in on_server_changed if appropriate
-        if not self.servers or self.servers[0].get('type') != 'tvheadend':
-            self.epg_frame.hide()
-        
+
         # Volume slider and mute button
         # Mute button with icons for different states
         
@@ -2948,26 +2944,33 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Traceback: {traceback.format_exc()}")
 
     def on_server_changed(self, index):
-        """Handle server selection change"""
-        if index >= 0 and index < len(self.servers):
-            server = self.servers[index]
-            source_type = server.get('type')
+        """
+        Handle when user switches to a different TVHeadend server in the dropdown.
+        Updates the config file with the newly selected server index and refreshes channel list.
+        
+        Args:
+            index (int): Index of the newly selected server in self.servers list
+        """
+        print(f"Debug: Server changed to index {index}")
+        if index >= 0:  # Valid index selected
+            print(f"Debug: Switching to server: {self.servers[index]['name']}")
             
-            # Show/hide EPG button based on source type
-            if source_type == 'tvheadend':
-                self.epg_frame.show()
-            else:
-                self.epg_frame.hide()
+            # Update config with new server selection
+            self.config['last_server'] = index
+            
+            # Save updated config to file
+            try:
+                with open(self.config_file, 'w') as f:
+                    json.dump(self.config, f, indent=2)
+                print(f"Debug: Saved server index {index} to config")
+            except Exception as e:
+                print(f"Debug: Error saving config: {e}")
                 
-            # Fetch channels for the selected server
+            # Load channels from newly selected server
             self.fetch_channels()
             
-            # Show/hide profile selection for TVHeadend sources
-            if source_type == 'tvheadend':
-                self.profile_frame.setVisible(True)
-                self.fetch_streaming_profiles()
-            else:
-                self.profile_frame.setVisible(False)
+            # Fetch streaming profiles for TVHeadend sources
+            self.fetch_streaming_profiles()
 
     def manage_servers(self):
         """Open server management dialog"""
