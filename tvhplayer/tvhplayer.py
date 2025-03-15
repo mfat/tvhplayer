@@ -2741,6 +2741,12 @@ class TVHeadendClient(QMainWindow):
         if event.type() == event.KeyPress:
             print(f"Debug: Key press detected: {event.key()}, modifiers: {event.modifiers()}")
             
+            # Handle Alt+F4 to close the entire application
+            if event.key() == Qt.Key_F4 and (event.modifiers() & Qt.AltModifier):
+                print("Debug: Alt+F4 detected - closing application")
+                self.close()  # Close the main window, which will exit the application
+                return True
+            
             if event.key() == Qt.Key_Escape and self.is_fullscreen:
                 print("Debug: Escape key pressed in fullscreen mode")
                 self.toggle_fullscreen()
@@ -2783,6 +2789,13 @@ class TVHeadendClient(QMainWindow):
                 self.fullscreen_window.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
                 self.fullscreen_window.installEventFilter(self)
                 self.fullscreen_window.setFocusPolicy(Qt.StrongFocus)  # Ensure window can receive keyboard focus
+                
+                # Override the closeEvent to close the entire application
+                def fullscreen_close_event(event):
+                    print("Debug: Fullscreen window close event - closing entire application")
+                    self.close()  # Close the main window, which will exit the application
+                
+                self.fullscreen_window.closeEvent = fullscreen_close_event
                 
                 # Add global shortcuts to fullscreen window
                 space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self.fullscreen_window)
@@ -2833,6 +2846,15 @@ class TVHeadendClient(QMainWindow):
                     right_layout.insertWidget(0, self.video_frame)
                     QApplication.processEvents()  # Process any pending events
                     self.video_frame.show()
+                    
+                    # Check if media player exists, create it if it doesn't
+                    if not hasattr(self, 'media_player') or self.media_player is None:
+                        print("Debug: Media player is absent, creating a new one")
+                        self.vlc_instance = vlc.Instance()
+                        self.media_player = self.vlc_instance.media_player_new()
+                        self.event_manager = self.media_player.event_manager()
+                        self.event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, self.on_media_playing)
+                        self.event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, self.on_media_error)
                     
                     # Reset VLC window handle for normal view
                     if sys.platform.startswith('linux'):
