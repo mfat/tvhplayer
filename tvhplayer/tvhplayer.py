@@ -1596,17 +1596,17 @@ class TVHeadendClient(QMainWindow):
         # Add Next/Previous Channel actions to Controls menu
         next_channel_action = QAction("Next Channel", self)
         if sys.platform == "darwin":  # macOS
-            next_channel_action.setShortcut("Cmd+N")
+            next_channel_action.setShortcuts(["Cmd+N", "Right"])
         else:  # Windows/Linux
-            next_channel_action.setShortcut("Ctrl+N")
+            next_channel_action.setShortcuts(["Ctrl+N", "Right"])
         next_channel_action.triggered.connect(self.play_next_channel)
         controls_menu.addAction(next_channel_action)
         
         prev_channel_action = QAction("Previous Channel", self)
         if sys.platform == "darwin":  # macOS
-            prev_channel_action.setShortcut("Cmd+P")
+            prev_channel_action.setShortcuts(["Cmd+P", "Left"])
         else:  # Windows/Linux
-            prev_channel_action.setShortcut("Ctrl+P")
+            prev_channel_action.setShortcuts(["Ctrl+P", "Left"])
         prev_channel_action.triggered.connect(self.play_previous_channel)
         controls_menu.addAction(prev_channel_action)
         
@@ -2763,6 +2763,16 @@ class TVHeadendClient(QMainWindow):
                 print("Debug: Ctrl+N pressed for next channel")
                 self.play_next_channel()
                 return True
+            elif event.key() == Qt.Key_Right:
+                # Next channel (Right arrow)
+                print("Debug: Right arrow pressed for next channel")
+                self.play_next_channel()
+                return True
+            elif event.key() == Qt.Key_Left:
+                # Previous channel (Left arrow)
+                print("Debug: Left arrow pressed for previous channel")
+                self.play_previous_channel()
+                return True
             
         return super().eventFilter(obj, event)
 
@@ -3642,12 +3652,16 @@ class TVHeadendClient(QMainWindow):
         # Enable marquee
         self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1)
         
-        # Set marquee text size (pixels)
-        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 24)
+        # Set marquee text size (pixels) - increased to 48 for better visibility
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 48)
         
-        # Set position (5% from top, centered horizontally)
-        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.X, 5)
-        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, 5)
+        # Try using just the top position (4) first
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Position, 5)  # 4 = top
+        
+                
+        # Set margins from edges
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.X, 20)
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, 20)
         
         # Set text color (white) and opacity
         self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Color, 0xFFFFFF)
@@ -3655,9 +3669,6 @@ class TVHeadendClient(QMainWindow):
         
         # Set timeout (milliseconds)
         self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Timeout, 3000)
-        
-        # Set text alignment (centered)
-        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Position, 8)  # 8 = top position
         
         # Initialize with empty text
         self.media_player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, "")
