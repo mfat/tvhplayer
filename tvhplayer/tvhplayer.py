@@ -41,8 +41,9 @@ import threading
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from epg_window import EPGWindow  # Add this import at the top of your file
 
-
-
+# Add this line to explicitly set the platform plugin
+import os
+os.environ['QT_QPA_PLATFORM'] = 'cocoa'  # Use 'cocoa' for macOS
 
 class Logger:
     def __init__(self, name="TVHplayer"):
@@ -4032,8 +4033,8 @@ def main():
     try:
         # Force the application to use XCB instead of Wayland
         # This helps with VLC integration under Wayland
-        QCoreApplication.setAttribute(Qt.AA_X11InitThreads, True)
-        os.environ["QT_QPA_PLATFORM"] = "xcb"
+        #QCoreApplication.setAttribute(Qt.AA_X11InitThreads, True)
+        #os.environ["QT_QPA_PLATFORM"] = "xcb"
         
         app = QApplication(sys.argv)
         player = TVHeadendClient()
