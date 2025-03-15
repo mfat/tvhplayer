@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from datetime import datetime, timedelta
 import sys
 from tkinter.filedialog import FileDialog
 import vlc
@@ -37,6 +38,8 @@ import re
 import base64
 from urllib.parse import urlparse, urljoin, urlunparse
 import threading
+from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+from epg_window import EPGWindow  # Add this import at the top of your file
 
 
 
@@ -1816,8 +1819,28 @@ class TVHeadendClient(QMainWindow):
 
         controls_layout.addWidget(self.local_record_frame)
 
-        
+        # Create frame for EPG button
+        self.epg_frame = QFrame()
+        self.epg_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}")
+        self.epg_frame.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
+        epg_layout = QHBoxLayout(self.epg_frame)
 
+        # EPG button
+        self.epg_btn = QPushButton()
+        self.epg_btn.setFixedSize(48, 48)
+        self.epg_btn.setIcon(QIcon(f"{self.icons_dir}/epg.svg"))
+        self.epg_btn.setIconSize(QSize(48, 48))
+        self.epg_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
+        self.epg_btn.setToolTip("Show Electronic Program Guide")
+        self.epg_btn.clicked.connect(self.show_epg)
+        epg_layout.addWidget(self.epg_btn)
+
+        controls_layout.addWidget(self.epg_frame)
+        
+        # Initially hide EPG button - will be shown in on_server_changed if appropriate
+        if not self.servers or self.servers[0].get('type') != 'tvheadend':
+            self.epg_frame.hide()
+        
         # Volume slider and mute button
         # Mute button with icons for different states
         
@@ -1987,6 +2010,26 @@ class TVHeadendClient(QMainWindow):
         search_layout.setContentsMargins(0, 5, 0, 5)
         search_layout.setSpacing(5)
         
+        # Add EPG action to View menu
+        epg_action = QAction("Program Guide (EPG)", self)
+        epg_action.setShortcut("Ctrl+E")
+        epg_action.triggered.connect(self.show_epg)
+        view_menu.addAction(epg_action)
+        
+        # Create control buttons
+        control_layout = QHBoxLayout()
+        
+        # ... existing control buttons ...
+        
+        
+        
+        # ... rest of the layout setup ...
+        
+        # Add control layout to the main layout
+        right_layout.addLayout(control_layout)
+        
+        # ... rest of the existing code ...
+    
     def fetch_channels(self):
         """Fetch channels from the selected server"""
         try:
@@ -2905,33 +2948,26 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Traceback: {traceback.format_exc()}")
 
     def on_server_changed(self, index):
-        """
-        Handle when user switches to a different TVHeadend server in the dropdown.
-        Updates the config file with the newly selected server index and refreshes channel list.
-        
-        Args:
-            index (int): Index of the newly selected server in self.servers list
-        """
-        print(f"Debug: Server changed to index {index}")
-        if index >= 0:  # Valid index selected
-            print(f"Debug: Switching to server: {self.servers[index]['name']}")
+        """Handle server selection change"""
+        if index >= 0 and index < len(self.servers):
+            server = self.servers[index]
+            source_type = server.get('type')
             
-            # Update config with new server selection
-            self.config['last_server'] = index
-            
-            # Save updated config to file
-            try:
-                with open(self.config_file, 'w') as f:
-                    json.dump(self.config, f, indent=2)
-                print(f"Debug: Saved server index {index} to config")
-            except Exception as e:
-                print(f"Debug: Error saving config: {e}")
+            # Show/hide EPG button based on source type
+            if source_type == 'tvheadend':
+                self.epg_frame.show()
+            else:
+                self.epg_frame.hide()
                 
-            # Load channels from newly selected server
+            # Fetch channels for the selected server
             self.fetch_channels()
             
-            # Fetch streaming profiles for TVHeadend sources
-            self.fetch_streaming_profiles()
+            # Show/hide profile selection for TVHeadend sources
+            if source_type == 'tvheadend':
+                self.profile_frame.setVisible(True)
+                self.fetch_streaming_profiles()
+            else:
+                self.profile_frame.setVisible(False)
 
     def manage_servers(self):
         """Open server management dialog"""
@@ -3680,6 +3716,32 @@ class TVHeadendClient(QMainWindow):
         
         # Set the message text
         self.media_player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, message)
+
+    def show_epg(self):
+        """Show the EPG window"""
+        # Get the current server
+        current_server_index = self.server_combo.currentIndex()
+        if current_server_index >= 0 and current_server_index < len(self.servers):
+            server = self.servers[current_server_index]
+            
+            # Only show EPG for TVHeadend servers
+            if server.get('type') == 'tvheadend':
+                epg_window = EPGWindow(server, self)
+                epg_window.exec_()
+            else:
+                self.statusBar().showMessage("EPG is only available for TVHeadend servers", 3000)
+
+    def play_channel_by_uuid(self, channel_uuid):
+        """Play a channel by its UUID"""
+        # Find the channel in the channel list
+        for row in range(self.channel_list.rowCount()):
+            channel_item = self.channel_list.item(row, 1)
+            if channel_item and channel_item.data(Qt.UserRole).get('uuid') == channel_uuid:
+                self.play_channel_from_table(channel_item)
+                return
+        
+        # If not found, show a message
+        self.statusBar().showMessage(f"Channel not found", 3000)
 
 class EPGDialog(QDialog):
     def __init__(self, channel_name, epg_data, server, parent=None):
