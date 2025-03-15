@@ -1581,6 +1581,7 @@ class TVHeadendClient(QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("File")
         view_menu = menubar.addMenu("View")
+        controls_menu = menubar.addMenu("Controls")
         help_menu = menubar.addMenu("Help")
 
         # Add User Guide action to Help menu
@@ -1600,6 +1601,29 @@ class TVHeadendClient(QMainWindow):
         fullscreen_action.setShortcut("F")
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(fullscreen_action)
+        
+        # Add Next/Previous Channel actions to Controls menu
+        next_channel_action = QAction("Next Channel", self)
+        if sys.platform == "darwin":  # macOS
+            next_channel_action.setShortcut("Cmd+N")
+        else:  # Windows/Linux
+            next_channel_action.setShortcut("Ctrl+N")
+        next_channel_action.triggered.connect(self.play_next_channel)
+        controls_menu.addAction(next_channel_action)
+        
+        prev_channel_action = QAction("Previous Channel", self)
+        if sys.platform == "darwin":  # macOS
+            prev_channel_action.setShortcut("Cmd+P")
+        else:  # Windows/Linux
+            prev_channel_action.setShortcut("Ctrl+P")
+        prev_channel_action.triggered.connect(self.play_previous_channel)
+        controls_menu.addAction(prev_channel_action)
+        
+        # Add Play/Pause action to Controls menu
+        play_pause_action = QAction("Play/Pause", self)
+        play_pause_action.setShortcut("Space")
+        play_pause_action.triggered.connect(self.toggle_play_pause)
+        controls_menu.addAction(play_pause_action)
 
         # Add Settings action to View menu
         #settings_action = QAction("Settings", self)
@@ -1700,6 +1724,7 @@ class TVHeadendClient(QMainWindow):
             background-position: center;
             background-repeat: no-repeat;
         """)
+        self.video_frame.setFocusPolicy(Qt.StrongFocus)  # Ensure video frame can receive keyboard focus
         
         right_layout.addWidget(self.video_frame)
         
@@ -1940,6 +1965,21 @@ class TVHeadendClient(QMainWindow):
         # Add Ctrl+F shortcut for search box
         search_shortcut = QShortcut(QKeySequence(Qt.Key_S, Qt.NoModifier), self)
         search_shortcut.activated.connect(self.search_box.setFocus)
+        
+        # Add global space shortcut for play/pause
+        space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
+        space_shortcut.activated.connect(self.toggle_play_pause)
+        
+        # Add global shortcuts for next/previous channel
+        if sys.platform == "darwin":  # macOS
+            next_channel_shortcut = QShortcut(QKeySequence("Cmd+N"), self)
+            prev_channel_shortcut = QShortcut(QKeySequence("Cmd+P"), self)
+        else:  # Windows/Linux
+            next_channel_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
+            prev_channel_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
+        
+        next_channel_shortcut.activated.connect(self.play_next_channel)
+        prev_channel_shortcut.activated.connect(self.play_previous_channel)
         
         # Create custom clear button action
         clear_action = QAction("⌫", self.search_box)
@@ -2699,6 +2739,8 @@ class TVHeadendClient(QMainWindow):
             
         # Handle key events for both main window and fullscreen window
         if event.type() == event.KeyPress:
+            print(f"Debug: Key press detected: {event.key()}, modifiers: {event.modifiers()}")
+            
             if event.key() == Qt.Key_Escape and self.is_fullscreen:
                 print("Debug: Escape key pressed in fullscreen mode")
                 self.toggle_fullscreen()
@@ -2706,6 +2748,22 @@ class TVHeadendClient(QMainWindow):
             elif event.key() == Qt.Key_F:
                 print("Debug: F key pressed")
                 self.toggle_fullscreen()
+                return True
+            elif event.key() == Qt.Key_Space:
+                # Toggle pause/play
+                if self.media_player.is_playing():
+                    self.media_player.pause()
+                else:
+                    self.media_player.play()
+                return True
+            elif event.key() == Qt.Key_P and (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
+                # Previous channel (Ctrl+P or Cmd+P)
+                self.play_previous_channel()
+                return True
+            elif event.key() == Qt.Key_N and (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
+                # Next channel (Ctrl+N or Cmd+N)
+                print("Debug: Ctrl+N pressed for next channel")
+                self.play_next_channel()
                 return True
             
         return super().eventFilter(obj, event)
@@ -2724,6 +2782,22 @@ class TVHeadendClient(QMainWindow):
                 self.fullscreen_window = QWidget()
                 self.fullscreen_window.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
                 self.fullscreen_window.installEventFilter(self)
+                self.fullscreen_window.setFocusPolicy(Qt.StrongFocus)  # Ensure window can receive keyboard focus
+                
+                # Add global shortcuts to fullscreen window
+                space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self.fullscreen_window)
+                space_shortcut.activated.connect(self.toggle_play_pause)
+                
+                if sys.platform == "darwin":  # macOS
+                    next_channel_shortcut = QShortcut(QKeySequence("Cmd+N"), self.fullscreen_window)
+                    prev_channel_shortcut = QShortcut(QKeySequence("Cmd+P"), self.fullscreen_window)
+                else:  # Windows/Linux
+                    next_channel_shortcut = QShortcut(QKeySequence("Ctrl+N"), self.fullscreen_window)
+                    prev_channel_shortcut = QShortcut(QKeySequence("Ctrl+P"), self.fullscreen_window)
+                
+                next_channel_shortcut.activated.connect(self.play_next_channel)
+                prev_channel_shortcut.activated.connect(self.play_previous_channel)
+                
                 layout = QVBoxLayout(self.fullscreen_window)
                 layout.setContentsMargins(0, 0, 0, 0)
                 layout.setSpacing(0)  # Remove spacing between widgets
@@ -2736,6 +2810,7 @@ class TVHeadendClient(QMainWindow):
                 QApplication.processEvents()  # Process any pending events
                 self.fullscreen_window.showFullScreen()
                 self.video_frame.show()
+                self.fullscreen_window.setFocus()  # Ensure window has focus to receive keyboard events
                 
                 # Reset VLC window handle for fullscreen
                 if sys.platform.startswith('linux'):
@@ -3438,6 +3513,75 @@ class TVHeadendClient(QMainWindow):
         # Stop the failed playback attempt
         self.media_player.stop()
         self.statusbar.showMessage(f"⚠ Error playing {channel_name}: Media playback failed")
+
+    def play_next_channel(self):
+        """Play the next channel in the list"""
+        try:
+            if self.channel_list.rowCount() == 0:
+                print("Debug: No channels in list")
+                return
+                
+            # Get current row
+            current_row = -1
+            if hasattr(self, 'current_channel') and self.current_channel:
+                # Find the current channel in the list
+                for row in range(self.channel_list.rowCount()):
+                    name_item = self.channel_list.item(row, 1)
+                    if name_item and name_item.data(Qt.UserRole):
+                        channel_data = name_item.data(Qt.UserRole)
+                        if channel_data.get('name') == self.current_channel.get('name'):
+                            current_row = row
+                            break
+            
+            # Calculate next row (with wrap-around)
+            next_row = (current_row + 1) % self.channel_list.rowCount()
+            
+            # Play the channel at next_row
+            name_item = self.channel_list.item(next_row, 1)
+            if name_item and name_item.data(Qt.UserRole):
+                print(f"Debug: Playing next channel at row {next_row}")
+                self.channel_list.selectRow(next_row)
+                self.play_channel_by_data(name_item.data(Qt.UserRole))
+        except Exception as e:
+            print(f"Debug: Error playing next channel: {str(e)}")
+            
+    def play_previous_channel(self):
+        """Play the previous channel in the list"""
+        try:
+            if self.channel_list.rowCount() == 0:
+                print("Debug: No channels in list")
+                return
+                
+            # Get current row
+            current_row = -1
+            if hasattr(self, 'current_channel') and self.current_channel:
+                # Find the current channel in the list
+                for row in range(self.channel_list.rowCount()):
+                    name_item = self.channel_list.item(row, 1)
+                    if name_item and name_item.data(Qt.UserRole):
+                        channel_data = name_item.data(Qt.UserRole)
+                        if channel_data.get('name') == self.current_channel.get('name'):
+                            current_row = row
+                            break
+            
+            # Calculate previous row (with wrap-around)
+            prev_row = (current_row - 1) % self.channel_list.rowCount()
+            
+            # Play the channel at prev_row
+            name_item = self.channel_list.item(prev_row, 1)
+            if name_item and name_item.data(Qt.UserRole):
+                print(f"Debug: Playing previous channel at row {prev_row}")
+                self.channel_list.selectRow(prev_row)
+                self.play_channel_by_data(name_item.data(Qt.UserRole))
+        except Exception as e:
+            print(f"Debug: Error playing previous channel: {str(e)}")
+
+    def toggle_play_pause(self):
+        """Toggle play/pause state of the media player"""
+        if self.media_player.is_playing():
+            self.media_player.pause()
+        else:
+            self.media_player.play()
 
 class EPGDialog(QDialog):
     def __init__(self, channel_name, epg_data, server, parent=None):
