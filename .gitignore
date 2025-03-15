@@ -2,3 +2,4 @@
 /.flatpak-builder
 /.history
 tvhplayer/__pycache__/resources_rc.cpython-313.pyc
+tvhplayer/__pycache__/epg_window.cpython-313.pyc
