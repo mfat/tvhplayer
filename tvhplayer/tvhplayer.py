@@ -1953,24 +1953,24 @@ class TVHeadendClient(QMainWindow):
         self.search_box.textChanged.connect(self.filter_channels)
         self.search_box.setClearButtonEnabled(True)  # Add clear button inside search box
         
-        # Add Ctrl+F shortcut for search box
+        # Add S shortcut for search box
         search_shortcut = QShortcut(QKeySequence(Qt.Key_S, Qt.NoModifier), self)
         search_shortcut.activated.connect(self.search_box.setFocus)
         
         # Add global space shortcut for play/pause
-        space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
-        space_shortcut.activated.connect(self.toggle_play_pause)
+        # space_shortcut = QShortcut(QKeySequence(Qt.Key_Space), self)
+        # space_shortcut.activated.connect(self.toggle_play_pause)
         
         # Add global shortcuts for next/previous channel
-        if sys.platform == "darwin":  # macOS
-            next_channel_shortcut = QShortcut(QKeySequence("Cmd+N"), self)
-            prev_channel_shortcut = QShortcut(QKeySequence("Cmd+P"), self)
-        else:  # Windows/Linux
-            next_channel_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
-            prev_channel_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
+        # if sys.platform == "darwin":  # macOS
+        #     next_channel_shortcut = QShortcut(QKeySequence("Cmd+N"), self)
+        #     prev_channel_shortcut = QShortcut(QKeySequence("Cmd+P"), self)
+        # else:  # Windows/Linux
+        #     next_channel_shortcut = QShortcut(QKeySequence("Ctrl+N"), self)
+        #     prev_channel_shortcut = QShortcut(QKeySequence("Ctrl+P"), self)
         
-        next_channel_shortcut.activated.connect(self.play_next_channel)
-        prev_channel_shortcut.activated.connect(self.play_previous_channel)
+        # next_channel_shortcut.activated.connect(self.play_next_channel)
+        # prev_channel_shortcut.activated.connect(self.play_previous_channel)
         
         # Create custom clear button action
         clear_action = QAction("⌫", self.search_box)
