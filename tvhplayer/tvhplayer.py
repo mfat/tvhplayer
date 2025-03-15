@@ -1420,6 +1420,13 @@ class TVHeadendClient(QMainWindow):
         self.event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, self.on_media_playing)
         self.event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, self.on_media_error)
         
+        # Initialize OSD
+        self.setup_osd()
+        
+        # Initialize fullscreen state
+        self.is_fullscreen = False
+        self.fullscreen_toggle_time = 0  # Track last toggle time for debounce
+        
         self.setup_paths()
         
         # Get OS-specific config path using sys.platform
@@ -1440,36 +1447,8 @@ class TVHeadendClient(QMainWindow):
         self.config = self.load_config()
         print(f"Debug: Current config: {json.dumps(self.config, indent=2)}")
         
-        # Initialize fullscreen state        
-        # Rest of initialization code...
-
-
-        # Set window title and geometry from config
-        self.setWindowTitle("TVHplayer")
-        geometry = self.config.get('window_geometry', {'x': 100, 'y': 100, 'width': 1200, 'height': 700})
-        self.setGeometry(
-            geometry['x'],
-            geometry['y'],
-            geometry['width'],
-            geometry['height']
-        )
-        
         # Initialize servers from config
         self.servers = self.config.get('servers', [])
-        print(f"Debug: Loaded {len(self.servers)} servers")
-        
-        # Initialize channels list
-        self.channels = []
-        
-        self.is_fullscreen = False
- 
-        
-        # Add recording indicator variables
-        self.recording_indicator_timer = None
-        self.recording_indicator_visible = False
-        self.is_recording = False
-        self.recording_animation = None
-        self.opacity_effect = None
         
         # Then setup UI
         self.setup_ui()
@@ -2438,44 +2417,32 @@ class TVHeadendClient(QMainWindow):
                     print(f"Debug: Adding TVHeadend authentication to playback URL")
                     # Add auth to URL for VLC
                     url = url.replace('://', f'://{username}:{password}@')
-            else:  # M3U
-                # For M3U streams, use the URI directly
-                url = channel_data['uri']
+            elif source_type == SourceType.M3U:
+                # For M3U sources, the URL is stored directly in the channel data
+                url = channel_data.get('url')
                 
-                # Add authentication to M3U stream URL if needed and not already present
-                if (server.get('username') or server.get('password')) and not ('://' + server.get('username', '') + ':' in url):
+                # Add authentication if needed
+                if server.get('username') or server.get('password'):
                     username = server.get('username', '')
                     password = server.get('password', '')
                     print(f"Debug: Adding M3U authentication to playback URL")
-                    
-                    try:
-                        # Parse the URL
-                        parsed_url = urlparse(url)
-                        
-                        # Check if URL already has authentication
-                        if '@' not in parsed_url.netloc:
-                            # Add authentication to the URL
-                            auth_string = f"{username}:{password}@"
-                            netloc_with_auth = auth_string + parsed_url.netloc
-                            
-                            # Reconstruct the URL with authentication
-                            url_parts = list(parsed_url)
-                            url_parts[1] = netloc_with_auth  # Replace netloc
-                            url = urlunparse(url_parts)
-                    except Exception as e:
-                        print(f"Debug: Error adding authentication to playback URL: {str(e)}")
-                
-                # Handle relative URLs for M3U sources
-                if not url.startswith(('http://', 'https://')):
-                    base_url = server['url']
-                    base_dir = '/'.join(base_url.split('/')[:-1])
-                    url = f"{base_dir}/{url}"
+                    # Add auth to URL for VLC
+                    url = url.replace('://', f'://{username}:{password}@')
             
+            if not url:
+                print(f"Debug: No URL found for channel: {channel_data.get('name', 'Unknown')}")
+                self.statusbar.showMessage(f"⚠ Error: No URL for {channel_data.get('name', 'Unknown')}")
+                return
+                
             print(f"Debug: Playing URL: {url}")
             
-            # Create and play media
+            # Create a new media instance
             media = self.vlc_instance.media_new(url)
+            
+            # Set the media to the player
             self.media_player.set_media(media)
+            
+            # Play the media
             self.media_player.play()
             
             # Set up playback timeout timer
@@ -2487,6 +2454,9 @@ class TVHeadendClient(QMainWindow):
             # Update current channel
             self.current_channel = channel_data
             self.statusbar.showMessage(f"▶ Playing: {channel_data.get('name', 'Unknown')}")
+            
+            # Show channel name in OSD
+            self.show_osd_message(f"Now playing: {channel_data.get('name', 'Unknown')}")
             
         except Exception as e:
             print(f"Debug: Error in play_channel: {str(e)}")
@@ -2503,6 +2473,8 @@ class TVHeadendClient(QMainWindow):
             # Stop the failed playback attempt
             self.media_player.stop()
             self.statusbar.showMessage(f"⚠ Playback timeout: Failed to play {channel_data.get('name', 'Unknown')}")
+            # Show OSD message
+            self.show_osd_message(f"Playback timeout: Failed to play {channel_data.get('name', 'Unknown')}", 5000)
 
     def show_server_status(self):
         """Show server status dialog"""
@@ -2736,6 +2708,12 @@ class TVHeadendClient(QMainWindow):
                 print("Debug: Double click detected on video frame")
                 self.toggle_fullscreen()
                 return True
+            elif event.type() == event.MouseMove:
+                # Show channel info on mouse movement if a channel is playing
+                if hasattr(self, 'current_channel') and self.current_channel:
+                    channel_name = self.current_channel.get('name', 'Unknown')
+                    self.show_osd_message(f"Channel: {channel_name}", 2000)
+                return False  # Continue event propagation
             
         # Handle key events for both main window and fullscreen window
         if event.type() == event.KeyPress:
@@ -2759,8 +2737,10 @@ class TVHeadendClient(QMainWindow):
                 # Toggle pause/play
                 if self.media_player.is_playing():
                     self.media_player.pause()
+                    self.show_osd_message("Paused")
                 else:
                     self.media_player.play()
+                    self.show_osd_message("Playing")
                 return True
             elif event.key() == Qt.Key_P and (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
                 # Previous channel (Ctrl+P or Cmd+P)
@@ -2778,6 +2758,13 @@ class TVHeadendClient(QMainWindow):
         """Toggle fullscreen mode for VLC player"""
         print(f"Debug: Toggling fullscreen. Current state: {self.is_fullscreen}")
         
+        # Debounce mechanism to prevent rapid toggling
+        current_time = time.time()
+        if current_time - self.fullscreen_toggle_time < 0.5:  # 500ms debounce
+            print("Debug: Ignoring rapid fullscreen toggle")
+            return
+        self.fullscreen_toggle_time = current_time
+        
         try:
             if not self.is_fullscreen:
                 # Store the video frame's original parent and layout position
@@ -2790,10 +2777,11 @@ class TVHeadendClient(QMainWindow):
                 self.fullscreen_window.installEventFilter(self)
                 self.fullscreen_window.setFocusPolicy(Qt.StrongFocus)  # Ensure window can receive keyboard focus
                 
-                # Override the closeEvent to close the entire application
+                # Override the closeEvent to exit fullscreen mode instead of closing the application
                 def fullscreen_close_event(event):
-                    print("Debug: Fullscreen window close event - closing entire application")
-                    self.close()  # Close the main window, which will exit the application
+                    print("Debug: Fullscreen window close event - exiting fullscreen mode")
+                    event.ignore()  # Ignore the close event
+                    self.toggle_fullscreen()  # Exit fullscreen mode instead
                 
                 self.fullscreen_window.closeEvent = fullscreen_close_event
                 
@@ -2819,6 +2807,12 @@ class TVHeadendClient(QMainWindow):
                 self.video_frame.setParent(self.fullscreen_window)
                 layout.addWidget(self.video_frame)
                 
+                # Update state before showing the window
+                self.is_fullscreen = True
+                
+                # Show OSD message for fullscreen
+                self.show_osd_message("Fullscreen mode")
+                
                 # Show fullscreen
                 QApplication.processEvents()  # Process any pending events
                 self.fullscreen_window.showFullScreen()
@@ -2835,43 +2829,53 @@ class TVHeadendClient(QMainWindow):
                     self.media_player.set_nsobject(self.video_frame.winId().__int__())
             else:
                 # Remove from fullscreen layout
-                if self.fullscreen_window and self.fullscreen_window.layout():
-                    self.fullscreen_window.layout().removeWidget(self.video_frame)
-                
-                # Find the right pane's layout again
-                right_layout = self.findChild(QVBoxLayout, "right_layout")
-                if right_layout:
-                    # Restore to right pane
-                    self.video_frame.setParent(self.original_parent)
-                    right_layout.insertWidget(0, self.video_frame)
-                    QApplication.processEvents()  # Process any pending events
-                    self.video_frame.show()
+                if hasattr(self, 'fullscreen_window') and self.fullscreen_window:
+                    if self.fullscreen_window.layout():
+                        self.fullscreen_window.layout().removeWidget(self.video_frame)
                     
-                    # Check if media player exists, create it if it doesn't
-                    if not hasattr(self, 'media_player') or self.media_player is None:
-                        print("Debug: Media player is absent, creating a new one")
-                        self.vlc_instance = vlc.Instance()
-                        self.media_player = self.vlc_instance.media_player_new()
-                        self.event_manager = self.media_player.event_manager()
-                        self.event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, self.on_media_playing)
-                        self.event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, self.on_media_error)
-                    
-                    # Reset VLC window handle for normal view
-                    if sys.platform.startswith('linux'):
-                        QApplication.processEvents()  # Give X11 time to update
-                        self.media_player.set_xwindow(self.video_frame.winId().__int__())
-                    elif sys.platform == "win32":
-                        self.media_player.set_hwnd(self.video_frame.winId().__int__())
-                    elif sys.platform == "darwin":
-                        self.media_player.set_nsobject(self.video_frame.winId().__int__())
-                    
-                    # Close fullscreen window
-                    self.fullscreen_window.close()
-                    self.fullscreen_window = None
+                    # Find the right pane's layout again
+                    right_layout = self.findChild(QVBoxLayout, "right_layout")
+                    if right_layout:
+                        # Restore to right pane
+                        self.video_frame.setParent(self.original_parent)
+                        right_layout.insertWidget(0, self.video_frame)
+                        QApplication.processEvents()  # Process any pending events
+                        self.video_frame.show()
+                        
+                        # Check if media player exists, create it if it doesn't
+                        if not hasattr(self, 'media_player') or self.media_player is None:
+                            print("Debug: Media player is absent, creating a new one")
+                            self.vlc_instance = vlc.Instance()
+                            self.media_player = self.vlc_instance.media_player_new()
+                            self.event_manager = self.media_player.event_manager()
+                            self.event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, self.on_media_playing)
+                            self.event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, self.on_media_error)
+                        
+                        # Reset VLC window handle for normal view
+                        if sys.platform.startswith('linux'):
+                            QApplication.processEvents()  # Give X11 time to update
+                            self.media_player.set_xwindow(self.video_frame.winId().__int__())
+                        elif sys.platform == "win32":
+                            self.media_player.set_hwnd(self.video_frame.winId().__int__())
+                        elif sys.platform == "darwin":
+                            self.media_player.set_nsobject(self.video_frame.winId().__int__())
+                        
+                        # Update state before closing the window
+                        self.is_fullscreen = False
+                        
+                        # Show OSD message for exiting fullscreen
+                        self.show_osd_message("Exited fullscreen mode")
+                        
+                        # Close fullscreen window
+                        self.fullscreen_window.close()
+                        self.fullscreen_window = None
+                    else:
+                        print("Debug: Could not find right_layout")
                 else:
-                    print("Debug: Could not find right_layout")
+                    print("Debug: Fullscreen window is None, already in normal mode")
+                    self.is_fullscreen = False
+                    return
             
-            self.is_fullscreen = not self.is_fullscreen
             print(f"Debug: New fullscreen state: {self.is_fullscreen}")
             
         except Exception as e:
@@ -3518,6 +3522,11 @@ class TVHeadendClient(QMainWindow):
         if hasattr(self, 'playback_timeout_timer') and self.playback_timeout_timer.isActive():
             self.playback_timeout_timer.stop()
             print("Debug: Playback timeout timer canceled")
+        
+        # Show OSD message
+        if hasattr(self, 'current_channel') and self.current_channel:
+            channel_name = self.current_channel.get('name', 'Unknown')
+            self.show_osd_message(f"Playing: {channel_name}")
 
     def on_media_error(self, event):
         """Called when media encounters an error"""
@@ -3535,12 +3544,16 @@ class TVHeadendClient(QMainWindow):
         # Stop the failed playback attempt
         self.media_player.stop()
         self.statusbar.showMessage(f"⚠ Error playing {channel_name}: Media playback failed")
+        
+        # Show OSD message
+        self.show_osd_message(f"Error playing {channel_name}", 5000)
 
     def play_next_channel(self):
         """Play the next channel in the list"""
         try:
             if self.channel_list.rowCount() == 0:
                 print("Debug: No channels in list")
+                self.show_osd_message("No channels available")
                 return
                 
             # Get current row
@@ -3563,15 +3576,18 @@ class TVHeadendClient(QMainWindow):
             if name_item and name_item.data(Qt.UserRole):
                 print(f"Debug: Playing next channel at row {next_row}")
                 self.channel_list.selectRow(next_row)
+                self.show_osd_message("Next channel")
                 self.play_channel_by_data(name_item.data(Qt.UserRole))
         except Exception as e:
             print(f"Debug: Error playing next channel: {str(e)}")
+            self.show_osd_message(f"Error: {str(e)}")
             
     def play_previous_channel(self):
         """Play the previous channel in the list"""
         try:
             if self.channel_list.rowCount() == 0:
                 print("Debug: No channels in list")
+                self.show_osd_message("No channels available")
                 return
                 
             # Get current row
@@ -3594,16 +3610,53 @@ class TVHeadendClient(QMainWindow):
             if name_item and name_item.data(Qt.UserRole):
                 print(f"Debug: Playing previous channel at row {prev_row}")
                 self.channel_list.selectRow(prev_row)
+                self.show_osd_message("Previous channel")
                 self.play_channel_by_data(name_item.data(Qt.UserRole))
         except Exception as e:
             print(f"Debug: Error playing previous channel: {str(e)}")
-
+            self.show_osd_message(f"Error: {str(e)}")
+            
     def toggle_play_pause(self):
         """Toggle play/pause state of the media player"""
         if self.media_player.is_playing():
             self.media_player.pause()
+            self.show_osd_message("Paused")
         else:
             self.media_player.play()
+            self.show_osd_message("Playing")
+            
+    def setup_osd(self):
+        """Setup VLC's built-in OSD (On-Screen Display) using marquee"""
+        # Enable marquee
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Enable, 1)
+        
+        # Set marquee text size (pixels)
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Size, 24)
+        
+        # Set position (5% from top, centered horizontally)
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.X, 5)
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Y, 5)
+        
+        # Set text color (white) and opacity
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Color, 0xFFFFFF)
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Opacity, 255)  # 0-255
+        
+        # Set timeout (milliseconds)
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Timeout, 3000)
+        
+        # Set text alignment (centered)
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Position, 8)  # 8 = top position
+        
+        # Initialize with empty text
+        self.media_player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, "")
+        
+    def show_osd_message(self, message, timeout=3000):
+        """Show a message on the OSD"""
+        # Set the timeout (in milliseconds)
+        self.media_player.video_set_marquee_int(vlc.VideoMarqueeOption.Timeout, timeout)
+        
+        # Set the message text
+        self.media_player.video_set_marquee_string(vlc.VideoMarqueeOption.Text, message)
 
 class EPGDialog(QDialog):
     def __init__(self, channel_name, epg_data, server, parent=None):
