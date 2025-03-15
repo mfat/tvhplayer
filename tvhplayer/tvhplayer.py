@@ -1415,6 +1415,11 @@ class TVHeadendClient(QMainWindow):
         self.media_player = self.vlc_instance.media_player_new()
         print("Debug: VLC media player created successfully")
         
+        # Set up event manager for media player
+        self.event_manager = self.media_player.event_manager()
+        self.event_manager.event_attach(vlc.EventType.MediaPlayerPlaying, self.on_media_playing)
+        self.event_manager.event_attach(vlc.EventType.MediaPlayerEncounteredError, self.on_media_error)
+        
         self.setup_paths()
         
         # Get OS-specific config path using sys.platform
@@ -2433,13 +2438,31 @@ class TVHeadendClient(QMainWindow):
             self.media_player.set_media(media)
             self.media_player.play()
             
+            # Set up playback timeout timer
+            self.playback_timeout_timer = QTimer()
+            self.playback_timeout_timer.setSingleShot(True)
+            self.playback_timeout_timer.timeout.connect(lambda: self.handle_playback_timeout(channel_data))
+            self.playback_timeout_timer.start(15000)  # 15 second timeout
+            
             # Update current channel
             self.current_channel = channel_data
-            self.statusbar.showMessage(f"Playing: {channel_data.get('name', 'Unknown')}")
+            self.statusbar.showMessage(f"▶ Playing: {channel_data.get('name', 'Unknown')}")
             
         except Exception as e:
             print(f"Debug: Error in play_channel: {str(e)}")
-            self.statusbar.showMessage(f"Error playing channel: {str(e)}")
+            self.statusbar.showMessage(f"⚠ Error playing channel: {str(e)}")
+            
+    def handle_playback_timeout(self, channel_data):
+        """Handle playback timeout when a channel fails to play"""
+        # Check if playback has started successfully
+        state = self.media_player.get_state()
+        print(f"Debug: Playback state after timeout: {state}")
+        
+        if state not in [vlc.State.Playing, vlc.State.Paused]:
+            print(f"Debug: Playback failed to start for channel: {channel_data.get('name', 'Unknown')}")
+            # Stop the failed playback attempt
+            self.media_player.stop()
+            self.statusbar.showMessage(f"⚠ Playback timeout: Failed to play {channel_data.get('name', 'Unknown')}")
 
     def show_server_status(self):
         """Show server status dialog"""
@@ -3391,6 +3414,31 @@ class TVHeadendClient(QMainWindow):
                 # Restart playback with the same channel but new profile
                 self.play_channel_by_data(self.current_channel)
         
+    def on_media_playing(self, event):
+        """Called when media starts playing successfully"""
+        print("Debug: Playback started successfully")
+        # Cancel the timeout timer if it's running
+        if hasattr(self, 'playback_timeout_timer') and self.playback_timeout_timer.isActive():
+            self.playback_timeout_timer.stop()
+            print("Debug: Playback timeout timer canceled")
+
+    def on_media_error(self, event):
+        """Called when media encounters an error"""
+        print(f"Debug: Media error: {event}")
+        
+        # Get the current channel name if available
+        channel_name = "Unknown"
+        if hasattr(self, 'current_channel') and self.current_channel:
+            channel_name = self.current_channel.get('name', 'Unknown')
+        
+        # Cancel the timeout timer if it's running
+        if hasattr(self, 'playback_timeout_timer') and self.playback_timeout_timer.isActive():
+            self.playback_timeout_timer.stop()
+            
+        # Stop the failed playback attempt
+        self.media_player.stop()
+        self.statusbar.showMessage(f"⚠ Error playing {channel_name}: Media playback failed")
+
 class EPGDialog(QDialog):
     def __init__(self, channel_name, epg_data, server, parent=None):
         super().__init__(parent)
