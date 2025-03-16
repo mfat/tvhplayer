@@ -1477,8 +1477,24 @@ class TVHeadendClient(QMainWindow):
         # Then setup UI
         self.setup_ui()
         
-        # Update to use config for last server
-        self.server_combo.setCurrentIndex(self.config.get('last_server', 0))
+        # Ensure a server is selected if available
+        if self.servers:
+            # Get the last selected server index from config, or default to 0
+            last_server_index = self.config.get('last_server', 0)
+            
+            # Make sure the index is valid
+            if last_server_index >= len(self.servers):
+                last_server_index = 0
+                
+            # Set the current index
+            self.server_combo.setCurrentIndex(last_server_index)
+            
+            # Explicitly trigger the on_server_changed event to load channels
+            self.on_server_changed(last_server_index)
+            
+            print(f"Debug: Selected server at index {last_server_index}: {self.servers[last_server_index]['name']}")
+        else:
+            print("Debug: No servers available")
         
         # Now configure hardware acceleration after UI is set up
         try:
