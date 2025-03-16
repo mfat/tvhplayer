@@ -1416,10 +1416,10 @@ class TVHeadendClient(QMainWindow):
         
         print("Debug: Initializing TVHeadendClient")
         
-        # Initialize VLC instance
-        print("Debug: Initializing VLC instance")
-        self.vlc_instance = vlc.Instance()
-        print("Debug: VLC instance created successfully with hardware acceleration")
+        # Initialize VLC instance with Arial font for OSD
+        print("Debug: Initializing VLC instance with Arial font")
+        self.vlc_instance = vlc.Instance('--freetype-font=Arial')
+        print("Debug: VLC instance created successfully with hardware acceleration and Arial font")
         
         # Create VLC media player
         self.media_player = self.vlc_instance.media_player_new()
