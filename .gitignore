@@ -2,3 +2,5 @@
 /.flatpak-builder
 /.history
 tvhplayer/__pycache__/resources_rc.cpython-313.pyc
+venv
+.venv

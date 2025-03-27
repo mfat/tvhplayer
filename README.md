@@ -1,7 +1,16 @@
-
 <a href='https://flathub.org/apps/io.github.mfat.tvhplayer'>
-    <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
-  </a>
+  <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
+</a>
+
+## Table of Contents
+- [TVHplayer](#tvhplayer)
+- [Features](#features)
+- [Download](#download)
+- [Requirements](#requirements)
+- [Help and Support](#help-and-support)
+- [Run the app from source](#run-the-app-from-source)
+- [Technical information](#technical-information)
+- [Support development](#support-development)
 
 # TVHplayer
 A TVheadend client for watching and recording live TV on PC
@@ -11,7 +20,7 @@ A TVheadend client for watching and recording live TV on PC
 
 
 
-## Features:
+## Features
 
 With TVHplayer you can:
 - Play live TV & radio channels
@@ -43,16 +52,26 @@ With TVHplayer you can:
 - If you encounter any problems [open a bug report](https://github.com/user/repository/issues/new)
 
 ## Run the app from source 
-- You can run the code directly with python. You may want to do this if you don't want to download an executable.
+
+You can run the code directly with python. You may want to do this if you don't want to download an executable.
+
 To do this:
-- install python
-- download the [requirements.txt](https://github.com/mfat/tvhplayer/blob/main/requirements.txt) and run this command:
-  `pip install -r requirements.txt`
-- Download the tvhplayer zip file from the latest release and extract to a folder or clone using git:
-  `git clone https://github.com/mfat/tvhplayer.git`
-- cd into the folder
-- Run the app with:
-  `python3 tvhplayer/tvhplayer.py`
+- Install Python based on your operation system ([official website](https://www.python.org/downloads/))
+- Download the tvhplayer zip file from the latest [release](https://github.com/mfat/tvhplayer/releases) and extract to a folder or clone using git:
+  ```bash 
+  git clone https://github.com/mfat/tvhplayer.git tvhplayer
+  ```
+- Go to the folder
+- Download the [requirements.txt](https://github.com/mfat/tvhplayer/blob/main/requirements.txt) and run this command:
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+  > If you are familier with development, that's better to create a `virtualenv` and install reuirements into that. ([official doc](https://docs.python.org/3/library/venv.html))
+- Run the app with: 
+  ```bash
+  python3 tvhplayer/tvhplayer.py
+  ```
 
 ## Technical information 
 - TVHplayer uses Tvheadend's http API (no htsp support yet)
