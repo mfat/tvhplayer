@@ -32,7 +32,7 @@ With TVHplayer you can:
 
 
 ## Requirements
-- Make sure both digest and plane authentication are enabled in your server
+- Make sure both digest and plain authentication are enabled in your server
 - See requirements.txt for requred python modules
 - VLC 
 - FFMPEG (used for local recording feature if you need it)
