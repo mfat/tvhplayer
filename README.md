@@ -33,7 +33,8 @@ With TVHplayer you can:
 
 ## Requirements
 - Make sure both digest and plain authentication are enabled in your server
-- See requirements.txt for requred python modules
+- See requirements.txt for required python modules (python3 -m pip install python-vlc
+- python3 -m pip install python-vlc
 - VLC 
 - FFMPEG (used for local recording feature if you need it)
   - On Windows follow [this guide](https://phoenixnap.com/kb/ffmpeg-windows) to add ffmpeg to windows PATH. You can also put ffmpeg.exe in the same directory as tvhplayer.
