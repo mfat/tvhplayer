@@ -79,11 +79,17 @@ jobs:
           test -f "$APP/Contents/Frameworks/icons/play.svg"
           codesign --verify --deep --verbose=2 "$APP"
           ditto -c -k --sequesterRsrc --keepParent "$APP" macos/dist/TVHplayer-MacOS-Intel.zip
+          bash macos/package-dmg.sh
+          test -s macos/dist/TVHplayer-MacOS-Intel.dmg
+          test -s macos/dist/TVHplayer-MacOS-Intel.dmg.sha256
 
       - name: Upload app archive
         uses: actions/upload-artifact@v7
         with:
           name: TVHplayer-MacOS-Intel-${{ github.sha }}
-          path: macos/dist/TVHplayer-MacOS-Intel.zip
+          path: |
+            macos/dist/TVHplayer-MacOS-Intel.zip
+            macos/dist/TVHplayer-MacOS-Intel.dmg
+            macos/dist/TVHplayer-MacOS-Intel.dmg.sha256
           if-no-files-found: error
           retention-days: 14
