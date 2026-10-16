@@ -2,3 +2,12 @@
 /.flatpak-builder
 /.history
 tvhplayer/__pycache__/resources_rc.cpython-313.pyc
+
+# Local macOS development/build output
+/macos/.venv*/
+/macos/build/
+/macos/dist/
+/macos/vlc-plugins-staging/
+/macos/*.log
+/macos/TVHplayer-*.spec
+/macos/tvhplayer/__pycache__/
