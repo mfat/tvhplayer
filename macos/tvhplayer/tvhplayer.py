@@ -251,7 +251,7 @@ class DVRStatusDialog(QDialog):
                     self.upcoming_table.setItem(i, 3, QTableWidgetItem(str(duration)))
                     
                     # Add status column
-                    status = "Recording" if is_recording else entry.get('sched_status', 'scheduled').capitalize()
+                    status = "Recording" if is_recording else "Scheduled"
                     self.upcoming_table.setItem(i, 4, QTableWidgetItem(status))
                     
                     # Highlight currently recording entries
