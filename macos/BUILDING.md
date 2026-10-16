@@ -45,6 +45,6 @@ The workflow packages the **exact branch/commit it runs on**. Building `main` be
 
 ## Notes
 
-- The existing multi-platform tag-release workflow is unchanged by this independent Intel macOS workflow.
+- The original multi-platform tag-release workflow retains its build commands. The packaging PR also removes invalid `env` references from its matrix artifact names; its retired runners and unrelated platform builds remain outside this change.
 - Local output is confined to `macos/build/` and `macos/dist/`; the installed VLC and TVHplayer applications are not overwritten.
 - Application runtime logs may contain TVHeadend credentials. Never attach unredacted logs or `~/.tvhplayer.conf` to a public GitHub issue or PR.
