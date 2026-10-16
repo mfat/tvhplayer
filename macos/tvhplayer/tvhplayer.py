@@ -2573,7 +2573,10 @@ class EPGDialog(QDialog):
                 "start": entry['start'],
                 "stop": entry['stop'],
                 "channel": entry['channelUuid'],
-                "title": entry.get('title', {"eng": "Scheduled Recording"}),
+                "title": (
+                    entry["title"] if isinstance(entry.get("title"), dict)
+                    else {"eng": entry.get("title") or "Scheduled Recording"}
+                ),
                 "description": entry.get('description', {"eng": ""}),
                 "comment": "Scheduled via TVHplayer"
             }
