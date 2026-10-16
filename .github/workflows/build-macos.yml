@@ -58,7 +58,7 @@ jobs:
           curl --fail --location --retry 3 --retry-delay 2 \
             -o "$RUNNER_TEMP/vlc-3.0.24-intel64.dmg" \
             'https://get.videolan.org/vlc/3.0.24/macosx/vlc-3.0.24-intel64.dmg'
-          echo "a8deea654654902f76252e9651723dd8f0053b9728ef6b89e8a0ebd69a311a20  $RUNNER_TEMP/vlc-3.0.24-intel64.dmg" | shasum -a 256 -c -
+          echo "1ef6c903e2dc026d4e58ddf7b2a9ed0eb6f8caf80a9a9f46f96490340b962707  $RUNNER_TEMP/vlc-3.0.24-intel64.dmg" | shasum -a 256 -c -
           mkdir -p "$RUNNER_TEMP/vlc-mount"
           hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/vlc-mount" "$RUNNER_TEMP/vlc-3.0.24-intel64.dmg" >/dev/null
           test -f "$RUNNER_TEMP/vlc-mount/VLC.app/Contents/MacOS/lib/libvlc.dylib"
