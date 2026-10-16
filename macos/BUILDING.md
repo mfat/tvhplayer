@@ -15,7 +15,13 @@ python -m pip install -r macos/requirements-build.txt
 bash macos/build-macos.sh
 ```
 
-The output is `macos/dist/TVHplayer-MacOS-Intel.app`.
+The output is `macos/dist/TVHplayer-MacOS-Intel.app`. To create an installable drag-and-drop disk image:
+
+```bash
+bash macos/package-dmg.sh
+```
+
+The resulting `macos/dist/TVHplayer-MacOS-Intel.dmg` includes the app, an Applications shortcut, and installation instructions. A separate `.dmg.sha256` file permits checksum verification.
 
 **Runtime dependency:** The generated `.app` bundles Python/Qt and VLC plugins, but does **not** bundle the native `libvlc.dylib` and `libvlccore.dylib`. VLC 3.0.24 must therefore remain installed at `/Applications/VLC.app` on the destination Mac. This is a development application bundle, not a self-contained VLC distribution.
 
@@ -37,9 +43,9 @@ Do not copy an existing `plugins.dat` into the completed bundle. The VLC install
 
 The dedicated [Build TVHplayer (macOS Intel)](../.github/workflows/build-macos.yml) workflow runs on `macos-15-intel`. Because the Python 3.15 stable package may not be available through `actions/setup-python` yet, the workflow instead downloads and verifies the official Python 3.15.0 macOS installer. It also downloads and SHA-256-verifies the official VLC 3.0.24 Intel DMG.
 
-After building and checking the bundle, GitHub Actions uploads `TVHplayer-MacOS-Intel.zip` as a downloadable workflow artifact, preserving the `.app` directory structure. The workflow runs on pushes to the packaging branch and matching pull requests. Once the workflow is on the default branch, it can also be launched manually from GitHub's **Actions** tab.
+After building and checking the bundle, GitHub Actions uploads `TVHplayer-MacOS-Intel.dmg`, its `.sha256` manifest and `TVHplayer-MacOS-Intel.zip` as downloadable workflow artifacts. The `.dmg` is the drag-and-drop installer; the ZIP preserves the `.app` structure. The workflow runs on pushes to the packaging branch and matching pull requests. Once the workflow is on the default branch, it can also be launched manually from GitHub's **Actions** tab.
 
-Builds use ad-hoc signing, not Apple Developer ID signing/notarization. The CI runner uses macOS 15; compatibility with the user's macOS Ventura 13.7.8 must be confirmed by testing the GitHub-built archive on that Mac.
+Builds use ad-hoc signing, not Apple Developer ID signing/notarization. The CI runner uses macOS 15. The previous GitHub-built ZIP launched successfully on Intel macOS Ventura 13.7.8; the new DMG must still be tested after downloading.
 
 The workflow packages the **exact branch/commit it runs on**. Building `main` before PRs #32 and #33 are merged does not include those application fixes. For integration testing, apply the packaging changes on a local test branch that already contains those fixes.
 
