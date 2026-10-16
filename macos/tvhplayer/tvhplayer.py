@@ -2583,7 +2583,7 @@ class EPGDialog(QDialog):
             print(f"Debug: Recording data: {data}")
             
             # Make recording request
-            record_url = f'http://{self.server["url"]}/api/dvr/entry/create'
+            record_url = f'{self.server["url"].rstrip("/")}/api/dvr/entry/create'
             print(f"Debug: Sending recording request to: {record_url}")
             
             response = requests.post(record_url, data=data, auth=auth)
