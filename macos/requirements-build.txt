@@ -1,7 +1,7 @@
 # Intel macOS / Python 3.15 build environment.
 # Install with Python 3.15.0 and use VLC 3.0.24.
 PyInstaller==6.22.3
-PyQt5==5.15.11
+PyQt6==6.10.2
 python-vlc==3.0.21203
 requests==2.32.5
 psutil==7.2.2

@@ -1,7 +1,19 @@
-
 /.flatpak-builder
 /.history
-tvhplayer/__pycache__/resources_rc.cpython-313.pyc
+.venv/
+.DS_Store
+._*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Debian package build output
+/debian/tvhplayer/
+/debian/.debhelper/
+/debian/files
+/debian/*.debhelper
+/debian/*.substvars
+/debian/debhelper-build-stamp
 
 # Local macOS development/build output
 /macos/.venv*/
@@ -10,4 +22,3 @@ tvhplayer/__pycache__/resources_rc.cpython-313.pyc
 /macos/vlc-plugins-staging/
 /macos/*.log
 /macos/TVHplayer-*.spec
-/macos/tvhplayer/__pycache__/

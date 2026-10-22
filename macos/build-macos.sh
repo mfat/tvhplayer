@@ -36,7 +36,7 @@ if [[ -z "$VLC_PLUGINS" ]]; then
   exit 1
 fi
 
-"$PYTHON" -c 'import PyInstaller; import PyQt5; import vlc; import requests'
+"$PYTHON" -c 'import PyInstaller; import PyQt6; import vlc; import requests'
 
 # plugins.dat is tied to the original plugins' sizes and modification times.
 # Copy plugins without it, so PyInstaller cannot package a stale cache.
@@ -60,14 +60,25 @@ printf 'VLC plugins from: %s (plugins.dat excluded)\n' "$VLC_PLUGINS"
   --target-arch x86_64 \
   --osx-bundle-identifier io.github.mfat.tvhplayer.localbuild \
   --icon "$MACOS_DIR/icons/tvhplayer.png" \
-  --paths "$MACOS_DIR/tvhplayer" \
+  --paths "$ROOT/tvhplayer" \
   --hidden-import resources_rc \
+  --hidden-import core \
+  --hidden-import core.backend \
+  --hidden-import core.config \
+  --hidden-import core.errors \
+  --hidden-import core.htsmsg \
+  --hidden-import core.htsp_backend \
+  --hidden-import core.htsp_connection \
+  --hidden-import core.http_backend \
+  --hidden-import core.models \
+  --hidden-import core.recorder \
+  --hidden-import core.urls \
   --add-data "$MACOS_DIR/icons:icons" \
   --add-data "$STAGING/plugins:vlc/plugins" \
   --distpath "$MACOS_DIR/dist" \
   --workpath "$MACOS_DIR/build" \
   --specpath "$MACOS_DIR/build" \
-  "$MACOS_DIR/tvhplayer/tvhplayer.py"
+  "$ROOT/tvhplayer/tvhplayer.py"
 
 BUNDLE="$MACOS_DIR/dist/$APP_NAME.app"
 BUNDLED_PLUGINS="$BUNDLE/Contents/Frameworks/vlc/plugins"

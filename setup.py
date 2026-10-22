@@ -8,12 +8,12 @@ setup(
     author_email="mah.fat@gmail.com",
     url="https://github.com/mfat/tvhplayer",
     install_requires=[
-        'PyQt5>=5.15.0',
+        'PyQt6>=6.4.0',
         'python-vlc>=3.0.12122',
         'requests>=2.25.1',
         'python-dateutil>=2.8.2',
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.9',
     packages=find_packages(),
     package_data={
         'tvhplayer': ['*.py', 'icons/*'],

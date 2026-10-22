@@ -9,10 +9,12 @@ on:
       - test/macos-integration-build
     paths:
       - 'macos/**'
+      - 'tvhplayer/**'
       - '.github/workflows/build-macos.yml'
   pull_request:
     paths:
       - 'macos/**'
+      - 'tvhplayer/**'
       - '.github/workflows/build-macos.yml'
 
 permissions:
@@ -48,7 +50,7 @@ jobs:
           /Library/Frameworks/Python.framework/Versions/3.15/bin/python3.15 -m venv "$RUNNER_TEMP/tvhplayer-venv"
           "$RUNNER_TEMP/tvhplayer-venv/bin/python" -m pip install -r macos/requirements-build.txt
           "$RUNNER_TEMP/tvhplayer-venv/bin/python" -m pip check
-          "$RUNNER_TEMP/tvhplayer-venv/bin/python" -c 'import ast, pathlib; ast.parse(pathlib.Path("macos/tvhplayer/tvhplayer.py").read_text(encoding="utf-8"))'
+          "$RUNNER_TEMP/tvhplayer-venv/bin/python" -c 'import ast, pathlib; ast.parse(pathlib.Path("tvhplayer/tvhplayer.py").read_text(encoding="utf-8"))'
           echo "$RUNNER_TEMP/tvhplayer-venv/bin" >> "$GITHUB_PATH"
 
       - name: Download verified VLC 3.0.24 (Intel)
