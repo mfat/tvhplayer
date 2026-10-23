@@ -580,10 +580,14 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.tasks_pane.search_box.accessibleName() == "Filter tasks"
         assert window.tasks_pane.status_combo.accessibleName() == "Task status"
         assert window.tasks_pane.status_combo.currentText() == "All"
-        assert window.tasks_pane.task_list.accessibleName() == "Tasks"
+        assert window.tasks_pane.task_table.accessibleName() == "Tasks"
+        assert window.tasks_pane.task_table.isVisible()
+        assert window.tasks_pane.task_table.rowCount() == 0
+        assert window.tasks_pane.task_table.horizontalHeaderItem(0).text() == "Kind"
+        assert window.tasks_pane.task_table.horizontalHeaderItem(4).text() == "Detail"
+        assert window.tasks_pane.task_table.accessibleDescription() == "No tasks"
         assert window.tasks_pane.action_btn.accessibleName() == "Stop"
         assert window.tasks_pane.action_btn.isEnabled() is False
-        assert window.tasks_pane.empty_label.text() == "No tasks"
         assert window.tasks_action.isChecked() is True
         assert any(label.buddy() is window.tasks_pane.search_box for label in window.findChildren(ui.QLabel))
         assert any(label.buddy() is window.tasks_pane.status_combo for label in window.findChildren(ui.QLabel))
@@ -596,7 +600,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
             focus_chain.append(focus_widget)
         search_at = focus_chain.index(window.tasks_pane.search_box)
         status_at = focus_chain.index(window.tasks_pane.status_combo)
-        list_at = focus_chain.index(window.tasks_pane.task_list)
+        list_at = focus_chain.index(window.tasks_pane.task_table)
         action_at = focus_chain.index(window.tasks_pane.action_btn)
         assert search_at < status_at < list_at < action_at
         assert "focus" in window.play_btn.styleSheet()
@@ -758,13 +762,19 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
 
 
 def _task_texts(panel):
-    return [panel.task_list.item(row).text() for row in range(panel.task_list.count())]
+    rows = []
+    for row in range(panel.task_table.rowCount()):
+        rows.append(" ".join(
+            panel.task_table.item(row, column).text()
+            for column in range(panel.task_table.columnCount())
+        ))
+    return rows
 
 
 def _select_task(panel, needle):
-    for row in range(panel.task_list.count()):
-        if needle in panel.task_list.item(row).text():
-            panel.task_list.setCurrentRow(row)
+    for row, text in enumerate(_task_texts(panel)):
+        if needle in text:
+            panel.task_table.selectRow(row)
             return
     raise AssertionError(needle)
 
@@ -852,15 +862,17 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         shown = _task_texts(panel)
         assert len(shown) == 1 and 'News' in shown[0]
         panel.status_combo.setCurrentText('Scheduled')
-        assert panel.empty_label.text() == 'No matching tasks'
-        assert not panel.task_list.isVisible()
+        assert panel.task_table.rowCount() == 0
+        assert panel.task_table.isVisible()
+        assert panel.task_table.accessibleDescription() == 'No matching tasks'
         panel.search_box.clear()
         assert len(_task_texts(panel)) == 1 and 'Later' in _task_texts(panel)[0]
         panel.status_combo.setCurrentText('All')
         panel.search_box.setText('Old')
-        assert panel.empty_label.text() == 'No matching tasks'
+        assert panel.task_table.rowCount() == 0
+        assert panel.task_table.accessibleDescription() == 'No matching tasks'
         panel.search_box.clear()
-        assert panel.task_list.count() == 3
+        assert panel.task_table.rowCount() == 3
 
         class Down:
             def list_dvr_entries(self):
@@ -869,11 +881,11 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         window.get_backend = lambda: Down()
         panel.refresh()
         assert panel.error_label.text() == "Couldn't refresh server recordings"
-        assert panel.task_list.count() == 3
+        assert panel.task_table.rowCount() == 3
         window.get_backend = lambda: backend
         panel.refresh()
         assert panel.error_label.text() == ''
-        assert panel.task_list.count() == 3
+        assert panel.task_table.rowCount() == 3
 
         _select_task(panel, 'News')
         assert panel.action_btn.accessibleName() == 'Stop'
@@ -898,7 +910,9 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         panel.run_action()
         assert backend.cancelled == ['soon']
         assert window.is_recording is True
-        assert panel.empty_label.text() == 'No tasks'
+        assert panel.task_table.rowCount() == 0
+        assert panel.task_table.isVisible()
+        assert panel.task_table.accessibleDescription() == 'No tasks'
 
         window.tasks_action.setChecked(False)
         window._toggle_tasks_pane(False)

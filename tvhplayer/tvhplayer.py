@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QRectF
-from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QFontMetrics
+from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor
 import json
 # Replace this line:
 #from . import resources_rc
@@ -471,7 +471,7 @@ class TasksPanel(QFrame):
         self._server_tasks = []
         self._tasks = []
         self._error_text = ""
-        self._empty_text = None
+        self._table_description = None
         self.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
         self.setAccessibleName("Tasks")
         self.setAccessibleDescription(
@@ -486,61 +486,73 @@ class TasksPanel(QFrame):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(6)
         heading = QLabel("Tasks")
         font = heading.font()
         font.setBold(True)
         heading.setFont(font)
         heading.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        heading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         layout.addWidget(heading)
 
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Channel or title")
         self.search_box.setClearButtonEnabled(True)
+        self.search_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         describe(
             self.search_box,
             "Filter tasks",
             "Filter tasks by channel, title, kind, or status.",
         )
         self.search_box.textChanged.connect(self._apply_filter)
-        layout.addWidget(buddy_label("Fi&lter:", self.search_box))
-        layout.addWidget(self.search_box)
+        filter_row = QHBoxLayout()
+        filter_label = buddy_label("Fi&lter:", self.search_box)
+        filter_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        filter_row.addWidget(filter_label)
+        filter_row.addWidget(self.search_box, 1)
+        layout.addLayout(filter_row)
 
         self.status_combo = QComboBox()
         self.status_combo.addItems(["All", "Recording", "Scheduled"])
+        self.status_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         describe(
             self.status_combo,
             "Task status",
             "Show all tasks, only recordings, or only scheduled recordings.",
         )
         self.status_combo.currentIndexChanged.connect(self._apply_filter)
-        layout.addWidget(buddy_label("Sho&w:", self.status_combo))
-        layout.addWidget(self.status_combo)
+        show_row = QHBoxLayout()
+        show_label = buddy_label("Sho&w:", self.status_combo)
+        show_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        show_row.addWidget(show_label)
+        show_row.addWidget(self.status_combo, 1)
+        layout.addLayout(show_row)
 
         self.error_label = QLabel("")
         self.error_label.setWordWrap(True)
+        self.error_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.error_label.hide()
         layout.addWidget(self.error_label)
 
-        self.empty_label = QLabel("")
-        self.empty_label.setWordWrap(True)
-        self.empty_label.hide()
-        layout.addWidget(self.empty_label)
-
-        self.task_list = QListWidget()
-        self.task_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.task_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.task_list.setWordWrap(True)
-        self.task_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.task_table = QTableWidget(0, 5)
+        self.task_table.setHorizontalHeaderLabels(["Kind", "Channel", "Title", "Status", "Detail"])
+        fit_table_columns(self.task_table, (2, 4))
+        self.task_table.verticalHeader().setVisible(False)
+        self.task_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.task_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.task_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.task_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         describe(
-            self.task_list,
+            self.task_table,
             "Tasks",
             "Ongoing and scheduled recordings. Recording rows are listed first.",
         )
-        self.task_list.itemSelectionChanged.connect(self._update_action)
-        layout.addWidget(self.task_list, 1)
+        self.task_table.itemSelectionChanged.connect(self._update_action)
+        layout.addWidget(self.task_table, 1)
 
         self.action_btn = QPushButton("Stop")
         self.action_btn.setEnabled(False)
+        self.action_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.action_btn.clicked.connect(self.run_action)
         self._set_action("Stop", "Stop the selected recording. The recorded file is kept.", False)
         layout.addWidget(self.action_btn)
@@ -574,7 +586,10 @@ class TasksPanel(QFrame):
         self._apply_filter()
 
     def selected_task(self):
-        item = self.task_list.currentItem()
+        row = self.task_table.currentRow()
+        if row < 0:
+            return None
+        item = self.task_table.item(row, 0)
         if item is None or not item.isSelected():
             return None
         return item.data(Qt.ItemDataRole.UserRole)
@@ -717,58 +732,58 @@ class TasksPanel(QFrame):
             task for task in self._tasks
             if self._matches(task, query, status_filter)
         ]
-        self.task_list.blockSignals(True)
-        self.task_list.clear()
+        self.task_table.blockSignals(True)
+        self.task_table.setRowCount(0)
         for task in visible:
-            self._add_item(task)
-        self.task_list.blockSignals(False)
+            self._add_row(task)
+        self.task_table.blockSignals(False)
         if visible:
             self._set_empty("")
             self._restore_selection(selected)
         else:
-            self.task_list.clearSelection()
+            self.task_table.clearSelection()
             if self._tasks:
                 self._set_empty("No matching tasks")
             else:
                 self._set_empty("No tasks")
         self._update_action()
 
-    def _add_item(self, task):
-        text = (
-            f"{task['kind']}: {task['channel']} — {task['title']}\n"
+    def _add_row(self, task):
+        row = self.task_table.rowCount()
+        self.task_table.insertRow(row)
+        values = [
+            task['kind'],
+            task['channel'],
+            task['title'],
+            task['status'],
+            task['detail'],
+        ]
+        summary = (
+            f"{task['kind']}, {task['channel']}, {task['title']}, "
             f"{task['status']}. {task['detail']}"
         )
-        item = QListWidgetItem(text)
-        item.setData(Qt.ItemDataRole.UserRole, task)
-        set_item_access(item, text, task['detail'])
         colors = row_emphasis('recording' if task['bucket'] == 'recording' else None)
-        if colors is not None:
-            item.setBackground(colors[0])
-            item.setForeground(colors[1])
-        item.setSizeHint(self._item_size(text))
-        self.task_list.addItem(item)
-
-    def _item_size(self, text):
-        metrics = QFontMetrics(self.task_list.font())
-        width = self.task_list.viewport().width()
-        if width < 80:
-            width = 220
-        bounds = metrics.boundingRect(
-            0, 0, width - 12, 400, int(Qt.TextFlag.TextWordWrap), text,
-        )
-        return QSize(width, max(bounds.height() + 10, metrics.lineSpacing() * 2))
+        for col, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            if col == 0:
+                item.setData(Qt.ItemDataRole.UserRole, task)
+                set_item_access(item, summary, task['detail'])
+            if colors is not None:
+                item.setBackground(colors[0])
+                item.setForeground(colors[1])
+            self.task_table.setItem(row, col, item)
 
     def _restore_selection(self, key):
         if key is None:
-            self.task_list.clearSelection()
+            self.task_table.clearSelection()
             return
-        for row in range(self.task_list.count()):
-            item = self.task_list.item(row)
+        for row in range(self.task_table.rowCount()):
+            item = self.task_table.item(row, 0)
             task = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             if task is not None and task.get('key') == key:
-                self.task_list.setCurrentRow(row)
+                self.task_table.selectRow(row)
                 return
-        self.task_list.clearSelection()
+        self.task_table.clearSelection()
 
     def _update_action(self):
         task = self.selected_task()
@@ -818,16 +833,15 @@ class TasksPanel(QFrame):
         self.error_label.setAccessibleName("")
 
     def _set_empty(self, message):
-        self.task_list.setVisible(not message)
-        self.empty_label.setVisible(bool(message))
-        if message == self._empty_text:
-            return
-        self._empty_text = message
+        """Keep the column table visible. Speak the empty state without a filler label."""
         if message:
-            announce_label(self.empty_label, message)
+            description = message
+        else:
+            description = "Ongoing and scheduled recordings. Recording rows are listed first."
+        if description == self._table_description:
             return
-        self.empty_label.setText("")
-        self.empty_label.setAccessibleName("")
+        self._table_description = description
+        self.task_table.setAccessibleDescription(description)
 
 
 class RecordingDurationDialog(QDialog):
@@ -2099,7 +2113,7 @@ class TVHeadendClient(QMainWindow):
             self.fullscreen_btn,
             self.tasks_pane.search_box,
             self.tasks_pane.status_combo,
-            self.tasks_pane.task_list,
+            self.tasks_pane.task_table,
             self.tasks_pane.action_btn,
         ]
         for first, second in zip(order, order[1:]):
