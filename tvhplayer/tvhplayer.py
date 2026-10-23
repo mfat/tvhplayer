@@ -8,10 +8,10 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton,
-    QAbstractItemView,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QRectF
-from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF
+from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap
 import json
 # Replace this line:
 #from . import resources_rc
@@ -520,6 +520,80 @@ def _entry_filesize(entry):
     return None
 
 
+_TASK_TABLE_DESCRIPTION = (
+    "Ongoing, scheduled, and completed recordings. "
+    "The first column is a status icon. Recording rows are listed first."
+)
+_TASK_STATUS_ICONS = {}
+
+
+def _task_status_icon(status):
+    """Small glyph for a task status. The status word stays in its own column."""
+    cached = _TASK_STATUS_ICONS.get(status)
+    if cached is not None:
+        return cached
+    pixmap = QPixmap(16, 16)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    if status == 'Recording':
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor('#dc2626'))
+        painter.drawEllipse(QRectF(2, 2, 12, 12))
+    elif status == 'Scheduled':
+        pen = QPen(QColor('#1d4ed8'))
+        pen.setWidthF(1.6)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QRectF(2, 2, 12, 12))
+        painter.drawLine(QPointF(8, 8), QPointF(8, 4.5))
+        painter.drawLine(QPointF(8, 8), QPointF(11, 9))
+    else:
+        pen = QPen(QColor('#166534'))
+        pen.setWidthF(2.2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(3, 8.5), QPointF(6.5, 12))
+        painter.drawLine(QPointF(6.5, 12), QPointF(13, 4))
+    painter.end()
+    icon = QIcon(pixmap)
+    _TASK_STATUS_ICONS[status] = icon
+    return icon
+
+
+class _StatusIconDelegate(QStyledItemDelegate):
+    """Draw the status glyph in the middle of the first column.
+
+    An item view keeps the decoration on the leading edge. Aligning the
+    item text does not move that glyph.
+    """
+
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        icon = QIcon(opt.icon)
+        opt.icon = QIcon()
+        opt.text = ""
+        opt.features = opt.features & ~QStyleOptionViewItem.ViewItemFeature.HasDecoration
+        widget = opt.widget
+        style = widget.style() if widget is not None else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+        if icon.isNull():
+            return
+        size = opt.decorationSize
+        if size.isEmpty():
+            size = QSize(16, 16)
+        cell = opt.rect
+        target = QRect(
+            cell.x() + (cell.width() - size.width()) // 2,
+            cell.y() + (cell.height() - size.height()) // 2,
+            size.width(),
+            size.height(),
+        )
+        icon.paint(painter, target, Qt.AlignmentFlag.AlignCenter)
+
+
 class TasksPanel(QFrame):
     """Ongoing, scheduled, and completed recordings, with search and a status filter."""
 
@@ -594,11 +668,22 @@ class TasksPanel(QFrame):
         self.error_label.hide()
         layout.addWidget(self.error_label)
 
-        self.task_table = QTableWidget(0, 6)
+        self.task_table = QTableWidget(0, 7)
         self.task_table.setHorizontalHeaderLabels(
-            ["Kind", "Channel", "Title", "Status", "Size", "Detail"]
+            ["", "Kind", "Channel", "Title", "Status", "Size", "Detail"]
         )
-        fit_table_columns(self.task_table, (2, 5))
+        status_header = self.task_table.horizontalHeaderItem(0)
+        set_item_access(
+            status_header,
+            "Status icon",
+            "Recording, scheduled, or completed.",
+        )
+        status_header.setToolTip("Status")
+        self.task_table.setIconSize(QSize(16, 16))
+        self.task_table.setItemDelegateForColumn(0, _StatusIconDelegate(self.task_table))
+        fit_table_columns(self.task_table, (3, 6))
+        self.task_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.task_table.setColumnWidth(0, 36)
         self.task_table.verticalHeader().setVisible(False)
         self.task_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.task_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -607,7 +692,7 @@ class TasksPanel(QFrame):
         describe(
             self.task_table,
             "Tasks",
-            "Ongoing, scheduled, and completed recordings. Recording rows are listed first.",
+            _TASK_TABLE_DESCRIPTION,
         )
         self.task_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.task_table.customContextMenuRequested.connect(self._show_task_menu)
@@ -901,11 +986,18 @@ class TasksPanel(QFrame):
             f"{task['status']}, {task.get('size') or 'no file yet'}. {task['detail']}"
         )
         colors = row_emphasis('recording' if task['bucket'] == 'recording' else None)
-        for col, value in enumerate(values):
+        icon_item = QTableWidgetItem()
+        icon_item.setIcon(_task_status_icon(task['status']))
+        icon_item.setData(Qt.ItemDataRole.UserRole, task)
+        set_item_access(icon_item, summary, task['detail'])
+        icon_item.setToolTip(task['status'])
+        if colors is not None:
+            icon_item.setBackground(colors[0])
+            icon_item.setForeground(colors[1])
+        self.task_table.setItem(row, 0, icon_item)
+        for offset, value in enumerate(values):
+            col = offset + 1
             item = QTableWidgetItem(value)
-            if col == 0:
-                item.setData(Qt.ItemDataRole.UserRole, task)
-                set_item_access(item, summary, task['detail'])
             # ElideRight hides the tail of Title and Detail. The cell tooltip
             # has to be that full text; the row description would replace it.
             if value:
@@ -990,9 +1082,7 @@ class TasksPanel(QFrame):
         if message:
             description = message
         else:
-            description = (
-                "Ongoing, scheduled, and completed recordings. Recording rows are listed first."
-            )
+            description = _TASK_TABLE_DESCRIPTION
         if description == self._table_description:
             return
         self._table_description = description

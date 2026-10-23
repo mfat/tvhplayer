@@ -703,9 +703,15 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.tasks_pane.task_table.accessibleName() == "Tasks"
         assert window.tasks_pane.task_table.isVisible()
         assert window.tasks_pane.task_table.rowCount() == 0
-        assert window.tasks_pane.task_table.horizontalHeaderItem(0).text() == "Kind"
-        assert window.tasks_pane.task_table.horizontalHeaderItem(4).text() == "Size"
-        assert window.tasks_pane.task_table.horizontalHeaderItem(5).text() == "Detail"
+        assert window.tasks_pane.task_table.columnCount() == 7
+        assert window.tasks_pane.task_table.horizontalHeaderItem(0).text() == ""
+        assert window.tasks_pane.task_table.horizontalHeaderItem(0).data(
+            Qt.ItemDataRole.AccessibleTextRole
+        ) == "Status icon"
+        assert window.tasks_pane.task_table.horizontalHeaderItem(1).text() == "Kind"
+        assert window.tasks_pane.task_table.horizontalHeaderItem(4).text() == "Status"
+        assert window.tasks_pane.task_table.horizontalHeaderItem(5).text() == "Size"
+        assert window.tasks_pane.task_table.horizontalHeaderItem(6).text() == "Detail"
         assert window.tasks_pane.task_table.accessibleDescription() == "No tasks"
         assert window.tasks_pane.action_btn.accessibleName() == "Stop"
         assert window.tasks_pane.action_btn.isEnabled() is False
@@ -895,6 +901,30 @@ def _task_texts(panel):
     return rows
 
 
+def _status_icon_center_offset(table, row):
+    """How far the painted status glyph sits from the middle of its cell."""
+    rect = table.visualItemRect(table.item(row, 0))
+    image = table.viewport().grab(rect).toImage()
+    background = image.pixelColor(1, 1)
+    xs = []
+    ys = []
+    for y in range(1, image.height() - 1):
+        for x in range(1, image.width() - 1):
+            color = image.pixelColor(x, y)
+            if (
+                abs(color.red() - background.red())
+                + abs(color.green() - background.green())
+                + abs(color.blue() - background.blue())
+            ) > 80:
+                xs.append(x)
+                ys.append(y)
+    assert xs, "status icon was not painted"
+    return (
+        sum(xs) / len(xs) - image.width() / 2,
+        sum(ys) / len(ys) - image.height() / 2,
+    )
+
+
 def _select_task(panel, needle):
     for row, text in enumerate(_task_texts(panel)):
         if needle in text:
@@ -980,7 +1010,18 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.status_combo.currentText() == 'Active'
         assert len(texts) == 3
         assert 'Local' in texts[0] and 'recording_irinn.ts' in texts[0] and 'stalled' in texts[0]
-        assert panel.task_table.item(0, 4).text().endswith('B')
+        assert panel.task_table.item(0, 0).text() == ''
+        assert panel.task_table.item(0, 0).icon().isNull() is False
+        assert panel.task_table.item(0, 0).toolTip() == 'Recording'
+        assert panel.task_table.item(1, 0).toolTip() == 'Recording'
+        assert panel.task_table.item(0, 0).icon().cacheKey() == panel.task_table.item(1, 0).icon().cacheKey()
+        assert panel.task_table.item(2, 0).toolTip() == 'Scheduled'
+        assert panel.task_table.item(0, 0).icon().cacheKey() != panel.task_table.item(2, 0).icon().cacheKey()
+        app.processEvents()
+        icon_dx, icon_dy = _status_icon_center_offset(panel.task_table, 2)
+        assert abs(icon_dx) <= 2
+        assert abs(icon_dy) <= 2
+        assert panel.task_table.item(0, 5).text().endswith('B')
         assert 'News' in texts[1] and 'Recording' in texts[1]
         from tvhplayer.tvhplayer import _entry_filesize
         assert _entry_filesize(DvrEntry(
@@ -991,12 +1032,12 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
             uuid='both', title='Both', channel_name='IRINN', start=1, duration=1,
             status='Running', raw={'dataSize': 0, 'filesize': 4096},
         )) == 4096
-        assert panel.task_table.item(1, 4).text() == '12.0 MB'
-        assert panel.task_table.item(1, 4).toolTip() == '12.0 MB'
-        assert panel.task_table.item(1, 2).toolTip() == panel.task_table.item(1, 2).text()
-        assert panel.task_table.item(1, 5).toolTip() == panel.task_table.item(1, 5).text()
-        assert 'Started' in panel.task_table.item(1, 5).toolTip()
-        assert panel.task_table.item(2, 4).text() == ''
+        assert panel.task_table.item(1, 5).text() == '12.0 MB'
+        assert panel.task_table.item(1, 5).toolTip() == '12.0 MB'
+        assert panel.task_table.item(1, 3).toolTip() == panel.task_table.item(1, 3).text()
+        assert panel.task_table.item(1, 6).toolTip() == panel.task_table.item(1, 6).text()
+        assert 'Started' in panel.task_table.item(1, 6).toolTip()
+        assert panel.task_table.item(2, 5).text() == ''
         assert 'Later' in texts[2] and 'Scheduled' in texts[2]
         assert all('Old' not in text and 'Archive' not in text for text in texts)
         assert panel.action_btn.isEnabled() is False
@@ -1031,7 +1072,10 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert shown[0].index('Old') >= 0
         assert 'Archive' in shown[1]
         assert 'Completed' in shown[0] and 'Finished' in shown[0]
-        assert panel.task_table.item(0, 4).text() == '4.0 KB'
+        from tvhplayer.tvhplayer import _task_status_icon
+        assert panel.task_table.item(0, 0).toolTip() == 'Completed'
+        assert panel.task_table.item(0, 0).icon().cacheKey() == _task_status_icon('Completed').cacheKey()
+        assert panel.task_table.item(0, 5).text() == '4.0 KB'
         _select_task(panel, 'Old')
         assert panel.action_btn.isEnabled() is False
         assert panel.reveal_btn.isEnabled() is False
