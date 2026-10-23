@@ -329,3 +329,91 @@ def test_playback_surface_ignores_transient_stop_and_qt_paints(monkeypatch, tmp_
     finally:
         window.close()
         app.processEvents()
+
+
+def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    monkeypatch.setitem(
+        sys.modules,
+        'vlc',
+        types.SimpleNamespace(Instance=lambda *a, **k: None, MediaStats=object, __version__='stub'),
+    )
+    sys.modules.pop('tvhplayer.tvhplayer', None)
+
+    import tvhplayer.tvhplayer as ui
+    from PyQt6.QtWidgets import QApplication, QWidget
+    from tvhplayer.core.models import DvrEntry
+
+    app = QApplication.instance() or QApplication([])
+
+    class FakeBackend:
+        def __init__(self):
+            self.stopped = []
+            self.entries = [
+                DvrEntry(
+                    uuid='soon', title='Later', channel_name='BBC', start=100, duration=60,
+                    status='Scheduled', sched_status='scheduled',
+                ),
+                DvrEntry(
+                    uuid='run', title='News', channel_name='IRINN', start=200, duration=60,
+                    status='Running', sched_status='recording', htsp_id=7,
+                ),
+                DvrEntry(
+                    uuid='done', title='Old', channel_name='BBC', start=50, duration=60,
+                    status='Completed',
+                ),
+            ]
+
+        def list_dvr_entries(self):
+            return list(self.entries)
+
+        def stop_dvr_entry(self, entry):
+            self.stopped.append(entry.uuid)
+            self.entries = [item for item in self.entries if item.uuid != entry.uuid]
+
+    class Parent(QWidget):
+        def __init__(self):
+            super().__init__()
+            self.is_recording = True
+            self.cleared = False
+            self.local_recorder = types.SimpleNamespace(is_running=False)
+            self.messages = []
+            self.statusbar = types.SimpleNamespace(showMessage=self.messages.append)
+
+        def stop_recording_indicator(self):
+            self.is_recording = False
+            self.cleared = True
+
+    backend = FakeBackend()
+    parent = Parent()
+    dialog = ui.DVRStatusDialog(backend, parent)
+    dialog.update_timer.stop()
+    try:
+        assert dialog.upcoming_table.rowCount() == 2
+        assert dialog.stop_btn.isEnabled() is False
+
+        dialog.upcoming_table.selectRow(0)
+        app.processEvents()
+        assert dialog.stop_btn.isEnabled() is False
+        dialog.stop_selected()
+        assert backend.stopped == []
+
+        dialog.upcoming_table.selectRow(1)
+        app.processEvents()
+        assert dialog.stop_btn.isEnabled() is True
+        dialog.stop_selected()
+        assert backend.stopped == ['run']
+        assert 'News' in dialog.action_label.text()
+        assert dialog.upcoming_table.rowCount() == 1
+        assert dialog.stop_btn.isEnabled() is False
+        assert parent.cleared is True
+        assert parent.messages == ['Recording stopped']
+
+        dialog.tabs.setCurrentWidget(dialog.finished_table)
+        dialog.finished_table.selectRow(0)
+        app.processEvents()
+        assert dialog.stop_btn.isEnabled() is False
+    finally:
+        dialog.close()
+        parent.close()
+        app.processEvents()

@@ -176,6 +176,7 @@ class DVRStatusDialog(QDialog):
         self.upcoming_table.setColumnCount(5)  # Added one more column for status
         self.upcoming_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Duration', 'Status'])
         self.upcoming_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self._prepare_table(self.upcoming_table)
         self.tabs.addTab(self.upcoming_table, "Upcoming/Current")  # Changed tab title
         
         # Finished recordings tab
@@ -183,6 +184,7 @@ class DVRStatusDialog(QDialog):
         self.finished_table.setColumnCount(4)
         self.finished_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Duration'])
         self.finished_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self._prepare_table(self.finished_table)
         self.tabs.addTab(self.finished_table, "Finished")
         
         # Failed recordings tab
@@ -190,14 +192,117 @@ class DVRStatusDialog(QDialog):
         self.failed_table.setColumnCount(4)
         self.failed_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Error'])
         self.failed_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self._prepare_table(self.failed_table)
         self.tabs.addTab(self.failed_table, "Failed")
-        
-        # Close button
+
+        self.tabs.currentChanged.connect(self._update_controls)
+
+        btn_layout = QHBoxLayout()
+        self.stop_btn = QPushButton("Stop Recording")
+        self.stop_btn.setToolTip("Stop the selected in-progress recording. The recorded file is kept.")
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self.stop_selected)
+        btn_layout.addWidget(self.stop_btn)
+        btn_layout.addStretch()
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn)
+        btn_layout.addWidget(close_btn)
+        layout.addLayout(btn_layout)
+
+        self.action_label = QLabel("")
+        self.action_label.setWordWrap(True)
+        layout.addWidget(self.action_label)
+
+    def _prepare_table(self, table):
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table.itemSelectionChanged.connect(self._update_controls)
+
+    def _selected_entry(self):
+        table = self.tabs.currentWidget()
+        if not isinstance(table, QTableWidget):
+            return None
+        row = table.currentRow()
+        if row < 0:
+            return None
+        item = table.item(row, 0)
+        if item is None:
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def _update_controls(self):
+        entry = self._selected_entry()
+        can_stop = entry is not None and entry.category() == 'recording'
+        self.stop_btn.setEnabled(can_stop)
+
+    def stop_selected(self):
+        """Stop the selected in-progress recording via the backend."""
+        entry = self._selected_entry()
+        if entry is None or entry.category() != 'recording':
+            return
+        title = entry.title or 'recording'
+        channel = entry.channel_name or 'channel'
+        try:
+            print(f"Debug: Stopping DVR entry: {title} ({entry.uuid}) on {channel}")
+            self.backend.stop_dvr_entry(entry)
+            self.action_label.setText(f"Stopped {title} on {channel}. The recorded file is kept.")
+            self.update_status()
+            self._sync_parent_indicator()
+        except Exception as e:
+            print(f"Debug: Error stopping DVR entry: {str(e)}")
+            print(f"Debug: Traceback: {traceback.format_exc()}")
+            QMessageBox.critical(self, "Error", f"Failed to stop recording: {str(e)}")
+
+    def _sync_parent_indicator(self):
+        """Clear the main-window pulse when no server recording is still running."""
+        parent = self.parent()
+        if parent is None or not hasattr(parent, 'stop_recording_indicator'):
+            return
+        recorder = getattr(parent, 'local_recorder', None)
+        if recorder is not None and recorder.is_running:
+            return
+        try:
+            running = [
+                item for item in self.backend.list_dvr_entries()
+                if item.category() == 'recording'
+            ]
+        except Exception:
+            return
+        if not running and getattr(parent, 'is_recording', False):
+            parent.stop_recording_indicator()
+            if hasattr(parent, 'statusbar'):
+                parent.statusbar.showMessage("Recording stopped")
+
+    def _fill_row(self, table, row, values, entry, background=None):
+        for col, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            if col == 0:
+                item.setData(Qt.ItemDataRole.UserRole, entry)
+            if background is not None:
+                item.setBackground(background)
+            table.setItem(row, col, item)
+
+    def _entry_key(self, entry):
+        if entry is None:
+            return None
+        if entry.htsp_id is not None:
+            return ('htsp', entry.htsp_id)
+        return ('uuid', entry.uuid)
+
+    def _restore_selection(self, table, key):
+        if key is None:
+            return
+        for row in range(table.rowCount()):
+            item = table.item(row, 0)
+            if item is None:
+                continue
+            if self._entry_key(item.data(Qt.ItemDataRole.UserRole)) == key:
+                table.selectRow(row)
+                return
         
     def update_status(self):
+        selected_key = self._entry_key(self._selected_entry())
         try:
             entries = self.backend.list_dvr_entries()
             upcoming = []
@@ -208,48 +313,69 @@ class DVRStatusDialog(QDialog):
                 duration = timedelta(seconds=entry.duration)
                 bucket = entry.category()
                 if bucket == 'recording':
-                    upcoming.append((entry.channel_name, entry.title, start, duration, True))
+                    upcoming.append((entry, start, duration, True))
                 elif bucket == 'upcoming':
-                    upcoming.append((entry.channel_name, entry.title, start, duration, False))
+                    upcoming.append((entry, start, duration, False))
                 elif bucket == 'finished':
-                    finished.append((entry.channel_name, entry.title, start, duration))
+                    finished.append((entry, start, duration))
                 else:
                     error_msg = entry.error
                     if not error_msg and entry.errors:
                         error_msg = f"Recording failed with {entry.errors} errors"
                     if not error_msg and entry.errorcode:
                         error_msg = f"Error code: {entry.errorcode}"
-                    failed.append((entry.channel_name, entry.title, start, error_msg or 'Unknown error'))
+                    failed.append((entry, start, error_msg or 'Unknown error'))
 
-            upcoming.sort(key=lambda x: x[2])
+            upcoming.sort(key=lambda x: x[1])
             self.upcoming_table.setRowCount(len(upcoming))
-            for i, (channel, title, start, duration, is_recording) in enumerate(upcoming):
-                self.upcoming_table.setItem(i, 0, QTableWidgetItem(channel))
-                self.upcoming_table.setItem(i, 1, QTableWidgetItem(title))
-                self.upcoming_table.setItem(i, 2, QTableWidgetItem(start.strftime('%Y-%m-%d %H:%M')))
-                self.upcoming_table.setItem(i, 3, QTableWidgetItem(str(duration)))
-                self.upcoming_table.setItem(i, 4, QTableWidgetItem("Recording" if is_recording else "Scheduled"))
-                if is_recording:
-                    for col in range(5):
-                        self.upcoming_table.item(i, col).setBackground(Qt.GlobalColor.green)
+            for i, (entry, start, duration, is_recording) in enumerate(upcoming):
+                self._fill_row(
+                    self.upcoming_table,
+                    i,
+                    [
+                        entry.channel_name,
+                        entry.title,
+                        start.strftime('%Y-%m-%d %H:%M'),
+                        str(duration),
+                        "Recording" if is_recording else "Scheduled",
+                    ],
+                    entry,
+                    Qt.GlobalColor.green if is_recording else None,
+                )
 
-            finished.sort(key=lambda x: x[2], reverse=True)
+            finished.sort(key=lambda x: x[1], reverse=True)
             self.finished_table.setRowCount(len(finished))
-            for i, (channel, title, start, duration) in enumerate(finished):
-                self.finished_table.setItem(i, 0, QTableWidgetItem(channel))
-                self.finished_table.setItem(i, 1, QTableWidgetItem(title))
-                self.finished_table.setItem(i, 2, QTableWidgetItem(start.strftime('%Y-%m-%d %H:%M')))
-                self.finished_table.setItem(i, 3, QTableWidgetItem(str(duration)))
+            for i, (entry, start, duration) in enumerate(finished):
+                self._fill_row(
+                    self.finished_table,
+                    i,
+                    [
+                        entry.channel_name,
+                        entry.title,
+                        start.strftime('%Y-%m-%d %H:%M'),
+                        str(duration),
+                    ],
+                    entry,
+                )
 
-            failed.sort(key=lambda x: x[2], reverse=True)
+            failed.sort(key=lambda x: x[1], reverse=True)
             self.failed_table.setRowCount(len(failed))
-            for i, (channel, title, start, error) in enumerate(failed):
-                self.failed_table.setItem(i, 0, QTableWidgetItem(channel))
-                self.failed_table.setItem(i, 1, QTableWidgetItem(title))
-                self.failed_table.setItem(i, 2, QTableWidgetItem(start.strftime('%Y-%m-%d %H:%M')))
-                self.failed_table.setItem(i, 3, QTableWidgetItem(error))
-                for col in range(4):
-                    self.failed_table.item(i, col).setBackground(Qt.GlobalColor.red)
+            for i, (entry, start, error) in enumerate(failed):
+                self._fill_row(
+                    self.failed_table,
+                    i,
+                    [
+                        entry.channel_name,
+                        entry.title,
+                        start.strftime('%Y-%m-%d %H:%M'),
+                        error,
+                    ],
+                    entry,
+                    Qt.GlobalColor.red,
+                )
+
+            self._restore_selection(self.tabs.currentWidget(), selected_key)
+            self._update_controls()
         except Exception as e:
             print(f"Debug: Error updating DVR status: {str(e)}")
             print(f"Debug: Traceback: {traceback.format_exc()}")
