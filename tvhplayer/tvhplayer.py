@@ -24,6 +24,7 @@ except ImportError:
 try:
     from .core.backend import create_backend
     from .core.config import ConfigStore
+    from .core.dvr import instant_recording_title
     from .core.errors import TvhError
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import STALL_LIMIT, LocalRecorder
@@ -33,6 +34,7 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from core.backend import create_backend
     from core.config import ConfigStore
+    from core.dvr import instant_recording_title
     from core.errors import TvhError
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import STALL_LIMIT, LocalRecorder
@@ -2532,7 +2534,7 @@ class TVHeadendClient(QMainWindow):
                 channel,
                 now,
                 now + duration,
-                title='Instant Recording',
+                title=instant_recording_title(channel.name, datetime.fromtimestamp(now)),
                 description='Recorded via TVHplayer',
                 comment='Instant recording via TVHplayer',
             )

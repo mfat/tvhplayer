@@ -1,9 +1,15 @@
 import json
+from datetime import datetime
 
 import pytest
 
 from tvhplayer.core.backend import TvhBackend
-from tvhplayer.core.dvr import clock_to_minutes, minutes_to_clock, weekdays_from_mask
+from tvhplayer.core.dvr import (
+    clock_to_minutes,
+    instant_recording_title,
+    minutes_to_clock,
+    weekdays_from_mask,
+)
 from tvhplayer.core.errors import TvhError
 from tvhplayer.core.htsp_backend import HtspBackend
 from tvhplayer.core.http_backend import HttpBackend
@@ -16,6 +22,12 @@ from tvhplayer.core.models import (
     ServerConfig,
     TimerecSpec,
 )
+
+
+def test_instant_recording_title_uses_channel_and_start_time():
+    when = datetime(2026, 10, 23, 14, 53, 7)
+    assert instant_recording_title('BBC One', when) == 'BBC One 2026-10-23 14:53:07'
+    assert instant_recording_title('  ', when) == 'Unknown Channel 2026-10-23 14:53:07'
 
 
 def test_time_and_weekday_conversions():

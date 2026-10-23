@@ -6,6 +6,7 @@ Public operations live on ``TvhBackend``. Protocol mapping is documented in
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 from urllib.parse import quote
 
@@ -24,6 +25,17 @@ from .models import (
 )
 
 GRID_LIMIT = 10000
+
+
+def instant_recording_title(channel_name: str, when: datetime) -> str:
+    """Title Tvheadend uses as ``$t`` when naming an instant recording.
+
+    The DVR create API has no separate filename. A channel plus the local
+    start time keeps each file distinct under a pathname of ``$t``.
+    """
+    name = (channel_name or '').strip() or 'Unknown Channel'
+    return f"{name} {when.strftime('%Y-%m-%d %H:%M:%S')}"
+
 
 RERECORD_ACTIONS = ('allow', 'deny', 'toggle')
 PREVREC_ACTIONS = ('set', 'unset', 'toggle')
