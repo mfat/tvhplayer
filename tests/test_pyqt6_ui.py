@@ -173,6 +173,7 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert 'background-image' not in window.video_frame.styleSheet()
         assert window.idle_splash.isVisible()
         assert window.left_pane.isVisible()
+        assert window.tasks_pane.isVisible()
         assert window.controls_bar.isVisible()
         assert not window.is_fullscreen
         windowed_frame = window.right_pane.frameStyle()
@@ -185,6 +186,7 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert window.video_frame.parent() is window.player_container
         assert window.idle_splash.isVisible()
         assert not window.left_pane.isVisible()
+        assert not window.tasks_pane.isVisible()
         assert not window.controls_bar.isVisible()
         assert not window.menuBar().isVisible()
         assert window.right_pane.frameStyle() == int(ui.QFrame.Shape.NoFrame)
@@ -204,6 +206,7 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
 
         assert not window.is_fullscreen
         assert window.left_pane.isVisible()
+        assert window.tasks_pane.isVisible()
         assert window.controls_bar.isVisible()
         assert window.menuBar().isVisible()
         assert window.right_pane.frameStyle() == windowed_frame
@@ -571,6 +574,31 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.video_frame.accessibleName() == "Video player"
         assert window.channel_list.accessibleName() == "Channels"
         assert window.channel_list.horizontalHeaderItem(0).text() == "Number"
+        assert window.splitter.accessibleName() == "Channels, player, and tasks"
+        assert window.splitter.handle(2).accessibleName() == "Resize player and tasks"
+        assert window.tasks_pane.accessibleName() == "Tasks"
+        assert window.tasks_pane.search_box.accessibleName() == "Filter tasks"
+        assert window.tasks_pane.status_combo.accessibleName() == "Task status"
+        assert window.tasks_pane.status_combo.currentText() == "All"
+        assert window.tasks_pane.task_list.accessibleName() == "Tasks"
+        assert window.tasks_pane.action_btn.accessibleName() == "Stop"
+        assert window.tasks_pane.action_btn.isEnabled() is False
+        assert window.tasks_pane.empty_label.text() == "No tasks"
+        assert window.tasks_action.isChecked() is True
+        assert any(label.buddy() is window.tasks_pane.search_box for label in window.findChildren(ui.QLabel))
+        assert any(label.buddy() is window.tasks_pane.status_combo for label in window.findChildren(ui.QLabel))
+        focus_chain = []
+        focus_widget = window.fullscreen_btn
+        for _ in range(40):
+            focus_widget = focus_widget.nextInFocusChain()
+            if focus_widget is window.fullscreen_btn:
+                break
+            focus_chain.append(focus_widget)
+        search_at = focus_chain.index(window.tasks_pane.search_box)
+        status_at = focus_chain.index(window.tasks_pane.status_combo)
+        list_at = focus_chain.index(window.tasks_pane.task_list)
+        action_at = focus_chain.index(window.tasks_pane.action_btn)
+        assert search_at < status_at < list_at < action_at
         assert "focus" in window.play_btn.styleSheet()
         assert window.fullscreen_action.shortcut().toString() == "F11"
         assert any(label.buddy() is window.search_box for label in window.findChildren(ui.QLabel))
@@ -578,11 +606,15 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.search_box.accessibleDescription()
 
         help_labels = []
+        view_labels = []
         for action in window.menuBar().actions():
             menu = action.menu()
             if menu and menu.title().replace("&", "") == "Help":
                 help_labels = [item.text().replace("&", "") for item in menu.actions()]
+            if menu and menu.title().replace("&", "") == "View":
+                view_labels = [item.text().replace("&", "") for item in menu.actions()]
         assert "Keyboard Shortcuts" in help_labels
+        assert "Tasks" in view_labels
 
         shortcuts = ui.ShortcutHelpDialog()
         help_body = shortcuts.help_text.toPlainText()
@@ -720,6 +752,163 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         status.close()
 
         assert ui.prefers_high_contrast() is False
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def _task_texts(panel):
+    return [panel.task_list.item(row).text() for row in range(panel.task_list.count())]
+
+
+def _select_task(panel, needle):
+    for row in range(panel.task_list.count()):
+        if needle in panel.task_list.item(row).text():
+            panel.task_list.setCurrentRow(row)
+            return
+    raise AssertionError(needle)
+
+
+def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
+    from tvhplayer.core.models import Channel, DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+
+    class FakeBackend:
+        def __init__(self):
+            self.stopped = []
+            self.cancelled = []
+            self.entries = [
+                DvrEntry(
+                    uuid='soon', title='Later', channel_name='BBC', start=300, duration=60,
+                    status='Scheduled', sched_status='scheduled',
+                ),
+                DvrEntry(
+                    uuid='run', title='News', channel_name='IRINN', start=200, duration=3600,
+                    status='Running', sched_status='recording', htsp_id=7,
+                ),
+                DvrEntry(
+                    uuid='done', title='Old', channel_name='BBC', start=50, duration=60,
+                    status='Completed',
+                ),
+            ]
+
+        def list_dvr_entries(self):
+            return list(self.entries)
+
+        def stop_dvr_entry(self, entry):
+            self.stopped.append(entry.uuid)
+            self.entries = [item for item in self.entries if item.uuid != entry.uuid]
+
+        def cancel_dvr_entry(self, entry):
+            self.cancelled.append(entry.uuid)
+            self.entries = [item for item in self.entries if item.uuid != entry.uuid]
+
+    class FakeRecorder:
+        def __init__(self):
+            self.running = True
+            self.started_at = 50
+            self.file_path = '/tmp/recording_irinn.ts'
+            self.stall_count = 6
+            self.stopped = False
+
+        @property
+        def is_running(self):
+            return self.running
+
+        def stop(self):
+            self.running = False
+            self.stopped = True
+
+    backend = FakeBackend()
+    recorder = FakeRecorder()
+    window.get_backend = lambda: backend
+    window.current_server = lambda: {'name': 'tv', 'url': 'http://tv'}
+    window.local_recorder = recorder
+    window._recording_channel = Channel(uuid='c', name='IRINN')
+    try:
+        window.show()
+        app.processEvents()
+        panel = window.tasks_pane
+        panel.refresh()
+
+        texts = _task_texts(panel)
+        assert len(texts) == 3
+        assert 'Local' in texts[0] and 'recording_irinn.ts' in texts[0] and 'stalled' in texts[0]
+        assert 'News' in texts[1] and 'Recording' in texts[1]
+        assert 'Later' in texts[2] and 'Scheduled' in texts[2]
+        assert all('Old' not in text for text in texts)
+        assert panel.action_btn.isEnabled() is False
+
+        panel.search_box.setText('Later')
+        assert _task_texts(panel) == [texts[2]]
+        panel.search_box.clear()
+        panel.status_combo.setCurrentText('Recording')
+        shown = _task_texts(panel)
+        assert len(shown) == 2
+        assert all('Later' not in text for text in shown)
+        panel.search_box.setText('News')
+        shown = _task_texts(panel)
+        assert len(shown) == 1 and 'News' in shown[0]
+        panel.status_combo.setCurrentText('Scheduled')
+        assert panel.empty_label.text() == 'No matching tasks'
+        assert not panel.task_list.isVisible()
+        panel.search_box.clear()
+        assert len(_task_texts(panel)) == 1 and 'Later' in _task_texts(panel)[0]
+        panel.status_combo.setCurrentText('All')
+        panel.search_box.setText('Old')
+        assert panel.empty_label.text() == 'No matching tasks'
+        panel.search_box.clear()
+        assert panel.task_list.count() == 3
+
+        class Down:
+            def list_dvr_entries(self):
+                raise RuntimeError('offline')
+
+        window.get_backend = lambda: Down()
+        panel.refresh()
+        assert panel.error_label.text() == "Couldn't refresh server recordings"
+        assert panel.task_list.count() == 3
+        window.get_backend = lambda: backend
+        panel.refresh()
+        assert panel.error_label.text() == ''
+        assert panel.task_list.count() == 3
+
+        _select_task(panel, 'News')
+        assert panel.action_btn.accessibleName() == 'Stop'
+        assert panel.action_btn.isEnabled() is True
+        panel.run_action()
+        assert backend.stopped == ['run']
+        assert recorder.running is True
+        assert window.is_recording is True
+        assert all('News' not in text for text in _task_texts(panel))
+
+        _select_task(panel, 'Local')
+        assert 'local recording' in panel.action_btn.accessibleDescription()
+        panel.run_action()
+        assert recorder.stopped is True
+        assert window.is_recording is False
+        assert all('Local' not in text for text in _task_texts(panel))
+
+        window.start_recording_indicator()
+        _select_task(panel, 'Later')
+        assert panel.action_btn.accessibleName() == 'Cancel'
+        assert panel.action_btn.text() == 'Cancel'
+        panel.run_action()
+        assert backend.cancelled == ['soon']
+        assert window.is_recording is True
+        assert panel.empty_label.text() == 'No tasks'
+
+        window.tasks_action.setChecked(False)
+        window._toggle_tasks_pane(False)
+        window.toggle_fullscreen()
+        app.processEvents()
+        assert not panel.isVisible()
+        window.toggle_fullscreen()
+        app.processEvents()
+        assert not panel.isVisible()
+        assert window.tasks_action.isChecked() is False
     finally:
         window.close()
         app.processEvents()

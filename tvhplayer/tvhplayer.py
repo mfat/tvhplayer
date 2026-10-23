@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QRectF
-from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor
+from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QFontMetrics
 import json
 # Replace this line:
 #from . import resources_rc
@@ -26,7 +26,7 @@ try:
     from .core.config import ConfigStore
     from .core.errors import TvhError
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
-    from .core.recorder import LocalRecorder
+    from .core.recorder import STALL_LIMIT, LocalRecorder
     from .core.vlc_player import VlcPlayer
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -34,7 +34,7 @@ except ImportError:
     from core.config import ConfigStore
     from core.errors import TvhError
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
-    from core.recorder import LocalRecorder
+    from core.recorder import STALL_LIMIT, LocalRecorder
     from core.vlc_player import VlcPlayer
 try:
     from .a11y import (
@@ -451,6 +451,384 @@ class DVRStatusDialog(QDialog):
     def closeEvent(self, event):
         self.update_timer.stop()
         super().closeEvent(event)
+
+
+def _clock(seconds):
+    """Format a duration as HH:MM:SS."""
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+class TasksPanel(QFrame):
+    """Ongoing and scheduled recordings, with search and a status filter."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # The splitter reparents this pane, so keep the window that owns the backend.
+        self._host = parent
+        self._server_tasks = []
+        self._tasks = []
+        self._error_text = ""
+        self._empty_text = None
+        self.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
+        self.setAccessibleName("Tasks")
+        self.setAccessibleDescription(
+            "Ongoing and scheduled recordings. "
+            "Filter by text or by status, then stop or cancel the selected one."
+        )
+        self.setMinimumWidth(220)
+        self._build_ui()
+        self.update_timer = QTimer(self)
+        self.update_timer.timeout.connect(self.refresh)
+        self.update_timer.start(5000)
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        heading = QLabel("Tasks")
+        font = heading.font()
+        font.setBold(True)
+        heading.setFont(font)
+        heading.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        layout.addWidget(heading)
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Channel or title")
+        self.search_box.setClearButtonEnabled(True)
+        describe(
+            self.search_box,
+            "Filter tasks",
+            "Filter tasks by channel, title, kind, or status.",
+        )
+        self.search_box.textChanged.connect(self._apply_filter)
+        layout.addWidget(buddy_label("Fi&lter:", self.search_box))
+        layout.addWidget(self.search_box)
+
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["All", "Recording", "Scheduled"])
+        describe(
+            self.status_combo,
+            "Task status",
+            "Show all tasks, only recordings, or only scheduled recordings.",
+        )
+        self.status_combo.currentIndexChanged.connect(self._apply_filter)
+        layout.addWidget(buddy_label("Sho&w:", self.status_combo))
+        layout.addWidget(self.status_combo)
+
+        self.error_label = QLabel("")
+        self.error_label.setWordWrap(True)
+        self.error_label.hide()
+        layout.addWidget(self.error_label)
+
+        self.empty_label = QLabel("")
+        self.empty_label.setWordWrap(True)
+        self.empty_label.hide()
+        layout.addWidget(self.empty_label)
+
+        self.task_list = QListWidget()
+        self.task_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.task_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.task_list.setWordWrap(True)
+        self.task_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        describe(
+            self.task_list,
+            "Tasks",
+            "Ongoing and scheduled recordings. Recording rows are listed first.",
+        )
+        self.task_list.itemSelectionChanged.connect(self._update_action)
+        layout.addWidget(self.task_list, 1)
+
+        self.action_btn = QPushButton("Stop")
+        self.action_btn.setEnabled(False)
+        self.action_btn.clicked.connect(self.run_action)
+        self._set_action("Stop", "Stop the selected recording. The recorded file is kept.", False)
+        layout.addWidget(self.action_btn)
+
+    def clear_server_tasks(self):
+        """Drop cached server rows, for example after the server changes."""
+        self._server_tasks = []
+
+    def refresh(self, server=True):
+        """Reload tasks. A failed server fetch keeps the rows already shown."""
+        if server:
+            fetched, error = self._fetch_server_tasks()
+            if error is None:
+                self._server_tasks = fetched
+                self._set_error("")
+            else:
+                print(f"Debug: Error refreshing tasks: {error}")
+                self._set_error("Couldn't refresh server recordings")
+        tasks = list(self._server_tasks)
+        local = self._local_task()
+        if local is not None:
+            tasks.append(local)
+        self._tasks = sorted(
+            tasks,
+            key=lambda task: (
+                0 if task['bucket'] == 'recording' else 1,
+                task['start'],
+                task.get('title') or '',
+            ),
+        )
+        self._apply_filter()
+
+    def selected_task(self):
+        item = self.task_list.currentItem()
+        if item is None or not item.isSelected():
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def run_action(self):
+        """Stop a recording or cancel a scheduled timer."""
+        task = self.selected_task()
+        host = self._host
+        if task is None or host is None:
+            return
+        title = task.get('title') or 'recording'
+        channel = task.get('channel') or 'channel'
+        try:
+            if task['kind'] == 'Local':
+                host.stop_local_recording()
+            elif task['bucket'] == 'recording':
+                host.get_backend().stop_dvr_entry(task['entry'])
+                self._tell(host, f"Stopped {title} on {channel}. The recorded file is kept.")
+                if hasattr(host, 'sync_recording_indicator'):
+                    host.sync_recording_indicator()
+            else:
+                host.get_backend().cancel_dvr_entry(task['entry'])
+                self._tell(host, f"Cancelled {title} on {channel}.")
+        except Exception as exc:
+            print(f"Debug: Error updating task: {exc}")
+            print(f"Debug: Traceback: {traceback.format_exc()}")
+            QMessageBox.critical(self, "Error", f"Failed to update the task: {exc}")
+            return
+        self.refresh()
+
+    def _tell(self, host, message):
+        statusbar = getattr(host, 'statusbar', None)
+        if statusbar is not None:
+            statusbar.showMessage(message)
+
+    def _fetch_server_tasks(self):
+        host = self._host
+        if host is None or not hasattr(host, 'get_backend'):
+            return [], None
+        try:
+            if hasattr(host, 'current_server') and not host.current_server():
+                return [], None
+            entries = host.get_backend().list_dvr_entries()
+        except Exception as exc:
+            return None, exc
+        return self._tasks_from_entries(entries), None
+
+    def _tasks_from_entries(self, entries):
+        tasks = []
+        now = int(datetime.now().timestamp())
+        for entry in entries:
+            category = entry.category()
+            if category == 'recording':
+                bucket = 'recording'
+                status = 'Recording'
+                start_text = datetime.fromtimestamp(entry.start).strftime('%Y-%m-%d %H:%M')
+                detail = (
+                    f"Started {start_text}, elapsed {_clock(now - entry.start)}, "
+                    f"{_clock(entry.start + entry.duration - now)} left"
+                )
+            elif category == 'upcoming':
+                bucket = 'scheduled'
+                status = 'Scheduled'
+                start_text = datetime.fromtimestamp(entry.start).strftime('%Y-%m-%d %H:%M')
+                detail = f"Starts {start_text}, duration {_clock(entry.duration)}"
+            else:
+                continue
+            if entry.htsp_id is not None:
+                key = ('server', 'htsp', entry.htsp_id)
+            else:
+                key = ('server', 'uuid', entry.uuid)
+            tasks.append({
+                'kind': 'Server',
+                'bucket': bucket,
+                'key': key,
+                'entry': entry,
+                'channel': entry.channel_name or '',
+                'title': entry.title or '',
+                'status': status,
+                'detail': detail,
+                'start': entry.start or 0,
+            })
+        return tasks
+
+    def _local_task(self):
+        host = self._host
+        recorder = getattr(host, 'local_recorder', None) if host is not None else None
+        if recorder is None or not getattr(recorder, 'is_running', False):
+            return None
+        # Read the file here. LocalRecorder.status() is what counts stalls,
+        # and the recording monitor is the only caller of that.
+        path = getattr(recorder, 'file_path', None) or ''
+        try:
+            size = os.path.getsize(path) if path and os.path.exists(path) else 0
+        except OSError:
+            size = 0
+        channel = getattr(host, '_recording_channel', None)
+        channel_name = getattr(channel, 'name', '') or 'Local'
+        title = Path(path).name or 'Local recording'
+        started = getattr(recorder, 'started_at', None) or 0
+        elapsed = time.time() - started if started else 0
+        detail = f"{path}, {_clock(elapsed)}, {size / (1024 * 1024):.2f} MB"
+        if getattr(recorder, 'stall_count', 0) > STALL_LIMIT:
+            detail += ", stalled"
+        return {
+            'kind': 'Local',
+            'bucket': 'recording',
+            'key': ('local',),
+            'entry': None,
+            'channel': channel_name,
+            'title': title,
+            'status': 'Recording',
+            'detail': detail,
+            'start': int(started),
+        }
+
+    def _matches(self, task, query, status_filter):
+        if status_filter == 'Recording' and task['bucket'] != 'recording':
+            return False
+        if status_filter == 'Scheduled' and task['bucket'] != 'scheduled':
+            return False
+        if not query:
+            return True
+        haystack = " ".join([
+            task.get('kind') or '',
+            task.get('channel') or '',
+            task.get('title') or '',
+            task.get('status') or '',
+        ]).casefold()
+        return query in haystack
+
+    def _apply_filter(self, *_args):
+        selected = None
+        current = self.selected_task()
+        if current is not None:
+            selected = current.get('key')
+        query = self.search_box.text().strip().casefold()
+        status_filter = self.status_combo.currentText()
+        visible = [
+            task for task in self._tasks
+            if self._matches(task, query, status_filter)
+        ]
+        self.task_list.blockSignals(True)
+        self.task_list.clear()
+        for task in visible:
+            self._add_item(task)
+        self.task_list.blockSignals(False)
+        if visible:
+            self._set_empty("")
+            self._restore_selection(selected)
+        else:
+            self.task_list.clearSelection()
+            if self._tasks:
+                self._set_empty("No matching tasks")
+            else:
+                self._set_empty("No tasks")
+        self._update_action()
+
+    def _add_item(self, task):
+        text = (
+            f"{task['kind']}: {task['channel']} — {task['title']}\n"
+            f"{task['status']}. {task['detail']}"
+        )
+        item = QListWidgetItem(text)
+        item.setData(Qt.ItemDataRole.UserRole, task)
+        set_item_access(item, text, task['detail'])
+        colors = row_emphasis('recording' if task['bucket'] == 'recording' else None)
+        if colors is not None:
+            item.setBackground(colors[0])
+            item.setForeground(colors[1])
+        item.setSizeHint(self._item_size(text))
+        self.task_list.addItem(item)
+
+    def _item_size(self, text):
+        metrics = QFontMetrics(self.task_list.font())
+        width = self.task_list.viewport().width()
+        if width < 80:
+            width = 220
+        bounds = metrics.boundingRect(
+            0, 0, width - 12, 400, int(Qt.TextFlag.TextWordWrap), text,
+        )
+        return QSize(width, max(bounds.height() + 10, metrics.lineSpacing() * 2))
+
+    def _restore_selection(self, key):
+        if key is None:
+            self.task_list.clearSelection()
+            return
+        for row in range(self.task_list.count()):
+            item = self.task_list.item(row)
+            task = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if task is not None and task.get('key') == key:
+                self.task_list.setCurrentRow(row)
+                return
+        self.task_list.clearSelection()
+
+    def _update_action(self):
+        task = self.selected_task()
+        if task is None:
+            self._set_action(
+                "Stop",
+                "Stop the selected recording. The recorded file is kept.",
+                False,
+            )
+            return
+        if task['bucket'] == 'scheduled':
+            self._set_action(
+                "Cancel",
+                "Cancel the selected scheduled recording.",
+                True,
+            )
+            return
+        if task['kind'] == 'Local':
+            self._set_action(
+                "Stop",
+                "Stop this local recording and keep the file saved so far.",
+                True,
+            )
+            return
+        self._set_action(
+            "Stop",
+            "Stop the selected recording. The recorded file is kept.",
+            True,
+        )
+
+    def _set_action(self, name, description, enabled):
+        self.action_btn.setText(name)
+        self.action_btn.setEnabled(enabled)
+        describe(self.action_btn, name, description)
+        self.action_btn.setToolTip(description)
+
+    def _set_error(self, message):
+        if message == self._error_text:
+            return
+        self._error_text = message
+        if message:
+            announce_label(self.error_label, message)
+            self.error_label.show()
+            return
+        self.error_label.hide()
+        self.error_label.setText("")
+        self.error_label.setAccessibleName("")
+
+    def _set_empty(self, message):
+        self.task_list.setVisible(not message)
+        self.empty_label.setVisible(bool(message))
+        if message == self._empty_text:
+            return
+        self._empty_text = message
+        if message:
+            announce_label(self.empty_label, message)
+            return
+        self.empty_label.setText("")
+        self.empty_label.setAccessibleName("")
+
 
 class RecordingDurationDialog(QDialog):
     def __init__(self, parent=None):
@@ -1596,16 +1974,22 @@ class TVHeadendClient(QMainWindow):
         self.right_layout.addWidget(self.controls_bar)
         
         # Add panes to splitter instead of layout
+        self.tasks_pane = TasksPanel(self)
         self.splitter.addWidget(self.left_pane)
         self.splitter.addWidget(self.right_pane)
-        self.splitter.setAccessibleName("Channels and player")
-        splitter_handle = self.splitter.handle(1)
-        if splitter_handle is not None:
-            splitter_handle.setAccessibleName("Resize channels and player")
-            splitter_handle.setAccessibleDescription("Drag left or right, or use the arrow keys, to resize the channel list and the player.")
+        self.splitter.addWidget(self.tasks_pane)
+        self.splitter.setAccessibleName("Channels, player, and tasks")
+        self._name_splitter_handles()
+
+        self.tasks_action = QAction("&Tasks", self)
+        self.tasks_action.setCheckable(True)
+        self.tasks_action.setChecked(True)
+        self.tasks_action.setStatusTip("Show or hide ongoing and scheduled recordings")
+        self.tasks_action.triggered.connect(self._toggle_tasks_pane)
+        view_menu.addAction(self.tasks_action)
         
         # Set initial sizes (optional)
-        self.splitter.setSizes([300, 900])  # Adjust these numbers based on your preference
+        self.splitter.setSizes([300, 640, 260])
         
         # Add splitter to main layout
         layout.addWidget(self.splitter)
@@ -1694,6 +2078,7 @@ class TVHeadendClient(QMainWindow):
         search_layout.setContentsMargins(0, 5, 0, 5)
         search_layout.setSpacing(5)
         self._apply_tab_order()
+        self.tasks_pane.refresh()
 
     def _apply_tab_order(self):
         """Follow the visual order: server, channels, search, picture, then controls."""
@@ -1712,6 +2097,10 @@ class TVHeadendClient(QMainWindow):
             self.mute_btn,
             self.volume_slider,
             self.fullscreen_btn,
+            self.tasks_pane.search_box,
+            self.tasks_pane.status_combo,
+            self.tasks_pane.task_list,
+            self.tasks_pane.action_btn,
         ]
         for first, second in zip(order, order[1:]):
             self.setTabOrder(first, second)
@@ -1907,6 +2296,7 @@ class TVHeadendClient(QMainWindow):
                 f"Recording started for: {channel.name} ({duration_minutes} minutes)"
             )
             self.start_recording_indicator()
+            self._refresh_tasks()
         except Exception as e:
             print(f"Debug: Recording error: {str(e)}")
             print(f"Debug: Error type: {type(e)}")
@@ -2039,13 +2429,67 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Error in toggle_fullscreen: {str(e)}")
             print(f"Debug: Traceback: {traceback.format_exc()}")
 
-    def _splitter_handle(self):
-        if self.splitter.count() > 1:
-            return self.splitter.handle(1)
-        return None
+    def _name_splitter_handles(self):
+        names = [
+            (
+                "Resize channels and player",
+                "Drag left or right, or use the arrow keys, to resize the channel list and the player.",
+            ),
+            (
+                "Resize player and tasks",
+                "Drag left or right, or use the arrow keys, to resize the player and the task list.",
+            ),
+        ]
+        for index, (name, description) in enumerate(names, start=1):
+            handle = self.splitter.handle(index)
+            if handle is None:
+                continue
+            handle.setAccessibleName(name)
+            handle.setAccessibleDescription(description)
+
+    def _splitter_handles(self):
+        handles = []
+        splitter = getattr(self, 'splitter', None)
+        if splitter is None:
+            return handles
+        for index in range(1, splitter.count()):
+            handle = splitter.handle(index)
+            if handle is not None:
+                handles.append(handle)
+        return handles
+
+    def _toggle_tasks_pane(self, checked):
+        self.tasks_pane.setVisible(bool(checked))
+
+    def _refresh_tasks(self, server=True):
+        pane = getattr(self, 'tasks_pane', None)
+        if pane is not None:
+            pane.refresh(server=server)
+
+    def _recording_in_progress(self):
+        """True while a server recording or the local job is running."""
+        recorder = getattr(self, 'local_recorder', None)
+        if recorder is not None and getattr(recorder, 'is_running', False):
+            return True
+        try:
+            if not self.current_server():
+                return False
+            entries = self.get_backend().list_dvr_entries()
+        except Exception:
+            return bool(getattr(self, 'is_recording', False))
+        return any(entry.category() == 'recording' for entry in entries)
+
+    def sync_recording_indicator(self):
+        """Show REC while a server recording or the local job is running."""
+        if self._recording_in_progress():
+            if not self.is_recording:
+                self.start_recording_indicator()
+            return
+        if self.is_recording:
+            self.stop_recording_indicator()
 
     def _enter_fullscreen(self):
-        handle = self._splitter_handle()
+        handles = self._splitter_handles()
         self._pre_fullscreen_state = {
             'geometry': self.saveGeometry(),
             'splitter': self.splitter.saveState(),
@@ -2056,19 +2500,21 @@ class TVHeadendClient(QMainWindow):
             'right_line': self.right_pane.lineWidth(),
             'splitter_frame': self.splitter.frameStyle(),
             'splitter_handle_width': self.splitter.handleWidth(),
-            'splitter_handle_visible': handle.isVisible() if handle else False,
+            'splitter_handles_visible': [handle.isVisible() for handle in handles],
+            'tasks_visible': self.tasks_pane.isVisible(),
         }
         self.setUpdatesEnabled(False)
         try:
             self.menuBar().hide()
             self.statusbar.hide()
             self.left_pane.hide()
+            self.tasks_pane.hide()
             self.controls_bar.hide()
             self.right_pane.setFrameStyle(QFrame.Shape.NoFrame)
             self.right_pane.setLineWidth(0)
             self.splitter.setFrameStyle(QFrame.Shape.NoFrame)
             self.splitter.setHandleWidth(0)
-            if handle:
+            for handle in handles:
                 handle.hide()
             self.right_layout.setContentsMargins(0, 0, 0, 0)
             self.main_layout.setContentsMargins(0, 0, 0, 0)
@@ -2098,9 +2544,14 @@ class TVHeadendClient(QMainWindow):
             self.right_pane.setLineWidth(state.get('right_line', 1))
             self.splitter.setFrameStyle(state.get('splitter_frame', QFrame.Shape.NoFrame))
             self.splitter.setHandleWidth(state.get('splitter_handle_width', 5))
-            handle = self._splitter_handle()
-            if handle and state.get('splitter_handle_visible', True):
-                handle.show()
+            visibilities = state.get('splitter_handles_visible')
+            handles = self._splitter_handles()
+            if visibilities is None:
+                for handle in handles:
+                    handle.show()
+            else:
+                for handle, visible in zip(handles, visibilities):
+                    handle.setVisible(bool(visible))
             margins = state.get('right_margins')
             if margins is not None:
                 self.right_layout.setContentsMargins(margins)
@@ -2113,6 +2564,12 @@ class TVHeadendClient(QMainWindow):
             splitter_state = state.get('splitter')
             if splitter_state:
                 self.splitter.restoreState(splitter_state)
+            tasks_visible = state.get('tasks_visible', True)
+            self.tasks_pane.setVisible(tasks_visible)
+            if hasattr(self, 'tasks_action'):
+                self.tasks_action.blockSignals(True)
+                self.tasks_action.setChecked(tasks_visible)
+                self.tasks_action.blockSignals(False)
         finally:
             self.setUpdatesEnabled(True)
             self._protect_video_surface(self._playback_active)
@@ -2295,6 +2752,10 @@ class TVHeadendClient(QMainWindow):
                 
             self.close_backend()
             self.fetch_channels()
+            pane = getattr(self, 'tasks_pane', None)
+            if pane is not None:
+                pane.clear_server_tasks()
+                pane.refresh()
 
     def on_volume_changed(self, value):
         print(f"Debug: Volume changed to {value}")
@@ -2548,13 +3009,13 @@ class TVHeadendClient(QMainWindow):
                 else:
                     print("Debug: No active recordings found")
                     self.statusbar.showMessage("No active recordings to stop")
-                    self.stop_recording_indicator()
+                    self.sync_recording_indicator()
                 return
             for entry in targets:
                 print(f"Debug: Stopping recording: {entry.title} ({entry.uuid}) on {entry.channel_name}")
                 backend.stop_dvr_entry(entry)
             if len(targets) >= len(running):
-                self.stop_recording_indicator()
+                self.sync_recording_indicator()
             channel_name = targets[0].channel_name or (channel.name if channel else 'channel')
             if len(targets) == 1:
                 self.statusbar.showMessage(f"Stopped recording for {channel_name}")
@@ -2567,7 +3028,9 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Traceback: {traceback.format_exc()}")
             self.statusbar.showMessage(f"Error stopping recordings: {str(e)}")
             if len(running) <= 1:
-                self.stop_recording_indicator()
+                self.sync_recording_indicator()
+        finally:
+            self._refresh_tasks()
 
     def start_recording_indicator(self):
         """Start the recording indicator with smooth pulsing animation"""
@@ -2681,9 +3144,7 @@ class TVHeadendClient(QMainWindow):
             self.recording_monitor.start(2000)
             self.statusbar.showMessage(f"Local recording started: {file_path}")
             self.start_recording_indicator()
-            self.recording_status_dialog = RecordingStatusDialog(channel_name, file_path, self)
-            self.recording_status_dialog.finished.connect(self.stop_local_recording)
-            self.recording_status_dialog.show()
+            self._refresh_tasks(server=False)
             
         except Exception as e:
             print(f"Debug: Local recording error: {str(e)}")
@@ -2698,12 +3159,12 @@ class TVHeadendClient(QMainWindow):
             status = self.local_recorder.status()
             if not status.exists:
                 if status.elapsed > 10:
-                    if hasattr(self, 'recording_status_dialog'):
-                        self.recording_status_dialog.close()
+                    self.stop_local_recording()
                     QMessageBox.warning(self, "Local Recording Status", "Recording file does not exist")
+                else:
+                    self._refresh_tasks(server=False)
                 return
-            if hasattr(self, 'recording_status_dialog'):
-                self.recording_status_dialog.update_status(status.size, status.stalled)
+            self._refresh_tasks(server=False)
             if status.return_code is not None:
                 if status.size == 0 or status.return_code != 0:
                     self.stop_local_recording()
@@ -2721,19 +3182,17 @@ class TVHeadendClient(QMainWindow):
     def stop_local_recording(self):
         """Stop local recording"""
         try:
-            if hasattr(self, 'recording_status_dialog'):
-                self.recording_status_dialog.close()
-                delattr(self, 'recording_status_dialog')
             if hasattr(self, 'recording_monitor') and self.recording_monitor is not None:
                 self.recording_monitor.stop()
                 self.recording_monitor = None
             self.local_recorder.stop()
             self.statusbar.showMessage("Local recording stopped")
-            self.stop_recording_indicator()
+            self.sync_recording_indicator()
         except Exception as e:
             print(f"Debug: Error stopping local recording: {str(e)}")
             self.statusbar.showMessage(f"Error stopping local recording: {str(e)}")
-            self.stop_recording_indicator()
+            self.sync_recording_indicator()
+        self._refresh_tasks()
 
     def closeEvent(self, event):
         """Save configuration when closing the application"""
@@ -2941,6 +3400,9 @@ class EPGDialog(QDialog):
                 "Success",
                 f"Recording scheduled successfully for {entry.title or 'Unknown'}"
             )
+            parent = self.parent()
+            if parent is not None and hasattr(parent, '_refresh_tasks'):
+                parent._refresh_tasks()
         except Exception as e:
             print(f"Debug: Error scheduling recording: {str(e)}")
             QMessageBox.critical(
@@ -2948,86 +3410,6 @@ class EPGDialog(QDialog):
                 "Error",
                 f"Failed to schedule recording: {str(e)}"
             )
-
-class RecordingStatusDialog(QDialog):
-    def __init__(self, channel_name, file_path, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Recording Status")
-        self.setModal(False)  # Allow interaction with main window
-        self.resize(400, 200)
-        self.setup_ui(channel_name, file_path)
-        
-    def setup_ui(self, channel_name, file_path):
-        layout = QVBoxLayout(self)
-        self.setAccessibleName("Recording Status")
-        self.setAccessibleDescription(f"Local recording of {channel_name}, saved to {file_path}.")
-        
-        # Channel name
-        channel_label = QLabel(f"Recording: {channel_name}")
-        font = channel_label.font()
-        font.setBold(True)
-        channel_label.setFont(font)
-        layout.addWidget(channel_label)
-        
-        # File path
-        path_label = QLabel(f"Saving to: {file_path}")
-        path_label.setWordWrap(True)
-        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByKeyboard)
-        layout.addWidget(path_label)
-        
-        # Duration
-        self.duration_label = QLabel("Duration: 00:00:00")
-        self.duration_label.setAccessibleName("Duration")
-        layout.addWidget(self.duration_label)
-        
-        # File size
-        self.size_label = QLabel("File size: 0 MB")
-        self.size_label.setAccessibleName("File size")
-        layout.addWidget(self.size_label)
-        
-        # Status message. The words carry the state; color is not required.
-        self.status_label = QLabel("Status: Recording")
-        self._spoken_status = self.status_label.text()
-        announce(self.status_label, self._spoken_status)
-        layout.addWidget(self.status_label)
-        
-        # Stop button
-        stop_btn = QPushButton("Stop &Recording")
-        describe(stop_btn, "Stop Recording", "Stop this local recording and keep the file saved so far.")
-        stop_btn.setDefault(True)
-        stop_btn.setAutoDefault(True)
-        stop_btn.clicked.connect(self.stop_requested)
-        layout.addWidget(stop_btn)
-        
-        # Start time for duration calculation
-        self.start_time = time.time()
-        
-    def update_status(self, file_size, is_stalled=False):
-        """Update the dialog with current recording status"""
-        # Update duration
-        duration = int(time.time() - self.start_time)
-        hours = duration // 3600
-        minutes = (duration % 3600) // 60
-        seconds = duration % 60
-        self.duration_label.setText(f"Duration: {hours:02d}:{minutes:02d}:{seconds:02d}")
-        
-        # Update file size
-        size_mb = file_size / (1024 * 1024)  # Convert to MB
-        self.size_label.setText(f"File size: {size_mb:.2f} MB")
-        
-        # Update status message
-        if is_stalled:
-            status = "Status: Stalled - Attempting recovery"
-        else:
-            status = "Status: Recording"
-        self.status_label.setText(status)
-        if status != self._spoken_status:
-            self._spoken_status = status
-            announce(self.status_label, status)
-    
-    def stop_requested(self):
-        """Signal that user wants to stop recording"""
-        self.accept()
 
 def main():
     """Main entry point for the application"""
