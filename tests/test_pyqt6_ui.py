@@ -798,7 +798,10 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
                 DvrEntry(
                     uuid='run', title='News', channel_name='IRINN', start=200, duration=3600,
                     status='Running', sched_status='recording', htsp_id=7,
-                    raw={'filesize': 12 * 1024 * 1024},
+                    raw={
+                        'dataSize': 12 * 1024 * 1024,
+                        'files': [{'filename': '/news.ts', 'size': 23688}],
+                    },
                 ),
                 DvrEntry(
                     uuid='done', title='Old', channel_name='BBC', start=50, duration=60,
@@ -850,7 +853,20 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert 'Local' in texts[0] and 'recording_irinn.ts' in texts[0] and 'stalled' in texts[0]
         assert panel.task_table.item(0, 4).text().endswith('B')
         assert 'News' in texts[1] and 'Recording' in texts[1]
+        from tvhplayer.tvhplayer import _entry_filesize
+        assert _entry_filesize(DvrEntry(
+            uuid='http', title='Http', channel_name='IRINN', start=1, duration=1,
+            status='Running', raw={'filesize': 2048},
+        )) == 2048
+        assert _entry_filesize(DvrEntry(
+            uuid='both', title='Both', channel_name='IRINN', start=1, duration=1,
+            status='Running', raw={'dataSize': 0, 'filesize': 4096},
+        )) == 4096
         assert panel.task_table.item(1, 4).text() == '12.0 MB'
+        assert panel.task_table.item(1, 4).toolTip() == '12.0 MB'
+        assert panel.task_table.item(1, 2).toolTip() == panel.task_table.item(1, 2).text()
+        assert panel.task_table.item(1, 5).toolTip() == panel.task_table.item(1, 5).text()
+        assert 'Started' in panel.task_table.item(1, 5).toolTip()
         assert panel.task_table.item(2, 4).text() == ''
         assert 'Later' in texts[2] and 'Scheduled' in texts[2]
         assert all('Old' not in text for text in texts)

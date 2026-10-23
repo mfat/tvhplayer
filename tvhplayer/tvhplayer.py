@@ -475,17 +475,44 @@ def _format_size(num_bytes):
     return f"{size / (1024 * 1024 * 1024):.2f} GB"
 
 
+def _byte_count(value):
+    if isinstance(value, bool) or value is None or value == '':
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip().lstrip('-').isdigit():
+        return int(value.strip())
+    return None
+
+
 def _entry_filesize(entry):
-    """Bytes recorded on the server, from the DVR entry's raw fields."""
+    """Bytes recorded so far.
+
+    HTSP reports the growing file in ``dataSize``. The copy under
+    ``files[].size`` is taken when the file is opened and does not grow.
+    HTTP reports the same live size as ``filesize``.
+    """
     raw = getattr(entry, 'raw', None) or {}
+    live = []
+    stored = []
+    for key in ('dataSize', 'data_size'):
+        count = _byte_count(raw.get(key))
+        if count is not None:
+            live.append(count)
     for key in ('filesize', 'file_size', 'size'):
-        value = raw.get(key)
-        if value in (None, ''):
-            continue
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            continue
+        count = _byte_count(raw.get(key))
+        if count is not None:
+            stored.append(count)
+    positive = [count for count in live if count > 0]
+    if positive:
+        return max(positive)
+    positive = [count for count in stored if count > 0]
+    if positive:
+        return max(positive)
+    if live or stored:
+        return 0
     return None
 
 
@@ -688,10 +715,10 @@ class TasksPanel(QFrame):
             else:
                 continue
             size_bytes = _entry_filesize(entry)
-            if bucket != 'recording' and not size_bytes:
+            if size_bytes is None or (bucket != 'recording' and not size_bytes):
                 size_text = ""
             else:
-                size_text = _format_size(0 if size_bytes is None else size_bytes)
+                size_text = _format_size(size_bytes)
             if entry.htsp_id is not None:
                 key = ('server', 'htsp', entry.htsp_id)
             else:
@@ -806,6 +833,10 @@ class TasksPanel(QFrame):
             if col == 0:
                 item.setData(Qt.ItemDataRole.UserRole, task)
                 set_item_access(item, summary, task['detail'])
+            # ElideRight hides the tail of Title and Detail. The cell tooltip
+            # has to be that full text; the row description would replace it.
+            if value:
+                item.setToolTip(value)
             if colors is not None:
                 item.setBackground(colors[0])
                 item.setForeground(colors[1])
