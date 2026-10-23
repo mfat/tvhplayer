@@ -349,6 +349,7 @@ def test_spinner_shows_until_playback_starts(monkeypatch, tmp_path):
                 return 'http://tv.example/stream'
 
         window.get_backend = lambda: Backend()
+        window.servers = []
         window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
         app.processEvents()
 
@@ -809,6 +810,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         window.channel_list.setItem(0, 0, number)
         window.channel_list.setItem(0, 1, name)
         window.channel_list.setCurrentCell(0, 1)
+        window.servers = []
         enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
         assert window.eventFilter(window.channel_list, enter) is True
         assert "Playback error" in window.status_label.text()

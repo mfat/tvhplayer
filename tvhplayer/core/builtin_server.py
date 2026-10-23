@@ -36,6 +36,13 @@ def is_builtin_server(server) -> bool:
     return bool(server and server.get('builtin'))
 
 
+def builtin_requests_ready(server, running: bool) -> bool:
+    """A built-in entry can be used once its child is listening."""
+    if not is_builtin_server(server):
+        return True
+    return bool(running) and bool((server.get('url') or '').strip())
+
+
 def bundled_binary_candidates() -> list[Path]:
     """Binaries this package may have shipped. A host install is not included."""
     candidates = [Path('/app/bin/tvheadend')]
@@ -48,6 +55,10 @@ def bundled_binary_candidates() -> list[Path]:
     frozen_root = getattr(sys, '_MEIPASS', None)
     if frozen_root:
         candidates.append(Path(frozen_root) / 'tvheadend')
+    # Source checkout: the Tvheadend tree sits next to this repo.
+    repo = Path(__file__).resolve().parents[2]
+    candidates.append(repo / 'build' / 'tvheadend')
+    candidates.append(repo.parent / 'tvheadend' / 'build.linux' / 'tvheadend')
     return candidates
 
 

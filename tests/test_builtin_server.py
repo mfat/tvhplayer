@@ -1,8 +1,12 @@
 import random
 
+from pathlib import Path
+
+from tvhplayer.core import builtin_server
 from tvhplayer.core.builtin_server import (
     LineBuffer,
     StderrWatch,
+    bundled_binary_candidates,
     command_args,
     ensure_builtin_server,
     initial_ports,
@@ -10,8 +14,16 @@ from tvhplayer.core.builtin_server import (
     quit_confirmation,
     recording_titles,
     startup_result,
+    builtin_requests_ready,
 )
 from tvhplayer.core.models import DvrEntry, ServerConfig
+
+
+def test_source_checkout_looks_beside_the_repo():
+    repo = Path(builtin_server.__file__).resolve().parents[2]
+    sibling = repo.parent / 'tvheadend' / 'build.linux' / 'tvheadend'
+    assert sibling in bundled_binary_candidates()
+    assert repo / 'build' / 'tvheadend' in bundled_binary_candidates()
 
 
 def test_command_stays_in_the_foreground_without_a_pid_file():
@@ -103,6 +115,16 @@ def test_quit_warning_names_the_active_recording():
     assert 'Later' not in message
     assert quit_confirmation([], False) is None
     assert 'could not be read' in quit_confirmation([], True)
+
+
+def test_builtin_requests_wait_until_the_child_has_a_url():
+    pending = {'name': 'Built-in Server', 'url': '', 'builtin': True}
+    assert builtin_requests_ready(pending, False) is False
+    assert builtin_requests_ready(pending, True) is False
+    ready = {'name': 'Built-in Server', 'url': 'http://127.0.0.1:24111', 'builtin': True}
+    assert builtin_requests_ready(ready, True) is True
+    local = {'name': 'local', 'url': 'http://127.0.0.1:9981', 'builtin': False}
+    assert builtin_requests_ready(local, False) is True
 
 
 def test_builtin_flag_roundtrips():

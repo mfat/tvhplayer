@@ -28,6 +28,7 @@ try:
         builtin_config_dir,
         ensure_builtin_server,
         find_bundled_binary,
+        builtin_requests_ready,
         is_builtin_server,
         platform_supports_builtin,
         quit_confirmation,
@@ -49,6 +50,7 @@ except ImportError:
         builtin_config_dir,
         ensure_builtin_server,
         find_bundled_binary,
+        builtin_requests_ready,
         is_builtin_server,
         platform_supports_builtin,
         quit_confirmation,
@@ -836,6 +838,8 @@ class TasksPanel(QFrame):
             return [], None
         try:
             if hasattr(host, 'current_server') and not host.current_server():
+                return [], None
+            if hasattr(host, '_server_requests_ready') and not host._server_requests_ready():
                 return [], None
             entries = host.get_backend().list_dvr_entries()
         except Exception as exc:
@@ -2514,10 +2518,18 @@ class TVHeadendClient(QMainWindow):
         self._backend = None
         self._backend_key = None
 
+    def _server_requests_ready(self):
+        server = self.current_server()
+        supervisor = getattr(self, 'builtin', None)
+        running = supervisor is not None and supervisor.is_running()
+        return builtin_requests_ready(server, running)
+
     def get_backend(self):
         server = self.current_server()
         if not server:
             raise TvhError('No server selected')
+        if is_builtin_server(server) and not self._server_requests_ready():
+            raise TvhError('Built-in server is not running yet')
         key = (
             server.get('url'),
             (server.get('protocol') or PROTOCOL_HTTP).lower(),
@@ -2651,15 +2663,19 @@ class TVHeadendClient(QMainWindow):
                 return
                 
             server = self.current_server()
-            if is_builtin_server(server):
+            if is_builtin_server(server) and not self._server_requests_ready():
+                self.channel_list.setRowCount(0)
                 supervisor = getattr(self, 'builtin', None)
-                if supervisor is None or not supervisor.is_running():
-                    self.statusbar.showMessage("Starting built-in server...")
-                    if supervisor is not None:
-                        supervisor.start()
-                    else:
-                        self.statusbar.showMessage("Built-in server is not available in this build.")
+                if supervisor is None:
+                    self.statusbar.showMessage("Built-in server is not available in this build.")
                     return
+                if supervisor.binary is None:
+                    self.statusbar.showMessage("Built-in Tvheadend is not packaged in this build.")
+                    print("Debug: Built-in Tvheadend binary was not found in this build.")
+                    return
+                self.statusbar.showMessage("Starting built-in server...")
+                supervisor.start()
+                return
             print(f"Debug: Fetching channels from server: {server['url']}")
             self.statusbar.showMessage("Connecting to server...")
             channels = self.get_backend().get_channels()
@@ -2914,7 +2930,7 @@ class TVHeadendClient(QMainWindow):
         if recorder is not None and getattr(recorder, 'is_running', False):
             return True
         try:
-            if not self.current_server():
+            if not self.current_server() or not self._server_requests_ready():
                 return False
             entries = self.get_backend().list_dvr_entries()
         except Exception:
@@ -3111,12 +3127,16 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Updated servers list, now has {len(self.servers)} servers")
             self.save_config()
             self.close_backend()
-            
-            # Update server combo
+
+            previous = self.server_combo.currentIndex()
+            self.server_combo.blockSignals(True)
             self.server_combo.clear()
             for server in self.servers:
                 print(f"Debug: Adding server to combo: {server['name']}")
                 self.server_combo.addItem(server['name'])
+            if self.servers:
+                self.server_combo.setCurrentIndex(min(max(previous, 0), len(self.servers) - 1))
+            self.server_combo.blockSignals(False)
             
             # Refresh channels
             self.fetch_channels()
@@ -3692,6 +3712,7 @@ class TVHeadendClient(QMainWindow):
             self.fetch_channels()
 
     def _on_builtin_failed(self, message):
+        print(f"Debug: Built-in server failed: {message}")
         self.statusbar.showMessage(message)
         self._sync_builtin_controls()
 
@@ -3803,6 +3824,9 @@ class TVHeadendClient(QMainWindow):
         try:
             if channel_data is None:
                 self.statusbar.showMessage("Please select a channel to play")
+                return
+            if not self._server_requests_ready():
+                self.statusbar.showMessage("Built-in server is not running yet")
                 return
             if isinstance(channel_data, Channel):
                 channel = channel_data
