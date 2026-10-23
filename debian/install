@@ -1,0 +1,4 @@
+# tvhplayer.py usr/bin/tvhplayer
+icons/* usr/share/icons/tvhplayer/
+icons/tvhplayer.png usr/share/icons/hicolor/256x256/apps
+tvhplayer.desktop usr/share/applications/ 
