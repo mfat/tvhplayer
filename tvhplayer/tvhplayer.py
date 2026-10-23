@@ -847,7 +847,8 @@ class TVHeadendClient(QMainWindow):
         self.channels = []
         
         self.is_fullscreen = False
- 
+        self._pre_fullscreen_state = None
+
         
         # Add recording indicator variables
         self.recording_indicator_timer = None
@@ -920,10 +921,8 @@ class TVHeadendClient(QMainWindow):
             # Set hardware decoding to automatic
             if hasattr(self.media_player, 'set_hardware_decoding'):
                 self.media_player.set_hardware_decoding(True)
-            else:
-                # Alternative method for older VLC Python bindings
-                self.media_player.video_set_key_input(False)
-                self.media_player.video_set_mouse_input(False)
+            # Always let Qt receive clicks and keys on the video surface
+            self._release_vlc_input()
             
             # Add a timer to check which hardware acceleration method is being used
             # This will check after playback starts
@@ -1024,10 +1023,11 @@ class TVHeadendClient(QMainWindow):
         
         
         # Add Fullscreen action to View menu
-        fullscreen_action = QAction("Fullscreen", self)
-        fullscreen_action.setShortcut("F")
-        fullscreen_action.triggered.connect(self.toggle_fullscreen)
-        view_menu.addAction(fullscreen_action)
+        self.fullscreen_action = QAction("Fullscreen", self)
+        self.fullscreen_action.setShortcut("F")
+        self.fullscreen_action.setCheckable(True)
+        self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
+        view_menu.addAction(self.fullscreen_action)
 
         # Add Settings action to View menu
         #settings_action = QAction("Settings", self)
@@ -1048,12 +1048,12 @@ class TVHeadendClient(QMainWindow):
         layout = QVBoxLayout(main_widget)
         
         # Create splitter for resizable panes
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # Left pane
-        left_pane = QFrame()
-        left_pane.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
-        left_layout = QVBoxLayout(left_pane)
+        self.left_pane = QFrame()
+        self.left_pane.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
+        left_layout = QVBoxLayout(self.left_pane)
         
         # Server selection with add/remove buttons
         server_layout = QHBoxLayout()
@@ -1101,13 +1101,17 @@ class TVHeadendClient(QMainWindow):
         left_layout.addWidget(self.channel_list)
         
         # Right pane
-        right_pane = QFrame()
-        right_pane.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
-        right_layout = QVBoxLayout(right_pane)
-        right_layout.setObjectName("right_layout")
+        self.right_pane = QFrame()
+        self.right_pane.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
+        self.right_layout = QVBoxLayout(self.right_pane)
+        self.right_layout.setObjectName("right_layout")
         
         # VLC player widget
         self.video_frame = QWidget()
+        self.video_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.video_frame.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.video_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.video_frame.customContextMenuRequested.connect(self.show_video_context_menu)
         self.video_frame.setStyleSheet("""
             background-color: black;
             background-image: url(icons/playerbg.svg);
@@ -1115,10 +1119,12 @@ class TVHeadendClient(QMainWindow):
             background-repeat: no-repeat;
         """)
         
-        right_layout.addWidget(self.video_frame)
+        self.right_layout.addWidget(self.video_frame, 1)
         
         # Player controls
-        controls_layout = QHBoxLayout()
+        self.controls_bar = QWidget()
+        controls_layout = QHBoxLayout(self.controls_bar)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
        # Create frame for play/stop buttons
         playback_frame = QFrame()
         playback_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
@@ -1234,29 +1240,30 @@ class TVHeadendClient(QMainWindow):
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         
         # Fullscreen button with icon
-        fullscreen_btn = QPushButton()
-        fullscreen_btn.setIcon(QIcon(f"{self.icons_dir}/fullscreen.svg"))
-        fullscreen_btn.setIconSize(QSize(32, 32))
-        fullscreen_btn.setFixedSize(32, 32)  # Remove extra parenthesis
-        fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        fullscreen_btn.setToolTip("Toggle Fullscreen")
-        fullscreen_btn.setStyleSheet("QPushButton { border: none; }")
+        self.fullscreen_btn = QPushButton()
+        self.fullscreen_btn.setIcon(QIcon(f"{self.icons_dir}/fullscreen.svg"))
+        self.fullscreen_btn.setIconSize(QSize(32, 32))
+        self.fullscreen_btn.setFixedSize(32, 32)
+        self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+        self.fullscreen_btn.setToolTip("Toggle Fullscreen")
+        self.fullscreen_btn.setStyleSheet("QPushButton { border: none; }")
         
         controls_layout.addStretch()  # Add stretch to push widgets to the right
         controls_layout.addWidget(self.mute_btn)
         controls_layout.addWidget(self.volume_slider)
-        controls_layout.addWidget(fullscreen_btn)
-        right_layout.addLayout(controls_layout)
+        controls_layout.addWidget(self.fullscreen_btn)
+        self.right_layout.addWidget(self.controls_bar)
         
         # Add panes to splitter instead of layout
-        splitter.addWidget(left_pane)
-        splitter.addWidget(right_pane)
+        self.splitter.addWidget(self.left_pane)
+        self.splitter.addWidget(self.right_pane)
         
         # Set initial sizes (optional)
-        splitter.setSizes([300, 900])  # Adjust these numbers based on your preference
+        self.splitter.setSizes([300, 900])  # Adjust these numbers based on your preference
         
         # Add splitter to main layout
-        layout.addWidget(splitter)
+        layout.addWidget(self.splitter)
+        self.main_layout = layout
         
         
         # Buttons removed
@@ -1313,9 +1320,6 @@ class TVHeadendClient(QMainWindow):
         
         # Add event filter to video frame for double-click
         self.video_frame.installEventFilter(self)
-        
-        # Add key event filter to main window
-        self.installEventFilter(self)
         
         # Add Server Status to View menu
         server_status_action = view_menu.addAction("Server Status")
@@ -1500,82 +1504,131 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage(f"Recording error: {str(e)}")
             
     def stop_playback(self):
-        print("Debug: Stopping playback")
         """Stop current playback"""
+        print("Debug: Stopping playback")
         self.media_player.stop()
         self.statusbar.showMessage("Playback stopped")
 
-                # Create a new fullscreen window
-    def toggle_fullscreen(self):
-        """Toggle fullscreen mode for VLC player"""
-        print(f"Debug: Toggling fullscreen. Current state: {self.is_fullscreen}")
-        
+    def _release_vlc_input(self):
+        """Stop VLC from eating mouse and keyboard so Qt can handle them."""
         try:
-            if not self.is_fullscreen:
-                # Store the video frame's original parent and layout position
-                self.original_parent = self.video_frame.parent()
-                self.original_layout = self.findChild(QVBoxLayout, "right_layout")
-            
-            # Create a new fullscreen window
-                self.fullscreen_window = QWidget()
-                self.fullscreen_window.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
-                self.fullscreen_window.installEventFilter(self)
-                layout = QVBoxLayout(self.fullscreen_window)
-                layout.setContentsMargins(0, 0, 0, 0)
-                layout.setSpacing(0)  # Remove spacing between widgets
-            
-                # Move video frame to fullscreen
-                self.video_frame.setParent(self.fullscreen_window)
-                layout.addWidget(self.video_frame)
-            
-                # Show fullscreen
-                QApplication.processEvents()  # Process any pending events
-                self.fullscreen_window.showFullScreen()
-                self.video_frame.show()
-            
-                # Reset VLC window handle for fullscreen
-                if sys.platform.startswith('linux'):
-                    QApplication.processEvents()  # Give X11 time to update
-                    self.media_player.set_xwindow(self.video_frame.winId().__int__())
-                elif sys.platform == "win32":
-                    self.media_player.set_hwnd(self.video_frame.winId().__int__())
-                elif sys.platform == "darwin":
-                    self.media_player.set_nsobject(self.video_frame.winId().__int__())
+            self.media_player.video_set_key_input(False)
+            self.media_player.video_set_mouse_input(False)
+        except Exception as e:
+            print(f"Debug: Could not disable VLC input grabbing: {e}")
+
+    def toggle_fullscreen(self, checked=None):
+        """Fill the screen with the current window; hide list, controls, and bars."""
+        print(f"Debug: Toggling fullscreen. Current state: {self.is_fullscreen}")
+        try:
+            if self.is_fullscreen:
+                self._exit_fullscreen()
             else:
-                # Remove from fullscreen layout
-                if self.fullscreen_window and self.fullscreen_window.layout():
-                    self.fullscreen_window.layout().removeWidget(self.video_frame)
-                
-                # Find the right pane's layout again
-                right_layout = self.findChild(QVBoxLayout, "right_layout")
-                if right_layout:
-                    # Restore to right pane
-                    self.video_frame.setParent(self.original_parent)
-                    right_layout.insertWidget(0, self.video_frame)
-                    QApplication.processEvents()  # Process any pending events
-                    self.video_frame.show()
-                    
-                    # Reset VLC window handle for normal view
-                    if sys.platform.startswith('linux'):
-                        QApplication.processEvents()  # Give X11 time to update
-                        self.media_player.set_xwindow(self.video_frame.winId().__int__())
-                    elif sys.platform == "win32":
-                        self.media_player.set_hwnd(self.video_frame.winId().__int__())
-                    elif sys.platform == "darwin":
-                        self.media_player.set_nsobject(self.video_frame.winId().__int__())
-                    
-                    # Close fullscreen window
-                    self.fullscreen_window.close()
-                    self.fullscreen_window = None
-                else:
-                    print("Debug: Could not find right_layout")
-            
-            self.is_fullscreen = not self.is_fullscreen
+                self._enter_fullscreen()
+            self._sync_fullscreen_ui()
             print(f"Debug: New fullscreen state: {self.is_fullscreen}")
-            
         except Exception as e:
             print(f"Debug: Error in toggle_fullscreen: {str(e)}")
             print(f"Debug: Traceback: {traceback.format_exc()}")
+
+    def _enter_fullscreen(self):
+        self._pre_fullscreen_state = {
+            'geometry': self.saveGeometry(),
+            'splitter': self.splitter.saveState(),
+            'right_margins': self.right_layout.contentsMargins(),
+            'main_margins': self.main_layout.contentsMargins(),
+            'right_frame': self.right_pane.frameStyle(),
+        }
+        self.menuBar().hide()
+        self.statusbar.hide()
+        self.left_pane.hide()
+        self.controls_bar.hide()
+        self.right_pane.setFrameStyle(QFrame.Shape.NoFrame)
+        self.right_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.showFullScreen()
+        self.video_frame.setFocus()
+        self.is_fullscreen = True
+
+    def _exit_fullscreen(self):
+        state = self._pre_fullscreen_state or {}
+        self.showNormal()
+        geometry = state.get('geometry')
+        if geometry:
+            self.restoreGeometry(geometry)
+        self.menuBar().show()
+        self.statusbar.show()
+        self.left_pane.show()
+        self.controls_bar.show()
+        self.right_pane.setFrameStyle(state.get('right_frame', QFrame.Shape.Panel | QFrame.Shadow.Raised))
+        margins = state.get('right_margins')
+        if margins is not None:
+            self.right_layout.setContentsMargins(margins)
+        main_margins = state.get('main_margins')
+        if main_margins is not None:
+            self.main_layout.setContentsMargins(main_margins)
+        splitter_state = state.get('splitter')
+        if splitter_state:
+            self.splitter.restoreState(splitter_state)
+        self.is_fullscreen = False
+        self._pre_fullscreen_state = None
+
+    def _sync_fullscreen_ui(self):
+        if hasattr(self, 'fullscreen_action'):
+            self.fullscreen_action.blockSignals(True)
+            self.fullscreen_action.setChecked(self.is_fullscreen)
+            self.fullscreen_action.setText('Exit Fullscreen' if self.is_fullscreen else 'Fullscreen')
+            self.fullscreen_action.blockSignals(False)
+        if hasattr(self, 'fullscreen_btn'):
+            self.fullscreen_btn.setToolTip('Exit Fullscreen' if self.is_fullscreen else 'Toggle Fullscreen')
+
+    def _video_context_menu(self):
+        """Build the right-click menu for the video surface."""
+        menu = QMenu(self)
+        channel = self.selected_channel()
+        playing = bool(self.media_player and self.media_player.is_playing())
+        muted = bool(self.media_player and self.media_player.audio_get_mute())
+
+        play_action = menu.addAction(QIcon(f"{self.icons_dir}/play.svg"), "Play")
+        play_action.setEnabled(channel is not None)
+        play_action.triggered.connect(lambda: self.play_channel_by_data(channel))
+
+        stop_action = menu.addAction(QIcon(f"{self.icons_dir}/stop.svg"), "Stop")
+        stop_action.setEnabled(playing)
+        stop_action.triggered.connect(self.stop_playback)
+
+        menu.addSeparator()
+
+        mute_action = menu.addAction(
+            QIcon(f"{self.icons_dir}/unmute.svg" if muted else f"{self.icons_dir}/mute.svg"),
+            "Unmute" if muted else "Mute",
+        )
+        mute_action.triggered.connect(self.toggle_mute)
+
+        fullscreen_action = menu.addAction(
+            QIcon(f"{self.icons_dir}/fullscreen.svg"),
+            "Exit Fullscreen" if self.is_fullscreen else "Fullscreen",
+        )
+        fullscreen_action.triggered.connect(self.toggle_fullscreen)
+
+        menu.addSeparator()
+
+        record_action = menu.addAction(QIcon(f"{self.icons_dir}/record.svg"), "Record")
+        record_action.setEnabled(channel is not None)
+        record_action.triggered.connect(self.start_recording)
+
+        local_action = menu.addAction(QIcon(f"{self.icons_dir}/reclocal.svg"), "Record Locally")
+        local_action.setEnabled(channel is not None)
+        local_action.triggered.connect(lambda: self.start_local_recording(channel))
+
+        epg_action = menu.addAction(QIcon(f"{self.icons_dir}/epg.svg"), "Show EPG")
+        epg_action.setEnabled(channel is not None)
+        epg_action.triggered.connect(lambda: self.show_channel_epg(channel))
+        return menu
+
+    def show_video_context_menu(self, position):
+        """Right-click menu on the video surface."""
+        self._video_context_menu().exec(self.video_frame.mapToGlobal(position))
 
     def manage_servers(self):
         print("Debug: Opening server management dialog")
@@ -1681,22 +1734,18 @@ class TVHeadendClient(QMainWindow):
         self.media_player.audio_set_volume(value)
 
     def eventFilter(self, obj, event):
-        """Handle double-click and key events"""
-        if obj == self.video_frame:
-            if event.type() == QEvent.Type.MouseButtonDblClick:
-                self.toggle_fullscreen()
-                return True
-            
-        # Handle key events for both main window and fullscreen window
-        if event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Escape and self.is_fullscreen:
-                self.toggle_fullscreen()
-                return True
-            elif event.key() == Qt.Key.Key_F:
-                self.toggle_fullscreen()
-                return True
-            
+        """Double-click the video to toggle fullscreen."""
+        if obj is self.video_frame and event.type() == QEvent.Type.MouseButtonDblClick:
+            self.toggle_fullscreen()
+            return True
         return super().eventFilter(obj, event)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape and self.is_fullscreen:
+            self.toggle_fullscreen()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def toggle_mute(self):
         """Toggle audio mute state"""
@@ -2041,6 +2090,7 @@ class TVHeadendClient(QMainWindow):
             media = self.instance.media_new(stream_url)
             self.media_player.set_media(media)
             self.media_player.play()
+            self._release_vlc_input()
             self.statusbar.showMessage(f"Playing: {channel.name}")
         except Exception as e:
             print(f"Debug: Error in play_channel: {str(e)}")
