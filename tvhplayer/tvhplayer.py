@@ -41,8 +41,10 @@ try:
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import STALL_LIMIT, LocalRecorder
     from .core.vlc_player import VlcPlayer
+    from .core.playlist_sync import PlaylistSource, server_key
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
+    from .playlist_dialogs import ImportPlaylistDialog
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from core.backend import create_backend
@@ -64,8 +66,10 @@ except ImportError:
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import STALL_LIMIT, LocalRecorder
     from core.vlc_player import VlcPlayer
+    from core.playlist_sync import PlaylistSource, server_key
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
+    from playlist_dialogs import ImportPlaylistDialog
 try:
     from .a11y import (
         ShortcutHelpDialog,
@@ -2003,6 +2007,12 @@ class TVHeadendClient(QMainWindow):
         #settings_action = QAction("Settings", self)
         ##view_menu.addAction(settings_action)
         
+        import_playlist_action = QAction("&Import Playlist…", self)
+        import_playlist_action.setShortcut("Ctrl+I")
+        import_playlist_action.triggered.connect(self.import_playlist)
+        file_menu.addAction(import_playlist_action)
+        file_menu.addSeparator()
+
         # Create actions
         exit_action = QAction("E&xit", self)
         if sys.platform == "darwin":  # macOS
@@ -3784,6 +3794,86 @@ class TVHeadendClient(QMainWindow):
         self.statusbar.showMessage(
             f"Log in as \"{supervisor.username}\". The password is on the clipboard."
         )
+
+    def import_playlist(self):
+        ImportPlaylistDialog(self, self).exec()
+
+    def import_targets(self):
+        """Servers a playlist can go to: the built-in server first, then the user's."""
+        targets = []
+        builtin = find_builtin_server(self.servers)
+        if builtin is not None and self.builtin is not None and self.builtin.binary is not None:
+            targets.append(builtin)
+        targets.extend(server for server in self.servers if not is_builtin_server(server))
+        return targets
+
+    def playlist_sources(self):
+        return [PlaylistSource.from_dict(raw) for raw in self.config.get('playlists') or []]
+
+    def store_playlist_source(self, data):
+        source = PlaylistSource.from_dict(data)
+        sources = self.playlist_sources()
+        for index, existing in enumerate(sources):
+            if existing.server == source.server and existing.location == source.location:
+                sources[index] = source
+                break
+        else:
+            sources.append(source)
+        self.config['playlists'] = [item.to_dict() for item in sources]
+        self.save_config()
+
+    def ensure_server_ready(self, server, on_ready, on_failed):
+        """Call ``on_ready`` with a usable server entry, starting the built-in server if needed."""
+        if not is_builtin_server(server):
+            on_ready(server)
+            return
+        supervisor = self.builtin
+        if supervisor is None or supervisor.binary is None:
+            on_failed("The built-in server is not part of this version of TVHplayer.")
+            return
+        current = find_builtin_server(self.servers)
+        if builtin_requests_ready(current, supervisor.is_running()):
+            on_ready(current)
+            return
+
+        def disconnect():
+            for signal, slot in ((supervisor.ready, ready), (supervisor.failed, failed)):
+                try:
+                    signal.disconnect(slot)
+                except TypeError:
+                    pass
+
+        def ready(_http_port, _htsp_port):
+            disconnect()
+            on_ready(find_builtin_server(self.servers))
+
+        def failed(message):
+            disconnect()
+            on_failed(message)
+
+        supervisor.ready.connect(ready)
+        supervisor.failed.connect(failed)
+        self.statusbar.showMessage("Starting built-in server...")
+        supervisor.start()
+
+    def _same_server(self, first, second):
+        if not first or not second:
+            return False
+        return server_key(first) == server_key(second)
+
+    def is_current_server(self, server):
+        return self._same_server(self.current_server(), server)
+
+    def playlist_imported(self, server):
+        if self.is_current_server(server):
+            self.close_backend()
+            self.fetch_channels()
+
+    def show_server(self, server):
+        for index, candidate in enumerate(self.servers):
+            if self._same_server(candidate, server):
+                self.server_combo.setCurrentIndex(index)
+                return
 
     def show_builtin_log(self):
         supervisor = getattr(self, 'builtin', None)

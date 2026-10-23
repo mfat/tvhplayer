@@ -37,6 +37,17 @@ To connect TVHPlayer to your TVHeadend server:
 
 Press the play button or double-click a channel on the channel list to start playback.
 
+### Adding channels from a playlist
+
+You can add internet TV channels from an M3U playlist.
+
+1. Choose **File → Import Playlist…** (Ctrl+I).
+2. Paste the playlist's web address, or click **Browse…** to pick a playlist file.
+3. If you have more than one server, choose where the channels go. The built-in server is chosen for you.
+4. Click **Import**.
+
+The channels appear in the channel list when the import finishes. To pick up changes to the playlist later, import the same playlist again: new channels are added, and channels that left the playlist are removed.
+
 ### Schedule recordings
 
 1. To record a live program using Tvheaden's DVR function, click the record button below the player. Recordings will be stored on the server.

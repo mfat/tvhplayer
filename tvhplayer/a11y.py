@@ -47,6 +47,7 @@ Menus
   Alt+F            File menu
   Alt+V            View menu
   Alt+H            Help menu
+  Ctrl+I           Import a playlist
   Ctrl+Q           Quit (Cmd+Q on macOS)
 """
 
