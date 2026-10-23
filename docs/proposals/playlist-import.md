@@ -28,7 +28,7 @@ Tvheadend has its own playlist importer, the *IPTV Automatic Network*. TVHplayer
 The import dialog has a **Server** list. It shows the built-in server first and preselects it. The user's other servers follow, in the order of the server list.
 
 - **Built-in server.** TVHplayer holds its admin login. If the server is not running, the import starts it and waits for the ready signal the supervisor already gives. The built-in server keeps starting and stopping with the app; the import does not change its lifetime.
-- **Other servers.** Changing networks and muxes needs the admin privilege. Before showing the preview, the app calls `api/mpegts/network/grid`. A 401 or 403 stops the import with: *"This account cannot change server settings. Sign in with an admin account to import a playlist."* Nothing has been written at that point.
+- **Other servers.** Changing networks and muxes needs the admin privilege. Before writing anything, the app calls `api/mpegts/network/grid`. A 401 or 403 stops the import with the administrator message in the error table below.
 - **HTSP servers.** Admin calls always use the HTTP JSON API at the server's address, whichever protocol the server entry uses for viewing.
 - **Platforms without the built-in server** (macOS and Windows today) show only the user's servers. With none configured, the menu item explains that a server is needed.
 
