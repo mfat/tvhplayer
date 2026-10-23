@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QCheckBox, QGroupBox,
     QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QEvent
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QEvent, QPoint
 from PyQt6.QtGui import QIcon, QPainter, QColor, QKeySequence, QPalette, QAction, QShortcut
 import json
 import requests
@@ -36,6 +36,36 @@ except ImportError:
     from core.errors import TvhError
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import LocalRecorder
+try:
+    from .a11y import (
+        ShortcutHelpDialog,
+        announce,
+        announce_label,
+        buddy_label,
+        button_stylesheet,
+        describe,
+        find_shortcut,
+        prefers_high_contrast,
+        quality_colors,
+        quality_phrase,
+        row_emphasis,
+        set_item_access,
+    )
+except ImportError:
+    from a11y import (
+        ShortcutHelpDialog,
+        announce,
+        announce_label,
+        buddy_label,
+        button_stylesheet,
+        describe,
+        find_shortcut,
+        prefers_high_contrast,
+        quality_colors,
+        quality_phrase,
+        row_emphasis,
+        set_item_access,
+    )
 # or
 #from tvhplayer import resources_rc  # Use absolute import
 import time
@@ -168,7 +198,13 @@ class DVRStatusDialog(QDialog):
         layout = QVBoxLayout(self)
         
         # Create tab widget
+        self.setAccessibleName("DVR Status")
+        self.setAccessibleDescription(
+            "Scheduled, finished, and failed recordings. "
+            "The Status column says whether a recording is in progress."
+        )
         self.tabs = QTabWidget()
+        self.tabs.setAccessibleName("Recording categories")
         layout.addWidget(self.tabs)
         
         # Upcoming/Current recordings tab
@@ -177,6 +213,11 @@ class DVRStatusDialog(QDialog):
         self.upcoming_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Duration', 'Status'])
         self.upcoming_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._prepare_table(self.upcoming_table)
+        describe(
+            self.upcoming_table,
+            "Upcoming and current recordings",
+            "Channel, title, start time, duration, and status. Status is written in the last column.",
+        )
         self.tabs.addTab(self.upcoming_table, "Upcoming/Current")  # Changed tab title
         
         # Finished recordings tab
@@ -185,6 +226,7 @@ class DVRStatusDialog(QDialog):
         self.finished_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Duration'])
         self.finished_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._prepare_table(self.finished_table)
+        describe(self.finished_table, "Finished recordings", "Channel, title, start time, and duration.")
         self.tabs.addTab(self.finished_table, "Finished")
         
         # Failed recordings tab
@@ -193,24 +235,32 @@ class DVRStatusDialog(QDialog):
         self.failed_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Error'])
         self.failed_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self._prepare_table(self.failed_table)
+        describe(self.failed_table, "Failed recordings", "Channel, title, start time, and the error text.")
         self.tabs.addTab(self.failed_table, "Failed")
 
         self.tabs.currentChanged.connect(self._update_controls)
 
         btn_layout = QHBoxLayout()
-        self.stop_btn = QPushButton("Stop Recording")
+        self.stop_btn = QPushButton("Stop &Recording")
         self.stop_btn.setToolTip("Stop the selected in-progress recording. The recorded file is kept.")
+        describe(
+            self.stop_btn,
+            "Stop Recording",
+            "Stop the selected in-progress recording. The recorded file is kept.",
+        )
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_selected)
         btn_layout.addWidget(self.stop_btn)
         btn_layout.addStretch()
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton("&Close")
         close_btn.clicked.connect(self.accept)
+        close_btn.setAutoDefault(True)
         btn_layout.addWidget(close_btn)
         layout.addLayout(btn_layout)
 
         self.action_label = QLabel("")
         self.action_label.setWordWrap(True)
+        self.action_label.setAccessibleName("Recording action result")
         layout.addWidget(self.action_label)
 
     def _prepare_table(self, table):
@@ -246,7 +296,10 @@ class DVRStatusDialog(QDialog):
         try:
             print(f"Debug: Stopping DVR entry: {title} ({entry.uuid}) on {channel}")
             self.backend.stop_dvr_entry(entry)
-            self.action_label.setText(f"Stopped {title} on {channel}. The recorded file is kept.")
+            announce_label(
+                self.action_label,
+                f"Stopped {title} on {channel}. The recorded file is kept.",
+            )
             self.update_status()
             self._sync_parent_indicator()
         except Exception as e:
@@ -274,13 +327,17 @@ class DVRStatusDialog(QDialog):
             if hasattr(parent, 'statusbar'):
                 parent.statusbar.showMessage("Recording stopped")
 
-    def _fill_row(self, table, row, values, entry, background=None):
+    def _fill_row(self, table, row, values, entry, emphasis=None):
+        colors = row_emphasis(emphasis)
+        summary = ", ".join(str(value) for value in values if value)
         for col, value in enumerate(values):
             item = QTableWidgetItem(value)
             if col == 0:
                 item.setData(Qt.ItemDataRole.UserRole, entry)
-            if background is not None:
-                item.setBackground(background)
+                set_item_access(item, summary)
+            if colors is not None:
+                item.setBackground(colors[0])
+                item.setForeground(colors[1])
             table.setItem(row, col, item)
 
     def _entry_key(self, entry):
@@ -340,7 +397,7 @@ class DVRStatusDialog(QDialog):
                         "Recording" if is_recording else "Scheduled",
                     ],
                     entry,
-                    Qt.GlobalColor.green if is_recording else None,
+                    'recording' if is_recording else None,
                 )
 
             finished.sort(key=lambda x: x[1], reverse=True)
@@ -371,7 +428,7 @@ class DVRStatusDialog(QDialog):
                         error,
                     ],
                     entry,
-                    Qt.GlobalColor.red,
+                    'failed',
                 )
 
             self._restore_selection(self.tabs.currentWidget(), selected_key)
@@ -393,6 +450,8 @@ class RecordingDurationDialog(QDialog):
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        self.setAccessibleName("Recording Duration")
+        self.setAccessibleDescription("Choose how long to record the selected channel.")
         
         # Quick duration buttons
         quick_duration_layout = QHBoxLayout()
@@ -401,6 +460,10 @@ class RecordingDurationDialog(QDialog):
         btn_1hr = QPushButton("1 hour") 
         btn_2hr = QPushButton("2 hours")
         btn_4hr = QPushButton("4 hours")
+        describe(btn_30min, "30 minutes", "Set the recording length to 30 minutes")
+        describe(btn_1hr, "1 hour", "Set the recording length to 1 hour")
+        describe(btn_2hr, "2 hours", "Set the recording length to 2 hours")
+        describe(btn_4hr, "4 hours", "Set the recording length to 4 hours")
         
         btn_30min.clicked.connect(lambda: self.set_duration(0, 30))
         btn_1hr.clicked.connect(lambda: self.set_duration(1, 0))
@@ -420,15 +483,21 @@ class RecordingDurationDialog(QDialog):
         self.hours_spin = QSpinBox()
         self.hours_spin.setRange(0, 24)
         self.hours_spin.setSuffix(" hours")
+        describe(self.hours_spin, "Hours", "Recording length in hours, from 0 to 24")
         
         self.minutes_spin = QSpinBox()
         self.minutes_spin.setRange(0, 59)
         self.minutes_spin.setSuffix(" minutes")
+        describe(self.minutes_spin, "Minutes", "Additional minutes, from 0 to 59")
         
+        duration_layout.addWidget(buddy_label("&Hours:", self.hours_spin))
         duration_layout.addWidget(self.hours_spin)
+        duration_layout.addWidget(buddy_label("&Minutes:", self.minutes_spin))
         duration_layout.addWidget(self.minutes_spin)
         
-        layout.addWidget(QLabel("Set custome recording duration:"))
+        heading = QLabel("Set a custom recording duration:")
+        heading.setAccessibleName("Set a custom recording duration")
+        layout.addWidget(heading)
         layout.addLayout(duration_layout)
         
         # Buttons
@@ -458,19 +527,22 @@ class ServerDialog(QDialog):
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
+        self.setAccessibleName("Server Management")
+        self.setAccessibleDescription("Add, edit, or remove TVHeadend servers.")
         # Server list
         self.server_list = QListWidget()
-        layout.addWidget(QLabel("Configured Servers:"))
+        describe(self.server_list, "Configured servers", "Double-click or press Enter to edit the selected server.")
+        layout.addWidget(buddy_label("&Configured servers:", self.server_list))
         layout.addWidget(self.server_list)
         
-        # Connect double-click signal
-        self.server_list.itemDoubleClicked.connect(self.edit_server)
+        # Enter and double-click both activate the selected server.
+        self.server_list.itemActivated.connect(lambda _item: self.edit_server())
         
         # Buttons
         btn_layout = QHBoxLayout()
-        add_btn = QPushButton("Add Server")
-        edit_btn = QPushButton("Edit Server")
-        remove_btn = QPushButton("Remove Server")
+        add_btn = QPushButton("&Add Server")
+        edit_btn = QPushButton("&Edit Server")
+        remove_btn = QPushButton("&Remove Server")
         
         add_btn.clicked.connect(self.add_server)
         edit_btn.clicked.connect(self.edit_server)
@@ -482,8 +554,9 @@ class ServerDialog(QDialog):
         layout.addLayout(btn_layout)
         
         # Close button
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton("&Close")
         close_btn.clicked.connect(self.accept)
+        close_btn.setAutoDefault(True)
         layout.addWidget(close_btn)
         
     def load_servers(self, servers):
@@ -531,36 +604,34 @@ class ServerConfigDialog(QDialog):
         
     def setup_ui(self):
         layout = QFormLayout(self)
+        self.setAccessibleName("Server Configuration")
+        self.setAccessibleDescription("Name, address, protocol, and optional sign-in for a TVHeadend server.")
         
         self.name_input = QLineEdit()
         self.url_input = QLineEdit()
         self.username_input = QLineEdit()
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        describe(self.password_input, description="Password is hidden while you type.")
         
-        # Style placeholder text
-        placeholder_color = QColor(100, 100, 100)  # Dark gray color
-        palette = self.palette()
-        palette.setColor(QPalette.ColorRole.PlaceholderText, placeholder_color)
-        self.setPalette(palette)
-        
-        # Apply placeholder text
-        layout.addRow("Name:", self.name_input)
         self.name_input.setPlaceholderText("My Server")
-        layout.addRow("Server address:", self.url_input)
         self.url_input.setPlaceholderText("http://127.0.0.1:9981")
+        self.username_input.setPlaceholderText("Optional")
+        self.password_input.setPlaceholderText("Optional")
+        layout.addRow(buddy_label("&Name:", self.name_input), self.name_input)
+        layout.addRow(buddy_label("Server &address:", self.url_input), self.url_input)
+        describe(self.url_input, description="Include http:// or https:// and the port.")
         self.protocol_combo = QComboBox()
         self.protocol_combo.addItem("HTTP JSON API", PROTOCOL_HTTP)
         self.protocol_combo.addItem("HTSP", PROTOCOL_HTSP)
-        layout.addRow("Protocol:", self.protocol_combo)
+        layout.addRow(buddy_label("&Protocol:", self.protocol_combo), self.protocol_combo)
         self.htsp_port_input = QSpinBox()
         self.htsp_port_input.setRange(1, 65535)
         self.htsp_port_input.setValue(9982)
-        layout.addRow("HTSP port:", self.htsp_port_input)
-        layout.addRow("Username:", self.username_input)
-        self.username_input.setPlaceholderText("Optional")
-        layout.addRow("Password:", self.password_input)
-        self.password_input.setPlaceholderText("Optional")
+        describe(self.htsp_port_input, "HTSP port", "Port for the HTSP protocol, usually 9982.")
+        layout.addRow(buddy_label("&HTSP port:", self.htsp_port_input), self.htsp_port_input)
+        layout.addRow(buddy_label("&Username:", self.username_input), self.username_input)
+        layout.addRow(buddy_label("Pass&word:", self.password_input), self.password_input)
         
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -667,26 +738,34 @@ class ConnectionErrorDialog(QDialog):
         
     def setup_ui(self, server_name, error_msg):
         layout = QVBoxLayout(self)
+        message = (
+            f"Failed to connect to server: {server_name}\n"
+            f"Error: {error_msg}\n\n"
+            "Would you like to retry the connection?"
+        )
+        self.setAccessibleName("Connection Error")
+        self.setAccessibleDescription(message)
         
         # Error icon and message
         message_layout = QHBoxLayout()
         icon_label = QLabel()
         icon_label.setPixmap(QMessageBox.standardIcon(QMessageBox.Icon.Critical))
+        icon_label.setAccessibleName("Error")
+        icon_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         message_layout.addWidget(icon_label)
         
-        error_text = QLabel(
-            f"Failed to connect to server: {server_name}\n"
-            f"Error: {error_msg}\n\n"
-            "Would you like to retry the connection?"
-        )
+        error_text = QLabel(message)
         error_text.setWordWrap(True)
+        error_text.setAccessibleName(message)
         message_layout.addWidget(error_text)
         layout.addLayout(message_layout)
         
         # Buttons
         button_layout = QHBoxLayout()
-        retry_btn = QPushButton("Retry")
-        abort_btn = QPushButton("Abort")
+        retry_btn = QPushButton("&Retry")
+        abort_btn = QPushButton("&Abort")
+        retry_btn.setDefault(True)
+        retry_btn.setAutoDefault(True)
         
         retry_btn.clicked.connect(self.accept)
         abort_btn.clicked.connect(self.reject)
@@ -715,9 +794,15 @@ class ServerStatusDialog(QDialog):
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        self.setAccessibleName("Server Status")
+        self.setAccessibleDescription(
+            "Active streams, signal quality, and server information. "
+            "Signal quality is written as good, fair, weak, or poor."
+        )
         
         # Create tab widget
         self.tabs = QTabWidget()
+        self.tabs.setAccessibleName("Server status categories")
         layout.addWidget(self.tabs)
         
         # Active streams/subscriptions tab
@@ -731,6 +816,7 @@ class ServerStatusDialog(QDialog):
             'Type/Status'
         ])
         self.subscriptions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        describe(self.subscriptions_table, "Active streams", "Connections and subscriptions, with type or status in the last column.")
         self.tabs.addTab(self.subscriptions_table, "Active Streams")
         
         # Signal Status tab (new)
@@ -744,15 +830,22 @@ class ServerStatusDialog(QDialog):
             'Weight'
         ])
         self.signal_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        describe(
+            self.signal_table,
+            "Signal status",
+            "Signal and SNR values include a quality word: good, fair, weak, or poor.",
+        )
         self.tabs.addTab(self.signal_table, "Signal Status")
         
         # Server info tab
         self.info_text = QTextEdit()
         self.info_text.setReadOnly(True)
+        describe(self.info_text, "Server information", "Name, address, protocol, and version.")
         self.tabs.addTab(self.info_text, "Server Info")
         
         # Close button
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton("&Close")
+        close_btn.setAutoDefault(True)
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
         
@@ -913,24 +1006,26 @@ class ServerStatusDialog(QDialog):
             print(f"Debug: Traceback: {traceback.format_exc()}")
 
     def color_code_cell(self, item, value, scale, type='signal'):
-        """Helper method to color code signal and SNR values"""
-        if value is not None and scale > 0:
-            if scale == 1:
-                quality = (value * 100 / 65535)
-            else:  # scale == 2
-                if type == 'signal':
-                    quality = min(100, max(0, (value / 1000 + 15) * 6.67))
-                else:  # SNR
-                    quality = min(100, max(0, (value / 1000 - 10) * 10))
-            
-            if quality >= 80:
-                item.setBackground(Qt.GlobalColor.green)
-            elif quality >= 60:
-                item.setBackground(Qt.GlobalColor.yellow)
-            elif quality >= 40:
-                item.setBackground(Qt.GlobalColor.darkYellow)
-            else:
-                item.setBackground(Qt.GlobalColor.red)
+        """Color a signal cell and add a quality word so color is not the only cue."""
+        if value is None or scale <= 0:
+            return
+        if scale == 1:
+            quality = (value * 100 / 65535)
+        elif type == 'signal':
+            quality = min(100, max(0, (value / 1000 + 15) * 6.67))
+        else:
+            quality = min(100, max(0, (value / 1000 - 10) * 10))
+
+        phrase = quality_phrase(quality)
+        reading = f"{item.text()} ({phrase})"
+        item.setText(reading)
+        kind = "Signal" if type == "signal" else "SNR"
+        set_item_access(item, reading, f"{kind} quality is {phrase}")
+        if prefers_high_contrast():
+            return
+        background, foreground = quality_colors(quality)
+        item.setBackground(background)
+        item.setForeground(foreground)
     
     def closeEvent(self, event):
         self.update_timer.stop()
@@ -954,6 +1049,12 @@ class TVHeadendClient(QMainWindow):
 
         # Set window title and geometry from config
         self.setWindowTitle("TVHplayer")
+        app = QApplication.instance()
+        if app is not None:
+            app.setApplicationName("TVHplayer")
+            app.setApplicationDisplayName("TVHplayer")
+            if not app.desktopFileName():
+                app.setDesktopFileName("io.github.mfat.tvhplayer")
         geometry = self.config.get('window_geometry', {'x': 100, 'y': 100, 'width': 1200, 'height': 700})
         self.setGeometry(
             geometry['x'],
@@ -1133,27 +1234,41 @@ class TVHeadendClient(QMainWindow):
         
 
         
+        self.setAccessibleName("TVHplayer")
+        self.setAccessibleDescription(
+            "Watch and record TVHeadend channels. "
+            "Press F11 or F for fullscreen, Ctrl+F to search, and F1 for keyboard shortcuts."
+        )
+
         # Create menu bar
         menubar = self.menuBar()
-        file_menu = menubar.addMenu("File")
-        view_menu = menubar.addMenu("View")
-        help_menu = menubar.addMenu("Help")
+        menubar.setAccessibleName("Main menu")
+        file_menu = menubar.addMenu("&File")
+        view_menu = menubar.addMenu("&View")
+        help_menu = menubar.addMenu("&Help")
 
         # Add User Guide action to Help menu
-        user_guide_action = QAction("User Guide", self)
+        user_guide_action = QAction("User &Guide", self)
+        user_guide_action.setStatusTip("Open the TVHplayer user guide in a browser")
         user_guide_action.triggered.connect(self.show_user_guide)
         help_menu.addAction(user_guide_action)
+
+        shortcuts_action = QAction("Keyboard &Shortcuts", self)
+        shortcuts_action.setShortcut("F1")
+        shortcuts_action.setStatusTip("Show keyboard shortcuts")
+        shortcuts_action.triggered.connect(self.show_keyboard_shortcuts)
+        help_menu.addAction(shortcuts_action)
         
         # Add About action to Help menu
-        about_action = QAction("About", self)
+        about_action = QAction("&About", self)
+        about_action.setStatusTip("About TVHplayer")
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
         
-        
-        
-        # Add Fullscreen action to View menu
+        # F11 is the menu shortcut. Plain F is handled when it will not interrupt typing.
         self.fullscreen_action = QAction("Fullscreen", self)
-        self.fullscreen_action.setShortcut("F")
+        self.fullscreen_action.setShortcut("F11")
+        self.fullscreen_action.setStatusTip("Toggle fullscreen. F11, or F when not typing in the channel list.")
         self.fullscreen_action.setCheckable(True)
         self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(self.fullscreen_action)
@@ -1163,7 +1278,8 @@ class TVHeadendClient(QMainWindow):
         ##view_menu.addAction(settings_action)
         
         # Create actions
-        exit_action = QAction("Exit", self)
+        exit_action = QAction("E&xit", self)
+        exit_action.setStatusTip("Quit TVHplayer")
         if sys.platform == "darwin":  # macOS
             exit_action.setShortcut("Cmd+Q")
         else:  # Windows/Linux
@@ -1182,6 +1298,7 @@ class TVHeadendClient(QMainWindow):
         # Left pane
         self.left_pane = QFrame()
         self.left_pane.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
+        self.left_pane.setAccessibleName("Channels")
         left_layout = QVBoxLayout(self.left_pane)
         
         # Server selection with add/remove buttons
@@ -1193,16 +1310,26 @@ class TVHeadendClient(QMainWindow):
         
         # Connect server combo box change signal
         self.server_combo.currentIndexChanged.connect(self.on_server_changed)
+        describe(self.server_combo, description="TVHeadend server used for the channel list")
         
-        manage_servers_btn = QToolButton()
-        manage_servers_btn.clicked.connect(self.manage_servers)
+        self.manage_servers_btn = QToolButton()
+        self.manage_servers_btn.clicked.connect(self.manage_servers)
         
-        server_layout.addWidget(QLabel("Server:"))
+        server_layout.addWidget(buddy_label("&Server:", self.server_combo))
         server_layout.addWidget(self.server_combo)
-        manage_servers_btn.setText("⚙️")  # Unicode settings icon
-        manage_servers_btn.setStyleSheet("font-size: 18px;")  # Make icon bigger
-        manage_servers_btn.setToolTip("Manage servers")
-        server_layout.addWidget(manage_servers_btn)
+        self.manage_servers_btn.setText("⚙️")  # Unicode settings icon
+        if not prefers_high_contrast():
+            self.manage_servers_btn.setStyleSheet(
+                "QToolButton { font-size: 18px; } "
+                "QToolButton:focus { border: 2px solid palette(highlight); }"
+            )
+        self.manage_servers_btn.setToolTip("Manage servers")
+        describe(
+            self.manage_servers_btn,
+            "Manage servers",
+            "Add, edit, or remove TVHeadend servers",
+        )
+        server_layout.addWidget(self.manage_servers_btn)
         left_layout.addLayout(server_layout)
         
     
@@ -1210,7 +1337,13 @@ class TVHeadendClient(QMainWindow):
         # Channel list
         self.channel_list = QTableWidget()
         self.channel_list.setColumnCount(2)
-        self.channel_list.setHorizontalHeaderLabels(['', 'Channel Name'])
+        self.channel_list.setHorizontalHeaderLabels(['Number', 'Channel Name'])
+        describe(
+            self.channel_list,
+            "Channels",
+            "Channel numbers and names. Type to jump to a channel. "
+            "Press Enter to play. Press Shift+F10 for more actions.",
+        )
         self.channel_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.channel_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.channel_list.verticalHeader().setVisible(False)
@@ -1225,13 +1358,14 @@ class TVHeadendClient(QMainWindow):
         # Connect context menu
         self.channel_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.channel_list.customContextMenuRequested.connect(self.show_channel_context_menu)
+        self.channel_list.installEventFilter(self)
         
-        left_layout.addWidget(QLabel(""))
         left_layout.addWidget(self.channel_list)
         
         # Right pane
         self.right_pane = QFrame()
         self.right_pane.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
+        self.right_pane.setAccessibleName("Player")
         self.right_layout = QVBoxLayout(self.right_pane)
         self.right_layout.setObjectName("right_layout")
         
@@ -1246,7 +1380,14 @@ class TVHeadendClient(QMainWindow):
 
         self.video_frame = QWidget()
         self.video_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.video_frame.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.video_frame.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        describe(
+            self.video_frame,
+            "Video player",
+            "Playback picture. F or F11 toggles fullscreen, Escape leaves fullscreen, "
+            "M mutes, P plays, and Ctrl+. stops. Shift+F10 opens the playback menu.",
+        )
+        self.video_frame.setToolTip("")
         self.video_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.video_frame.customContextMenuRequested.connect(self.show_video_context_menu)
         self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
@@ -1265,6 +1406,7 @@ class TVHeadendClient(QMainWindow):
         )
         self.idle_splash.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.idle_splash.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        describe(self.idle_splash, "Nothing playing", "TVHplayer logo, shown when nothing is playing")
 
         player_layout.addWidget(self.video_frame)
         self.player_container.installEventFilter(self)
@@ -1277,7 +1419,9 @@ class TVHeadendClient(QMainWindow):
         controls_layout.setContentsMargins(0, 0, 0, 0)
        # Create frame for play/stop buttons
         playback_frame = QFrame()
-        playback_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
+        if not prefers_high_contrast():
+            playback_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}")
+        playback_frame.setAccessibleName("Playback")
         playback_frame.setWindowTitle("Playback")
         playback_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
         playback_frame.setLineWidth(5)  # Make frame thicker
@@ -1288,9 +1432,10 @@ class TVHeadendClient(QMainWindow):
         self.play_btn.setFixedSize(48, 48)
         self.play_btn.setIcon(QIcon(f"{self.icons_dir}/play.svg"))
         self.play_btn.setIconSize(QSize(48, 48))
-        self.play_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
+        self.play_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
         self.play_btn.clicked.connect(lambda: self.play_channel_by_data(self.selected_channel()))
         self.play_btn.setToolTip("Play selected channel")
+        describe(self.play_btn, "Play", "Play the selected channel. Keyboard: P, or Enter on the channel list.")
         playback_layout.addWidget(self.play_btn)
         
         # Stop button
@@ -1298,16 +1443,19 @@ class TVHeadendClient(QMainWindow):
         self.stop_btn.setFixedSize(48, 48)
         self.stop_btn.setIcon(QIcon(f"{self.icons_dir}/stop.svg"))
         self.stop_btn.setIconSize(QSize(48, 48))
-        self.stop_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
+        self.stop_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
         self.stop_btn.clicked.connect(self.stop_playback)
         self.stop_btn.setToolTip("Stop playback")
+        describe(self.stop_btn, "Stop", "Stop playback. Keyboard: Ctrl+.")
         playback_layout.addWidget(self.stop_btn)
         
         controls_layout.addWidget(playback_frame)
         
         # Create frame for record buttons
         record_frame = QFrame()
-        record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
+        if not prefers_high_contrast():
+            record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}")
+        record_frame.setAccessibleName("Server recording")
         record_frame.setWindowTitle("Recording")
         record_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
         record_frame.setLineWidth(5)  # Make frame thicker
@@ -1318,8 +1466,9 @@ class TVHeadendClient(QMainWindow):
         self.start_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
         self.start_record_btn.setIcon(QIcon(f"{self.icons_dir}/record.svg"))
         self.start_record_btn.setIconSize(QSize(48, 48))
-        self.start_record_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
+        self.start_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
         self.start_record_btn.setToolTip("Start Recording")
+        describe(self.start_record_btn, "Record on server", "Record the selected channel on the TVHeadend server. Keyboard: Ctrl+R.")
         self.start_record_btn.clicked.connect(self.start_recording)
         record_layout.addWidget(self.start_record_btn)
 
@@ -1328,8 +1477,9 @@ class TVHeadendClient(QMainWindow):
         self.stop_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
         self.stop_record_btn.setIcon(QIcon(f"{self.icons_dir}/stoprec.svg"))
         self.stop_record_btn.setIconSize(QSize(48, 48))
-        self.stop_record_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
+        self.stop_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
         self.stop_record_btn.setToolTip("Stop Recording")
+        describe(self.stop_record_btn, "Stop server recording", "Stop the recording on the TVHeadend server. Keyboard: Ctrl+E.")
         self.stop_record_btn.clicked.connect(self.stop_recording)
         record_layout.addWidget(self.stop_record_btn)
         
@@ -1337,7 +1487,9 @@ class TVHeadendClient(QMainWindow):
         
         # Create frame for local record buttons
         local_record_frame = QFrame()
-        local_record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}");
+        if not prefers_high_contrast():
+            local_record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}")
+        local_record_frame.setAccessibleName("Local recording")
         local_record_frame.setWindowTitle("Local Recording")
         local_record_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
         local_record_layout = QHBoxLayout(local_record_frame)
@@ -1347,8 +1499,13 @@ class TVHeadendClient(QMainWindow):
         self.start_local_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
         self.start_local_record_btn.setIcon(QIcon(f"{self.icons_dir}/reclocal.svg"))
         self.start_local_record_btn.setIconSize(QSize(48, 48))
-        self.start_local_record_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
+        self.start_local_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
         self.start_local_record_btn.setToolTip("Start Local Recording")
+        describe(
+            self.start_local_record_btn,
+            "Record locally",
+            "Save the selected channel on this computer. Keyboard: Ctrl+Shift+R.",
+        )
         self.start_local_record_btn.clicked.connect(
             lambda: self.start_local_recording(self.selected_channel())
         )
@@ -1359,8 +1516,13 @@ class TVHeadendClient(QMainWindow):
         self.stop_local_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
         self.stop_local_record_btn.setIcon(QIcon(f"{self.icons_dir}/stopreclocal.svg"))
         self.stop_local_record_btn.setIconSize(QSize(48, 48))
-        self.stop_local_record_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
+        self.stop_local_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
         self.stop_local_record_btn.setToolTip("Stop Local Recording")
+        describe(
+            self.stop_local_record_btn,
+            "Stop local recording",
+            "Stop the recording saved on this computer. Keyboard: Ctrl+Shift+E.",
+        )
         self.stop_local_record_btn.clicked.connect(self.stop_local_recording)
         local_record_layout.addWidget(self.stop_local_record_btn)
 
@@ -1379,24 +1541,30 @@ class TVHeadendClient(QMainWindow):
         self.mute_btn.setFixedSize(32, 32)  # Remove extra parenthesis
         self.mute_btn.setCheckable(True)  # Make the button checkable
         self.mute_btn.clicked.connect(self.toggle_mute)
-        self.mute_btn.setToolTip("Toggle Mute")
-        self.mute_btn.setStyleSheet("QPushButton { border: none; }")
+        self.mute_btn.setToolTip("Mute")
+        self.mute_btn.setStyleSheet(button_stylesheet("border: none;"))
+        describe(self.mute_btn, "Mute", "Turn sound off. Keyboard: M. The button stays pressed while muted.")
 
         
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(50)
         self.volume_slider.setFixedWidth(150)  # Set fixed width to make slider less wide
+        self.volume_slider.setSingleStep(1)
+        self.volume_slider.setPageStep(10)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
+        describe(self.volume_slider, "Volume", "Playback volume from 0 to 100. Keyboard: Ctrl+Up and Ctrl+Down.")
         
         # Fullscreen button with icon
         self.fullscreen_btn = QPushButton()
         self.fullscreen_btn.setIcon(QIcon(f"{self.icons_dir}/fullscreen.svg"))
         self.fullscreen_btn.setIconSize(QSize(32, 32))
         self.fullscreen_btn.setFixedSize(32, 32)
+        self.fullscreen_btn.setCheckable(True)
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
         self.fullscreen_btn.setToolTip("Toggle Fullscreen")
-        self.fullscreen_btn.setStyleSheet("QPushButton { border: none; }")
+        self.fullscreen_btn.setStyleSheet(button_stylesheet("border: none;"))
+        describe(self.fullscreen_btn, "Fullscreen", "Fill the screen with the picture. Keyboard: F11 or F. Escape leaves fullscreen.")
         
         controls_layout.addStretch()  # Add stretch to push widgets to the right
         controls_layout.addWidget(self.mute_btn)
@@ -1407,6 +1575,11 @@ class TVHeadendClient(QMainWindow):
         # Add panes to splitter instead of layout
         self.splitter.addWidget(self.left_pane)
         self.splitter.addWidget(self.right_pane)
+        self.splitter.setAccessibleName("Channels and player")
+        splitter_handle = self.splitter.handle(1)
+        if splitter_handle is not None:
+            splitter_handle.setAccessibleName("Resize channels and player")
+            splitter_handle.setAccessibleDescription("Drag left or right, or use the arrow keys, to resize the channel list and the player.")
         
         # Set initial sizes (optional)
         self.splitter.setSizes([300, 900])  # Adjust these numbers based on your preference
@@ -1420,6 +1593,7 @@ class TVHeadendClient(QMainWindow):
         
         # Status bar setup
         self.statusbar = QStatusBar()
+        self.statusbar.setAccessibleName("Status bar")
         self.setStatusBar(self.statusbar)
         
         # Create a container widget for status bar items
@@ -1428,27 +1602,20 @@ class TVHeadendClient(QMainWindow):
         status_layout.setContentsMargins(0, 0, 0, 0)
         status_layout.setSpacing(10)  # Space between indicator and text
         
-        # Create recording indicator
-        self.recording_indicator = QLabel()
-        self.recording_indicator.setFixedSize(16, 16)
-        self.recording_indicator.setStyleSheet("""
-            QLabel {
-                background-color: rgba(255, 0, 0, 0.8);
-                min-width: 16px;
-                max-width: 16px;
-                min-height: 16px;
-                max-height: 16px;
-                border-radius: 8px;
-                margin: 2px;
-            }
-            QLabel[recording="false"] {
-                background-color: transparent;
-            }
-        """)
-        self.recording_indicator.setProperty("recording", False)
+        # Text plus a dark-red badge, so recording state is not color alone.
+        self.recording_indicator = QLabel("")
+        self.recording_indicator.setVisible(False)
+        self.recording_indicator.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        if not prefers_high_contrast():
+            self.recording_indicator.setStyleSheet(
+                "QLabel { background-color: #7f1d1d; color: #ffffff; "
+                "font-weight: bold; padding: 1px 6px; border-radius: 8px; }"
+            )
+        describe(self.recording_indicator, "Not recording", "Shown only while a recording is in progress")
         
         # Create status message label
         self.status_label = QLabel("Ready")
+        describe(self.status_label, "Ready", "Application status")
         
         # Add widgets to horizontal layout
         status_layout.addWidget(self.recording_indicator)
@@ -1460,7 +1627,7 @@ class TVHeadendClient(QMainWindow):
         
         # Override showMessage to update our custom label
         def custom_show_message(message, timeout=0):
-            self.status_label.setText(message)
+            announce_label(self.status_label, message)
         self.statusbar.showMessage = custom_show_message
         
         # Initialize
@@ -1472,46 +1639,99 @@ class TVHeadendClient(QMainWindow):
         self.video_frame.installEventFilter(self)
         
         # Add Server Status to View menu
-        server_status_action = view_menu.addAction("Server Status")
+        server_status_action = view_menu.addAction("Server &Status")
+        server_status_action.setStatusTip("Show connections, signal quality, and server information")
         server_status_action.triggered.connect(self.show_server_status)
         
         # Add DVR Status to View menu
-        dvr_status_action = view_menu.addAction("DVR Status")
+        dvr_status_action = view_menu.addAction("&DVR Status")
+        dvr_status_action.setStatusTip("Show scheduled, finished, and failed recordings")
         dvr_status_action.triggered.connect(self.show_dvr_status)
         
         # Add search box before styling it
         search_layout = QHBoxLayout()
-        search_icon = QLabel("🔍")  # Unicode search icon
         self.search_box = QLineEdit()
-        
-        # Style placeholder text
-        placeholder_color = QColor(100, 100, 100)  # Dark gray color
-        search_palette = self.search_box.palette()
-        search_palette.setColor(QPalette.ColorRole.PlaceholderText, placeholder_color)
-        self.search_box.setPalette(search_palette)
-        
-        self.search_box.setPlaceholderText("Press S to search channels...")
+        self.search_box.setPlaceholderText("Channel name")
         self.search_box.textChanged.connect(self.filter_channels)
-        self.search_box.setClearButtonEnabled(True)  # Add clear button inside search box
+        self.search_box.setClearButtonEnabled(True)
+        describe(
+            self.search_box,
+            description="Filter the channel list. Ctrl+F moves here, and so does S when the list is not focused.",
+        )
         
-        # Add Ctrl+F shortcut for search box
-        search_shortcut = QShortcut(QKeySequence(Qt.Key.Key_S), self)
-        search_shortcut.activated.connect(self.search_box.setFocus)
+        search_shortcut = QShortcut(find_shortcut(), self)
+        search_shortcut.setObjectName("focus-search")
+        search_shortcut.activated.connect(self._focus_search)
         
-        # Create custom clear button action
-        clear_action = QAction("⌫", self.search_box)
-        self.search_box.addAction(clear_action, QLineEdit.ActionPosition.TrailingPosition)
-        
-        search_layout.addWidget(search_icon)
+        search_layout.addWidget(buddy_label("&Search:", self.search_box))
         search_layout.addWidget(self.search_box)
         left_layout.addLayout(search_layout)  # Add to left pane layout
-        
-        # Now style the search box with custom clear button styling
-        
         
         # Add margins to search layout
         search_layout.setContentsMargins(0, 5, 0, 5)
         search_layout.setSpacing(5)
+        self._apply_tab_order()
+
+    def _apply_tab_order(self):
+        """Follow the visual order: server, channels, search, picture, then controls."""
+        order = [
+            self.server_combo,
+            self.manage_servers_btn,
+            self.channel_list,
+            self.search_box,
+            self.video_frame,
+            self.play_btn,
+            self.stop_btn,
+            self.start_record_btn,
+            self.stop_record_btn,
+            self.start_local_record_btn,
+            self.stop_local_record_btn,
+            self.mute_btn,
+            self.volume_slider,
+            self.fullscreen_btn,
+        ]
+        for first, second in zip(order, order[1:]):
+            self.setTabOrder(first, second)
+
+    def _focus_search(self):
+        self.search_box.setFocus(Qt.FocusReason.ShortcutFocusReason)
+        self.search_box.selectAll()
+
+    def show_keyboard_shortcuts(self):
+        ShortcutHelpDialog(self).exec()
+
+    def _blocks_plain_keys(self):
+        """Letter keys belong to text fields and to channel type-ahead."""
+        widget = QApplication.focusWidget()
+        if widget is None:
+            return False
+        if isinstance(widget, (QLineEdit, QTextEdit, QSpinBox, QComboBox)):
+            return True
+        return widget is self.channel_list or self.channel_list.isAncestorOf(widget)
+
+    def _is_context_menu_key(self, event):
+        if event.modifiers() & (
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier
+        ):
+            return False
+        if event.key() == Qt.Key.Key_Menu:
+            return True
+        return (
+            event.key() == Qt.Key.Key_F10
+            and bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        )
+
+    def _adjust_volume(self, delta):
+        value = max(0, min(100, self.volume_slider.value() + delta))
+        self.volume_slider.setValue(value)
+        self.statusbar.showMessage(f"Volume {value}")
+
+    def _channel_menu_position(self):
+        row = self.channel_list.currentRow()
+        if row < 0:
+            return QPoint(0, 0)
+        rect = self.channel_list.visualRect(self.channel_list.model().index(row, 1))
+        return rect.center()
 
     def current_server(self):
         if not self.servers:
@@ -1601,9 +1821,15 @@ class TVHeadendClient(QMainWindow):
                 self.channel_list.insertRow(row)
                 number_item = QTableWidgetItem()
                 number_item.setData(Qt.ItemDataRole.DisplayRole, channel.number)
+                set_item_access(number_item, f"Channel {channel.number}", "Channel number")
                 self.channel_list.setItem(row, 0, number_item)
                 name_item = QTableWidgetItem(channel.name)
                 name_item.setData(Qt.ItemDataRole.UserRole, channel.to_raw())
+                set_item_access(
+                    name_item,
+                    channel.name,
+                    f"Channel {channel.number}, {channel.name}. Press Enter to play.",
+                )
                 self.channel_list.setItem(row, 1, name_item)
             self.channel_list.setSortingEnabled(True)
             self.statusbar.showMessage("Channels loaded successfully")
@@ -1680,9 +1906,11 @@ class TVHeadendClient(QMainWindow):
             return
         if visible:
             self.idle_splash.setGeometry(self.player_container.rect())
+            self.idle_splash.setAccessibleName("Nothing playing")
             self.idle_splash.show()
             self.idle_splash.raise_()
         else:
+            self.idle_splash.setAccessibleName("")
             self.idle_splash.hide()
 
     def _protect_video_surface(self, playing):
@@ -1844,11 +2072,23 @@ class TVHeadendClient(QMainWindow):
             self.fullscreen_action.setText('Exit Fullscreen' if self.is_fullscreen else 'Fullscreen')
             self.fullscreen_action.blockSignals(False)
         if hasattr(self, 'fullscreen_btn'):
-            self.fullscreen_btn.setToolTip('Exit Fullscreen' if self.is_fullscreen else 'Toggle Fullscreen')
+            if self.is_fullscreen:
+                self.fullscreen_btn.setToolTip('Exit Fullscreen')
+                describe(self.fullscreen_btn, 'Exit fullscreen', 'Return to the window. Keyboard: Escape, F11, or F.')
+            else:
+                self.fullscreen_btn.setToolTip('Toggle Fullscreen')
+                describe(self.fullscreen_btn, 'Fullscreen', 'Fill the screen with the picture. Keyboard: F11 or F.')
+            self.fullscreen_btn.setChecked(self.is_fullscreen)
+        if hasattr(self, 'video_frame'):
+            announce(
+                self.video_frame,
+                "Fullscreen video player" if self.is_fullscreen else "Video player",
+            )
 
     def _video_context_menu(self):
         """Build the right-click menu for the video surface."""
         menu = QMenu(self)
+        menu.setAccessibleName("Playback")
         channel = self.selected_channel()
         playing = bool(self.media_player and self.media_player.is_playing())
         muted = bool(self.media_player and self.media_player.audio_get_mute())
@@ -2008,15 +2248,26 @@ class TVHeadendClient(QMainWindow):
 
     def eventFilter(self, obj, event):
         """Keep the video surface stable and handle player gestures."""
+        channel_list = getattr(self, 'channel_list', None)
+        if obj is channel_list and channel_list is not None and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not event.modifiers():
+                self.play_channel_by_data(self.selected_channel())
+                return True
+            if self._is_context_menu_key(event):
+                self.show_channel_context_menu(None)
+                return True
+        player_container = getattr(self, 'player_container', None)
         if (
-            hasattr(self, 'player_container')
-            and obj is self.player_container
+            player_container is not None
+            and obj is player_container
             and event.type() == QEvent.Type.Resize
         ):
-            if hasattr(self, 'idle_splash') and self.idle_splash.isVisible():
-                self.idle_splash.setGeometry(self.player_container.rect())
+            idle_splash = getattr(self, 'idle_splash', None)
+            if idle_splash is not None and idle_splash.isVisible():
+                idle_splash.setGeometry(player_container.rect())
             return False
-        if obj is self.video_frame:
+        video_frame = getattr(self, 'video_frame', None)
+        if video_frame is not None and obj is video_frame:
             if event.type() == QEvent.Type.MouseButtonDblClick:
                 self.toggle_fullscreen()
                 return True
@@ -2032,6 +2283,93 @@ class TVHeadendClient(QMainWindow):
             self.toggle_fullscreen()
             event.accept()
             return
+
+        modifiers = event.modifiers()
+        key = event.key()
+        ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
+        shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        if modifiers & Qt.KeyboardModifier.AltModifier:
+            super().keyPressEvent(event)
+            return
+
+        if ctrl and shift and key == Qt.Key.Key_R:
+            self.start_local_recording(self.selected_channel())
+            event.accept()
+            return
+        if ctrl and shift and key == Qt.Key.Key_E:
+            self.stop_local_recording()
+            event.accept()
+            return
+        if ctrl and not shift and key == Qt.Key.Key_R:
+            self.start_recording()
+            event.accept()
+            return
+        if ctrl and not shift and key == Qt.Key.Key_E:
+            self.stop_recording()
+            event.accept()
+            return
+        if ctrl and not shift and key == Qt.Key.Key_G:
+            self.show_channel_epg(self.selected_channel())
+            event.accept()
+            return
+        if ctrl and not shift and key == Qt.Key.Key_Period:
+            self.stop_playback()
+            event.accept()
+            return
+        if key in (Qt.Key.Key_VolumeUp, Qt.Key.Key_VolumeDown) or (
+            ctrl and not shift and key in (Qt.Key.Key_Up, Qt.Key.Key_Down)
+        ):
+            self._adjust_volume(5 if key in (Qt.Key.Key_VolumeUp, Qt.Key.Key_Up) else -5)
+            event.accept()
+            return
+        if key in (Qt.Key.Key_VolumeMute, Qt.Key.Key_MediaTogglePlayPause):
+            if key == Qt.Key.Key_MediaTogglePlayPause:
+                if self.media_player and self.media_player.is_playing():
+                    self.stop_playback()
+                else:
+                    self.play_channel_by_data(self.selected_channel())
+            else:
+                self.toggle_mute()
+            event.accept()
+            return
+        if key == Qt.Key.Key_MediaPlay:
+            self.play_channel_by_data(self.selected_channel())
+            event.accept()
+            return
+        if key == Qt.Key.Key_MediaStop:
+            self.stop_playback()
+            event.accept()
+            return
+
+        if self._is_context_menu_key(event):
+            focus = QApplication.focusWidget()
+            if focus is self.channel_list or (
+                focus is not None and self.channel_list.isAncestorOf(focus)
+            ):
+                self.show_channel_context_menu(None)
+            else:
+                self.show_video_context_menu(self.video_frame.rect().center())
+            event.accept()
+            return
+
+        if not self._blocks_plain_keys():
+            if key == Qt.Key.Key_F and not ctrl and not shift:
+                self.toggle_fullscreen()
+                event.accept()
+                return
+            if key == Qt.Key.Key_M and not ctrl and not shift:
+                self.toggle_mute()
+                event.accept()
+                return
+            if key == Qt.Key.Key_P and not ctrl and not shift:
+                self.play_channel_by_data(self.selected_channel())
+                event.accept()
+                return
+            if key == Qt.Key.Key_S and not ctrl and not shift:
+                self._focus_search()
+                event.accept()
+                return
+
         super().keyPressEvent(event)
 
     def toggle_mute(self):
@@ -2043,10 +2381,16 @@ class TVHeadendClient(QMainWindow):
         if not is_muted:  # Switching to muted
             self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/mute.svg"))
             self.mute_btn.setToolTip("Unmute")
+            self.mute_btn.setChecked(True)
+            describe(self.mute_btn, "Unmute", "Turn sound on. Keyboard: M. The button stays pressed while muted.")
+            self.statusbar.showMessage("Muted")
             print("Debug: Audio muted")
         else:  # Switching to unmuted
             self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
             self.mute_btn.setToolTip("Mute")
+            self.mute_btn.setChecked(False)
+            describe(self.mute_btn, "Mute", "Turn sound off. Keyboard: M. The button stays pressed while muted.")
+            self.statusbar.showMessage("Sound on")
             print("Debug: Audio unmuted")
 
     def show_about(self):
@@ -2080,6 +2424,8 @@ class TVHeadendClient(QMainWindow):
         )
         msg = QMessageBox()
         msg.setWindowTitle("About TVHplayer")
+        msg.setAccessibleName("About TVHplayer")
+        msg.setAccessibleDescription("TVHplayer version 3.5.5, created by mFat.")
         msg.setText(about_text)
         msg.setTextFormat(Qt.TextFormat.RichText)
         msg.setMinimumWidth(400)  # Make dialog wider to prevent text wrapping
@@ -2169,6 +2515,9 @@ class TVHeadendClient(QMainWindow):
         """Start the recording indicator with smooth pulsing animation"""
         print("Debug: Starting recording indicator")
         self.is_recording = True
+        self.recording_indicator.setText("REC")
+        self.recording_indicator.setVisible(True)
+        describe(self.recording_indicator, "Recording in progress", "A recording is in progress")
         self.recording_indicator.setProperty("recording", True)
         self.recording_indicator.style().polish(self.recording_indicator)
         
@@ -2197,6 +2546,9 @@ class TVHeadendClient(QMainWindow):
         if hasattr(self, 'opacity_effect'):
             self.recording_indicator.setGraphicsEffect(None)
             self.opacity_effect = None
+        self.recording_indicator.setText("")
+        self.recording_indicator.setVisible(False)
+        describe(self.recording_indicator, "Not recording", "Shown only while a recording is in progress")
         self.recording_indicator.setProperty("recording", False)
         self.recording_indicator.style().polish(self.recording_indicator)
 
@@ -2329,24 +2681,35 @@ class TVHeadendClient(QMainWindow):
     def show_channel_context_menu(self, position):
         """Show context menu for channel list items"""
         menu = QMenu()
+        menu.setAccessibleName("Channel actions")
         
-        # Get the item at the position
-        row = self.channel_list.rowAt(position.y())
+        # Get the item at the position. Keyboard callers pass None and use the selection.
+        if position is None:
+            row = self.channel_list.currentRow()
+            position = self._channel_menu_position()
+        else:
+            row = self.channel_list.rowAt(position.y())
         if row >= 0:
             channel_item = self.channel_list.item(row, 1)  # Get name column item
+            if channel_item is None:
+                return
             channel_data = channel_item.data(Qt.ItemDataRole.UserRole)
             
             # Add menu actions
             play_action = menu.addAction("Play")
+            play_action.setStatusTip("Play this channel")
             play_action.triggered.connect(lambda: self.play_channel_by_data(channel_data))
             record_action = menu.addAction("Record")
+            record_action.setStatusTip("Record this channel on the server")
             record_action.triggered.connect(lambda: self.start_recording())
             local_record_action = menu.addAction("Record Locally")
+            local_record_action.setStatusTip("Save this channel on this computer")
             local_record_action.triggered.connect(
                 lambda: self.start_local_recording(channel_data))
             
             # Add EPG action
             epg_action = menu.addAction("Show EPG")
+            epg_action.setStatusTip("Show the program guide for this channel")
             epg_action.triggered.connect(lambda: self.show_channel_epg(channel_data))
             
             # Show the menu at the cursor position
@@ -2418,9 +2781,14 @@ class TVHeadendClient(QMainWindow):
         search_text = search_text.lower()
         for row in range(self.channel_list.rowCount()):
             item = self.channel_list.item(row, 1)  # Get name column item
+            number_item = self.channel_list.item(row, 0)
             if item:
                 channel_name = item.text().lower()
-                self.channel_list.setRowHidden(row, search_text not in channel_name)
+                number = number_item.text().lower() if number_item else ""
+                self.channel_list.setRowHidden(
+                    row,
+                    search_text not in channel_name and search_text not in number,
+                )
 
     def check_hardware_acceleration(self):
         """Check and print which hardware acceleration method is being used"""
@@ -2483,9 +2851,16 @@ class EPGDialog(QDialog):
         
     def setup_ui(self, epg_data):
         layout = QVBoxLayout(self)
+        self.setAccessibleName(f"Program guide for {self.channel_name}")
+        self.setAccessibleDescription("Programs and a button to schedule each one.")
         
         # Create list widget for EPG entries
         self.epg_list = QListWidget()
+        describe(
+            self.epg_list,
+            f"Programs on {self.channel_name}",
+            "Each row is a program. Use the Rec button to schedule it.",
+        )
         layout.addWidget(self.epg_list)
         
         # Add EPG entries to list with record buttons
@@ -2497,38 +2872,32 @@ class EPGDialog(QDialog):
             stop_time = datetime.fromtimestamp(entry.stop).strftime('%H:%M')
             title = entry.title or 'No title'
             description = entry.description or 'No description'
-            info_label = QLabel(f"{start_time} - {stop_time}: {title}")
+            summary = f"{start_time} - {stop_time}: {title}"
+            info_label = QLabel(summary)
             info_label.setToolTip(description)
+            info_label.setAccessibleDescription(description)
             item_layout.addWidget(info_label, stretch=1)
-            record_btn = QPushButton("⏺")
-            record_btn.setFixedWidth(32)
+            record_btn = QPushButton("Rec")
+            record_btn.setMinimumWidth(48)
             record_btn.setFixedHeight(32)
-            record_btn.setStyleSheet("""
-                QPushButton {
-                    color: red;
-                    font-size: 16px;
-                    border: 1px solid #ccc;
-                    border-radius: 16px;
-                    padding: 0px;
-                }
-                QPushButton:hover {
-                    background-color: #f0f0f0;
-                }
-                QPushButton:pressed {
-                    background-color: #e0e0e0;
-                }
-            """)
+            record_btn.setStyleSheet(button_stylesheet(
+                "border: 1px solid palette(mid); border-radius: 16px; padding: 0px;",
+                radius=16,
+            ))
             record_btn.setToolTip("Schedule Recording")
+            describe(record_btn, f"Schedule recording for {title}", description)
             record_btn.clicked.connect(lambda checked, e=entry: self.schedule_recording(e))
             item_layout.addWidget(record_btn)
             list_item = QListWidgetItem(self.epg_list)
             list_item.setSizeHint(item_widget.sizeHint())
+            set_item_access(list_item, summary, description)
             self.epg_list.addItem(list_item)
             self.epg_list.setItemWidget(list_item, item_widget)
 
         # Close button
-        close_btn = QPushButton("Close")
+        close_btn = QPushButton("&Close")
         close_btn.clicked.connect(self.accept)
+        close_btn.setAutoDefault(True)
         layout.addWidget(close_btn)
         
     def schedule_recording(self, entry):
@@ -2567,32 +2936,43 @@ class RecordingStatusDialog(QDialog):
         
     def setup_ui(self, channel_name, file_path):
         layout = QVBoxLayout(self)
+        self.setAccessibleName("Recording Status")
+        self.setAccessibleDescription(f"Local recording of {channel_name}, saved to {file_path}.")
         
         # Channel name
         channel_label = QLabel(f"Recording: {channel_name}")
-        channel_label.setStyleSheet("font-weight: bold;")
+        font = channel_label.font()
+        font.setBold(True)
+        channel_label.setFont(font)
         layout.addWidget(channel_label)
         
         # File path
         path_label = QLabel(f"Saving to: {file_path}")
         path_label.setWordWrap(True)
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByKeyboard)
         layout.addWidget(path_label)
         
         # Duration
         self.duration_label = QLabel("Duration: 00:00:00")
+        self.duration_label.setAccessibleName("Duration")
         layout.addWidget(self.duration_label)
         
         # File size
         self.size_label = QLabel("File size: 0 MB")
+        self.size_label.setAccessibleName("File size")
         layout.addWidget(self.size_label)
         
-        # Status message
+        # Status message. The words carry the state; color is not required.
         self.status_label = QLabel("Status: Recording")
-        self.status_label.setStyleSheet("color: green;")
+        self._spoken_status = self.status_label.text()
+        announce(self.status_label, self._spoken_status)
         layout.addWidget(self.status_label)
         
         # Stop button
-        stop_btn = QPushButton("Stop Recording")
+        stop_btn = QPushButton("Stop &Recording")
+        describe(stop_btn, "Stop Recording", "Stop this local recording and keep the file saved so far.")
+        stop_btn.setDefault(True)
+        stop_btn.setAutoDefault(True)
         stop_btn.clicked.connect(self.stop_requested)
         layout.addWidget(stop_btn)
         
@@ -2614,11 +2994,13 @@ class RecordingStatusDialog(QDialog):
         
         # Update status message
         if is_stalled:
-            self.status_label.setText("Status: Stalled - Attempting recovery")
-            self.status_label.setStyleSheet("color: orange;")
+            status = "Status: Stalled - Attempting recovery"
         else:
-            self.status_label.setText("Status: Recording")
-            self.status_label.setStyleSheet("color: green;")
+            status = "Status: Recording"
+        self.status_label.setText(status)
+        if status != self._spoken_status:
+            self._spoken_status = status
+            announce(self.status_label, status)
     
     def stop_requested(self):
         """Signal that user wants to stop recording"""
@@ -2630,6 +3012,9 @@ def main():
         # VLC's window embedding is still more reliable on X11 than on Wayland.
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
         app = QApplication(sys.argv)
+        app.setApplicationName("TVHplayer")
+        app.setApplicationDisplayName("TVHplayer")
+        app.setDesktopFileName("io.github.mfat.tvhplayer")
         app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
         player = TVHeadendClient()
         player.show()

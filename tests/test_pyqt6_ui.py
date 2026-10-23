@@ -413,7 +413,186 @@ def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
         dialog.finished_table.selectRow(0)
         app.processEvents()
         assert dialog.stop_btn.isEnabled() is False
+        assert dialog.upcoming_table.accessibleName() == "Upcoming and current recordings"
     finally:
         dialog.close()
         parent.close()
+        app.processEvents()
+
+
+def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QEvent, Qt
+    from PyQt6.QtGui import QKeyEvent
+    from tvhplayer.core.models import Channel, EpgEvent
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        window.show()
+        app.processEvents()
+
+        assert app.applicationName() == "TVHplayer"
+        assert window.play_btn.accessibleName() == "Play"
+        assert window.stop_btn.accessibleName() == "Stop"
+        assert window.start_record_btn.accessibleName() == "Record on server"
+        assert window.stop_record_btn.accessibleName() == "Stop server recording"
+        assert window.start_local_record_btn.accessibleName() == "Record locally"
+        assert window.stop_local_record_btn.accessibleName() == "Stop local recording"
+        assert window.mute_btn.accessibleName() == "Mute"
+        assert window.fullscreen_btn.accessibleName() == "Fullscreen"
+        assert window.manage_servers_btn.accessibleName() == "Manage servers"
+        assert window.volume_slider.accessibleName() == "Volume"
+        assert window.video_frame.accessibleName() == "Video player"
+        assert window.channel_list.accessibleName() == "Channels"
+        assert window.channel_list.horizontalHeaderItem(0).text() == "Number"
+        assert "focus" in window.play_btn.styleSheet()
+        assert window.fullscreen_action.shortcut().toString() == "F11"
+        assert any(label.buddy() is window.search_box for label in window.findChildren(ui.QLabel))
+        assert any(label.buddy() is window.server_combo for label in window.findChildren(ui.QLabel))
+        assert window.search_box.accessibleDescription()
+
+        help_labels = []
+        for action in window.menuBar().actions():
+            menu = action.menu()
+            if menu and menu.title().replace("&", "") == "Help":
+                help_labels = [item.text().replace("&", "") for item in menu.actions()]
+        assert "Keyboard Shortcuts" in help_labels
+
+        shortcuts = ui.ShortcutHelpDialog()
+        help_body = shortcuts.help_text.toPlainText()
+        assert "Enter" in help_body
+        assert "Ctrl+F" in help_body
+        assert shortcuts.help_text.accessibleName() == "Keyboard shortcuts"
+        shortcuts.close()
+
+        window.statusbar.showMessage("Playing: News")
+        window.statusbar.showMessage("Playing: News")
+        assert window.status_label.text() == "Playing: News"
+        assert window.status_label.accessibleName() == "Playing: News"
+
+        window.video_frame.setFocus()
+        app.processEvents()
+        mute = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_M, Qt.KeyboardModifier.NoModifier)
+        window.keyPressEvent(mute)
+        app.processEvents()
+        assert fake_player.audio_get_mute()
+        assert window.mute_btn.isChecked() is True
+        assert window.mute_btn.accessibleName() == "Unmute"
+        assert window.status_label.accessibleName() == "Muted"
+
+        window.channel_list.setFocus()
+        app.processEvents()
+        focus = app.focusWidget()
+        assert focus is window.channel_list or window.channel_list.isAncestorOf(focus)
+        letter_f = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_F, Qt.KeyboardModifier.NoModifier)
+        window.keyPressEvent(letter_f)
+        assert window.is_fullscreen is False
+
+        window.video_frame.setFocus()
+        app.processEvents()
+        search = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_S, Qt.KeyboardModifier.NoModifier)
+        window.keyPressEvent(search)
+        app.processEvents()
+        assert app.focusWidget() is window.search_box
+
+        typed = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_S, Qt.KeyboardModifier.NoModifier)
+        window.keyPressEvent(typed)
+        assert window.search_box.text() == ""
+
+        louder = QKeyEvent(
+            QEvent.Type.KeyPress,
+            Qt.Key.Key_Up,
+            Qt.KeyboardModifier.ControlModifier,
+        )
+        window.keyPressEvent(louder)
+        assert window.volume_slider.value() == 55
+        assert window.status_label.text() == "Volume 55"
+
+        window.channel_list.setSortingEnabled(False)
+        window.channel_list.insertRow(0)
+        number = ui.QTableWidgetItem()
+        number.setData(Qt.ItemDataRole.DisplayRole, 4)
+        name = ui.QTableWidgetItem("News")
+        name.setData(Qt.ItemDataRole.UserRole, {"uuid": "abc", "name": "News", "number": 4})
+        window.channel_list.setItem(0, 0, number)
+        window.channel_list.setItem(0, 1, name)
+        window.channel_list.setCurrentCell(0, 1)
+        enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+        assert window.eventFilter(window.channel_list, enter) is True
+        assert "Playback error" in window.status_label.text()
+
+        window.start_recording_indicator()
+        assert window.recording_indicator.text() == "REC"
+        assert window.recording_indicator.isVisible()
+        assert "Recording" in window.recording_indicator.accessibleName()
+        window.stop_recording_indicator()
+        assert window.recording_indicator.text() == ""
+        assert window.recording_indicator.accessibleName() == "Not recording"
+
+        window.toggle_fullscreen()
+        app.processEvents()
+        assert window.video_frame.accessibleName() == "Fullscreen video player"
+        assert window.fullscreen_btn.accessibleName() == "Exit fullscreen"
+        window.toggle_fullscreen()
+        app.processEvents()
+        assert window.video_frame.accessibleName() == "Video player"
+
+        duration = ui.RecordingDurationDialog()
+        assert duration.hours_spin.accessibleName() == "Hours"
+        assert duration.minutes_spin.accessibleName() == "Minutes"
+        assert any(label.buddy() is duration.hours_spin for label in duration.findChildren(ui.QLabel))
+        duration.close()
+
+        config = ui.ServerConfigDialog()
+        assert config.password_input.echoMode() == ui.QLineEdit.EchoMode.Password
+        assert any(label.buddy() is config.password_input for label in config.findChildren(ui.QLabel))
+        assert any(label.buddy() is config.url_input for label in config.findChildren(ui.QLabel))
+        config.close()
+
+        channel = Channel(uuid="c", name="News", number=1)
+        event = EpgEvent(
+            start=1_700_000_000,
+            stop=1_700_003_600,
+            title="Evening News",
+            description="Headlines tonight",
+        )
+        guide = ui.EPGDialog(channel, [event], None)
+        button_names = [button.accessibleName() for button in guide.findChildren(ui.QPushButton)]
+        assert any("Evening News" in button_name for button_name in button_names)
+        assert any("Evening News" in label.text() for label in guide.findChildren(ui.QLabel))
+        guide.close()
+
+        class _StatusBackend:
+            def __init__(self):
+                self.server = types.SimpleNamespace(to_dict=lambda: {
+                    "name": "local",
+                    "url": "http://127.0.0.1:9981",
+                    "protocol": "http",
+                })
+
+            def get_server_info(self):
+                raise RuntimeError("offline")
+
+            def get_inputs(self):
+                return []
+
+            def get_connections(self):
+                return []
+
+            def get_subscriptions(self):
+                return []
+
+        status = ui.ServerStatusDialog(_StatusBackend(), None)
+        status.update_timer.stop()
+        good = ui.QTableWidgetItem("80.0%")
+        status.color_code_cell(good, 52428, 1, "signal")
+        assert good.text() == "80.0% (good)"
+        poor = ui.QTableWidgetItem("1.0%")
+        status.color_code_cell(poor, 655, 1, "signal")
+        assert poor.text().endswith("(poor)")
+        assert poor.foreground().color().name() == "#ffffff"
+        status.close()
+
+        assert ui.prefers_high_contrast() is False
+    finally:
+        window.close()
         app.processEvents()
