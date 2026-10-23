@@ -848,6 +848,8 @@ class TVHeadendClient(QMainWindow):
         
         self.is_fullscreen = False
         self._pre_fullscreen_state = None
+        self._playback_active = False
+        self._video_menu = None
 
         
         # Add recording indicator variables
@@ -902,6 +904,7 @@ class TVHeadendClient(QMainWindow):
         
         # Then setup UI
         self.setup_ui()
+        self._bind_playback_splash()
         
         # Update to use config for last server
         self.server_combo.setCurrentIndex(self.config.get('last_server', 0))
@@ -1106,20 +1109,41 @@ class TVHeadendClient(QMainWindow):
         self.right_layout = QVBoxLayout(self.right_pane)
         self.right_layout.setObjectName("right_layout")
         
-        # VLC player widget
+        # VLC draws into video_frame. Keep that surface free of the splash
+        # image so Qt repaints do not flash the logo over live video.
+        self.player_container = QWidget()
+        self.player_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.player_container.setStyleSheet("background-color: black;")
+        player_layout = QVBoxLayout(self.player_container)
+        player_layout.setContentsMargins(0, 0, 0, 0)
+        player_layout.setSpacing(0)
+
         self.video_frame = QWidget()
         self.video_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_frame.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.video_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.video_frame.customContextMenuRequested.connect(self.show_video_context_menu)
-        self.video_frame.setStyleSheet("""
-            background-color: black;
-            background-image: url(icons/playerbg.svg);
-            background-position: center;
-            background-repeat: no-repeat;
-        """)
-        
-        self.right_layout.addWidget(self.video_frame, 1)
+        self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.video_frame.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+        self.video_frame.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+
+        splash_path = Path(self.icons_dir) / 'playerbg.svg'
+        self.idle_splash = QLabel(self.player_container)
+        self.idle_splash.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.idle_splash.setStyleSheet(
+            f"background-color: black; "
+            f"background-image: url({splash_path.as_posix()}); "
+            "background-position: center; "
+            "background-repeat: no-repeat;"
+        )
+        self.idle_splash.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.idle_splash.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        player_layout.addWidget(self.video_frame)
+        self.player_container.installEventFilter(self)
+        self.right_layout.addWidget(self.player_container, 1)
+        self._set_idle_splash(True)
         
         # Player controls
         self.controls_bar = QWidget()
@@ -1149,7 +1173,7 @@ class TVHeadendClient(QMainWindow):
         self.stop_btn.setIcon(QIcon(f"{self.icons_dir}/stop.svg"))
         self.stop_btn.setIconSize(QSize(48, 48))
         self.stop_btn.setStyleSheet("QPushButton { border-radius: 24px; }")
-        self.stop_btn.clicked.connect(self.media_player.stop)
+        self.stop_btn.clicked.connect(self.stop_playback)
         self.stop_btn.setToolTip("Stop playback")
         playback_layout.addWidget(self.stop_btn)
         
@@ -1506,8 +1530,71 @@ class TVHeadendClient(QMainWindow):
     def stop_playback(self):
         """Stop current playback"""
         print("Debug: Stopping playback")
+        self._playback_active = False
         self.media_player.stop()
+        self._protect_video_surface(False)
         self.statusbar.showMessage("Playback stopped")
+
+    def _set_idle_splash(self, visible):
+        """Show the logo overlay only when VLC is not drawing video."""
+        if not hasattr(self, 'idle_splash'):
+            return
+        if visible:
+            self.idle_splash.setGeometry(self.player_container.rect())
+            self.idle_splash.show()
+            self.idle_splash.raise_()
+        else:
+            self.idle_splash.hide()
+
+    def _protect_video_surface(self, playing):
+        """While a channel is on, do not let Qt paint or flash the splash."""
+        self._playback_active = playing
+        if hasattr(self, '_splash_idle_timer'):
+            self._splash_idle_timer.stop()
+        self._set_idle_splash(not playing)
+        if hasattr(self, 'video_frame'):
+            self.video_frame.setUpdatesEnabled(not playing)
+
+    def _on_vlc_playing(self):
+        self._protect_video_surface(True)
+
+    def _on_vlc_stopped(self):
+        # A menu or resize can make VLC tear down its output for a moment.
+        # Do not treat that as a real stop or the splash will flash.
+        if self._playback_active:
+            return
+        if not hasattr(self, '_splash_idle_timer'):
+            return
+        self._splash_idle_timer.start(400)
+
+    def _show_splash_if_idle(self):
+        if self._playback_active:
+            return
+        if self.media_player and self.media_player.is_playing():
+            return
+        self._protect_video_surface(False)
+
+    def _bind_playback_splash(self):
+        """Keep the splash in sync if VLC starts or stops on its own."""
+        self._splash_idle_timer = QTimer(self)
+        self._splash_idle_timer.setSingleShot(True)
+        self._splash_idle_timer.timeout.connect(self._show_splash_if_idle)
+        try:
+            manager = self.media_player.event_manager()
+            manager.event_attach(
+                vlc.EventType.MediaPlayerPlaying,
+                lambda event: QTimer.singleShot(0, self._on_vlc_playing),
+            )
+            manager.event_attach(
+                vlc.EventType.MediaPlayerStopped,
+                lambda event: QTimer.singleShot(0, self._on_vlc_stopped),
+            )
+            manager.event_attach(
+                vlc.EventType.MediaPlayerEndReached,
+                lambda event: QTimer.singleShot(0, self._on_vlc_stopped),
+            )
+        except Exception as e:
+            print(f"Debug: Could not attach VLC splash events: {e}")
 
     def _release_vlc_input(self):
         """Stop VLC from eating mouse and keyboard so Qt can handle them."""
@@ -1535,41 +1622,38 @@ class TVHeadendClient(QMainWindow):
         self._pre_fullscreen_state = {
             'geometry': self.saveGeometry(),
             'splitter': self.splitter.saveState(),
-            'right_margins': self.right_layout.contentsMargins(),
-            'main_margins': self.main_layout.contentsMargins(),
-            'right_frame': self.right_pane.frameStyle(),
         }
-        self.menuBar().hide()
-        self.statusbar.hide()
-        self.left_pane.hide()
-        self.controls_bar.hide()
-        self.right_pane.setFrameStyle(QFrame.Shape.NoFrame)
-        self.right_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.showFullScreen()
-        self.video_frame.setFocus()
+        self.setUpdatesEnabled(False)
+        try:
+            self.menuBar().hide()
+            self.statusbar.hide()
+            self.left_pane.hide()
+            self.controls_bar.hide()
+            self.showFullScreen()
+        finally:
+            self.setUpdatesEnabled(True)
+            self._protect_video_surface(self._playback_active)
         self.is_fullscreen = True
 
     def _exit_fullscreen(self):
         state = self._pre_fullscreen_state or {}
-        self.showNormal()
-        geometry = state.get('geometry')
-        if geometry:
-            self.restoreGeometry(geometry)
-        self.menuBar().show()
-        self.statusbar.show()
-        self.left_pane.show()
-        self.controls_bar.show()
-        self.right_pane.setFrameStyle(state.get('right_frame', QFrame.Shape.Panel | QFrame.Shadow.Raised))
-        margins = state.get('right_margins')
-        if margins is not None:
-            self.right_layout.setContentsMargins(margins)
-        main_margins = state.get('main_margins')
-        if main_margins is not None:
-            self.main_layout.setContentsMargins(main_margins)
-        splitter_state = state.get('splitter')
-        if splitter_state:
-            self.splitter.restoreState(splitter_state)
+        self.setUpdatesEnabled(False)
+        try:
+            geometry = state.get('geometry')
+            if geometry:
+                self.restoreGeometry(geometry)
+            else:
+                self.showNormal()
+            self.menuBar().show()
+            self.statusbar.show()
+            self.left_pane.show()
+            self.controls_bar.show()
+            splitter_state = state.get('splitter')
+            if splitter_state:
+                self.splitter.restoreState(splitter_state)
+        finally:
+            self.setUpdatesEnabled(True)
+            self._protect_video_surface(self._playback_active)
         self.is_fullscreen = False
         self._pre_fullscreen_state = None
 
@@ -1628,7 +1712,16 @@ class TVHeadendClient(QMainWindow):
 
     def show_video_context_menu(self, position):
         """Right-click menu on the video surface."""
-        self._video_context_menu().exec(self.video_frame.mapToGlobal(position))
+        menu = self._video_context_menu()
+        menu.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        menu.setWindowFlag(Qt.WindowType.WindowDoesNotAcceptFocus, True)
+        menu.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        if hasattr(Qt.WidgetAttribute, 'WA_X11DoNotAcceptFocus'):
+            menu.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True)
+        self._video_menu = menu
+        # popup() avoids exec()'s modal loop, which deactivates the window
+        # and can make VLC tear down its output.
+        menu.popup(self.video_frame.mapToGlobal(position))
 
     def manage_servers(self):
         print("Debug: Opening server management dialog")
@@ -1734,10 +1827,24 @@ class TVHeadendClient(QMainWindow):
         self.media_player.audio_set_volume(value)
 
     def eventFilter(self, obj, event):
-        """Double-click the video to toggle fullscreen."""
-        if obj is self.video_frame and event.type() == QEvent.Type.MouseButtonDblClick:
-            self.toggle_fullscreen()
-            return True
+        """Keep the video surface stable and handle player gestures."""
+        if (
+            hasattr(self, 'player_container')
+            and obj is self.player_container
+            and event.type() == QEvent.Type.Resize
+        ):
+            if hasattr(self, 'idle_splash') and self.idle_splash.isVisible():
+                self.idle_splash.setGeometry(self.player_container.rect())
+            return False
+        if obj is self.video_frame:
+            if event.type() == QEvent.Type.MouseButtonDblClick:
+                self.toggle_fullscreen()
+                return True
+            if self._playback_active and event.type() in (
+                QEvent.Type.Paint,
+                QEvent.Type.UpdateRequest,
+            ):
+                return True
         return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event):
@@ -2091,6 +2198,7 @@ class TVHeadendClient(QMainWindow):
             self.media_player.set_media(media)
             self.media_player.play()
             self._release_vlc_input()
+            self._protect_video_surface(True)
             self.statusbar.showMessage(f"Playing: {channel.name}")
         except Exception as e:
             print(f"Debug: Error in play_channel: {str(e)}")
@@ -2322,6 +2430,7 @@ def main():
         # VLC's window embedding is still more reliable on X11 than on Wayland.
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
         app = QApplication(sys.argv)
+        app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
         player = TVHeadendClient()
         player.show()
         sys.exit(app.exec())

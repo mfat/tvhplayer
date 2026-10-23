@@ -55,12 +55,24 @@ def test_ui_module_uses_pyqt6(monkeypatch):
     app.processEvents()
 
 
+class _FakeEvents:
+    def __init__(self):
+        self.handlers = {}
+
+    def event_attach(self, event_type, callback):
+        self.handlers[event_type] = callback
+
+
 class _FakeVlcPlayer:
     def __init__(self):
         self.key_input = None
         self.mouse_input = None
         self._muted = 0
         self._playing = False
+        self._events = _FakeEvents()
+
+    def event_manager(self):
+        return self._events
 
     def set_xwindow(self, handle):
         return None
@@ -118,6 +130,11 @@ def _make_player(monkeypatch, tmp_path):
         types.SimpleNamespace(
             Instance=lambda *a, **k: fake_instance,
             MediaStats=object,
+            EventType=types.SimpleNamespace(
+                MediaPlayerPlaying='playing',
+                MediaPlayerStopped='stopped',
+                MediaPlayerEndReached='ended',
+            ),
             __version__='stub',
         ),
     )
@@ -132,7 +149,10 @@ def _make_player(monkeypatch, tmp_path):
 
     from PyQt6.QtWidgets import QApplication
 
+    from PyQt6.QtCore import Qt
+
     app = QApplication.instance() or QApplication([])
+    app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
     window = ui.TVHeadendClient()
     return app, ui, window, fake_player
 
@@ -148,7 +168,9 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
 
         assert fake_player.mouse_input is False
         assert fake_player.key_input is False
-        assert window.video_frame.parent() is window.right_pane
+        assert window.video_frame.parent() is window.player_container
+        assert 'background-image' not in window.video_frame.styleSheet()
+        assert window.idle_splash.isVisible()
         assert window.left_pane.isVisible()
         assert window.controls_bar.isVisible()
         assert not window.is_fullscreen
@@ -157,7 +179,8 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         app.processEvents()
 
         assert window.is_fullscreen
-        assert window.video_frame.parent() is window.right_pane
+        assert window.video_frame.parent() is window.player_container
+        assert window.idle_splash.isVisible()
         assert not window.left_pane.isVisible()
         assert not window.controls_bar.isVisible()
         assert not window.menuBar().isVisible()
@@ -243,7 +266,58 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
         app.processEvents()
         assert consumed is True
         assert window.is_fullscreen
-        assert window.video_frame.parent() is window.right_pane
+        assert window.video_frame.parent() is window.player_container
+        assert 'background-image' not in window.video_frame.styleSheet()
+
+        window._protect_video_surface(True)
+        app.processEvents()
+        assert not window.idle_splash.isVisible()
+        assert not window.video_frame.updatesEnabled()
+        window.toggle_fullscreen()
+        app.processEvents()
+        assert not window.idle_splash.isVisible()
+        assert not window.video_frame.updatesEnabled()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_playback_surface_ignores_transient_stop_and_qt_paints(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QEvent, QPoint, QRect, Qt
+    from PyQt6.QtGui import QPaintEvent
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        window.show()
+        app.processEvents()
+
+        window._protect_video_surface(True)
+        assert window._playback_active
+        assert not window.idle_splash.isVisible()
+        assert not window.video_frame.updatesEnabled()
+
+        paint = QPaintEvent(QRect(0, 0, 10, 10))
+        assert window.eventFilter(window.video_frame, paint) is True
+
+        fake_player._events.handlers['stopped'](None)
+        app.processEvents()
+        assert not window.idle_splash.isVisible()
+        assert window._playback_active
+
+        window.show_video_context_menu(QPoint(8, 8))
+        app.processEvents()
+        menu = window._video_menu
+        assert menu is not None
+        assert menu.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        assert bool(menu.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus)
+        assert not window.idle_splash.isVisible()
+        menu.hide()
+
+        window.stop_playback()
+        app.processEvents()
+        assert not window._playback_active
+        assert window.idle_splash.isVisible()
+        assert window.video_frame.updatesEnabled()
     finally:
         window.close()
         app.processEvents()
