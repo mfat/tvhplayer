@@ -1,0 +1,225 @@
+name: Linux packages (deb, rpm)
+
+# Each package compiles the built-in Tvheadend from the archives pinned in
+# packaging/tvheadend/pins.env, against the libraries of the distro it targets.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    paths:
+      - 'debian/**'
+      - 'rpm.spec'
+      - 'packaging/**'
+      - 'io.github.mfat.tvhplayer.yml'
+      - 'pypi-dependencies.yaml'
+      - '.github/workflows/packages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pins:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Flatpak, deb, and rpm pin the same Tvheadend
+        run: |
+          python3 -m pip install --quiet pytest pyyaml
+          python3 -m pytest -q tests/test_packaging_pins.py
+
+      - name: Lint the build script
+        run: shellcheck -x packaging/tvheadend/build-tvheadend.sh
+
+  deb:
+    needs: pins
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    # Oldest supported Ubuntu, so the package installs on it and everything newer.
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Install packaging tools
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates curl devscripts equivs git
+
+      - uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "label=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0~ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "label=ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch the built-in Tvheadend sources
+        run: packaging/tvheadend/build-tvheadend.sh fetch packaging/tvheadend/sources
+
+      - name: Install build dependencies
+        run: |
+          mk-build-deps --install --remove \
+            --tool 'apt-get -y --no-install-recommends' debian/control
+
+      # debian/changelog is not kept in step with releases; stamp the version.
+      - name: Set Debian package version
+        run: |
+          DEBFULLNAME="mFat" DEBEMAIL="newmfat@gmail.com" \
+            dch --newversion "${{ steps.version.outputs.version }}-1" \
+            --distribution unstable "Release ${{ steps.version.outputs.version }}"
+
+      - name: Build package
+        run: |
+          dpkg-buildpackage -us -uc -b
+          mkdir -p artifacts
+          mv ../tvhplayer_*.deb artifacts/
+
+      - name: Install and smoke-test package
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ./artifacts/tvhplayer_*.deb desktop-file-utils
+          desktop-file-validate /usr/share/applications/io.github.mfat.tvhplayer.desktop
+          cd / && python3 "$GITHUB_WORKSPACE/packaging/check-installed.py"
+
+      - name: Name release package
+        run: |
+          mkdir -p release-assets
+          set -- artifacts/tvhplayer_*.deb
+          if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+            echo "Expected exactly one Debian package, found $#"
+            exit 1
+          fi
+          name="tvhplayer-${{ steps.version.outputs.label }}-ubuntu24.04-${{ matrix.arch }}.deb"
+          cp "$1" "release-assets/$name"
+          cd release-assets && sha256sum "$name" > "$name.sha256"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload to release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          overwrite_files: false
+
+  rpm:
+    needs: pins
+    strategy:
+      fail-fast: false
+      matrix:
+        # A binary RPM requires the python(abi) of the Fedora it was built on.
+        # Add releases here to publish RPMs for them.
+        fedora: ['44']
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: fedora:${{ matrix.fedora }}
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Install packaging tools
+        run: dnf install -y rpm-build rpmdevtools rpmlint dnf-plugins-core git-core
+
+      - uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "label=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0^ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+            echo "label=ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # rpm.spec's Version and %changelog are not kept in step with releases; stamp them.
+      - name: Prepare spec and sources
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          mkdir -p ~/rpmbuild/SOURCES ~/rpmbuild/SPECS
+          sed -e "s/^Version:.*/Version:        ${version}/" \
+              -e "/^%changelog$/a * $(LC_ALL=C date '+%a %b %d %Y') mFat <newmfat@gmail.com> - ${version}-1\n- Release ${version}\n" \
+              rpm.spec > ~/rpmbuild/SPECS/tvhplayer.spec
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git archive --format=tar.gz --prefix="tvhplayer-${version}/" \
+            -o ~/rpmbuild/SOURCES/tvhplayer-${version}.tar.gz HEAD
+          spectool -g -R ~/rpmbuild/SPECS/tvhplayer.spec
+          dnf builddep -y ~/rpmbuild/SPECS/tvhplayer.spec
+
+      - name: Build package
+        run: rpmbuild -ba ~/rpmbuild/SPECS/tvhplayer.spec
+
+      - name: Run rpmlint
+        run: rpmlint -r tvhplayer.rpmlintrc ~/rpmbuild/RPMS/*/tvhplayer-*.rpm
+
+      - name: Install and smoke-test package
+        run: |
+          dnf install -y ~/rpmbuild/RPMS/*/tvhplayer-*.rpm
+          cd / && python3 "$GITHUB_WORKSPACE/packaging/check-installed.py"
+
+      - name: Name release packages
+        run: |
+          mkdir -p release-assets
+          label="${{ steps.version.outputs.label }}"
+          suffix="fedora${{ matrix.fedora }}-${{ matrix.arch }}"
+          set -- ~/rpmbuild/RPMS/${{ matrix.arch }}/tvhplayer-*.rpm
+          if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+            echo "Expected exactly one binary RPM, found $#"
+            exit 1
+          fi
+          cp "$1" "release-assets/tvhplayer-${label}-${suffix}.rpm"
+          # The source RPM is the same on every architecture; publish it once.
+          if [ "${{ matrix.arch }}" = x86_64 ]; then
+            cp ~/rpmbuild/SRPMS/tvhplayer-*.src.rpm "release-assets/tvhplayer-${label}-fedora${{ matrix.fedora }}.src.rpm"
+          fi
+          cd release-assets
+          for package in *.rpm; do sha256sum "$package" > "$package.sha256"; done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rpm-fedora${{ matrix.fedora }}-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload to release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*
+          fail_on_unmatched_files: true
+          overwrite_files: false
