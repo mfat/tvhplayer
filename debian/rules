@@ -30,6 +30,7 @@ override_dh_auto_install:
 	mkdir -p $(APP)
 	cp -a tvhplayer/. $(APP)/
 	cp -a icons $(APP)/icons
+	chmod 644 $(APP)/icons/*
 	find $(APP) -type d -name __pycache__ -prune -exec rm -rf {} +
 
 	# Desktop entry basename matches QGuiApplication.setDesktopFileName.
