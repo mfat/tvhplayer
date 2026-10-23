@@ -26,5 +26,15 @@ def test_dvr_category_maps_running_and_failed():
     assert running.category() == 'recording'
     htsp_rec = DvrEntry(uuid='1', title='t', channel_name='c', start=0, duration=1, status='Running', sched_status='recording')
     assert htsp_rec.category() == 'recording'
+    waiting = DvrEntry(
+        uuid='1', title='t', channel_name='c', start=0, duration=1,
+        status='Waiting for stream', sched_status='recording',
+    )
+    assert waiting.category() == 'recording'
     failed = DvrEntry(uuid='1', title='t', channel_name='c', start=0, duration=1, status='Failed', errors=1)
     assert failed.category() == 'failed'
+    scheduled = DvrEntry(
+        uuid='1', title='t', channel_name='c', start=0, duration=1,
+        status='Scheduled for recording', sched_status='scheduled',
+    )
+    assert scheduled.category() == 'upcoming'

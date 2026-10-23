@@ -7,9 +7,11 @@ evaluates the username. Client protocol version matches pvr.hts (38).
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import logging
 import socket
+import struct
 import threading
 from typing import Callable, Optional
 
@@ -36,6 +38,7 @@ class HtspConnection:
         self.port = int(port)
         self.timeout = timeout
         self._sock = None
+        self._rx = bytearray()
         self._lock = threading.RLock()
         self._seq = 0
         self._challenge = b''
@@ -49,6 +52,7 @@ class HtspConnection:
 
     def connect(self):
         self.close()
+        self._rx = bytearray()
         try:
             self._sock = socket.create_connection((self.host, self.port), self.timeout)
             self._sock.settimeout(self.timeout)
@@ -58,6 +62,7 @@ class HtspConnection:
     def close(self):
         sock = self._sock
         self._sock = None
+        self._rx = bytearray()
         if sock is not None:
             try:
                 sock.close()
@@ -65,20 +70,70 @@ class HtspConnection:
                 pass
 
     def _recv_exact(self, size: int) -> bytes:
-        chunks = []
-        remaining = size
-        while remaining > 0:
+        while len(self._rx) < size:
             try:
-                chunk = self._sock.recv(remaining)
+                chunk = self._sock.recv(max(size - len(self._rx), 4096))
             except socket.timeout as exc:
                 raise TvhConnectionError('HTSP read timed out') from exc
             except OSError as exc:
                 raise TvhConnectionError(f'HTSP read failed: {exc}') from exc
             if not chunk:
                 raise TvhConnectionError('HTSP connection closed')
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        return b''.join(chunks)
+            self._rx.extend(chunk)
+        data = bytes(self._rx[:size])
+        del self._rx[:size]
+        return data
+
+    def _message_ready(self) -> bool:
+        if len(self._rx) < 4:
+            return False
+        (size,) = struct.unpack('>I', self._rx[:4])
+        if size > 16 * 1024 * 1024:
+            raise TvhError(f'HTSMSG too large ({size} bytes)')
+        return len(self._rx) >= 4 + size
+
+    def _read_available(self):
+        """Pull bytes already queued on the socket into the receive buffer."""
+        sock = self._sock
+        old_timeout = sock.gettimeout()
+        sock.setblocking(False)
+        try:
+            while True:
+                try:
+                    chunk = sock.recv(65536)
+                except BlockingIOError:
+                    break
+                except socket.timeout:
+                    break
+                except OSError as exc:
+                    if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                        break
+                    raise TvhConnectionError(f'HTSP read failed: {exc}') from exc
+                if not chunk:
+                    raise TvhConnectionError('HTSP connection closed')
+                self._rx.extend(chunk)
+        finally:
+            sock.settimeout(old_timeout)
+
+    def drain_async(self, on_async: Optional[Callable] = None) -> int:
+        """Dispatch async messages already buffered, without waiting for new ones.
+
+        Tvheadend pushes dvrEntryUpdate on this socket after enableAsyncMetadata.
+        Those messages sit unread until the next RPC, so a stop that only looks
+        at the cached list still sees the entry as scheduled while the server
+        is already recording.
+        """
+        with self._lock:
+            if self._sock is None:
+                return 0
+            self._read_available()
+            count = 0
+            while self._message_ready():
+                msg = self._recv()
+                count += 1
+                if on_async:
+                    on_async(msg)
+            return count
 
     def _send(self, msg: dict):
         payload = serialize(msg)

@@ -118,15 +118,23 @@ class DvrEntry:
         status = self.status or ''
         sched = (self.sched_status or '').lower()
         status_l = status.lower()
-        if status == 'Running' or status_l in ('recording', 'running'):
+        # sched_status "recording" covers Running plus the in-progress labels
+        # Tvheadend uses before the file is open ("Waiting for stream",
+        # "Commercial break", and so on). Those must not be treated as upcoming.
+        if sched == 'recording' or status == 'Running' or status_l in (
+            'recording',
+            'running',
+            'waiting for stream',
+            'waiting for program start',
+            'commercial break',
+            'waiting for epg running flag',
+        ):
             return 'recording'
         if self.errors or self.errorcode or 'failed' in status_l or 'invalid' in status_l or 'error' in status_l or 'missed' in status_l:
             return 'failed'
         if 'completed' in status_l or status_l == 'finished':
             return 'finished'
-        if 'scheduled' in status_l or sched in ('scheduled', 'recording'):
-            return 'upcoming'
-        if status_l == 'scheduled':
+        if 'scheduled' in status_l or sched == 'scheduled':
             return 'upcoming'
         return 'upcoming'
 

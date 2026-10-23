@@ -76,26 +76,78 @@ class HtspBackend(TvhBackend):
         entry_id = msg.get('id')
         if entry_id is None:
             return
-        start = int(msg.get('start') or 0)
-        stop = int(msg.get('stop') or 0)
-        state = msg.get('state') or ''
-        channel_name = msg.get('channelName') or 'Unknown'
-        channel_id = msg.get('channel')
-        if channel_id in self._channels:
-            channel_name = self._channels[channel_id].name
-        uuid = msg.get('idStr') or str(entry_id)
+        try:
+            entry_id = int(entry_id)
+        except (TypeError, ValueError):
+            return
+        existing = self._dvr.get(entry_id)
+        raw = dict(existing.raw) if existing else {}
+        raw.update(msg)
+
+        if 'start' in msg:
+            start = int(msg.get('start') or 0)
+        elif existing:
+            start = existing.start
+        else:
+            start = 0
+        if 'stop' in msg:
+            stop = int(msg.get('stop') or 0)
+            duration = max(0, stop - start)
+        elif existing:
+            duration = existing.duration
+        else:
+            duration = 0
+
+        if 'state' in msg:
+            state = msg.get('state') or ''
+        elif existing:
+            state = existing.raw.get('state') or ''
+        else:
+            state = ''
         status, sched = _htsp_state_to_http(state)
+
+        channel_id = msg.get('channel') if 'channel' in msg else raw.get('channel')
+        if 'channelName' in msg and msg.get('channelName'):
+            channel_name = msg.get('channelName')
+        elif channel_id in self._channels:
+            channel_name = self._channels[channel_id].name
+        elif existing:
+            channel_name = existing.channel_name
+        else:
+            channel_name = 'Unknown'
+
+        if 'title' in msg and msg.get('title'):
+            title = msg.get('title')
+        elif existing:
+            title = existing.title
+        else:
+            title = 'Unknown'
+
+        if msg.get('idStr'):
+            uuid = str(msg.get('idStr'))
+        elif existing and existing.uuid:
+            uuid = existing.uuid
+        else:
+            uuid = str(entry_id)
+
+        if 'error' in msg:
+            error = msg.get('error') or ''
+        elif existing:
+            error = existing.error
+        else:
+            error = ''
+
         self._dvr[entry_id] = DvrEntry(
-            uuid=str(uuid),
-            title=msg.get('title') or 'Unknown',
+            uuid=uuid,
+            title=title,
             channel_name=channel_name,
             start=start,
-            duration=max(0, stop - start),
+            duration=duration,
             status=status,
             sched_status=sched,
-            error=msg.get('error') or '',
-            htsp_id=int(entry_id),
-            raw=msg,
+            error=error,
+            htsp_id=entry_id,
+            raw=raw,
         )
 
     def _ensure(self):
@@ -195,6 +247,9 @@ class HtspBackend(TvhBackend):
 
     def list_dvr_entries(self) -> List[DvrEntry]:
         self._ensure()
+        # Apply dvrEntryUpdate messages queued since the last RPC so a
+        # recording that has already started is not still listed as scheduled.
+        self._conn.drain_async(self._on_async)
         return list(self._dvr.values())
 
     def stop_dvr_entry(self, entry: DvrEntry) -> None:
