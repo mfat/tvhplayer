@@ -1,0 +1,202 @@
+# Proposal: Playlist Import
+
+- **Status:** Proposed
+- **Date:** October 2026
+
+## What this is
+
+The user picks an M3U or M3U8 playlist, from a web address or a local file, and TVHplayer turns its entries into channels on a Tvheadend server. The built-in server is the default target. A user who has added other servers can pick one of those instead.
+
+An imported playlist is a **playlist source**. TVHplayer remembers it, so the user can refresh it later. A refresh updates the channels in place: renamed, renumbered, and moved streams keep their channel, new entries are added, and removed entries go away.
+
+## Why the app does the work
+
+Tvheadend has its own playlist importer, the *IPTV Automatic Network*. TVHplayer does not use it. The app reads the playlist itself and writes plain IPTV muxes through the JSON API. Research on the pinned Tvheadend commit (`51ec612fa`), its forum, and its issue tracker found these problems with the built-in importer:
+
+| Problem with the automatic network | What the app does instead |
+| :--- | :--- |
+| A stream whose address changes is deleted and created again. Its channel is lost, along with recordings links and guide mapping. Providers that rotate tokens do this daily. | The app matches entries to muxes by a stable key and edits the address in place. A test confirmed the channel uuid stays the same. |
+| Every re-fetch overwrites name, number, icon, guide id, tags, and headers. Hand edits on the server are lost. | Same behaviour for fields the playlist sets, but the app decides which fields it owns. |
+| Its parser takes any line without `#` as a stream. Telewebion's master playlist has `EXT-X-VERSION:6` without `#`, so native HLS requests `…/EXT-X-VERSION:6` and fails with 403. | Entries the app cannot trust Tvheadend to read go through ffmpeg. |
+| It reads only `#EXTVLCOPT:program`, `\|key=value` headers on http lines, and `\|`-separated tags. Real playlists use Kodi conventions: `#EXTVLCOPT:http-user-agent`, `http-referrer`, `#EXTGRP`, `;`-separated `group-title`, `x-tvg-url`. | The app parses the Kodi IPTV Simple syntax and converts it. |
+| `file://` and `pipe://` playlist addresses are read on the server. | The app reads the playlist on this machine, so a local file works for a remote server too. |
+| It scans every stream after import. Forum users report 5,000 entries taking 7–8 hours and providers banning their IP. | Networks are created with *Service ID* = 1. Each mux gets its service immediately and nothing is tuned until someone watches. Tested: channels appeared instantly and played. |
+| Created through the API, it re-fetches every minute (`refetch_period` 0) and waits 0 s for data (`max_timeout` 0). | The app sets every network field it relies on. |
+
+## Choosing the server
+
+The import dialog has a **Server** list. It shows the built-in server first and preselects it. The user's other servers follow, in the order of the server list.
+
+- **Built-in server.** TVHplayer holds its admin login. If the server is not running, the import starts it and waits for the ready signal the supervisor already gives. The built-in server keeps starting and stopping with the app; the import does not change its lifetime.
+- **Other servers.** Changing networks and muxes needs the admin privilege. Before showing the preview, the app calls `api/mpegts/network/grid`. A 401 or 403 stops the import with: *"This account cannot change server settings. Sign in with an admin account to import a playlist."* Nothing has been written at that point.
+- **HTSP servers.** Admin calls always use the HTTP JSON API at the server's address, whichever protocol the server entry uses for viewing.
+- **Platforms without the built-in server** (macOS and Windows today) show only the user's servers. With none configured, the menu item explains that a server is needed.
+
+Streams received through ffmpeg run ffmpeg **on the target server**. For the built-in server the app knows which ffmpeg that is: it looks it up on the PATH the child inherits (`/app/bin/ffmpeg` in Flatpak, `/usr/bin/ffmpeg` from the deb and rpm). For another server the app cannot check, so the dialog shows an **ffmpeg on the server** field, defaulting to `/usr/bin/ffmpeg`. An absolute path avoids a Tvheadend lookup quirk where a bare `ffmpeg` can run `ffmpegthumbnailer` (issue 1632). Clearing the field means "this server has no ffmpeg": every entry is then received directly, and entries that need ffmpeg are marked as not importable.
+
+## User flow
+
+1. **File → Import Playlist…** opens the dialog.
+2. **Source:** a web address or **Browse…** for a file. **Name** defaults to the file name or host. **Server** as above. **Connection limit** (Tvheadend's *Maximum # input streams*) defaults to 2: one channel to watch plus one recording. The help text says to set it to the provider's limit.
+3. **Read playlist** downloads and parses it, then shows the **preview**:
+   - a group filter, with every group ticked; unticking a group unticks its entries;
+   - a table with Include, Number, Name, Group, Received by, and a Note column.
+   *Received by* is **Direct**, **ffmpeg**, or **Playlist command**. The Note explains skipped entries, for example "local file on another computer" or "unsupported address".
+4. **Import** runs in the background with a progress bar and **Cancel**. The summary shows added, updated, removed, and skipped counts.
+5. When the target is the current server, the channel list reloads. When it is another server, the summary offers **Switch to <server>**.
+
+**File → Manage Playlists…** lists the saved sources, grouped by server, with **Refresh**, **Edit**, and **Remove**:
+- **Edit** reopens the dialog with the saved choices.
+- **Remove** asks first, then deletes the network. Its muxes, services, channels, and bouquet go with it, which a test confirmed. The app then deletes the leftover `*** <name>` network tag, which Tvheadend leaves behind.
+
+Each source also has **Refresh when TVHplayer starts**, on by default for the built-in server. Since the built-in server runs only while the app runs, Tvheadend's own timers are not used.
+
+## How each entry is received
+
+The app decides per entry. The user can change any row in the preview.
+
+| Entry address | Default | Why |
+| :--- | :--- | :--- |
+| `udp://`, `rtp://` | Direct | Tvheadend reads these natively. |
+| `http(s)://` ending in `.ts`, or with a `video/mp2t` type hint | Direct | Plain MPEG-TS works natively. Headers go into the mux's *Custom HTTP headers*. |
+| `http(s)://` HLS (`.m3u8`) | ffmpeg | Tvheadend's HLS reader fails on malformed master playlists, cannot join separate audio renditions (ZDF), and does not reconnect when a stream drops. Forum threads from 2017 to October 2026 converge on ffmpeg for stalls and short recordings. |
+| `http(s)://` anything else | Direct | Unknown containers are left to Tvheadend. The user can switch the row to ffmpeg. |
+| `rtsp://`, `rtmp://`, DASH `.mpd` | ffmpeg | Tvheadend's README lists only UDP, HTTP, and pipe input (issue 2005). |
+| `pipe://…` in the playlist | Playlist command, **not ticked** | It runs a program on the server as the Tvheadend user. The row shows the full command. The user ticks each one, or uses **Include playlist commands** with a confirmation. |
+| `file://` | Skipped | It names a file on whichever machine runs Tvheadend. |
+
+### The ffmpeg command
+
+`core/playlist.py` builds the command. Tvheadend splits it without a shell, honouring `"…"`, `'…'`, and backslash escapes. The builder quotes every value and escapes `"` and `\`. A test runs a Python copy of `spawn_parse_args` on the built command and checks that the argument list comes back unchanged.
+
+```
+pipe://FFMPEG -nostdin -hide_banner -loglevel error
+  -reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_delay_max 5
+  [-user_agent "UA"] [-headers "Referer: R\r\n"]
+  -i "URL" -c copy
+  -metadata service_name="NAME" -metadata service_provider="PLAYLIST"
+  -f mpegts -mpegts_flags resend_headers pipe:1
+```
+
+- No `-map 0`. On an HLS master it would copy every variant. ffmpeg's default picks the best video and audio, the same as the user's current Telewebion command.
+- The service name and provider are set inside the stream, as the kodinerds-iptv playlist does.
+- The reconnect options exist in FFmpeg 4.3 and later. The Flatpak builds 4.4.5.
+- Tvheadend stored a 759-character command intact in a test.
+
+## What is written to the server
+
+One **IPTV Network** (`iptv_network`, not the automatic one) per playlist source:
+
+| Field | Value | Reason |
+| :--- | :--- | :--- |
+| `networkname` | source name | Shown in Tvheadend's UI. |
+| `service_sid` | 1 | Creates the service without scanning. |
+| `scan_create`, `skipinitscan`, `idlescan` | off, on, off | No tuning until someone watches. |
+| `max_streams` | connection limit | Provider limit. |
+| `max_timeout` | 15 | The web UI default; the API default is 0. |
+| `bouquet` | on | Channels are created and kept in sync by a bouquet. |
+| `epgauto_default` | on | New channels auto-map guide data by `tvg-id`. |
+
+The network's bouquet is enabled with *Map to channels* and the options *Map zero-numbered channels*, *Map radio channels*, and *Map encrypted services*. Without zero-numbered mapping, entries with no channel number are skipped. A test confirmed renames, renumbers, and removals carry through to channels.
+
+One **mux** per included entry:
+
+| Mux field | From the playlist |
+| :--- | :--- |
+| `iptv_url` | address, or the built ffmpeg command |
+| `iptv_hdr` | headers, direct `http(s)` only, as `Key: value` lines |
+| `iptv_sname`, `iptv_muxname` | entry name |
+| `channel_number` | `tvh-chnum`, `tvg-chno`, or `channel-number` |
+| `iptv_icon` | `tvg-logo` |
+| `iptv_epgid` | `tvg-id` |
+| `iptv_tags` | groups from `group-title` (split on `;` and `\|`) and `#EXTGRP`, one per line |
+| `epg` | 0 |
+
+`epg` 0 turns off over-the-air guide grabbing for the mux. With the default on, Tvheadend re-tunes every watched IPTV stream at 02:04 and 14:04 for up to 10 minutes (issue 1925).
+
+Updates are sent in batches: `api/idnode/save` accepts a list of nodes, which a test confirmed. New muxes need one `api/mpegts/network/mux_create` call each.
+
+## Matching entries on refresh
+
+Each entry gets a key: `tvg-id` when it is present and unique in the playlist, otherwise the entry name, with a ` #2`, ` #3` suffix for repeats. The source remembers key → mux uuid.
+
+On refresh:
+- known keys update their mux, including a changed address;
+- new keys create muxes;
+- keys missing from the playlist delete their mux and so their channel;
+- a mux uuid that no longer exists on the server is created again.
+
+The map is saved after every batch, so a cancelled import leaves the remembered state matching the server.
+
+A refresh never deletes anything when the download fails or the playlist parses to zero entries.
+
+## Playlist parsing
+
+`core/playlist.py`, with no Qt imports, reads:
+
+- `#EXTM3U` header attributes: `x-tvg-url`, `url-tvg`;
+- `#EXTINF` duration, attributes, and the name after the last unquoted comma;
+- `#EXTGRP`, `#EXTVLCOPT:http-user-agent`, `http-referrer`, `program`;
+- `URL|key=value&key=value` headers, keys case-insensitive, with a `!` prefix accepted and stripped.
+
+It ignores `#KODIPROP`, catch-up attributes, and `tvg-shift`.
+
+- **Encoding:** UTF-8, with an optional BOM, falling back to Latin-1.
+- **Line endings:** CRLF accepted.
+- **Downloads:** go through `proxy.configure_session`, follow redirects, and stop at 50 MB.
+- **Errors:** a file that does not start with `#EXTM3U`, or that has no entries, is reported as *"This file is not an M3U playlist."*
+
+## Guide data
+
+When the playlist header names an XMLTV address, the preview shows **Load the guide from <host>**, ticked.
+
+- **Built-in server.** TVHplayer downloads the guide (gzip accepted) on import, on refresh, and on start when refresh-on-start is on. It enables Tvheadend's *External: XMLTV* module and writes the file to `<config>/epggrab/xmltv.sock`. Channels match by `tvg-id` through `epgauto_default`.
+- **Other servers.** The socket is on that machine, so the app cannot write to it. The option is shown only when the server already lists an *XMLTV URL grabber* module (a `tv_grab_url` script, as TVH-IPTV-Config ships). The app then sets that module's arguments to the address.
+
+## Code layout
+
+| Piece | Where | Qt |
+| :--- | :--- | :--- |
+| Parser, entry plan, ffmpeg command builder | `tvhplayer/core/playlist.py` | no |
+| Admin API calls: network, mux, bouquet, tag, epggrab | `tvhplayer/core/tvh_admin.py`, a small client on `requests` that reuses `urls.http_auth` and `proxy.configure_session` | no |
+| Sync: diff, batches, progress callback, cancel flag | `tvhplayer/core/playlist_sync.py` | no |
+| Saved sources | `playlists` list in `tvhplayer.conf`, normalised in `core/config.py`; each source names its server by `builtin` or by URL | no |
+| Import dialog, preview, progress, Manage Playlists | `tvhplayer/playlist_dialogs.py` | yes |
+| Background run | a `QThread` worker that calls the sync and emits progress | yes |
+
+`docs/backend.md` says the backend library does not call network or mux APIs. That stays true: admin calls live in `tvh_admin.py`, not on `TvhBackend`.
+
+## Tests
+
+- **Parser** fixtures: Kodi syntax, `#EXTGRP`, `#EXTVLCOPT`, `|` headers, BOM, CRLF, a name containing commas, quoted attributes, missing names, duplicate names.
+- **Planner:** every row of the receiving table.
+- **Command builder:** quoting round-trip through a Python port of Tvheadend's `spawn_parse_args`.
+- **Sync** against a fake admin client: add, update, address change, removal, cancel mid-batch, failed download, empty playlist, vanished mux uuid.
+- **Integration**, skipped when no Tvheadend binary is found:
+  1. Start a throwaway server like the built-in one.
+  2. Import a playlist whose single entry is `pipe://ffmpeg -f lavfi -i testsrc … -f mpegts pipe:1`. It needs no network.
+  3. Check that a channel exists and that `/stream/channel/<uuid>` returns MPEG-TS.
+
+## Phases
+
+Each phase is one commit with its tests.
+
+1. Parser, planner, and command builder.
+2. Admin client and sync, with the integration test.
+3. Import dialog and preview, built-in server only.
+4. Other servers: admin check and the ffmpeg path field.
+5. Manage Playlists: refresh, edit, remove, refresh on start.
+6. Guide data from `x-tvg-url`.
+
+## Out of scope
+
+- Catch-up and archive playback.
+- Failover between several sources of one channel.
+- Picon generation.
+- Tvheadend's *Use A/V library* option, which the built-in build does not include.
+
+## Open questions
+
+1. **Playlist commands.** The proposal imports `pipe://` entries only when the user ticks them. The alternative is refusing them entirely.
+2. **HLS default.** The proposal sends HLS through ffmpeg. Direct HLS uses no extra process per stream and starts faster, but fails on the cases above.
+3. **Connection limit default.** The proposal uses 2. Public free channels usually have no limit, while paid providers often allow 1.
