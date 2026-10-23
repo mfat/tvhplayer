@@ -174,6 +174,8 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert window.left_pane.isVisible()
         assert window.controls_bar.isVisible()
         assert not window.is_fullscreen
+        windowed_frame = window.right_pane.frameStyle()
+        windowed_handle = window.splitter.handleWidth()
 
         window.toggle_fullscreen()
         app.processEvents()
@@ -184,6 +186,10 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert not window.left_pane.isVisible()
         assert not window.controls_bar.isVisible()
         assert not window.menuBar().isVisible()
+        assert window.right_pane.frameStyle() == int(ui.QFrame.Shape.NoFrame)
+        assert window.right_layout.contentsMargins().left() == 0
+        assert window.main_layout.contentsMargins().left() == 0
+        assert window.splitter.handleWidth() == 0
         assert window.fullscreen_action.isChecked()
         assert window.fullscreen_action.text() == 'Exit Fullscreen'
 
@@ -199,6 +205,8 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert window.left_pane.isVisible()
         assert window.controls_bar.isVisible()
         assert window.menuBar().isVisible()
+        assert window.right_pane.frameStyle() == windowed_frame
+        assert window.splitter.handleWidth() == windowed_handle
         assert not window.fullscreen_action.isChecked()
         assert window.fullscreen_action.text() == 'Fullscreen'
     finally:

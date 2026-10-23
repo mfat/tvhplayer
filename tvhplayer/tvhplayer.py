@@ -1618,10 +1618,24 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Error in toggle_fullscreen: {str(e)}")
             print(f"Debug: Traceback: {traceback.format_exc()}")
 
+    def _splitter_handle(self):
+        if self.splitter.count() > 1:
+            return self.splitter.handle(1)
+        return None
+
     def _enter_fullscreen(self):
+        handle = self._splitter_handle()
         self._pre_fullscreen_state = {
             'geometry': self.saveGeometry(),
             'splitter': self.splitter.saveState(),
+            'right_margins': self.right_layout.contentsMargins(),
+            'main_margins': self.main_layout.contentsMargins(),
+            'window_margins': self.contentsMargins(),
+            'right_frame': self.right_pane.frameStyle(),
+            'right_line': self.right_pane.lineWidth(),
+            'splitter_frame': self.splitter.frameStyle(),
+            'splitter_handle_width': self.splitter.handleWidth(),
+            'splitter_handle_visible': handle.isVisible() if handle else False,
         }
         self.setUpdatesEnabled(False)
         try:
@@ -1629,6 +1643,15 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.hide()
             self.left_pane.hide()
             self.controls_bar.hide()
+            self.right_pane.setFrameStyle(QFrame.Shape.NoFrame)
+            self.right_pane.setLineWidth(0)
+            self.splitter.setFrameStyle(QFrame.Shape.NoFrame)
+            self.splitter.setHandleWidth(0)
+            if handle:
+                handle.hide()
+            self.right_layout.setContentsMargins(0, 0, 0, 0)
+            self.main_layout.setContentsMargins(0, 0, 0, 0)
+            self.setContentsMargins(0, 0, 0, 0)
             self.showFullScreen()
         finally:
             self.setUpdatesEnabled(True)
@@ -1648,6 +1671,24 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.show()
             self.left_pane.show()
             self.controls_bar.show()
+            self.right_pane.setFrameStyle(
+                state.get('right_frame', QFrame.Shape.Panel | QFrame.Shadow.Raised)
+            )
+            self.right_pane.setLineWidth(state.get('right_line', 1))
+            self.splitter.setFrameStyle(state.get('splitter_frame', QFrame.Shape.NoFrame))
+            self.splitter.setHandleWidth(state.get('splitter_handle_width', 5))
+            handle = self._splitter_handle()
+            if handle and state.get('splitter_handle_visible', True):
+                handle.show()
+            margins = state.get('right_margins')
+            if margins is not None:
+                self.right_layout.setContentsMargins(margins)
+            main_margins = state.get('main_margins')
+            if main_margins is not None:
+                self.main_layout.setContentsMargins(main_margins)
+            window_margins = state.get('window_margins')
+            if window_margins is not None:
+                self.setContentsMargins(window_margins)
             splitter_state = state.get('splitter')
             if splitter_state:
                 self.splitter.restoreState(splitter_state)
