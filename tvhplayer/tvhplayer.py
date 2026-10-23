@@ -3387,6 +3387,7 @@ class TVHeadendClient(QMainWindow):
                 server.get('password') or '',
             )
             self._recording_channel = channel
+            self._recording_stall_noted = False
             self.recording_monitor = QTimer()
             self.recording_monitor.timeout.connect(self.check_recording_status)
             self.recording_monitor.start(2000)
@@ -3419,10 +3420,13 @@ class TVHeadendClient(QMainWindow):
                     QMessageBox.critical(self, "Recording Error", "Recording failed - check console for errors")
                 return
             if status.stalled:
-                channel = getattr(self, '_recording_channel', None)
-                QMessageBox.warning(self, "Recording Status", "Recording stalled - attempting restart")
-                self.stop_local_recording()
-                self.start_local_recording(channel or self.selected_channel())
+                # Keep the ffmpeg process. Restarting opens a save dialog and
+                # would discard the file already being written.
+                if not getattr(self, '_recording_stall_noted', False):
+                    self._recording_stall_noted = True
+                    self.statusbar.showMessage("Local recording stalled")
+                return
+            self._recording_stall_noted = False
         except Exception as e:
             print(f"Debug: Error checking recording status: {str(e)}")
             QMessageBox.critical(self, "Recording Error", str(e))

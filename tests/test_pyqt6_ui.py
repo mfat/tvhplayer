@@ -1106,3 +1106,41 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_stalled_local_recording_is_left_running(monkeypatch, tmp_path):
+    from tvhplayer.core.recorder import RecorderStatus
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    stopped = []
+
+    class Recorder:
+        def status(self):
+            return RecorderStatus(
+                file_path='/tmp/a.ts',
+                exists=True,
+                size=10,
+                elapsed=30,
+                running=True,
+                stalled=True,
+                return_code=None,
+            )
+
+        def stop(self):
+            stopped.append(True)
+
+    def dialog(*_args, **_kwargs):
+        raise AssertionError('dialog')
+
+    monkeypatch.setattr(ui.QMessageBox, 'warning', dialog)
+    monkeypatch.setattr(ui.QMessageBox, 'critical', dialog)
+    monkeypatch.setattr(ui.QFileDialog, 'getSaveFileName', dialog)
+    window.local_recorder = Recorder()
+    try:
+        window.check_recording_status()
+        window.check_recording_status()
+        assert stopped == []
+        assert window.status_label.text() == 'Local recording stalled'
+    finally:
+        window.close()
+        app.processEvents()

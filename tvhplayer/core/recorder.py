@@ -6,6 +6,7 @@ import base64
 import logging
 import os
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from typing import List, Optional
@@ -14,6 +15,8 @@ from urllib.parse import urlparse
 log = logging.getLogger(__name__)
 
 STALL_LIMIT = 5
+# Keep the tail. A live stream can warn for hours; the pipe only has to stay drained.
+_STDERR_LIMIT = 64 * 1024
 
 
 @dataclass
@@ -91,7 +94,9 @@ class LocalRecorder:
         self.started_at = None
         self.last_size = None
         self.stall_count = 0
-        self._stderr = b''
+        self._stderr = bytearray()
+        self._stderr_lock = threading.Lock()
+        self._stderr_thread = None
 
     @property
     def is_running(self):
@@ -103,22 +108,57 @@ class LocalRecorder:
         if cmd[0] != self.ffmpeg_executable:
             cmd[0] = self.ffmpeg_executable
         log.info('Starting local recording: %s', redact_command(cmd))
+        # stdout is unused. stderr has to be drained: the kernel pipe is 64 KB,
+        # and a full pipe blocks ffmpeg so SIGTERM never reaches the trailer.
         self.process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            bufsize=10**8,
         )
         self.file_path = str(file_path)
         self.started_at = time.time()
         self.last_size = None
         self.stall_count = 0
-        self._stderr = b''
+        with self._stderr_lock:
+            self._stderr = bytearray()
+        self._stderr_thread = threading.Thread(
+            target=self._read_stderr,
+            args=(self.process.stderr,),
+            daemon=True,
+        )
+        self._stderr_thread.start()
         return cmd
+
+    def _read_stderr(self, pipe):
+        try:
+            while True:
+                chunk = pipe.read(4096)
+                if not chunk:
+                    break
+                with self._stderr_lock:
+                    self._stderr.extend(chunk)
+                    extra = len(self._stderr) - _STDERR_LIMIT
+                    if extra > 0:
+                        del self._stderr[:extra]
+        except Exception:
+            log.debug('stderr reader stopped', exc_info=True)
+        finally:
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+    def _stderr_text(self) -> str:
+        with self._stderr_lock:
+            data = bytes(self._stderr)
+        return data.decode('utf-8', 'replace')
 
     def stop(self, timeout=5):
         process = self.process
+        thread = self._stderr_thread
         self.process = None
+        self._stderr_thread = None
         if process is None:
             return
         if process.poll() is None:
@@ -128,11 +168,8 @@ class LocalRecorder:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=timeout)
-        try:
-            _, stderr = process.communicate(timeout=1)
-            self._stderr = stderr or b''
-        except Exception:
-            pass
+        if thread is not None:
+            thread.join(timeout=1)
         self.last_size = None
         self.stall_count = 0
 
@@ -153,12 +190,10 @@ class LocalRecorder:
             self.last_size = size
         stderr = ''
         if return_code is not None and self.process is not None:
-            try:
-                _, err = self.process.communicate(timeout=1)
-                self._stderr = err or b''
-            except Exception:
-                pass
-            stderr = self._stderr.decode('utf-8', 'replace')
+            thread = self._stderr_thread
+            if thread is not None:
+                thread.join(timeout=1)
+            stderr = self._stderr_text()
         return RecorderStatus(
             file_path=path,
             exists=exists,
