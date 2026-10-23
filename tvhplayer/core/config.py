@@ -37,6 +37,9 @@ def default_config():
         'recording_path': str(Path.home()),
         'window_geometry': dict(DEFAULT_GEOMETRY),
         'servers': [],
+        'builtin_autostart': False,
+        'builtin_http_port': 0,
+        'builtin_htsp_port': 0,
     }
 
 
@@ -62,6 +65,12 @@ def _normalize(data):
         cfg['volume'] = int(cfg.get('volume') or 50)
     except (TypeError, ValueError):
         cfg['volume'] = 50
+    cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
+    for key in ('builtin_http_port', 'builtin_htsp_port'):
+        try:
+            cfg[key] = int(cfg.get(key) or 0)
+        except (TypeError, ValueError):
+            cfg[key] = 0
     return cfg
 
 

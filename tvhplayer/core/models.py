@@ -14,6 +14,7 @@ class ServerConfig:
     password: str = ''
     protocol: str = PROTOCOL_HTTP
     htsp_port: int = 9982
+    builtin: bool = False
 
     @classmethod
     def from_dict(cls, data):
@@ -32,6 +33,7 @@ class ServerConfig:
             password=data.get('password') or '',
             protocol=protocol,
             htsp_port=htsp_port,
+            builtin=bool(data.get('builtin')),
         )
 
     def to_dict(self):
@@ -42,6 +44,7 @@ class ServerConfig:
             'password': self.password,
             'protocol': self.protocol,
             'htsp_port': self.htsp_port,
+            'builtin': self.builtin,
         }
 
 

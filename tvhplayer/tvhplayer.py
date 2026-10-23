@@ -8,10 +8,10 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF
-from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
+from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices
 import json
 # Replace this line:
 #from . import resources_rc
@@ -23,22 +23,44 @@ except ImportError:
     import resources_rc  # noqa: F401  # source-tree fallback; registers Qt icons
 try:
     from .core.backend import create_backend
+    from .core.builtin_server import (
+        apply_builtin_endpoint,
+        builtin_config_dir,
+        ensure_builtin_server,
+        find_bundled_binary,
+        is_builtin_server,
+        platform_supports_builtin,
+        quit_confirmation,
+        recording_titles,
+    )
     from .core.config import ConfigStore
     from .core.dvr import instant_recording_title
     from .core.errors import TvhError
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import STALL_LIMIT, LocalRecorder
     from .core.vlc_player import VlcPlayer
+    from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from core.backend import create_backend
+    from core.builtin_server import (
+        apply_builtin_endpoint,
+        builtin_config_dir,
+        ensure_builtin_server,
+        find_bundled_binary,
+        is_builtin_server,
+        platform_supports_builtin,
+        quit_confirmation,
+        recording_titles,
+    )
     from core.config import ConfigStore
     from core.dvr import instant_recording_title
     from core.errors import TvhError
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import STALL_LIMIT, LocalRecorder
     from core.vlc_player import VlcPlayer
+    from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
 try:
     from .a11y import (
@@ -1199,6 +1221,14 @@ class ServerDialog(QDialog):
         btn_layout.addWidget(add_btn)
         btn_layout.addWidget(edit_btn)
         btn_layout.addWidget(remove_btn)
+        open_web_btn = QPushButton("Open Web Interface")
+        open_web_btn.clicked.connect(self._open_builtin_web)
+        describe(
+            open_web_btn,
+            "Open Web Interface",
+            "Open the built-in server web interface in the default browser",
+        )
+        btn_layout.addWidget(open_web_btn)
         layout.addLayout(btn_layout)
         
         # Close button
@@ -1224,6 +1254,13 @@ class ServerDialog(QDialog):
             
     def edit_server(self):
         current_row = self.server_list.currentRow()
+        if current_row >= 0 and self.servers[current_row].get('builtin'):
+            QMessageBox.information(
+                self,
+                "Built-in Server",
+                "The built-in server is managed by TVHplayer. Its address cannot be edited.",
+            )
+            return
         if current_row >= 0:
             print(f"Debug: Editing server at index {current_row}")
             dialog = ServerConfigDialog(self)
@@ -1235,6 +1272,13 @@ class ServerDialog(QDialog):
                 
     def remove_server(self):
         current_row = self.server_list.currentRow()
+        if current_row >= 0 and self.servers[current_row].get('builtin'):
+            QMessageBox.information(
+                self,
+                "Built-in Server",
+                "The built-in server stays in the server list.",
+            )
+            return
         if current_row >= 0:
             server_name = self.servers[current_row]['name']
             print(f"Debug: Removing server: {server_name}")
@@ -1242,6 +1286,11 @@ class ServerDialog(QDialog):
             self.server_list.takeItem(current_row)
         else:
             print("Debug: No server selected for removal")
+
+    def _open_builtin_web(self):
+        parent = self.parent()
+        if parent is not None and hasattr(parent, 'open_builtin_web'):
+            parent.open_builtin_web()
             
 class ServerConfigDialog(QDialog):
     def __init__(self, parent=None):
@@ -1771,10 +1820,25 @@ class TVHeadendClient(QMainWindow):
         )
         
         # Initialize servers from config
-        self.servers = self.config_store.servers
+        self.servers = ensure_builtin_server(
+            self.config_store.servers,
+            self.config.get('builtin_http_port') or 0,
+            self.config.get('builtin_htsp_port') or 0,
+        )
         self._backend = None
         self._backend_key = None
         self.local_recorder = LocalRecorder()
+        self.builtin = None
+        if platform_supports_builtin():
+            self.builtin = BuiltinSupervisor(
+                find_bundled_binary(),
+                builtin_config_dir(self.config_dir),
+                self.config.get('builtin_http_port') or 0,
+                self.config.get('builtin_htsp_port') or 0,
+            )
+            self.builtin.ready.connect(self._on_builtin_ready)
+            self.builtin.failed.connect(self._on_builtin_failed)
+            self.builtin.status_changed.connect(lambda _status: self._sync_builtin_controls())
         print(f"Debug: Loaded {len(self.servers)} servers")
         
         # Initialize channels list
@@ -1808,7 +1872,12 @@ class TVHeadendClient(QMainWindow):
         self._bind_playback_splash()
 
         # Update to use config for last server
-        self.server_combo.setCurrentIndex(self.config.get('last_server', 0))
+        last_server = self.config.get('last_server', 0)
+        if self.servers and 0 <= last_server < len(self.servers):
+            self.server_combo.setCurrentIndex(last_server)
+        if self.builtin is not None and self.config.get('builtin_autostart'):
+            self.builtin.start()
+        self._sync_builtin_controls()
 
         try:
             self.player.attach(self.video_frame.winId().__int__())
@@ -1980,6 +2049,30 @@ class TVHeadendClient(QMainWindow):
         )
         self.manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(self.manage_servers_btn)
+        self.open_web_btn = QPushButton("Open Web Interface")
+        self.open_web_btn.setVisible(False)
+        self.open_web_btn.clicked.connect(self.open_builtin_web)
+        describe(
+            self.open_web_btn,
+            "Open Web Interface",
+            "Open the built-in server web interface in the default browser",
+        )
+        self.builtin_log_btn = QPushButton("Server log")
+        self.builtin_log_btn.setVisible(False)
+        self.builtin_log_btn.clicked.connect(self.show_builtin_log)
+        describe(self.builtin_log_btn, "Server log", "Show the built-in server log")
+        self.builtin_autostart = QCheckBox("Start with TVHplayer")
+        self.builtin_autostart.setVisible(False)
+        self.builtin_autostart.setChecked(bool(self.config.get('builtin_autostart')))
+        self.builtin_autostart.toggled.connect(self._set_builtin_autostart)
+        describe(
+            self.builtin_autostart,
+            "Start with TVHplayer",
+            "Start the built-in server when TVHplayer opens",
+        )
+        server_layout.addWidget(self.open_web_btn)
+        server_layout.addWidget(self.builtin_log_btn)
+        server_layout.addWidget(self.builtin_autostart)
         left_layout.addLayout(server_layout)
         
     
@@ -2558,6 +2651,15 @@ class TVHeadendClient(QMainWindow):
                 return
                 
             server = self.current_server()
+            if is_builtin_server(server):
+                supervisor = getattr(self, 'builtin', None)
+                if supervisor is None or not supervisor.is_running():
+                    self.statusbar.showMessage("Starting built-in server...")
+                    if supervisor is not None:
+                        supervisor.start()
+                    else:
+                        self.statusbar.showMessage("Built-in server is not available in this build.")
+                    return
             print(f"Debug: Fetching channels from server: {server['url']}")
             self.statusbar.showMessage("Connecting to server...")
             channels = self.get_backend().get_channels()
@@ -3000,7 +3102,11 @@ class TVHeadendClient(QMainWindow):
         dialog.load_servers(self.servers)
         print(f"Debug: Loaded {len(self.servers)} servers into dialog")
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.servers = dialog.servers
+            self.servers = ensure_builtin_server(
+                dialog.servers,
+                self.config.get('builtin_http_port') or 0,
+                self.config.get('builtin_htsp_port') or 0,
+            )
             self.config_store.servers = self.servers
             print(f"Debug: Updated servers list, now has {len(self.servers)} servers")
             self.save_config()
@@ -3014,6 +3120,7 @@ class TVHeadendClient(QMainWindow):
             
             # Refresh channels
             self.fetch_channels()
+            self._sync_builtin_controls()
 
     def save_config(self):
         """Save current configuration"""
@@ -3096,6 +3203,7 @@ class TVHeadendClient(QMainWindow):
             if pane is not None:
                 pane.clear_server_tasks()
                 pane.refresh()
+        self._sync_builtin_controls()
 
     def on_volume_changed(self, value):
         print(f"Debug: Volume changed to {value}")
@@ -3540,12 +3648,93 @@ class TVHeadendClient(QMainWindow):
 
     def closeEvent(self, event):
         """Save configuration when closing the application"""
+        if not self._confirm_builtin_quit():
+            event.ignore()
+            return
         self.save_config()
+        if self.builtin is not None:
+            self.builtin.stop()
         self.local_recorder.stop()
         self.close_backend()
         if getattr(self, 'player', None) is not None:
             self.player.close()
         super().closeEvent(event)
+
+    def _confirm_builtin_quit(self):
+        supervisor = getattr(self, 'builtin', None)
+        if supervisor is None or not supervisor.is_running():
+            return True
+        titles = []
+        lookup_failed = False
+        try:
+            titles = recording_titles(self.get_backend().list_dvr_entries())
+        except Exception:
+            lookup_failed = True
+        message = quit_confirmation(titles, lookup_failed)
+        if not message:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Recording in progress",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _on_builtin_ready(self, http_port, htsp_port):
+        self.servers = apply_builtin_endpoint(self.servers, http_port, htsp_port)
+        self.config['builtin_http_port'] = http_port
+        self.config['builtin_htsp_port'] = htsp_port
+        self.close_backend()
+        self._sync_builtin_controls()
+        if is_builtin_server(self.current_server()):
+            self.fetch_channels()
+
+    def _on_builtin_failed(self, message):
+        self.statusbar.showMessage(message)
+        self._sync_builtin_controls()
+
+    def _set_builtin_autostart(self, checked):
+        self.config['builtin_autostart'] = bool(checked)
+
+    def _sync_builtin_controls(self):
+        buttons = (
+            getattr(self, 'open_web_btn', None),
+            getattr(self, 'builtin_log_btn', None),
+            getattr(self, 'builtin_autostart', None),
+        )
+        if buttons[0] is None:
+            return
+        selected = is_builtin_server(self.current_server())
+        running = self.builtin is not None and self.builtin.is_running()
+        self.open_web_btn.setVisible(selected)
+        self.builtin_log_btn.setVisible(selected)
+        self.builtin_autostart.setVisible(selected)
+        self.open_web_btn.setEnabled(selected and running)
+
+    def open_builtin_web(self):
+        supervisor = getattr(self, 'builtin', None)
+        if supervisor is None or not supervisor.is_running():
+            self.statusbar.showMessage("The built-in server is not running.")
+            return
+        QDesktopServices.openUrl(QUrl(f"http://127.0.0.1:{supervisor.http_port}/"))
+
+    def show_builtin_log(self):
+        supervisor = getattr(self, 'builtin', None)
+        text = supervisor.log_text() if supervisor is not None else ''
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Built-in server log")
+        layout = QVBoxLayout(dialog)
+        view = QTextEdit()
+        view.setReadOnly(True)
+        view.setPlainText(text or "No log yet.")
+        layout.addWidget(view)
+        close_btn = QPushButton("&Close")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        dialog.resize(640, 360)
+        dialog.exec()
 
     def show_channel_context_menu(self, position):
         """Show context menu for channel list items"""
