@@ -103,13 +103,18 @@ def test_builtin_entry_is_permanent_and_separate_from_a_local_instance(monkeypat
     assert len(again) == 2
 
 
-def test_windows_does_not_list_a_builtin_server(monkeypatch):
-    monkeypatch.setattr('tvhplayer.core.builtin_server.sys.platform', 'win32')
-    servers = ensure_builtin_server([
-        {'name': 'Built-in Server', 'url': 'http://127.0.0.1:24111', 'builtin': True},
-        {'name': 'NAS', 'url': 'http://nas:9981'},
-    ])
-    assert servers == [{'name': 'NAS', 'url': 'http://nas:9981'}]
+def test_windows_and_macos_do_not_list_a_builtin_server(monkeypatch):
+    for platform in ('win32', 'darwin'):
+        monkeypatch.setattr('tvhplayer.core.builtin_server.sys.platform', platform)
+        servers = ensure_builtin_server([
+            {'name': 'Built-in Server', 'url': 'http://127.0.0.1:24111', 'builtin': True},
+            {'name': 'NAS', 'url': 'http://nas:9981'},
+        ])
+        assert servers == [{'name': 'NAS', 'url': 'http://nas:9981'}]
+
+
+def test_deb_and_rpm_location_is_searched():
+    assert Path('/usr/libexec/tvhplayer/tvheadend') in bundled_binary_candidates()
 
 
 def test_quit_warning_names_the_active_recording():

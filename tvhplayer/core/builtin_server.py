@@ -35,8 +35,8 @@ _HTSP_STARTED = 'Starting HTSP server'
 
 
 def platform_supports_builtin() -> bool:
-    """Linux, macOS, and Flatpak. Windows is deferred."""
-    return sys.platform != 'win32'
+    """Linux only, Flatpak included. Tvheadend has no supported macOS or Windows build."""
+    return sys.platform.startswith('linux')
 
 
 def is_builtin_server(server) -> bool:
@@ -52,13 +52,10 @@ def builtin_requests_ready(server, running: bool) -> bool:
 
 def bundled_binary_candidates() -> list[Path]:
     """Binaries this package may have shipped. A host install is not included."""
-    candidates = [Path('/app/bin/tvheadend')]
+    # Flatpak, then the deb and rpm packages' private copy.
+    candidates = [Path('/app/bin/tvheadend'), Path('/usr/libexec/tvhplayer/tvheadend')]
     executable = Path(sys.executable).resolve()
     candidates.append(executable.with_name('tvheadend'))
-    # macOS .app: the interpreter or launcher lives in Contents/MacOS.
-    candidates.append(executable.parent / 'tvheadend')
-    if executable.parent.name == 'MacOS':
-        candidates.append(executable.parent.parent / 'Resources' / 'tvheadend')
     frozen_root = getattr(sys, '_MEIPASS', None)
     if frozen_root:
         candidates.append(Path(frozen_root) / 'tvheadend')
