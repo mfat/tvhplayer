@@ -44,7 +44,7 @@ try:
     from .core.playlist_sync import PlaylistSource, server_key
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
-    from .playlist_dialogs import ImportPlaylistDialog
+    from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from core.backend import create_backend
@@ -69,7 +69,7 @@ except ImportError:
     from core.playlist_sync import PlaylistSource, server_key
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
-    from playlist_dialogs import ImportPlaylistDialog
+    from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
 try:
     from .a11y import (
         ShortcutHelpDialog,
@@ -1837,6 +1837,8 @@ class TVHeadendClient(QMainWindow):
         )
         self._backend = None
         self._backend_key = None
+        self._busy_playlists = set()
+        self._builtin_playlists_refreshed = False
         self.local_recorder = LocalRecorder()
         self.builtin = None
         if platform_supports_builtin():
@@ -2011,6 +2013,9 @@ class TVHeadendClient(QMainWindow):
         import_playlist_action.setShortcut("Ctrl+I")
         import_playlist_action.triggered.connect(self.import_playlist)
         file_menu.addAction(import_playlist_action)
+        playlists_action = QAction("&Playlists…", self)
+        playlists_action.triggered.connect(self.show_playlists)
+        file_menu.addAction(playlists_action)
         file_menu.addSeparator()
 
         # Create actions
@@ -3759,6 +3764,7 @@ class TVHeadendClient(QMainWindow):
         self._sync_builtin_controls()
         if is_builtin_server(self.current_server()):
             self.fetch_channels()
+        self._refresh_builtin_playlists()
 
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
@@ -3797,6 +3803,64 @@ class TVHeadendClient(QMainWindow):
 
     def import_playlist(self):
         ImportPlaylistDialog(self, self).exec()
+
+    def show_playlists(self):
+        PlaylistsDialog(self, self).exec()
+
+    def server_for_playlist(self, source):
+        """The server entry a playlist source was imported to, or None when it is gone."""
+        for server in self.import_targets():
+            if server_key(server) == source.server:
+                return server
+        return None
+
+    def claim_playlist(self, source):
+        key = (source.server, source.location)
+        if key in self._busy_playlists:
+            return False
+        self._busy_playlists.add(key)
+        return True
+
+    def release_playlist(self, source):
+        self._busy_playlists.discard((source.server, source.location))
+
+    def forget_playlist_source(self, data):
+        gone = PlaylistSource.from_dict(data)
+        self.config['playlists'] = [
+            source.to_dict() for source in self.playlist_sources()
+            if (source.server, source.location) != (gone.server, gone.location)
+        ]
+        self.save_config()
+
+    def _refresh_builtin_playlists(self):
+        """Refresh playlists on the built-in server once per session, one at a time."""
+        if self._builtin_playlists_refreshed:
+            return
+        self._builtin_playlists_refreshed = True
+        server = find_builtin_server(self.servers)
+        queue = [source for source in self.playlist_sources() if source.server == server_key(server or {})]
+
+        def next_job(*_args):
+            if not queue:
+                return
+            source = queue.pop(0)
+            job = PlaylistJob(self, source, server, parent=self)
+            job.finished.connect(lambda message, _skipped: self._playlist_refreshed(message, job.server))
+            job.failed.connect(lambda message: self._playlist_refresh_failed(source, message))
+            job.finished.connect(next_job)
+            job.failed.connect(next_job)
+            job.start()
+
+        next_job()
+
+    def _playlist_refresh_failed(self, source, message):
+        # An import the user started is already updating this playlist.
+        if message != PLAYLIST_BUSY:
+            self.statusbar.showMessage(f"Could not refresh {source.name}. {message}")
+
+    def _playlist_refreshed(self, message, server):
+        self.playlist_imported(server)
+        self.statusbar.showMessage(message)
 
     def import_targets(self):
         """Servers a playlist can go to: the built-in server first, then the user's."""

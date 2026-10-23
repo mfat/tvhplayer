@@ -135,6 +135,25 @@ class TvhAdmin:
                 return None
             time.sleep(0.5)
 
+    def delete_unused_tags(self, names: List[str], wait=BOUQUET_WAIT_SECONDS) -> None:
+        """Delete channel tags with these names once no channel carries them.
+
+        Tvheadend drops a deleted network's channels on a timer, so this
+        waits for their tags to be released.
+        """
+        names = set(names or [])
+        if not names:
+            return
+        deadline = time.monotonic() + wait
+        while True:
+            tags = [row for row in self._grid('api/channeltag/grid') if row.get('name') in names]
+            used = {tag for row in self._grid('api/channel/grid') for tag in row.get('tags') or []}
+            unused = [row['uuid'] for row in tags if row.get('uuid') not in used]
+            if len(unused) == len(tags) or time.monotonic() >= deadline:
+                self.delete(unused)
+                return
+            time.sleep(0.5)
+
     def delete_network(self, network_uuid: str) -> None:
         """Delete the network, then the channel tag its bouquet leaves behind."""
         bouquet = self.find_bouquet(network_uuid)

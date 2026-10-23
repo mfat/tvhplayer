@@ -49,7 +49,7 @@ The user imports a playlist and it works. The dialogs use no Tvheadend or stream
 The playlist's name comes from the file name or the web address's host. A source whose address is already imported to that server is refreshed instead of added twice.
 
 **File → Playlists…** lists the imported playlists with **Refresh** and **Remove**:
-- **Remove** asks "Remove the channels from <name>?" and then deletes the network. Its muxes, services, channels, and bouquet go with it, which a test confirmed. The app then deletes the leftover `*** <name>` network tag, which Tvheadend leaves behind.
+- **Remove** asks "Remove the channels from <name>?" and then deletes the network. Its muxes, services, channels, and bouquet go with it, which a test confirmed. The app then deletes the leftover `*** <name>` network tag, which Tvheadend leaves behind, and the group tags the playlist created once no other channel carries them. The source remembers those tag names for this.
 - Playlists imported to the built-in server refresh by themselves when TVHplayer starts. Since the built-in server runs only while the app runs, Tvheadend's own timers are not used.
 
 Plain-language errors:
@@ -206,7 +206,7 @@ Each phase is one commit with its tests.
 1. Parser, planner, and command builder.
 2. Admin client and sync, with the integration test.
 3. Import dialog, for the built-in server and other servers.
-4. Playlists dialog: refresh, remove, and refresh on start.
+4. Playlists dialog: refresh, remove, and refresh on start. One playlist is updated by one job at a time.
 5. Guide data from `x-tvg-url`.
 
 ## Out of scope

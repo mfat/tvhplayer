@@ -16,14 +16,15 @@ OTHER = {'name': 'Living room', 'url': 'http://tv.lan:9981'}
 
 
 class FakeAdmin:
-    instances = []
+    """One fake server per URL, kept across connections like a real one."""
+
+    servers = {}
 
     def __init__(self, server):
         self.server = server
-        self.networks = {}
-        self.muxes = {}
-        self.fail = None
-        FakeAdmin.instances.append(self)
+        state = FakeAdmin.servers.setdefault(server.get('url'), {'networks': {}, 'muxes': {}})
+        self.networks = state['networks']
+        self.muxes = state['muxes']
 
     def __enter__(self):
         return self
@@ -43,7 +44,7 @@ class FakeAdmin:
         return 'net'
 
     def list_muxes(self, _network_uuid):
-        return []
+        return [dict(conf, uuid=uuid) for uuid, conf in self.muxes.items()]
 
     def create_mux(self, _network_uuid, conf):
         uuid = f'm{len(self.muxes) + 1}'
@@ -56,12 +57,16 @@ class FakeAdmin:
     def delete(self, uuids):
         pass
 
+    def delete_unused_tags(self, names):
+        self.tags_deleted = list(names)
+
     def map_network_bouquet(self, _network_uuid):
         pass
 
 
 class FakeHost:
     def __init__(self, targets, current=None):
+        self.busy = set()
         self.targets = targets
         self.current = current
         self.stored = []
@@ -90,11 +95,32 @@ class FakeHost:
         self.shown.append(server)
 
 
+    def claim_playlist(self, source):
+        key = (source.server, source.location)
+        if key in self.busy:
+            return False
+        self.busy.add(key)
+        return True
+
+    def release_playlist(self, source):
+        self.busy.discard((source.server, source.location))
+
+    def forget_playlist_source(self, data):
+        self.stored = [item for item in self.stored if item['location'] != data['location']]
+
+    def server_for_playlist(self, source):
+        for server in self.targets:
+            key = 'builtin' if server.get('builtin') else server['url']
+            if key == source.server:
+                return server
+        return None
+
+
 @pytest.fixture
 def app(monkeypatch):
     monkeypatch.setattr(dialogs, 'TvhAdmin', FakeAdmin)
     monkeypatch.setattr(dialogs, 'ffmpeg_for_server', lambda _server: '/usr/bin/ffmpeg')
-    FakeAdmin.instances = []
+    FakeAdmin.servers = {}
     return QApplication.instance() or QApplication([])
 
 
@@ -142,7 +168,7 @@ def test_import_again_refreshes_the_same_playlist(app, tmp_path):
     _run(app, dialog)
     _run(app, dialog)
     assert len(host.stored) == 1
-    assert dialog.status_label.text().startswith('Updated the channels from news')
+    assert dialog.status_label.text() == 'The channels from news are up to date.'
 
 
 def test_other_server_offers_to_show_its_channels(app, tmp_path):
@@ -186,3 +212,52 @@ def test_playlist_programs_need_permission(app, tmp_path, monkeypatch):
     assert dialog.status_label.text() == 'Added 2 channels from news. 1 entry could not be added.'
     assert not dialog.details_btn.isHidden()
     assert host.stored[-1]['allow_commands'] is False
+
+
+def _wait_job(app, dialog, timeout=10):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if dialog._job is not None and not dialog._job.is_running():
+            break
+        time.sleep(0.02)
+    for _ in range(5):
+        app.processEvents()
+
+
+def test_playlists_dialog_refreshes_and_removes(app, tmp_path, monkeypatch):
+    removed = []
+    monkeypatch.setattr(dialogs, 'remove_playlist', lambda _admin, source: removed.append(source.name))
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    importer = dialogs.ImportPlaylistDialog(host)
+    importer.location_input.setText(_playlist(tmp_path, TWO))
+    _run(app, importer)
+
+    dialog = dialogs.PlaylistsDialog(host)
+    assert dialog.playlist_list.count() == 1
+    assert dialog.playlist_list.item(0).text() == 'news — Built-in Server'
+    dialog.refresh_btn.click()
+    _wait_job(app, dialog)
+    assert dialog.status_label.text() == 'The channels from news are up to date.'
+
+    monkeypatch.setattr(
+        dialogs.QMessageBox, 'question', lambda *_args, **_kwargs: dialogs.QMessageBox.StandardButton.Yes
+    )
+    dialog.remove_btn.click()
+    _wait_job(app, dialog)
+    assert removed == ['news']
+    assert host.stored == []
+    assert dialog.status_label.text() == 'Removed the channels from news.'
+    assert dialog.playlist_list.isHidden()
+    assert not dialog.empty_label.isHidden()
+
+
+def test_one_job_per_playlist(app, tmp_path):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    location = _playlist(tmp_path, TWO)
+    host.busy.add(('builtin', location))
+    dialog = dialogs.ImportPlaylistDialog(host)
+    dialog.location_input.setText(location)
+    _run(app, dialog)
+    assert dialog.status_label.text() == dialogs.BUSY
+    assert dialog.import_btn.isEnabled()

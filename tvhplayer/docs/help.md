@@ -46,7 +46,12 @@ You can add internet TV channels from an M3U playlist.
 3. If you have more than one server, choose where the channels go. The built-in server is chosen for you.
 4. Click **Import**.
 
-The channels appear in the channel list when the import finishes. To pick up changes to the playlist later, import the same playlist again: new channels are added, and channels that left the playlist are removed.
+The channels appear in the channel list when the import finishes.
+
+Playlists on the built-in server are checked again each time TVHplayer starts, so new channels are added and channels that left the playlist are removed. To manage your playlists, choose **File → Playlists…**:
+
+- **Refresh** reads the playlist again now.
+- **Remove** removes the playlist and its channels.
 
 ### Schedule recordings
 

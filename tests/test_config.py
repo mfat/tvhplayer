@@ -45,4 +45,5 @@ def test_playlists_are_saved_and_cleaned(tmp_path):
         'network_uuid': '',
         'muxes': {'id:a': 'm1'},
         'allow_commands': False,
+        'tags': [],
     }]

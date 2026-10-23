@@ -45,6 +45,8 @@ class PlaylistSource:
     network_uuid: str = ''
     muxes: Dict[str, str] = field(default_factory=dict)
     allow_commands: bool = False
+    # Channel tag names this playlist's groups created on the server.
+    tags: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data):
@@ -57,6 +59,7 @@ class PlaylistSource:
             network_uuid=str(data.get('network_uuid') or ''),
             muxes={str(key): str(value) for key, value in muxes.items()},
             allow_commands=bool(data.get('allow_commands')),
+            tags=[str(tag) for tag in data.get('tags') or [] if tag],
         )
 
     def to_dict(self):
@@ -67,6 +70,7 @@ class PlaylistSource:
             'network_uuid': self.network_uuid,
             'muxes': dict(self.muxes),
             'allow_commands': self.allow_commands,
+            'tags': list(self.tags),
         }
 
 
@@ -138,8 +142,8 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
     return message
 
 
-def error_message(exc: Exception, server_name: str) -> str:
-    """Plain words for a failed import."""
+def error_message(exc: Exception, server_name: str, removing: bool = False) -> str:
+    """Plain words for a failed import or removal."""
     if isinstance(exc, PlaylistError):
         return str(exc)
     if isinstance(exc, TvhAuthError):
@@ -149,7 +153,8 @@ def error_message(exc: Exception, server_name: str) -> str:
         )
     if isinstance(exc, TvhConnectionError):
         return f'Could not reach {server_name}. Check that it is running and that its address is right.'
-    return f'{server_name} could not add the channels: {exc}'
+    action = 'remove' if removing else 'add'
+    return f'{server_name} could not {action} the channels: {exc}'
 
 
 def mux_conf(plan: ChannelPlan) -> dict:
@@ -241,16 +246,23 @@ def sync_playlist(
         checkpoint()
         progress(total, total)
 
+    tags = set(source.tags)
+    for plan in plans:
+        tags.update(plan.groups)
+    source.tags = sorted(tags)
+    checkpoint()
     admin.map_network_bouquet(source.network_uuid)
     return result
 
 
 def remove_playlist(admin, source: PlaylistSource) -> None:
-    """Delete the playlist's network, with its channels and channel tag."""
+    """Delete the playlist's network, its channels, and tags no other channel uses."""
     if admin.network_exists(source.network_uuid):
         admin.delete_network(source.network_uuid)
+    admin.delete_unused_tags(source.tags)
     source.network_uuid = ''
     source.muxes = {}
+    source.tags = []
 
 
 def _differs(conf: dict, row: dict) -> bool:

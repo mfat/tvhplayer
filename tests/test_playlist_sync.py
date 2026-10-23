@@ -73,6 +73,9 @@ class FakeAdmin:
             self.muxes.pop(uuid, None)
             self.networks.pop(uuid, None)
 
+    def delete_unused_tags(self, names):
+        self.tags_deleted = list(names)
+
     def map_network_bouquet(self, network_uuid):
         self.mapped.append(network_uuid)
 
@@ -189,14 +192,17 @@ def test_remove_playlist_deletes_network():
     admin = FakeAdmin()
     source = PlaylistSource('List', '', 'builtin')
     sync_playlist(admin, source, _plans(FIRST))
+    source.tags = ['News']
     remove_playlist(admin, source)
     assert admin.networks == {}
     assert admin.muxes == {}
+    assert admin.tags_deleted == ['News']
     assert source.network_uuid == ''
+    assert source.tags == []
 
 
 def test_source_round_trips_and_names_its_server():
-    source = PlaylistSource('L', '/tmp/a.m3u', 'builtin', 'n', {'id:a': 'm'}, True)
+    source = PlaylistSource('L', '/tmp/a.m3u', 'builtin', 'n', {'id:a': 'm'}, True, ['News'])
     assert PlaylistSource.from_dict(source.to_dict()) == source
     assert server_key({'builtin': True, 'url': 'http://127.0.0.1:1'}) == 'builtin'
     assert server_key({'url': 'http://tv.lan:9981/'}) == 'http://tv.lan:9981'
@@ -324,6 +330,7 @@ def test_import_plays_refreshes_and_removes(tvheadend, media):
         assert _wait(lambda: _channels(port) == {})
         tags = [row['name'] for row in _api(port, 'channeltag/grid')['entries']]
         assert not any(name.startswith('*** ') for name in tags)
+        assert 'News' not in tags
 
 
 def test_ffmpeg_location_per_server():
