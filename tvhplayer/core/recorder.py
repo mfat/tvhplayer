@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import List, Optional
 from urllib.parse import urlparse
 
+from .proxy import child_env
+
 log = logging.getLogger(__name__)
 
 STALL_LIMIT = 5
@@ -115,6 +117,7 @@ class LocalRecorder:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            env=child_env(stream_url),
         )
         self.file_path = str(file_path)
         self.started_at = time.time()

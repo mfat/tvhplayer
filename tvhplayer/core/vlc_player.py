@@ -7,6 +7,7 @@ import sys
 import traceback
 
 from .player import Player
+from .proxy import hide_http_proxy_from_vlc
 
 VLC_ARGS = (
     '--avcodec-hw=any',
@@ -27,6 +28,8 @@ class VlcPlayer(Player):
         self._vlc = vlc
         self._events_bound = False
         _prepare_frozen_plugins()
+        # libvlc ignores no_proxy, so a local or LAN server would go through the proxy.
+        hide_http_proxy_from_vlc()
         self._instance = vlc.Instance(list(VLC_ARGS))
         if not self._instance:
             raise RuntimeError('VLC Instance creation returned None')

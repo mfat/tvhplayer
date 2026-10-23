@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from PyQt6.QtCore import QObject, QProcess, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, pyqtSignal
 
 try:
     from .core.builtin_server import (
@@ -18,6 +18,7 @@ try:
         serverinfo_ok,
         startup_result,
     )
+    from .core.proxy import child_env
 except ImportError:
     from core.builtin_server import (
         MAX_BIND_ATTEMPTS,
@@ -30,6 +31,7 @@ except ImportError:
         serverinfo_ok,
         startup_result,
     )
+    from core.proxy import child_env
 
 
 class BuiltinSupervisor(QObject):
@@ -110,6 +112,11 @@ class BuiltinSupervisor(QObject):
         args = command_args(self.binary, self.config_dir, self.http_port, self.htsp_port)[1:]
         self._set_status('starting')
         self._deadline = time.monotonic() + self.startup_timeout
+        # VLC's http_proxy is hidden from this process. Tvheadend's own fetches keep it.
+        environment = QProcessEnvironment()
+        for key, value in child_env(None).items():
+            environment.insert(key, value)
+        self.process.setProcessEnvironment(environment)
         self.process.start(str(self.binary), args)
         self._poll.start()
 

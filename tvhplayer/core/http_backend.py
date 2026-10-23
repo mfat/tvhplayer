@@ -62,6 +62,7 @@ from .models import (
     TimerecEntry,
     TimerecSpec,
 )
+from .proxy import configure_session
 from .urls import append_profile, http_auth, http_base_url, insert_basic_auth, resolve_reference
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class HttpBackend(TvhBackend):
         self._base = http_base_url(server.url)
         self._auth = http_auth(server.to_dict())
         self._session = requests.Session()
+        configure_session(self._session, self._base)
         self._timeout = DEFAULT_TIMEOUT
 
     def close(self):
