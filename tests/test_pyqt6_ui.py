@@ -882,9 +882,6 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
 
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
     window.tasks_pane.update_timer.stop()
-    old_file = tmp_path / 'shows' / 'old.ts'
-    old_file.parent.mkdir()
-    old_file.write_bytes(b'old')
 
     class FakeBackend:
         def __init__(self):
@@ -906,7 +903,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
                 DvrEntry(
                     uuid='done', title='Old', channel_name='BBC', start=50, duration=60,
                     status='Completed',
-                    raw={'filesize': 4096, 'filename': 'shows/old.ts'},
+                    raw={'filesize': 4096},
                 ),
                 DvrEntry(
                     uuid='older', title='Archive', channel_name='BBC', start=10, duration=30,
@@ -924,9 +921,6 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         def cancel_dvr_entry(self, entry):
             self.cancelled.append(entry.uuid)
             self.entries = [item for item in self.entries if item.uuid != entry.uuid]
-
-        def list_dvr_configs(self):
-            return [types.SimpleNamespace(storage=str(tmp_path))]
 
     class FakeRecorder:
         def __init__(self):
@@ -1003,8 +997,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.task_table.rowCount() == 1
         assert 'Old' in _task_texts(panel)[0]
         _select_task(panel, 'Old')
-        assert panel.reveal_btn.isEnabled() is True
-        assert panel.selected_task()['path'] == str(old_file)
+        assert panel.reveal_btn.isEnabled() is False
         panel.search_box.clear()
         panel.status_combo.setCurrentText('Completed')
         shown = _task_texts(panel)
@@ -1015,7 +1008,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.task_table.item(0, 4).text() == '4.0 KB'
         _select_task(panel, 'Old')
         assert panel.action_btn.isEnabled() is False
-        assert panel.reveal_btn.isEnabled() is True
+        assert panel.reveal_btn.isEnabled() is False
         _select_task(panel, 'Archive')
         assert panel.reveal_btn.isEnabled() is False
         panel.status_combo.setCurrentText('All')
@@ -1038,8 +1031,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         _select_task(panel, 'News')
         assert panel.action_btn.accessibleName() == 'Stop'
         assert panel.action_btn.isEnabled() is True
-        assert panel.reveal_btn.isEnabled() is True
-        assert panel.selected_task()['path'] == '/news.ts'
+        assert panel.reveal_btn.isEnabled() is False
         panel.run_action()
         assert backend.stopped == ['run']
         assert recorder.running is True
@@ -1116,6 +1108,8 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert any('Old' in text for text in _task_texts(panel))
         assert panel.task_table.isVisible()
         _select_task(panel, 'Old')
+        assert panel.reveal_btn.isEnabled() is False
+        _select_task(panel, 'Local')
         assert panel.reveal_btn.isEnabled() is True
 
         window.tasks_action.setChecked(False)
