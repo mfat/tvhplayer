@@ -28,6 +28,7 @@ try:
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import STALL_LIMIT, LocalRecorder
     from .core.vlc_player import VlcPlayer
+    from .file_manager import show_in_file_manager
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from core.backend import create_backend
@@ -36,6 +37,7 @@ except ImportError:
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import STALL_LIMIT, LocalRecorder
     from core.vlc_player import VlcPlayer
+    from file_manager import show_in_file_manager
 try:
     from .a11y import (
         ShortcutHelpDialog,
@@ -517,7 +519,7 @@ def _entry_filesize(entry):
 
 
 class TasksPanel(QFrame):
-    """Ongoing and scheduled recordings, with search and a status filter."""
+    """Ongoing, scheduled, and completed recordings, with search and a status filter."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -531,7 +533,8 @@ class TasksPanel(QFrame):
         self.setAccessibleName("Tasks")
         self.setAccessibleDescription(
             "Ongoing and scheduled recordings. "
-            "Filter by text or by status, then stop or cancel the selected one."
+            "Choose Completed to see finished recordings. "
+            "Filter by text or by status, then stop, cancel, or reveal the selected one."
         )
         self.setMinimumWidth(220)
         self._build_ui()
@@ -568,12 +571,13 @@ class TasksPanel(QFrame):
         layout.addLayout(filter_row)
 
         self.status_combo = QComboBox()
-        self.status_combo.addItems(["All", "Recording", "Scheduled"])
+        self.status_combo.addItems(["All", "Recording", "Scheduled", "Completed"])
         self.status_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         describe(
             self.status_combo,
             "Task status",
-            "Show all tasks, only recordings, or only scheduled recordings.",
+            "Show ongoing and scheduled tasks, only recordings, "
+            "only scheduled recordings, or completed recordings.",
         )
         self.status_combo.currentIndexChanged.connect(self._apply_filter)
         show_row = QHBoxLayout()
@@ -602,8 +606,11 @@ class TasksPanel(QFrame):
         describe(
             self.task_table,
             "Tasks",
-            "Ongoing and scheduled recordings. Recording rows are listed first.",
+            "Ongoing and scheduled recordings. Choose Completed to see finished recordings. "
+            "Recording rows are listed first.",
         )
+        self.task_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.task_table.customContextMenuRequested.connect(self._show_task_menu)
         self.task_table.itemSelectionChanged.connect(self._update_action)
         layout.addWidget(self.task_table, 1)
 
@@ -612,7 +619,19 @@ class TasksPanel(QFrame):
         self.action_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.action_btn.clicked.connect(self.run_action)
         self._set_action("Stop", "Stop the selected recording. The recorded file is kept.", False)
-        layout.addWidget(self.action_btn)
+        self.reveal_btn = QPushButton("Reveal")
+        self.reveal_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        describe(
+            self.reveal_btn,
+            "Reveal in File Manager",
+            "Show the selected local recording in the file manager, with the file selected.",
+        )
+        self.reveal_btn.clicked.connect(self.reveal_selected)
+        self._set_reveal(False)
+        action_row = QHBoxLayout()
+        action_row.addWidget(self.action_btn, 1)
+        action_row.addWidget(self.reveal_btn, 1)
+        layout.addLayout(action_row)
 
     def clear_server_tasks(self):
         """Drop cached server rows, for example after the server changes."""
@@ -632,14 +651,7 @@ class TasksPanel(QFrame):
         local = self._local_task()
         if local is not None:
             tasks.append(local)
-        self._tasks = sorted(
-            tasks,
-            key=lambda task: (
-                0 if task['bucket'] == 'recording' else 1,
-                task['start'],
-                task.get('title') or '',
-            ),
-        )
+        self._tasks = sorted(tasks, key=self._sort_key)
         self._apply_filter()
 
     def selected_task(self):
@@ -677,6 +689,34 @@ class TasksPanel(QFrame):
             return
         self.refresh()
 
+    def reveal_selected(self):
+        """Show the selected local recording in the file manager."""
+        task = self.selected_task()
+        path = (task or {}).get('path') or ''
+        host = self._host
+        if not self._can_reveal(task):
+            return
+        if show_in_file_manager(path):
+            self._tell(host, f"Showing {Path(path).name} in the file manager")
+            return
+        folder = os.path.dirname(os.path.abspath(path))
+        if folder and os.path.isdir(folder) and show_in_file_manager(folder):
+            self._tell(host, f"Showing {Path(folder).name} in the file manager")
+            return
+        self._tell(host, "Couldn't show the recording in the file manager")
+
+    def _show_task_menu(self, position):
+        index = self.task_table.indexAt(position)
+        if not index.isValid():
+            return
+        self.task_table.selectRow(index.row())
+        menu = QMenu(self)
+        menu.setAccessibleName("Task actions")
+        action = menu.addAction("Reveal in File Manager")
+        action.setEnabled(self._can_reveal(self.selected_task()))
+        action.triggered.connect(self.reveal_selected)
+        menu.exec(self.task_table.viewport().mapToGlobal(position))
+
     def _tell(self, host, message):
         statusbar = getattr(host, 'statusbar', None)
         if statusbar is not None:
@@ -712,10 +752,16 @@ class TasksPanel(QFrame):
                 status = 'Scheduled'
                 start_text = datetime.fromtimestamp(entry.start).strftime('%Y-%m-%d %H:%M')
                 detail = f"Starts {start_text}, duration {_clock(entry.duration)}"
+            elif category == 'finished':
+                bucket = 'completed'
+                status = 'Completed'
+                finished_at = (entry.start or 0) + (entry.duration or 0)
+                finished_text = datetime.fromtimestamp(finished_at).strftime('%Y-%m-%d %H:%M')
+                detail = f"Finished {finished_text}, duration {_clock(entry.duration)}"
             else:
                 continue
             size_bytes = _entry_filesize(entry)
-            if size_bytes is None or (bucket != 'recording' and not size_bytes):
+            if size_bytes is None or (bucket not in ('recording', 'completed') and not size_bytes):
                 size_text = ""
             else:
                 size_text = _format_size(size_bytes)
@@ -734,6 +780,7 @@ class TasksPanel(QFrame):
                 'size': size_text,
                 'detail': detail,
                 'start': entry.start or 0,
+                'path': '',
             })
         return tasks
 
@@ -768,12 +815,27 @@ class TasksPanel(QFrame):
             'size': _format_size(size),
             'detail': detail,
             'start': int(started),
+            'path': path,
         }
 
+    def _sort_key(self, task):
+        order = {'recording': 0, 'scheduled': 1, 'completed': 2}.get(task['bucket'], 9)
+        start = task['start']
+        if task['bucket'] == 'completed':
+            start = -start
+        return (order, start, task.get('title') or '')
+
+    def _can_reveal(self, task):
+        return bool(task and task.get('kind') == 'Local' and task.get('path'))
+
     def _matches(self, task, query, status_filter):
+        if status_filter == 'All' and task['bucket'] == 'completed':
+            return False
         if status_filter == 'Recording' and task['bucket'] != 'recording':
             return False
         if status_filter == 'Scheduled' and task['bucket'] != 'scheduled':
+            return False
+        if status_filter == 'Completed' and task['bucket'] != 'completed':
             return False
         if not query:
             return True
@@ -806,7 +868,11 @@ class TasksPanel(QFrame):
             self._restore_selection(selected)
         else:
             self.task_table.clearSelection()
-            if self._tasks:
+            # Completed rows stay out of All, so an empty All list is still "No tasks".
+            active = [task for task in self._tasks if task['bucket'] != 'completed']
+            if status_filter == 'All' and not query and not active:
+                self._set_empty("No tasks")
+            elif self._tasks:
                 self._set_empty("No matching tasks")
             else:
                 self._set_empty("No tasks")
@@ -856,10 +922,18 @@ class TasksPanel(QFrame):
 
     def _update_action(self):
         task = self.selected_task()
+        self._set_reveal(self._can_reveal(task))
         if task is None:
             self._set_action(
                 "Stop",
                 "Stop the selected recording. The recorded file is kept.",
+                False,
+            )
+            return
+        if task['bucket'] == 'completed':
+            self._set_action(
+                "Stop",
+                "Completed recordings are finished. There is nothing to stop.",
                 False,
             )
             return
@@ -889,6 +963,9 @@ class TasksPanel(QFrame):
         describe(self.action_btn, name, description)
         self.action_btn.setToolTip(description)
 
+    def _set_reveal(self, enabled):
+        self.reveal_btn.setEnabled(enabled)
+
     def _set_error(self, message):
         if message == self._error_text:
             return
@@ -906,7 +983,10 @@ class TasksPanel(QFrame):
         if message:
             description = message
         else:
-            description = "Ongoing and scheduled recordings. Recording rows are listed first."
+            description = (
+                "Ongoing and scheduled recordings. Choose Completed to see finished recordings. "
+                "Recording rows are listed first."
+            )
         if description == self._table_description:
             return
         self._table_description = description
@@ -2186,6 +2266,7 @@ class TVHeadendClient(QMainWindow):
             self.tasks_pane.status_combo,
             self.tasks_pane.task_table,
             self.tasks_pane.action_btn,
+            self.tasks_pane.reveal_btn,
         ]
         for first, second in zip(order, order[1:]):
             self.setTabOrder(first, second)

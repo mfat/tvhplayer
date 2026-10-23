@@ -670,6 +670,10 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.tasks_pane.search_box.accessibleName() == "Filter tasks"
         assert window.tasks_pane.status_combo.accessibleName() == "Task status"
         assert window.tasks_pane.status_combo.currentText() == "All"
+        assert [
+            window.tasks_pane.status_combo.itemText(index)
+            for index in range(window.tasks_pane.status_combo.count())
+        ] == ["All", "Recording", "Scheduled", "Completed"]
         assert window.tasks_pane.task_table.accessibleName() == "Tasks"
         assert window.tasks_pane.task_table.isVisible()
         assert window.tasks_pane.task_table.rowCount() == 0
@@ -679,6 +683,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.tasks_pane.task_table.accessibleDescription() == "No tasks"
         assert window.tasks_pane.action_btn.accessibleName() == "Stop"
         assert window.tasks_pane.action_btn.isEnabled() is False
+        assert window.tasks_pane.reveal_btn.accessibleName() == "Reveal in File Manager"
+        assert window.tasks_pane.reveal_btn.isEnabled() is False
         assert window.tasks_action.isChecked() is True
         assert any(label.buddy() is window.tasks_pane.search_box for label in window.findChildren(ui.QLabel))
         assert any(label.buddy() is window.tasks_pane.status_combo for label in window.findChildren(ui.QLabel))
@@ -693,7 +699,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         status_at = focus_chain.index(window.tasks_pane.status_combo)
         list_at = focus_chain.index(window.tasks_pane.task_table)
         action_at = focus_chain.index(window.tasks_pane.action_btn)
-        assert search_at < status_at < list_at < action_at
+        reveal_at = focus_chain.index(window.tasks_pane.reveal_btn)
+        assert search_at < status_at < list_at < action_at < reveal_at
         assert "focus" in window.play_btn.styleSheet()
         assert window.fullscreen_action.shortcut().toString() == "F11"
         assert any(label.buddy() is window.search_box for label in window.findChildren(ui.QLabel))
@@ -896,6 +903,11 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
                 DvrEntry(
                     uuid='done', title='Old', channel_name='BBC', start=50, duration=60,
                     status='Completed',
+                    raw={'filesize': 4096},
+                ),
+                DvrEntry(
+                    uuid='older', title='Archive', channel_name='BBC', start=10, duration=30,
+                    status='Completed',
                 ),
             ]
 
@@ -983,6 +995,16 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.task_table.rowCount() == 0
         assert panel.task_table.accessibleDescription() == 'No matching tasks'
         panel.search_box.clear()
+        panel.status_combo.setCurrentText('Completed')
+        shown = _task_texts(panel)
+        assert [text for text in shown if 'Old' in text or 'Archive' in text]
+        assert shown[0].index('Old') >= 0
+        assert 'Archive' in shown[1]
+        assert 'Completed' in shown[0] and 'Finished' in shown[0]
+        assert panel.task_table.item(0, 4).text() == '4.0 KB'
+        assert panel.action_btn.isEnabled() is False
+        assert panel.reveal_btn.isEnabled() is False
+        panel.status_combo.setCurrentText('All')
         assert panel.task_table.rowCount() == 3
 
         class Down:
@@ -1009,6 +1031,53 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
 
         _select_task(panel, 'Local')
         assert 'local recording' in panel.action_btn.accessibleDescription()
+        assert panel.reveal_btn.isEnabled() is True
+        recording = tmp_path / 'recording_irinn.ts'
+        recording.write_bytes(b'ts')
+        recorder.file_path = str(recording)
+        panel.refresh()
+        _select_task(panel, 'Local')
+        revealed = []
+
+        def fake_show(path, platform=None):
+            revealed.append(os.path.abspath(path))
+            return os.path.isfile(path)
+
+        monkeypatch.setattr(ui, 'show_in_file_manager', fake_show)
+        panel.reveal_selected()
+        assert revealed == [str(recording)]
+        assert window.status_label.text() == 'Showing recording_irinn.ts in the file manager'
+        revealed.clear()
+
+        def show_folder(path, platform=None):
+            revealed.append(os.path.abspath(path))
+            return os.path.isdir(path)
+
+        monkeypatch.setattr(ui, 'show_in_file_manager', show_folder)
+        recorder.file_path = str(tmp_path / 'not-written.ts')
+        panel.refresh()
+        _select_task(panel, 'Local')
+        panel.reveal_selected()
+        assert revealed == [
+            str(tmp_path / 'not-written.ts'),
+            str(tmp_path),
+        ]
+        revealed.clear()
+        monkeypatch.setattr(ui, 'show_in_file_manager', lambda path, platform=None: False)
+        panel.reveal_selected()
+        assert window.status_label.text() == "Couldn't show the recording in the file manager"
+        labels = []
+
+        def capture_menu(menu, *_args, **_kwargs):
+            labels.extend(action.text() for action in menu.actions())
+            return None
+
+        monkeypatch.setattr(ui.QMenu, 'exec', capture_menu)
+        panel._show_task_menu(panel.task_table.visualItemRect(panel.task_table.item(0, 0)).center())
+        assert labels == ['Reveal in File Manager']
+        recorder.file_path = str(recording)
+        panel.refresh()
+        _select_task(panel, 'Local')
         panel.run_action()
         assert recorder.stopped is True
         assert window.is_recording is False
