@@ -45,12 +45,47 @@ class ServerConfig:
         }
 
 
+def _optional_int(value):
+    if isinstance(value, bool) or value is None or value == '':
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _id_list(value) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    ids = []
+    for item in value:
+        if isinstance(item, dict):
+            item = item.get('uuid') or item.get('tagId') or item.get('channelId') or item.get('id')
+        if item in (None, ''):
+            continue
+        ids.append(str(item))
+    return ids
+
+
+def _enabled_flag(data, default=True) -> bool:
+    if not isinstance(data, dict) or 'enabled' not in data:
+        return default
+    value = data.get('enabled')
+    if isinstance(value, str):
+        return value.strip().lower() not in ('0', 'false', 'no', '')
+    return bool(value)
+
+
 @dataclass
 class Channel:
     uuid: str
     name: str
     number: int = 0
     htsp_id: Optional[int] = None
+    icon: str = ''
+    tag_ids: List[str] = field(default_factory=list)
+    number_minor: Optional[int] = None
+    enabled: bool = True
     raw: Dict[str, Any] = field(default_factory=dict)
 
     def to_raw(self):
@@ -61,6 +96,13 @@ class Channel:
         data['number'] = self.number
         if self.htsp_id is not None:
             data['htsp_id'] = self.htsp_id
+        if self.icon:
+            data['icon'] = self.icon
+        if self.tag_ids:
+            data['tags'] = list(self.tag_ids)
+        if self.number_minor is not None:
+            data['number_minor'] = self.number_minor
+        data['enabled'] = self.enabled
         return data
 
     @classmethod
@@ -69,32 +111,201 @@ class Channel:
         htsp_id = data.get('htsp_id')
         if htsp_id is None:
             htsp_id = data.get('channelId')
-        try:
-            htsp_id = int(htsp_id) if htsp_id is not None else None
-        except (TypeError, ValueError):
-            htsp_id = None
-        number = data.get('number', data.get('channelNumber', 0)) or 0
-        try:
-            number = int(number)
-        except (TypeError, ValueError):
-            number = 0
+        htsp_id = _optional_int(htsp_id)
+        number = _optional_int(data.get('number', data.get('channelNumber', 0))) or 0
         return cls(
             uuid=str(data.get('uuid') or data.get('channelIdStr') or ('' if htsp_id is None else htsp_id)),
             name=data.get('name') or data.get('channelName') or 'Unknown Channel',
             number=number,
             htsp_id=htsp_id,
+            icon=str(data.get('icon') or data.get('channelIcon') or ''),
+            tag_ids=_id_list(data.get('tags')),
+            number_minor=_optional_int(data.get('number_minor', data.get('channelNumberMinor'))),
+            enabled=_enabled_flag(data),
             raw=data,
         )
 
 
 @dataclass
+class ChannelTag:
+    """One channel tag from ``channeltag/grid`` or HTSP ``tagAdd``.
+
+    HTTP ``uuid`` matches ``Channel.tag_ids``. HTSP ``tag_ids`` are the
+    decimal ``tagId`` and match ``str(htsp_id)``. ``tagIdStr`` is ``uuid``
+    when the server sends it.
+    """
+
+    uuid: str
+    name: str = ''
+    index: int = 0
+    icon: str = ''
+    member_ids: List[str] = field(default_factory=list)
+    htsp_id: Optional[int] = None
+    enabled: bool = True
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class EpgEvent:
+    """One programme. Times are Unix seconds. ``genre`` values are ETSI content nibbles.
+
+    Image fields are Tvheadend references such as ``imagecache/38``, not
+    fetched bytes. ``description`` falls back to ``summary`` when the
+    event has no long description.
+    """
+
     start: int
     stop: int
     title: str
     description: str = ''
     channel_uuid: str = ''
     event_id: Optional[int] = None
+    subtitle: str = ''
+    summary: str = ''
+    channel_name: str = ''
+    channel_number: int = 0
+    genre: List[int] = field(default_factory=list)
+    image: str = ''
+    image_poster: str = ''
+    image_backdrop: str = ''
+    image_still: str = ''
+    serieslink_uri: str = ''
+    episode_uri: str = ''
+    next_event_id: Optional[int] = None
+    dvr_uuid: str = ''
+    dvr_state: str = ''
+    widescreen: bool = False
+    subtitled: bool = False
+    hd: bool = False
+    age_rating: Optional[int] = None
+    rating_label: str = ''
+    rating_label_icon: str = ''
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class EpgQuery:
+    """Filters for ``query_epg``. ``None`` means that parameter is not sent.
+
+    ``channel`` is a ``Channel``. ``channel_tag`` is a ``ChannelTag``.
+    ``mode`` is ``now`` or omitted. ``limit`` is a row count and ``offset``
+    is the grid start index (HTTP ``start``), not a programme time.
+    ``fulltext`` asks HTTP for an exact title match.
+    """
+
+    title: Optional[str] = None
+    fulltext: Optional[bool] = None
+    channel: Optional[Channel] = None
+    channel_tag: Optional[ChannelTag] = None
+    content_type: Optional[int] = None
+    duration_min: Optional[int] = None
+    duration_max: Optional[int] = None
+    mode: Optional[str] = None
+    limit: Optional[int] = None
+    offset: Optional[int] = None
+    lang: Optional[str] = None
+
+
+@dataclass
+class ContentType:
+    """One genre id from ``epg/content_type/list``. ``key`` 0 is the empty type."""
+
+    key: int
+    name: str = ''
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class StreamProfile:
+    """A streaming profile (``pass``, ``matroska``, and the server's own names)."""
+
+    uuid: str
+    name: str = ''
+    comment: str = ''
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+class RawGet:
+    """Dict-style lookup of the server payload stored on ``raw``."""
+
+    def get(self, key, default=None):
+        raw = getattr(self, 'raw', None) or {}
+        if isinstance(raw, dict):
+            return raw.get(key, default)
+        return default
+
+
+@dataclass
+class InputStatus(RawGet):
+    """One tuner row from ``status/inputs``.
+
+    ``signal_scale`` and ``snr_scale`` are ``1`` for a relative reading
+    (65535 = 100%), ``2`` for absolute (1000 = 1 dB), and ``0`` when the
+    reading is not valid. ``.get()`` reads the original JSON keys, including
+    ``input``.
+    """
+
+    name: str = ''
+    uuid: str = ''
+    signal: Optional[int] = None
+    signal_scale: int = 0
+    snr: Optional[int] = None
+    snr_scale: int = 0
+    stream: str = ''
+    weight: Optional[int] = None
+    subscribers: Optional[int] = None
+    ber: Optional[int] = None
+    unc: Optional[int] = None
+    bps: Optional[int] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ConnectionStatus(RawGet):
+    """One client connection from ``status/connections``. ``kind`` is the JSON ``type``."""
+
+    id: Optional[int] = None
+    peer: str = ''
+    user: str = ''
+    started: int = 0
+    kind: str = ''
+    server: str = ''
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class SubscriptionStatus(RawGet):
+    """One live subscription from ``status/subscriptions``.
+
+    ``channel`` is a display string. ``.get('channel')`` still returns the
+    original value, which may be a dict.
+    """
+
+    id: Optional[int] = None
+    channel: str = ''
+    username: str = ''
+    title: str = ''
+    service: str = ''
+    state: str = ''
+    start: int = 0
+    errors: int = 0
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ServerActivity(RawGet):
+    """Wake-up summary from ``status/activity`` (Tvheadend 4.3-2405 and later).
+
+    Times are Unix seconds. ``0`` means that activity has nothing scheduled.
+    ``activities`` keys are ``dvr``, ``ota_grabber``, ``int_grabber``, and
+    ``mux_scheduler`` when the server sends them.
+    """
+
+    current_time: int = 0
+    next_activity: int = 0
+    activities: Dict[str, int] = field(default_factory=dict)
+    subscription_count: int = 0
+    connection_count: int = 0
     raw: Dict[str, Any] = field(default_factory=dict)
 
 

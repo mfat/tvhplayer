@@ -11,13 +11,21 @@ from .models import (
     AutorecEntry,
     AutorecSpec,
     Channel,
+    ChannelTag,
+    ConnectionStatus,
+    ContentType,
     DvrConfig,
     DvrCutpoint,
     DvrEntry,
     DvrEntryUpdate,
     EpgEvent,
+    EpgQuery,
+    InputStatus,
+    ServerActivity,
     ServerConfig,
     ServerInfo,
+    StreamProfile,
+    SubscriptionStatus,
     TimerecEntry,
     TimerecSpec,
 )
@@ -42,8 +50,62 @@ class TvhBackend(ABC):
         """Return the channel list, sorted by number then name."""
 
     @abstractmethod
+    def list_channel_tags(self) -> List[ChannelTag]:
+        """Return channel tags, sorted by index then name.
+
+        HTTP ``api/channeltag/grid``. HTSP reads ``tagAdd`` / ``tagUpdate``
+        stored during ``enableAsyncMetadata``.
+        """
+
+    @abstractmethod
+    def query_epg(self, query: EpgQuery) -> List[EpgEvent]:
+        """Return guide rows for ``query``.
+
+        HTTP ``api/epg/events/grid``. HTSP uses ``epgQuery`` when a title is
+        set, ``getEvents`` for one channel and a limit, and the HTTP grid
+        through ``api`` for exact title match, ``mode``, a grid offset, or
+        a filter the native call cannot express.
+        """
+
     def get_epg(self, channel: Channel, limit: int = 24) -> List[EpgEvent]:
         """Return upcoming EPG events for one channel."""
+        return self.query_epg(EpgQuery(channel=channel, limit=limit))
+
+    @abstractmethod
+    def get_event(self, event_id: int) -> EpgEvent:
+        """Return one programme.
+
+        HTTP ``api/epg/events/load``. HTSP ``getEvent``. Raises ``TvhError``
+        when the server has no such event.
+        """
+
+    @abstractmethod
+    def list_related_events(self, event_id: int) -> List[EpgEvent]:
+        """Return other broadcasts in the same series.
+
+        HTTP ``api/epg/events/related``. HTSP calls that path through ``api``.
+        """
+
+    @abstractmethod
+    def list_alternative_events(self, event_id: int) -> List[EpgEvent]:
+        """Return other broadcasts of the same event.
+
+        HTTP ``api/epg/events/alternative``. HTSP calls that path through ``api``.
+        """
+
+    @abstractmethod
+    def list_content_types(self) -> List[ContentType]:
+        """Return genre ids from ``api/epg/content_type/list``.
+
+        HTSP reads the same path through ``api``.
+        """
+
+    @abstractmethod
+    def list_profiles(self) -> List[StreamProfile]:
+        """Return streaming profiles.
+
+        HTTP ``api/profile/list``. HTSP ``getProfiles``.
+        """
 
     @abstractmethod
     def create_dvr_entry(
@@ -281,20 +343,55 @@ class TvhBackend(ABC):
         """Return server name/version/capabilities."""
 
     @abstractmethod
-    def get_inputs(self) -> list:
-        """Return tuner/input status rows (JSON `status/inputs` shape)."""
+    def get_inputs(self) -> List[InputStatus]:
+        """Return tuner rows from ``status/inputs``.
+
+        Each row keeps the JSON payload. ``.get('input')`` and
+        ``.get('signal')`` are the keys the status window already reads.
+        HTSP loads this grid through ``api``.
+        """
 
     @abstractmethod
-    def get_connections(self) -> list:
-        """Return client connections (`status/connections`)."""
+    def get_connections(self) -> List[ConnectionStatus]:
+        """Return client connections from ``status/connections``.
+
+        ``.get('peer')``, ``.get('user')``, and ``.get('started')`` read the
+        original row. HTSP loads this grid through ``api``.
+        """
 
     @abstractmethod
-    def get_subscriptions(self) -> list:
-        """Return live subscriptions (`status/subscriptions`)."""
+    def get_subscriptions(self) -> List[SubscriptionStatus]:
+        """Return live subscriptions from ``status/subscriptions``.
+
+        ``.get('channel')`` returns the original value, including a dict.
+        HTSP loads this grid through ``api``.
+        """
 
     @abstractmethod
-    def stream_url(self, channel: Channel) -> str:
-        """HTTP URL VLC/ffmpeg can play (HTSP muxpkt is not used)."""
+    def get_activity(self) -> ServerActivity:
+        """Return the low-power activity summary from ``status/activity``.
+
+        Requires Tvheadend 4.3-2405 or later. HTSP reads the same path
+        through ``api``.
+        """
+
+    @abstractmethod
+    def stream_url(self, channel: Channel, profile: Optional[str] = None) -> str:
+        """HTTP URL VLC/ffmpeg can play (HTSP muxpkt is not used).
+
+        HTTP uses ``/stream/channel/{uuid}``. HTSP uses
+        ``/stream/channelid/{id}``. ``profile`` is added as ``?profile=``
+        when set.
+        """
+
+    @abstractmethod
+    def image_url(self, reference: str) -> str:
+        """HTTP URL for a channel icon or programme image reference.
+
+        ``imagecache/38`` and other relative paths are joined to the server
+        and carry embedded basic auth. An absolute http(s) URL is returned
+        unchanged. An empty reference returns ``''``.
+        """
 
     def ping(self) -> None:
         """Cheap connectivity check; default is get_server_info()."""

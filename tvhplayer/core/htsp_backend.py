@@ -37,21 +37,45 @@ from .dvr import (
     timerec_http_conf,
 )
 from .errors import TvhError
+from .guide import (
+    epg_htsp_args,
+    epg_htsp_transport,
+    epg_http_params,
+    parse_activity,
+    parse_channel_tag,
+    parse_connection,
+    parse_content_type,
+    parse_epg_event,
+    parse_events,
+    parse_input_status,
+    parse_profile,
+    parse_subscription,
+    sort_channel_tags,
+    _rows,
+)
 from .htsp_connection import HtspConnection
 from .models import (
     AutorecEntry,
     AutorecSpec,
     Channel,
+    ChannelTag,
+    ConnectionStatus,
+    ContentType,
     DvrConfig,
     DvrCutpoint,
     DvrEntry,
     DvrEntryUpdate,
     EpgEvent,
+    EpgQuery,
+    InputStatus,
+    ServerActivity,
     ServerInfo,
+    StreamProfile,
+    SubscriptionStatus,
     TimerecEntry,
     TimerecSpec,
 )
-from .urls import http_base_url, htsp_host_port, insert_basic_auth
+from .urls import append_profile, http_base_url, htsp_host_port, insert_basic_auth, resolve_reference
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +88,7 @@ class HtspBackend(TvhBackend):
         host, port = htsp_host_port(server.url, server.htsp_port)
         self._conn = HtspConnection(host, port)
         self._channels = {}
+        self._tags = {}
         self._dvr = {}
         self._synced = False
         self._ready = False
@@ -80,6 +105,10 @@ class HtspBackend(TvhBackend):
         elif method == 'channelDelete':
             channel_id = msg.get('channelId')
             self._channels.pop(channel_id, None)
+        elif method in ('tagAdd', 'tagUpdate'):
+            self._store_tag(msg, replace=(method == 'tagAdd'))
+        elif method == 'tagDelete':
+            self._tags.pop(_tag_key(msg.get('tagId')), None)
         elif method in ('dvrEntryAdd', 'dvrEntryUpdate'):
             self._store_dvr(msg)
         elif method == 'dvrEntryDelete':
@@ -92,21 +121,22 @@ class HtspBackend(TvhBackend):
         if channel_id is None:
             return
         existing = None if replace else self._channels.get(channel_id)
-        name = msg.get('channelName') or (existing.name if existing else 'Unknown Channel')
-        number = msg.get('channelNumber')
-        if number in (None, 0) and existing:
-            number = existing.number
-        number = int(number or 0)
-        uuid = msg.get('channelIdStr') or (existing.uuid if existing else str(channel_id))
         raw = dict(existing.raw) if existing else {}
         raw.update(msg)
-        self._channels[channel_id] = Channel(
-            uuid=str(uuid),
-            name=name,
-            number=number,
-            htsp_id=int(channel_id),
-            raw=raw,
-        )
+        raw['htsp_id'] = int(channel_id)
+        if msg.get('channelNumber') in (None, 0) and existing and existing.number:
+            raw['channelNumber'] = existing.number
+        self._channels[channel_id] = Channel.from_raw(raw)
+
+    def _store_tag(self, msg, replace=False):
+        tag_id = _tag_key(msg.get('tagId'))
+        if tag_id is None:
+            return
+        existing = None if replace else self._tags.get(tag_id)
+        raw = dict(existing.raw) if existing else {}
+        raw.update(msg)
+        raw['tagId'] = tag_id
+        self._tags[tag_id] = parse_channel_tag(raw)
 
     def _store_dvr(self, msg):
         entry_id = msg.get('id')
@@ -190,6 +220,7 @@ class HtspBackend(TvhBackend):
         if self._ready and self._conn._sock is not None:
             return
         self._channels.clear()
+        self._tags.clear()
         self._dvr.clear()
         self._synced = False
         self._conn.connect()
@@ -223,34 +254,62 @@ class HtspBackend(TvhBackend):
         channels.sort(key=channel_sort_key)
         return channels
 
-    def get_epg(self, channel: Channel, limit: int = 24) -> List[EpgEvent]:
+    def list_channel_tags(self) -> List[ChannelTag]:
         self._ensure()
-        if channel.htsp_id is None:
-            raise TvhError('Channel has no HTSP id')
-        max_time = int(time.time()) + max(limit, 1) * 3600
-        reply = self._conn.rpc(
-            'getEvents',
-            {'channelId': int(channel.htsp_id), 'maxTime': max_time},
-            on_async=self._on_async,
-        )
-        events = []
-        for raw in reply.get('events') or []:
-            if not isinstance(raw, dict):
-                continue
-            events.append(
-                EpgEvent(
-                    start=int(raw.get('start') or 0),
-                    stop=int(raw.get('stop') or 0),
-                    title=raw.get('title') or 'No title',
-                    description=raw.get('description') or raw.get('summary') or '',
-                    channel_uuid=channel.uuid,
-                    event_id=raw.get('eventId'),
-                    raw=raw,
-                )
-            )
-            if len(events) >= limit:
-                break
+        return sort_channel_tags(list(self._tags.values()))
+
+    def query_epg(self, query: EpgQuery) -> List[EpgEvent]:
+        self._ensure()
+        query = query or EpgQuery()
+        transport = epg_htsp_transport(query)
+        if transport == 'getEvents':
+            return self._events_for_channel(query)
+        if transport == 'epgQuery':
+            reply = self._rpc('epgQuery', epg_htsp_args(query))
+            events = parse_events(reply.get('events') or [], query.channel)
+            if query.limit is not None:
+                return events[:int(query.limit)]
+            return events
+        return parse_events(self._grid('epg/events/grid', epg_http_params(query)))
+
+    def _events_for_channel(self, query: EpgQuery) -> List[EpgEvent]:
+        limit = query.limit if query.limit is not None else 24
+        max_time = int(time.time()) + max(int(limit), 1) * 3600
+        reply = self._rpc('getEvents', {
+            'channelId': int(query.channel.htsp_id),
+            'maxTime': max_time,
+        })
+        events = parse_events(reply.get('events') or [], query.channel)
+        if query.limit is not None:
+            return events[:int(query.limit)]
         return events
+
+    def get_event(self, event_id: int) -> EpgEvent:
+        reply = self._rpc('getEvent', {'eventId': int(event_id)})
+        events = parse_events(reply.get('events') or [])
+        if events:
+            return events[0]
+        if reply.get('eventId') is not None or reply.get('title'):
+            return parse_epg_event(reply)
+        raise TvhError(f'EPG event {event_id} was not found')
+
+    def list_related_events(self, event_id: int) -> List[EpgEvent]:
+        return self._epg_list('epg/events/related', event_id)
+
+    def list_alternative_events(self, event_id: int) -> List[EpgEvent]:
+        return self._epg_list('epg/events/alternative', event_id)
+
+    def list_content_types(self) -> List[ContentType]:
+        data = self._proxy('epg/content_type/list')
+        return [parse_content_type(row) for row in _rows(data) if isinstance(row, dict)]
+
+    def list_profiles(self) -> List[StreamProfile]:
+        reply = self._rpc('getProfiles')
+        return [parse_profile(row) for row in _rows(reply, 'profiles') if isinstance(row, dict)]
+
+    def _epg_list(self, path, event_id: int) -> List[EpgEvent]:
+        data = self._proxy(path, {'eventId': int(event_id)})
+        return parse_events(_rows(data))
 
     def create_dvr_entry(
         self,
@@ -443,8 +502,13 @@ class HtspBackend(TvhBackend):
             raise TvhError(str(response['error']))
         return response
 
-    def _grid(self, path):
-        data = self._proxy(path, {'limit': GRID_LIMIT})
+    def _grid(self, path, params=None):
+        args = {'limit': GRID_LIMIT}
+        if params:
+            args.update(params)
+        data = self._proxy(path, args)
+        if isinstance(data, list):
+            return data
         if not isinstance(data, dict):
             return []
         return data.get('entries') or []
@@ -471,23 +535,49 @@ class HtspBackend(TvhBackend):
             },
         )
 
-    def get_inputs(self) -> list:
-        return (self._api('status/inputs') or {}).get('entries') or []
+    def get_inputs(self) -> List[InputStatus]:
+        return [parse_input_status(row) for row in self._grid('status/inputs') if isinstance(row, dict)]
 
-    def get_connections(self) -> list:
-        return (self._api('status/connections') or {}).get('entries') or []
+    def get_connections(self) -> List[ConnectionStatus]:
+        return [parse_connection(row) for row in self._grid('status/connections') if isinstance(row, dict)]
 
-    def get_subscriptions(self) -> list:
-        return (self._api('status/subscriptions') or {}).get('entries') or []
+    def get_subscriptions(self) -> List[SubscriptionStatus]:
+        return [parse_subscription(row) for row in self._grid('status/subscriptions') if isinstance(row, dict)]
 
-    def stream_url(self, channel: Channel) -> str:
+    def get_activity(self) -> ServerActivity:
+        data = self._proxy('status/activity')
+        return parse_activity(data if isinstance(data, dict) else {})
+
+    def stream_url(self, channel: Channel, profile: Optional[str] = None) -> str:
         """Same HTTP streaming URL Kodi builds when streaming_http is enabled."""
         if channel.htsp_id is None:
             raise TvhError('Channel has no HTSP id')
+        self._ensure()
         base = http_base_url(self.server.url)
-        webroot = (self._conn.webroot or '').rstrip('/')
-        path = f'{webroot}/stream/channelid/{int(channel.htsp_id)}'
-        return insert_basic_auth(base + path, self.server.username, self.server.password)
+        webroot = getattr(self._conn, 'webroot', '') or ''
+        url = resolve_reference(base, f'stream/channelid/{int(channel.htsp_id)}', webroot)
+        url = insert_basic_auth(url, self.server.username, self.server.password)
+        return append_profile(url, profile)
+
+    def image_url(self, reference: str) -> str:
+        reference = (reference or '').strip()
+        if not reference:
+            return ''
+        if reference.startswith(('http://', 'https://')):
+            return reference
+        self._ensure()
+        webroot = getattr(self._conn, 'webroot', '') or ''
+        url = resolve_reference(http_base_url(self.server.url), reference, webroot)
+        return insert_basic_auth(url, self.server.username, self.server.password)
+
+
+def _tag_key(tag_id):
+    if isinstance(tag_id, bool) or tag_id is None:
+        return None
+    try:
+        return int(tag_id)
+    except (TypeError, ValueError):
+        return None
 
 
 def _htsp_state_to_http(state: str):

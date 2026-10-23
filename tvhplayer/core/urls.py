@@ -1,4 +1,4 @@
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from requests.auth import HTTPBasicAuth, HTTPDigestAuth
 
@@ -73,3 +73,32 @@ def insert_basic_auth(url, username, password):
     port = f':{parsed.port}' if parsed.port else ''
     creds = f'{username}:{password}@'
     return parsed._replace(netloc=f'{creds}{host}{port}').geturl()
+
+
+def append_profile(url, profile):
+    """Add ``?profile=`` to a stream URL. An empty profile leaves the URL alone."""
+    if not profile:
+        return url
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query['profile'] = profile
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
+def resolve_reference(base, reference, webroot=''):
+    """Join a relative image or icon path onto the HTTP base.
+
+    Absolute http(s) URLs are returned unchanged. ``webroot`` is prefixed
+    only when ``base`` does not already end with it.
+    """
+    reference = (reference or '').strip()
+    if not reference:
+        return ''
+    if reference.startswith(('http://', 'https://')):
+        return reference
+    base = (base or '').rstrip('/')
+    root = (webroot or '').strip('/')
+    path = reference.lstrip('/')
+    if root and not base.endswith('/' + root):
+        base = f'{base}/{root}'
+    return f'{base}/{path}'

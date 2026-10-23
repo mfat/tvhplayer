@@ -9,16 +9,37 @@ def test_server_config_defaults_to_http():
 
 
 def test_channel_from_htsp_and_http():
-    http_ch = Channel.from_raw({'uuid': 'abc', 'name': 'BBC One', 'number': 1})
+    http_ch = Channel.from_raw({
+        'uuid': 'abc',
+        'name': 'BBC One',
+        'number': 1,
+        'icon': 'imagecache/9',
+        'tags': ['fav'],
+        'enabled': 0,
+    })
     assert http_ch.uuid == 'abc'
     assert http_ch.htsp_id is None
+    assert http_ch.icon == 'imagecache/9'
+    assert http_ch.tag_ids == ['fav']
+    assert http_ch.enabled is False
+    assert http_ch.to_raw()['icon'] == 'imagecache/9'
 
-    htsp_ch = Channel.from_raw(
-        {'channelId': 42, 'channelIdStr': 'deadbeef', 'channelName': 'BBC Two', 'channelNumber': 2}
-    )
+    htsp_ch = Channel.from_raw({
+        'channelId': 42,
+        'channelIdStr': 'deadbeef',
+        'channelName': 'BBC Two',
+        'channelNumber': 2,
+        'channelNumberMinor': 1,
+        'channelIcon': 'imagecache/2',
+        'tags': [7],
+    })
     assert htsp_ch.htsp_id == 42
     assert htsp_ch.uuid == 'deadbeef'
     assert htsp_ch.name == 'BBC Two'
+    assert htsp_ch.number_minor == 1
+    assert htsp_ch.icon == 'imagecache/2'
+    assert htsp_ch.tag_ids == ['7']
+    assert htsp_ch.enabled is True
 
 
 def test_dvr_category_maps_running_and_failed():

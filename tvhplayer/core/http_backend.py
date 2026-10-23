@@ -17,7 +17,6 @@ from .dvr import (
     dvr_update_http_node,
     entry_uuid,
     file_move_args,
-    localized_text,
     parse_autorec_entry,
     parse_dvr_config,
     parse_dvr_entry,
@@ -29,20 +28,42 @@ from .dvr import (
     RERECORD_ACTIONS,
 )
 from .errors import TvhAuthError, TvhConnectionError, TvhError
+from .guide import (
+    epg_http_params,
+    parse_activity,
+    parse_channel_tag,
+    parse_connection,
+    parse_content_type,
+    parse_epg_event,
+    parse_events,
+    parse_input_status,
+    parse_profile,
+    parse_subscription,
+    sort_channel_tags,
+    _rows,
+)
 from .models import (
     AutorecEntry,
     AutorecSpec,
     Channel,
+    ChannelTag,
+    ConnectionStatus,
+    ContentType,
     DvrConfig,
     DvrCutpoint,
     DvrEntry,
     DvrEntryUpdate,
     EpgEvent,
+    EpgQuery,
+    InputStatus,
+    ServerActivity,
     ServerInfo,
+    StreamProfile,
+    SubscriptionStatus,
     TimerecEntry,
     TimerecSpec,
 )
-from .urls import http_auth, http_base_url, insert_basic_auth
+from .urls import append_profile, http_auth, http_base_url, insert_basic_auth, resolve_reference
 
 log = logging.getLogger(__name__)
 
@@ -94,26 +115,37 @@ class HttpBackend(TvhBackend):
         channels.sort(key=channel_sort_key)
         return channels
 
-    def get_epg(self, channel: Channel, limit: int = 24) -> List[EpgEvent]:
-        entries = self._request(
-            'GET',
-            'api/epg/events/grid',
-            params={'channel': channel.uuid, 'limit': limit},
-        ).get('entries') or []
-        events = []
-        for entry in entries:
-            events.append(
-                EpgEvent(
-                    start=int(entry.get('start') or 0),
-                    stop=int(entry.get('stop') or 0),
-                    title=localized_text(entry.get('title'), 'No title'),
-                    description=localized_text(entry.get('description') or entry.get('summary')),
-                    channel_uuid=entry.get('channelUuid') or channel.uuid,
-                    event_id=entry.get('eventId'),
-                    raw=entry,
-                )
-            )
-        return events
+    def list_channel_tags(self) -> List[ChannelTag]:
+        tags = [parse_channel_tag(row) for row in self._grid('api/channeltag/grid') if isinstance(row, dict)]
+        return sort_channel_tags(tags)
+
+    def query_epg(self, query: EpgQuery) -> List[EpgEvent]:
+        return parse_events(self._grid('api/epg/events/grid', epg_http_params(query)))
+
+    def get_event(self, event_id: int) -> EpgEvent:
+        data = self._request('GET', 'api/epg/events/load', params={'eventId': int(event_id)})
+        events = parse_events(_rows(data))
+        if not events:
+            raise TvhError(f'EPG event {event_id} was not found')
+        return events[0]
+
+    def list_related_events(self, event_id: int) -> List[EpgEvent]:
+        return self._epg_list('api/epg/events/related', event_id)
+
+    def list_alternative_events(self, event_id: int) -> List[EpgEvent]:
+        return self._epg_list('api/epg/events/alternative', event_id)
+
+    def list_content_types(self) -> List[ContentType]:
+        data = self._request('GET', 'api/epg/content_type/list')
+        return [parse_content_type(row) for row in _rows(data) if isinstance(row, dict)]
+
+    def list_profiles(self) -> List[StreamProfile]:
+        data = self._request('GET', 'api/profile/list')
+        return [parse_profile(row) for row in _rows(data) if isinstance(row, dict)]
+
+    def _epg_list(self, path, event_id: int) -> List[EpgEvent]:
+        data = self._request('GET', path, params={'eventId': int(event_id)})
+        return parse_events(_rows(data))
 
     def create_dvr_entry(
         self,
@@ -275,15 +307,32 @@ class HttpBackend(TvhBackend):
             raw=data,
         )
 
-    def get_inputs(self) -> list:
-        return self._grid('api/status/inputs')
+    def get_inputs(self) -> List[InputStatus]:
+        return [parse_input_status(row) for row in self._grid('api/status/inputs') if isinstance(row, dict)]
 
-    def get_connections(self) -> list:
-        return self._grid('api/status/connections')
+    def get_connections(self) -> List[ConnectionStatus]:
+        return [parse_connection(row) for row in self._grid('api/status/connections') if isinstance(row, dict)]
 
-    def get_subscriptions(self) -> list:
-        return self._grid('api/status/subscriptions')
+    def get_subscriptions(self) -> List[SubscriptionStatus]:
+        return [parse_subscription(row) for row in self._grid('api/status/subscriptions') if isinstance(row, dict)]
 
-    def stream_url(self, channel: Channel) -> str:
+    def get_activity(self) -> ServerActivity:
+        data = self._request('GET', 'api/status/activity')
+        return parse_activity(data if isinstance(data, dict) else {})
+
+    def stream_url(self, channel: Channel, profile: Optional[str] = None) -> str:
         url = f'{self._base}/stream/channel/{channel.uuid}'
-        return insert_basic_auth(url, self.server.username, self.server.password)
+        url = insert_basic_auth(url, self.server.username, self.server.password)
+        return append_profile(url, profile)
+
+    def image_url(self, reference: str) -> str:
+        reference = (reference or '').strip()
+        if not reference:
+            return ''
+        if reference.startswith(('http://', 'https://')):
+            return reference
+        return insert_basic_auth(
+            resolve_reference(self._base, reference),
+            self.server.username,
+            self.server.password,
+        )
