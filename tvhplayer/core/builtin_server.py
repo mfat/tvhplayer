@@ -363,21 +363,37 @@ def serverinfo_ok(http_port: int, timeout: float = 0.4, username='', password=''
 PLAIN_AND_DIGEST_LOGIN = 2
 
 
-def allow_plain_login(http_port: int, username='', password='', timeout: float = 2.0) -> bool:
-    """Let the built-in server accept a plain login as well as digest.
-
-    Tvheadend defaults to digest only. VLC's HTTP access sends the login in
-    the stream URL as plain (Basic) and fails with 401 against digest. The
-    built-in server listens on 127.0.0.1 only and keeps its generated
-    password, so plain login does not open it to anyone else.
-    """
-    url = f'http://127.0.0.1:{int(http_port)}/api/config/save'
-    body = urllib.parse.urlencode({'node': json.dumps({'digest': PLAIN_AND_DIGEST_LOGIN})}).encode()
+def _post(http_port: int, path: str, form: dict, username='', password='', timeout: float = 2.0) -> bool:
+    url = f'http://127.0.0.1:{int(http_port)}/{path}'
+    body = urllib.parse.urlencode(form).encode()
     try:
         with _direct_opener(url, username, password).open(url, data=body, timeout=timeout) as response:
             return 200 <= response.status < 300
     except (OSError, urllib.error.URLError, ValueError):
         return False
+
+
+def apply_builtin_defaults(http_port: int, username='', password='') -> list[str]:
+    """Settings that make the built-in server ready to use; returns those that failed.
+
+    * Accept a plain login as well as digest. Tvheadend defaults to digest
+      only, and VLC sends the login in the stream URL as plain (Basic), so
+      playback failed with 401. The server listens on 127.0.0.1 only and keeps
+      its generated password, so this opens it to no one else.
+    * Turn off the first-run setup wizard, so the web interface opens on its
+      normal pages. The wizard can still be started from Configuration → General.
+
+    Applied on every start, so an older built-in config gets them too.
+    """
+    steps = (
+        ('plain login', 'api/config/save', {'node': json.dumps({'digest': PLAIN_AND_DIGEST_LOGIN})}),
+        # The handler needs a request body, even an unused one.
+        ('setup wizard off', 'api/wizard/cancel', {'cancel': '1'}),
+    )
+    return [
+        name for name, path, form in steps
+        if not _post(http_port, path, form, username, password)
+    ]
 
 
 def ensure_builtin_server(servers, http_port=0, htsp_port=0, username='', password=''):

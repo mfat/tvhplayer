@@ -342,14 +342,14 @@ def test_launched_server_stops_when_the_app_dies(tmp_path):
     assert args[-4:] == ['42', '/bin/tvheadend', '-c', 'x']
 
 
-def test_builtin_server_is_told_to_accept_the_players_plain_login():
+def test_builtin_server_gets_its_ready_to_use_defaults():
     from urllib.parse import parse_qs
 
-    from tvhplayer.core.builtin_server import allow_plain_login
+    from tvhplayer.core.builtin_server import apply_builtin_defaults
 
     received = []
 
-    class Config(http.server.BaseHTTPRequestHandler):
+    class Api(http.server.BaseHTTPRequestHandler):
         def do_POST(self):
             length = int(self.headers['Content-Length'])
             received.append((self.path, parse_qs(self.rfile.read(length).decode())))
@@ -360,17 +360,17 @@ def test_builtin_server_is_told_to_accept_the_players_plain_login():
         def log_message(self, *_args):
             pass
 
-    server = http.server.HTTPServer(('127.0.0.1', 0), Config)
+    server = http.server.HTTPServer(('127.0.0.1', 0), Api)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        assert allow_plain_login(server.server_address[1])
+        assert apply_builtin_defaults(server.server_address[1]) == []
     finally:
         server.shutdown()
-    path, form = received[0]
-    assert path == '/api/config/save'
-    assert json.loads(form['node'][0]) == {'digest': 2}
-    assert not allow_plain_login(_free_port_for_test())
+    paths = [path for path, _form in received]
+    assert paths == ['/api/config/save', '/api/wizard/cancel']
+    assert json.loads(received[0][1]['node'][0]) == {'digest': 2}
+    assert apply_builtin_defaults(_free_port_for_test()) == ['plain login', 'setup wizard off']
 
 
 def _free_port_for_test():
