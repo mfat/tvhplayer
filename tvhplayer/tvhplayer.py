@@ -27,14 +27,14 @@ try:
     from .core.backend import create_backend
     from .core.config import ConfigStore
     from .core.errors import TvhError
-    from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel
+    from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import LocalRecorder
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from core.backend import create_backend
     from core.config import ConfigStore
     from core.errors import TvhError
-    from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel
+    from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import LocalRecorder
 # or
 #from tvhplayer import resources_rc  # Use absolute import
@@ -1442,6 +1442,18 @@ class TVHeadendClient(QMainWindow):
         if self.channel_list.rowCount() > 0:
             return self.channel_from_row(0)
         return None
+
+    def active_channel(self):
+        """Channel the record controls apply to.
+
+        The highlighted row wins. With no highlight, use the channel that is playing.
+        """
+        row = self.channel_list.currentRow()
+        if row >= 0:
+            channel = self.channel_from_row(row)
+            if channel:
+                return channel
+        return getattr(self, '_playback_channel', None)
         
     def fetch_channels(self):
         """Fetch channel list from current TVHeadend server"""
@@ -1531,6 +1543,7 @@ class TVHeadendClient(QMainWindow):
         """Stop current playback"""
         print("Debug: Stopping playback")
         self._playback_active = False
+        self._playback_channel = None
         self.media_player.stop()
         self._protect_video_surface(False)
         self.statusbar.showMessage("Playback stopped")
@@ -1984,28 +1997,47 @@ class TVHeadendClient(QMainWindow):
             self.stop_recording()
 
     def stop_recording(self):
-        """Stop active recordings"""
+        """Stop the running recording for the active channel.
+
+        A lone running job is stopped even when no channel is highlighted.
+        When several jobs are running, only the active channel is stopped.
+        """
         print("Debug: Attempting to stop recordings")
+        running = []
         try:
             backend = self.get_backend()
-            active = [entry for entry in backend.list_dvr_entries() if entry.category() == 'recording']
-            if not active:
-                print("Debug: No active recordings found")
-                self.statusbar.showMessage("No active recordings to stop")
-                self.stop_recording_indicator()
+            entries = backend.list_dvr_entries()
+            running = [entry for entry in entries if entry.category() == 'recording']
+            channel = self.active_channel()
+            targets = recordings_to_stop(entries, channel)
+            if not targets:
+                if len(running) > 1 and channel is not None:
+                    self.statusbar.showMessage(f"No recording in progress for {channel.name}")
+                elif len(running) > 1:
+                    self.statusbar.showMessage("Select a channel to stop its recording")
+                else:
+                    print("Debug: No active recordings found")
+                    self.statusbar.showMessage("No active recordings to stop")
+                    self.stop_recording_indicator()
                 return
-            for entry in active:
-                print(f"Debug: Stopping recording: {entry.title} ({entry.uuid})")
+            for entry in targets:
+                print(f"Debug: Stopping recording: {entry.title} ({entry.uuid}) on {entry.channel_name}")
                 backend.stop_dvr_entry(entry)
-            self.stop_recording_indicator()
-            self.statusbar.showMessage(f"Stopped {len(active)} recording(s)")
+            if len(targets) >= len(running):
+                self.stop_recording_indicator()
+            channel_name = targets[0].channel_name or (channel.name if channel else 'channel')
+            if len(targets) == 1:
+                self.statusbar.showMessage(f"Stopped recording for {channel_name}")
+            else:
+                self.statusbar.showMessage(f"Stopped {len(targets)} recordings for {channel_name}")
         except Exception as e:
             print(f"Debug: Error stopping recordings: {str(e)}")
             print(f"Debug: Error type: {type(e)}")
             import traceback
             print(f"Debug: Traceback: {traceback.format_exc()}")
             self.statusbar.showMessage(f"Error stopping recordings: {str(e)}")
-            self.stop_recording_indicator()
+            if len(running) <= 1:
+                self.stop_recording_indicator()
 
     def start_recording_indicator(self):
         """Start the recording indicator with smooth pulsing animation"""
@@ -2233,6 +2265,7 @@ class TVHeadendClient(QMainWindow):
                 channel = channel_data
             else:
                 channel = Channel.from_raw(channel_data)
+            self._playback_channel = channel
             stream_url = self.get_backend().stream_url(channel)
             print(f"Debug: Stream URL: {stream_url}")
             media = self.instance.media_new(stream_url)

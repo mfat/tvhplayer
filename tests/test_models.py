@@ -1,4 +1,4 @@
-from tvhplayer.core.models import Channel, DvrEntry, ServerConfig
+from tvhplayer.core.models import Channel, DvrEntry, ServerConfig, recordings_to_stop
 
 
 def test_server_config_defaults_to_http():
@@ -38,3 +38,35 @@ def test_dvr_category_maps_running_and_failed():
         status='Scheduled for recording', sched_status='scheduled',
     )
     assert scheduled.category() == 'upcoming'
+
+
+def _running(uuid, name, channel_key):
+    return DvrEntry(
+        uuid=uuid,
+        title='Instant Recording',
+        channel_name=name,
+        start=0,
+        duration=60,
+        status='Running',
+        sched_status='recording',
+        raw={'channel': channel_key, 'channelname': name},
+    )
+
+
+def test_matches_channel_by_htsp_id_or_http_uuid():
+    htsp = _running('1', 'IRINN', 42)
+    assert htsp.matches_channel(Channel(uuid='42', name='IRINN', htsp_id=42))
+    assert not htsp.matches_channel(Channel(uuid='7', name='IRINN', htsp_id=7))
+
+    http = _running('2', 'BBC', 'abc')
+    assert http.matches_channel(Channel(uuid='abc', name='BBC'))
+    assert not http.matches_channel(Channel(uuid='def', name='BBC'))
+
+
+def test_recordings_to_stop_keeps_other_jobs_when_several_are_running():
+    first = _running('1', 'IRINN', 'a')
+    second = _running('2', 'BBC', 'b')
+    assert recordings_to_stop([first]) == [first]
+    assert recordings_to_stop([first, second], Channel(uuid='b', name='BBC')) == [second]
+    assert recordings_to_stop([first, second], None) == []
+    assert recordings_to_stop([first, second], Channel(uuid='c', name='Other')) == []

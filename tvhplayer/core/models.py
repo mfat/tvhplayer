@@ -138,6 +138,51 @@ class DvrEntry:
             return 'upcoming'
         return 'upcoming'
 
+    def matches_channel(self, channel) -> bool:
+        """True when this DVR entry is for the given channel."""
+        if channel is None:
+            return False
+        raw = self.raw or {}
+        raw_channel = raw.get('channel')
+        raw_id = _as_int(raw_channel)
+        channel_id = _as_int(getattr(channel, 'htsp_id', None))
+        if raw_id is not None and channel_id is not None:
+            return raw_id == channel_id
+        channel_uuid = str(getattr(channel, 'uuid', '') or '')
+        if raw_channel not in (None, '') and channel_uuid and raw_id is None:
+            return str(raw_channel) == channel_uuid
+        target = (getattr(channel, 'name', None) or '').strip().casefold()
+        if not target:
+            return False
+        for candidate in (self.channel_name, raw.get('channelName'), raw.get('channelname')):
+            if candidate and str(candidate).strip().casefold() == target:
+                return True
+        return False
+
+
+def recordings_to_stop(entries, channel=None):
+    """Running jobs the Stop button should end.
+
+    One running job is stopped on its own. Several running jobs are narrowed
+    to the active channel so the others keep recording.
+    """
+    running = [entry for entry in entries if entry.category() == 'recording']
+    if len(running) <= 1:
+        return running
+    if channel is None:
+        return []
+    return [entry for entry in running if entry.matches_channel(channel)]
+
+
+def _as_int(value):
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
 
 @dataclass
 class ServerInfo:
