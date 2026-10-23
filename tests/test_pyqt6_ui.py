@@ -134,6 +134,7 @@ def _make_player(monkeypatch, tmp_path):
                 MediaPlayerPlaying='playing',
                 MediaPlayerStopped='stopped',
                 MediaPlayerEndReached='ended',
+                MediaPlayerEncounteredError='error',
             ),
             __version__='stub',
         ),
@@ -326,6 +327,58 @@ def test_playback_surface_ignores_transient_stop_and_qt_paints(monkeypatch, tmp_
         assert not window._playback_active
         assert window.idle_splash.isVisible()
         assert window.video_frame.updatesEnabled()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_spinner_shows_until_playback_starts(monkeypatch, tmp_path):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        window.show()
+        app.processEvents()
+
+        assert window.idle_splash.isVisible()
+        assert not window.playback_spinner.isVisible()
+
+        class Backend:
+            def stream_url(self, channel):
+                return 'http://tv.example/stream'
+
+        window.get_backend = lambda: Backend()
+        window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        app.processEvents()
+
+        assert window._awaiting_playback
+        assert window.playback_spinner.isVisible()
+        assert window.playback_spinner._timer.isActive()
+        assert window.idle_splash.isVisible()
+        assert window.status_label.text() == 'Starting: News'
+        image = window.playback_spinner.grab().toImage()
+        assert image.width() > 0
+        assert any(
+            image.pixelColor(x, image.height() // 2).red() > 200
+            for x in range(image.width())
+        )
+
+        fake_player._events.handlers['playing'](None)
+        app.processEvents()
+
+        assert not window._awaiting_playback
+        assert not window.playback_spinner.isVisible()
+        assert not window.playback_spinner._timer.isActive()
+        assert not window.idle_splash.isVisible()
+        assert window.status_label.text() == 'Playing: News'
+
+        window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        app.processEvents()
+        assert window.playback_spinner.isVisible()
+        fake_player._events.handlers['error'](None)
+        app.processEvents()
+
+        assert not window.playback_spinner.isVisible()
+        assert window.idle_splash.isVisible()
+        assert window.status_label.text() == 'Playback failed'
     finally:
         window.close()
         app.processEvents()

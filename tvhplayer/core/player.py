@@ -15,16 +15,19 @@ class Player(ABC):
     def __init__(self):
         self._on_playing: Optional[Callable[[], None]] = None
         self._on_stopped: Optional[Callable[[], None]] = None
+        self._on_error: Optional[Callable[[], None]] = None
         self._schedule: Callable[[Callable[[], None]], None] = lambda fn: fn()
 
-    def set_handlers(self, on_playing=None, on_stopped=None, schedule=None):
-        """Register start and stop callbacks.
+    def set_handlers(self, on_playing=None, on_stopped=None, schedule=None, on_error=None):
+        """Register start, stop, and failure callbacks.
 
         ``schedule`` runs a callback on the UI thread. The default calls it
         immediately. ``on_stopped`` also covers the media ending on its own.
+        ``on_error`` runs when the engine cannot open the stream.
         """
         self._on_playing = on_playing
         self._on_stopped = on_stopped
+        self._on_error = on_error
         if schedule is not None:
             self._schedule = schedule
 

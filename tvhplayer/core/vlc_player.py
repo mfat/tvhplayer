@@ -47,8 +47,8 @@ class VlcPlayer(Player):
             player.set_hardware_decoding(True)
         self._release_input()
 
-    def set_handlers(self, on_playing=None, on_stopped=None, schedule=None):
-        super().set_handlers(on_playing, on_stopped, schedule)
+    def set_handlers(self, on_playing=None, on_stopped=None, schedule=None, on_error=None):
+        super().set_handlers(on_playing, on_stopped, schedule, on_error)
         if self._events_bound or self._player is None:
             return
         manager = self._player.event_manager()
@@ -56,6 +56,9 @@ class VlcPlayer(Player):
         manager.event_attach(event.MediaPlayerPlaying, lambda _event: self._emit(self._on_playing))
         manager.event_attach(event.MediaPlayerStopped, lambda _event: self._emit(self._on_stopped))
         manager.event_attach(event.MediaPlayerEndReached, lambda _event: self._emit(self._on_stopped))
+        error = getattr(event, 'MediaPlayerEncounteredError', None)
+        if error is not None:
+            manager.event_attach(error, lambda _event: self._emit(self._on_error))
         self._events_bound = True
 
     def play(self, url: str):

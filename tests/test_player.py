@@ -85,6 +85,7 @@ def _install_vlc(monkeypatch, instance):
                 MediaPlayerPlaying='playing',
                 MediaPlayerStopped='stopped',
                 MediaPlayerEndReached='ended',
+                MediaPlayerEncounteredError='error',
             ),
             MediaStats=object,
             __version__='stub',
@@ -103,6 +104,7 @@ def test_play_stop_mute_and_stopped_callback_is_scheduled(monkeypatch):
         lambda: seen.append('playing'),
         lambda: seen.append('stopped'),
         lambda fn: scheduled.append(fn),
+        on_error=lambda: seen.append('error'),
     )
     engine.attach(7)
     assert media.window_id == 7
@@ -127,6 +129,10 @@ def test_play_stop_mute_and_stopped_callback_is_scheduled(monkeypatch):
     media._events.handlers['ended'](None)
     scheduled[-1]()
     assert seen == ['stopped', 'stopped']
+
+    media._events.handlers['error'](None)
+    scheduled[-1]()
+    assert seen == ['stopped', 'stopped', 'error']
 
     engine.stop()
     assert media.stopped is True

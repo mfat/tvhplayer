@@ -10,8 +10,8 @@ from PyQt6.QtWidgets import (
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint
-from PyQt6.QtGui import QIcon, QAction, QShortcut
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QRectF
+from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor
 import json
 # Replace this line:
 #from . import resources_rc
@@ -1031,6 +1031,65 @@ class ServerStatusDialog(QDialog):
         self.update_timer.stop()
         super().closeEvent(event)
 
+class PlaybackSpinner(QWidget):
+    """Ring drawn over the player until the first picture arrives."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._angle = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._advance)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setStyleSheet("background-color: black;")
+        self.hide()
+
+    def set_running(self, running):
+        if running:
+            if not self._timer.isActive():
+                self._timer.start()
+            self.show()
+            self.raise_()
+        else:
+            self._timer.stop()
+            self.hide()
+
+    def _advance(self):
+        self._angle = (self._angle + 8) % 360
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.fillRect(self.rect(), QColor(0, 0, 0))
+        span = min(self.width(), self.height())
+        diameter = max(36, min(72, span // 6 if span else 36))
+        thickness = max(4, diameter // 10)
+        rect = QRectF(
+            (self.width() - diameter) / 2,
+            (self.height() - diameter) / 2,
+            diameter,
+            diameter,
+        )
+        track = QPen(QColor(255, 255, 255, 50), thickness)
+        track.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(track)
+        painter.drawEllipse(rect)
+        arc = QPen(QColor(255, 255, 255, 235), thickness)
+        arc.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(arc)
+        painter.drawArc(rect, int(-self._angle * 16), int(110 * 16))
+        painter.setPen(QColor(255, 255, 255, 230))
+        font = painter.font()
+        font.setPointSize(11)
+        painter.setFont(font)
+        caption = QRectF(0, rect.bottom() + 12, self.width(), 24)
+        painter.drawText(caption, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "Starting…")
+        painter.end()
+
+
 class TVHeadendClient(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1076,6 +1135,7 @@ class TVHeadendClient(QMainWindow):
         self.is_fullscreen = False
         self._pre_fullscreen_state = None
         self._playback_active = False
+        self._awaiting_playback = False
         self._video_menu = None
 
         
@@ -1352,6 +1412,13 @@ class TVHeadendClient(QMainWindow):
         self.idle_splash.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.idle_splash.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         describe(self.idle_splash, "Nothing playing", "TVHplayer logo, shown when nothing is playing")
+
+        self.playback_spinner = PlaybackSpinner(self.player_container)
+        describe(
+            self.playback_spinner,
+            "Starting playback",
+            "Shown from the moment a channel is opened until the picture starts",
+        )
 
         player_layout.addWidget(self.video_frame)
         self.player_container.installEventFilter(self)
@@ -1839,8 +1906,10 @@ class TVHeadendClient(QMainWindow):
     def stop_playback(self):
         """Stop current playback"""
         print("Debug: Stopping playback")
+        self._awaiting_playback = False
         self._playback_active = False
         self._playback_channel = None
+        self._set_playback_spinner(False)
         self.player.stop()
         self._protect_video_surface(False)
         self.statusbar.showMessage("Playback stopped")
@@ -1854,33 +1923,77 @@ class TVHeadendClient(QMainWindow):
             self.idle_splash.setAccessibleName("Nothing playing")
             self.idle_splash.show()
             self.idle_splash.raise_()
+            spinner = getattr(self, 'playback_spinner', None)
+            if spinner is not None and spinner.isVisible():
+                spinner.raise_()
         else:
             self.idle_splash.setAccessibleName("")
             self.idle_splash.hide()
+
+    def _set_playback_spinner(self, visible):
+        """Show a spinner from the play request until the picture starts."""
+        spinner = getattr(self, 'playback_spinner', None)
+        if spinner is None:
+            return
+        if visible:
+            already = spinner.isVisible()
+            spinner.setGeometry(self.player_container.rect())
+            spinner.set_running(True)
+            if not already:
+                announce(spinner, "Starting playback")
+        else:
+            spinner.set_running(False)
+            spinner.setAccessibleName("")
+
+    def _show_playback_wait(self):
+        """Cover the player until VLC reports that playback has started."""
+        self._awaiting_playback = True
+        if hasattr(self, '_splash_idle_timer'):
+            self._splash_idle_timer.stop()
+        self._set_idle_splash(True)
+        self._set_playback_spinner(True)
+        if hasattr(self, 'video_frame'):
+            self.video_frame.setUpdatesEnabled(False)
 
     def _protect_video_surface(self, playing):
         """While a channel is on, do not let Qt paint or flash the splash."""
         self._playback_active = playing
         if hasattr(self, '_splash_idle_timer'):
             self._splash_idle_timer.stop()
-        self._set_idle_splash(not playing)
+        waiting = bool(getattr(self, '_awaiting_playback', False))
+        self._set_idle_splash((not playing) or waiting)
+        if waiting:
+            self._set_playback_spinner(True)
         if hasattr(self, 'video_frame'):
-            self.video_frame.setUpdatesEnabled(not playing)
+            self.video_frame.setUpdatesEnabled(not playing and not waiting)
 
     def _on_playback_started(self):
+        self._awaiting_playback = False
+        self._set_playback_spinner(False)
         self._protect_video_surface(True)
+        channel = getattr(self, '_playback_channel', None)
+        if channel is not None:
+            self.statusbar.showMessage(f"Playing: {channel.name}")
+
+    def _on_playback_failed(self):
+        self._awaiting_playback = False
+        self._playback_active = False
+        self._playback_channel = None
+        self._set_playback_spinner(False)
+        self._protect_video_surface(False)
+        self.statusbar.showMessage("Playback failed")
 
     def _on_playback_stopped(self):
         # A menu or resize can make the engine tear down its output for a moment.
         # Do not treat that as a real stop or the splash will flash.
-        if self._playback_active:
+        if self._playback_active or self._awaiting_playback:
             return
         if not hasattr(self, '_splash_idle_timer'):
             return
         self._splash_idle_timer.start(400)
 
     def _show_splash_if_idle(self):
-        if self._playback_active:
+        if self._playback_active or self._awaiting_playback:
             return
         if self.player and self.player.is_playing():
             return
@@ -1896,6 +2009,7 @@ class TVHeadendClient(QMainWindow):
                 self._on_playback_started,
                 self._on_playback_stopped,
                 lambda fn: QTimer.singleShot(0, fn),
+                on_error=self._on_playback_failed,
             )
         except Exception as e:
             print(f"Debug: Could not attach playback events: {e}")
@@ -2194,6 +2308,10 @@ class TVHeadendClient(QMainWindow):
             idle_splash = getattr(self, 'idle_splash', None)
             if idle_splash is not None and idle_splash.isVisible():
                 idle_splash.setGeometry(player_container.rect())
+            spinner = getattr(self, 'playback_spinner', None)
+            if spinner is not None and spinner.isVisible():
+                spinner.setGeometry(player_container.rect())
+                spinner.raise_()
             return False
         video_frame = getattr(self, 'video_frame', None)
         if video_frame is not None and obj is video_frame:
@@ -2495,8 +2613,16 @@ class TVHeadendClient(QMainWindow):
     def play_url(self, url):
         """Play media from URL"""
         try:
+            self._playback_channel = None
+            self._show_playback_wait()
             self.player.play(url)
+            self.statusbar.showMessage("Starting playback")
         except Exception as e:
+            if self._awaiting_playback:
+                self._awaiting_playback = False
+                self._playback_active = False
+                self._set_playback_spinner(False)
+                self._protect_video_surface(False)
             QMessageBox.critical(self, "Error", f"Failed to play media: {str(e)}")
 
     def start_local_recording(self, channel):
@@ -2686,11 +2812,16 @@ class TVHeadendClient(QMainWindow):
             self._playback_channel = channel
             stream_url = self.get_backend().stream_url(channel)
             print(f"Debug: Stream URL: {stream_url}")
+            self._show_playback_wait()
             self.player.play(stream_url)
-            self._protect_video_surface(True)
-            self.statusbar.showMessage(f"Playing: {channel.name}")
+            self.statusbar.showMessage(f"Starting: {channel.name}")
         except Exception as e:
             print(f"Debug: Error in play_channel: {str(e)}")
+            if self._awaiting_playback:
+                self._awaiting_playback = False
+                self._playback_active = False
+                self._set_playback_spinner(False)
+                self._protect_video_surface(False)
             self.statusbar.showMessage(f"Playback error: {str(e)}")
 
     def show_server_status(self):
