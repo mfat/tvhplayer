@@ -7,7 +7,6 @@ TVHplayer always uses that HTTP path because VLC cannot demux HTSP muxpkt.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from typing import List, Optional
@@ -453,7 +452,9 @@ class HtspBackend(TvhBackend):
     def _save_http_node(self, uuid, fields):
         node = {'uuid': uuid}
         node.update(fields)
-        self._proxy('idnode/save', {'node': json.dumps(node)})
+        # HTSP api args are HTS messages. idnode/save takes node as a list of
+        # maps there; the HTTP form post is the path that sends a JSON string.
+        self._proxy('idnode/save', {'node': [node]})
 
     def get_server_info(self) -> ServerInfo:
         self._ensure()

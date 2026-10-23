@@ -75,7 +75,9 @@ class HttpBackend(TvhBackend):
         if not response.content:
             return {}
         try:
-            return response.json()
+            # Tvheadend can embed raw control characters in JSON strings.
+            # The JSON API Python example decodes with strict=False.
+            return json.loads(response.text, strict=False)
         except ValueError as exc:
             raise TvhError(f'Invalid JSON from {path}') from exc
 

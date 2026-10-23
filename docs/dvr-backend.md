@@ -114,3 +114,7 @@ Rows from the grid have a uuid and no HTSP id, so an HTSP connection updates and
 ## HTSP `api` proxy
 
 Paths above that say "through `api`" are the HTTP path without the `api/` prefix, sent as HTSP method `api` with `path` and `args`. The HTTP backend posts the same path under `api/`. Example: HTTP `POST api/dvr/entry/cancel` with `uuid`, HTSP `api` path `dvr/entry/cancel` with `args.uuid`.
+
+HTTP `idnode/save` posts `node` as a JSON string (one object). The HTSP `api` proxy sends `node` as a list of maps, which is how structured arguments travel in an HTS message. Nested values such as a language map stay maps; they are not JSON text.
+
+HTTP response bodies are parsed with `json.loads(..., strict=False)`. Tvheadend sometimes leaves raw control characters inside strings, and the [Python example](https://docs.tvheadend.org/documentation/development/json-api/examples#python) decodes them that way.

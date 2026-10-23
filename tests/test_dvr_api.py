@@ -31,6 +31,18 @@ def test_time_and_weekday_conversions():
         weekdays_from_mask(0x80)
 
 
+def test_http_json_accepts_raw_control_characters():
+    backend = _http()
+
+    class Loose:
+        status_code = 200
+        content = b'{"disp_title":"Line\nbreak"}'
+        text = '{"disp_title":"Line\nbreak"}'
+
+    backend._session.request = lambda *args, **kwargs: Loose()
+    assert backend._request('GET', 'api/dvr/entry/grid')['disp_title'] == 'Line\nbreak'
+
+
 def test_every_backend_method_is_documented_and_implemented():
     for name, value in vars(TvhBackend).items():
         if not getattr(value, '__isabstractmethod__', False):
@@ -45,8 +57,12 @@ class _Response:
         self.status_code = status
         self.headers = headers or {}
         self._payload = {} if payload is None else payload
-        self.content = b'{}' if content is None else content
-        self.text = ''
+        if content is None:
+            self.text = json.dumps(self._payload)
+            self.content = self.text.encode('utf-8')
+        else:
+            self.content = content
+            self.text = content.decode('utf-8', 'replace') if content else ''
 
     def json(self):
         return self._payload
@@ -376,8 +392,7 @@ def test_htsp_native_and_proxied_dvr_calls():
     conn.replies['api'] = {'response': {'uuid': 'saved'}}
     backend.update_autorec_entry(AutorecEntry(uuid='uu', title='News'), AutorecSpec(comment='x'))
     assert conn.calls[-1][1]['path'] == 'idnode/save'
-    node = json.loads(conn.calls[-1][1]['args']['node'])
-    assert node == {'uuid': 'uu', 'comment': 'x'}
+    assert conn.calls[-1][1]['args']['node'] == [{'uuid': 'uu', 'comment': 'x'}]
 
     conn.replies['addTimerecEntry'] = {'success': 1, 'id': 't1'}
     assert backend.create_timerec_entry(TimerecSpec(title='Nightly', start=19 * 60, stop=20 * 60)) == 't1'
