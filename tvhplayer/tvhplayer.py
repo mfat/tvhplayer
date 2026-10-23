@@ -461,6 +461,34 @@ def _clock(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def _format_size(num_bytes):
+    """Format a byte count. ``None`` means the file does not exist yet."""
+    if num_bytes is None:
+        return ""
+    size = max(0, int(num_bytes))
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    if size < 1024 * 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    return f"{size / (1024 * 1024 * 1024):.2f} GB"
+
+
+def _entry_filesize(entry):
+    """Bytes recorded on the server, from the DVR entry's raw fields."""
+    raw = getattr(entry, 'raw', None) or {}
+    for key in ('filesize', 'file_size', 'size'):
+        value = raw.get(key)
+        if value in (None, ''):
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 class TasksPanel(QFrame):
     """Ongoing and scheduled recordings, with search and a status filter."""
 
@@ -534,9 +562,11 @@ class TasksPanel(QFrame):
         self.error_label.hide()
         layout.addWidget(self.error_label)
 
-        self.task_table = QTableWidget(0, 5)
-        self.task_table.setHorizontalHeaderLabels(["Kind", "Channel", "Title", "Status", "Detail"])
-        fit_table_columns(self.task_table, (2, 4))
+        self.task_table = QTableWidget(0, 6)
+        self.task_table.setHorizontalHeaderLabels(
+            ["Kind", "Channel", "Title", "Status", "Size", "Detail"]
+        )
+        fit_table_columns(self.task_table, (2, 5))
         self.task_table.verticalHeader().setVisible(False)
         self.task_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.task_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -657,6 +687,11 @@ class TasksPanel(QFrame):
                 detail = f"Starts {start_text}, duration {_clock(entry.duration)}"
             else:
                 continue
+            size_bytes = _entry_filesize(entry)
+            if bucket != 'recording' and not size_bytes:
+                size_text = ""
+            else:
+                size_text = _format_size(0 if size_bytes is None else size_bytes)
             if entry.htsp_id is not None:
                 key = ('server', 'htsp', entry.htsp_id)
             else:
@@ -669,6 +704,7 @@ class TasksPanel(QFrame):
                 'channel': entry.channel_name or '',
                 'title': entry.title or '',
                 'status': status,
+                'size': size_text,
                 'detail': detail,
                 'start': entry.start or 0,
             })
@@ -691,7 +727,7 @@ class TasksPanel(QFrame):
         title = Path(path).name or 'Local recording'
         started = getattr(recorder, 'started_at', None) or 0
         elapsed = time.time() - started if started else 0
-        detail = f"{path}, {_clock(elapsed)}, {size / (1024 * 1024):.2f} MB"
+        detail = f"{path}, {_clock(elapsed)}"
         if getattr(recorder, 'stall_count', 0) > STALL_LIMIT:
             detail += ", stalled"
         return {
@@ -702,6 +738,7 @@ class TasksPanel(QFrame):
             'channel': channel_name,
             'title': title,
             'status': 'Recording',
+            'size': _format_size(size),
             'detail': detail,
             'start': int(started),
         }
@@ -756,11 +793,12 @@ class TasksPanel(QFrame):
             task['channel'],
             task['title'],
             task['status'],
+            task.get('size') or '',
             task['detail'],
         ]
         summary = (
             f"{task['kind']}, {task['channel']}, {task['title']}, "
-            f"{task['status']}. {task['detail']}"
+            f"{task['status']}, {task.get('size') or 'no file yet'}. {task['detail']}"
         )
         colors = row_emphasis('recording' if task['bucket'] == 'recording' else None)
         for col, value in enumerate(values):

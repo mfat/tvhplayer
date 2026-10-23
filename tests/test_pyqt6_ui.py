@@ -584,7 +584,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.tasks_pane.task_table.isVisible()
         assert window.tasks_pane.task_table.rowCount() == 0
         assert window.tasks_pane.task_table.horizontalHeaderItem(0).text() == "Kind"
-        assert window.tasks_pane.task_table.horizontalHeaderItem(4).text() == "Detail"
+        assert window.tasks_pane.task_table.horizontalHeaderItem(4).text() == "Size"
+        assert window.tasks_pane.task_table.horizontalHeaderItem(5).text() == "Detail"
         assert window.tasks_pane.task_table.accessibleDescription() == "No tasks"
         assert window.tasks_pane.action_btn.accessibleName() == "Stop"
         assert window.tasks_pane.action_btn.isEnabled() is False
@@ -797,6 +798,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
                 DvrEntry(
                     uuid='run', title='News', channel_name='IRINN', start=200, duration=3600,
                     status='Running', sched_status='recording', htsp_id=7,
+                    raw={'filesize': 12 * 1024 * 1024},
                 ),
                 DvrEntry(
                     uuid='done', title='Old', channel_name='BBC', start=50, duration=60,
@@ -846,7 +848,10 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         texts = _task_texts(panel)
         assert len(texts) == 3
         assert 'Local' in texts[0] and 'recording_irinn.ts' in texts[0] and 'stalled' in texts[0]
+        assert panel.task_table.item(0, 4).text().endswith('B')
         assert 'News' in texts[1] and 'Recording' in texts[1]
+        assert panel.task_table.item(1, 4).text() == '12.0 MB'
+        assert panel.task_table.item(2, 4).text() == ''
         assert 'Later' in texts[2] and 'Scheduled' in texts[2]
         assert all('Old' not in text for text in texts)
         assert panel.action_btn.isEnabled() is False
