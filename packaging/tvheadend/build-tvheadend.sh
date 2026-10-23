@@ -88,6 +88,9 @@ cmd_build() {
     fi
 
     cd "$work/tvheadend"
+    # configure defaults to "python", which Debian and Fedora do not provide.
+    PYTHON=${PYTHON:-python3}
+    export PYTHON
     # shellcheck disable=SC2086 # the flags are a word list
     ./configure \
         --prefix=/usr \

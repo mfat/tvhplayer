@@ -2,6 +2,11 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: tvhplayer
 Upstream-Contact: mFat <newmfat@gmail.com>
 Source: https://github.com/mfat/tvhplayer
+Comment: The binary package also carries the built-in server, built from the
+ archives pinned in packaging/tvheadend/pins.env: Tvheadend
+ (https://github.com/tvheadend/tvheadend, GPL-3.0+) in /usr/libexec/tvhplayer,
+ and the dtv-scan-tables data (https://github.com/tvheadend/dtv-scan-tables,
+ GPL-2.0 and LGPL-2.1+) in /usr/share/tvhplayer/tvheadend.
 
 Files: *
 Copyright: 2024 mFat <newmfat@gmail.com>

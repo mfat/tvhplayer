@@ -1,8 +1,52 @@
 #!/usr/bin/make -f
 
-export PYBUILD_NAME=tvhplayer
-export PYBUILD_DISABLE_CLEAN=1
+# The built-in Tvheadend builds offline from archives fetched beforehand:
+#   packaging/tvheadend/build-tvheadend.sh fetch packaging/tvheadend/sources
+TVH_SOURCES ?= $(CURDIR)/packaging/tvheadend/sources
+TVH_WORK = $(CURDIR)/debian/tvheadend-build
+PKG = $(CURDIR)/debian/tvhplayer
+APP = $(PKG)/usr/share/tvhplayer
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+DPKG_EXPORT_BUILDFLAGS = 1
+include /usr/share/dpkg/buildflags.mk
 
 %:
-	dh $@ --with python3 --buildsystem=pybuild
+	dh $@ --with python3
 
+override_dh_auto_configure:
+	# Tvheadend is configured by build-tvheadend.sh.
+
+override_dh_auto_build:
+	packaging/tvheadend/build-tvheadend.sh build $(TVH_SOURCES) $(TVH_WORK)
+
+override_dh_auto_test:
+	# The test suite runs in CI before packaging.
+
+override_dh_auto_install:
+	packaging/tvheadend/build-tvheadend.sh install $(TVH_WORK) $(PKG)
+
+	# Same layout as the Flatpak: the app reads icons/ next to its own code.
+	mkdir -p $(APP)
+	cp -a tvhplayer/. $(APP)/
+	cp -a icons $(APP)/icons
+	find $(APP) -type d -name __pycache__ -prune -exec rm -rf {} +
+
+	# Desktop entry basename matches QGuiApplication.setDesktopFileName.
+	install -D -m 644 io.github.mfat.tvhplayer.desktop \
+		$(PKG)/usr/share/applications/io.github.mfat.tvhplayer.desktop
+	install -D -m 644 icons/tvhplayer.svg \
+		$(PKG)/usr/share/icons/hicolor/scalable/apps/io.github.mfat.tvhplayer.svg
+	install -D -m 644 io.github.mfat.tvhplayer.metainfo.xml \
+		$(PKG)/usr/share/metainfo/io.github.mfat.tvhplayer.metainfo.xml
+
+	mkdir -p $(PKG)/usr/bin
+	printf '%s\n' '#!/bin/sh' 'exec /usr/bin/python3 /usr/share/tvhplayer/tvhplayer.py "$$@"' \
+		> $(PKG)/usr/bin/tvhplayer
+	chmod 755 $(PKG)/usr/bin/tvhplayer
+
+override_dh_python3:
+	dh_python3 /usr/share/tvhplayer
+
+override_dh_auto_clean:
+	rm -rf $(TVH_WORK)

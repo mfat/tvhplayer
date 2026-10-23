@@ -3,29 +3,41 @@ Section: video
 Priority: optional
 Maintainer: mFat <newmfat@gmail.com>
 Build-Depends: debhelper-compat (= 13),
-               python3-all,
-               python3-setuptools,
-               dh-python
-Standards-Version: 4.5.1
+               dh-python,
+               python3,
+               pkgconf,
+               gettext,
+               bzip2,
+               libssl-dev,
+               zlib1g-dev,
+               libpcre2-dev,
+               libdbus-1-dev,
+               libdvbcsa-dev
+Standards-Version: 4.6.2
 Homepage: https://github.com/mfat/tvhplayer
 Vcs-Browser: https://github.com/mfat/tvhplayer
 Vcs-Git: https://github.com/mfat/tvhplayer.git
+Rules-Requires-Root: no
 
 Package: tvhplayer
-Architecture: all
-Depends: ${python3:Depends},
+Architecture: any
+Depends: ${shlibs:Depends},
          ${misc:Depends},
+         ${python3:Depends},
          python3-pyqt6,
-         vlc,
-         ffmpeg,
+         python3-vlc,
          python3-requests,
-         python3-urllib3,
-         python3-pil
-Description: TVheadend Desktop Client
- A desktop client for TVheadend for live TV playback and recording.
+         python3-psutil,
+         qt6-svg-plugins | libqt6svg6,
+         vlc,
+         ffmpeg
+Description: Tvheadend desktop client with a built-in server
+ A desktop client for Tvheadend for live TV playback and recording.
  .
  Features:
   * Live TV playback
   * EPG (Electronic Program Guide)
-  * Recording management
-  * Multiple TVheadend server support 
+  * Recording on the server or locally
+  * Multiple Tvheadend server support
+  * A built-in Tvheadend that starts and stops with the app, kept
+    separate from any Tvheadend installed on the system
