@@ -1,6 +1,6 @@
 # Proposal: Playlist Import
 
-- **Status:** Proposed
+- **Status:** Implemented
 - **Date:** October 2026
 
 ## What this is
