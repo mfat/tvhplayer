@@ -1282,3 +1282,25 @@ def test_quit_asks_the_builtin_server_even_when_another_is_selected(monkeypatch,
     assert [server['name'] for server in asked] == ['Built-in Server']
     assert 'News Hour' in messages[0]
     app.processEvents()
+
+
+def test_status_is_repeated_on_the_picture_only_while_a_channel_shows(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    from tvhplayer.core.models import Channel
+
+    shown = []
+    monkeypatch.setattr(window.player, 'show_message', lambda text, duration_ms=3000: shown.append(text))
+
+    window._playback_active = False
+    window.on_volume_changed(30)
+    assert shown == []
+
+    window._playback_channel = Channel(uuid='c1', name='News One', number=5)
+    window._on_playback_started()
+    assert shown == ['5  News One']
+
+    window.on_volume_changed(40)
+    window.toggle_mute()
+    window.toggle_mute()
+    assert shown[1:] == ['Volume 40', 'Muted', 'Sound on']
+    app.processEvents()

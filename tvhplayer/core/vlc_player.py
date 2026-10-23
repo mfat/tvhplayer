@@ -36,6 +36,7 @@ class VlcPlayer(Player):
         self._player = self._instance.media_player_new()
         if not self._player:
             raise RuntimeError('VLC media player creation returned None')
+        self._setup_marquee()
 
     def attach(self, window_id):
         player = self._player
@@ -65,6 +66,9 @@ class VlcPlayer(Player):
         self._events_bound = True
 
     def play(self, url: str):
+        # Each new picture inherits the last marquee text. Clear it so the
+        # previous channel's message does not reappear.
+        self._set_marquee_text('')
         media = self._instance.media_new(url)
         self._player.set_media(media)
         self._player.play()
@@ -72,7 +76,40 @@ class VlcPlayer(Player):
 
     def stop(self):
         if self._player is not None:
+            self._set_marquee_text('')
             self._player.stop()
+
+    def show_message(self, text: str, duration_ms: int = 3000):
+        """VLC's marquee: drawn into the video, so it shows in fullscreen too."""
+        option = self._marquee_option()
+        if option is None or self._player is None:
+            return
+        self._player.video_set_marquee_int(option.Timeout, int(duration_ms))
+        self._set_marquee_text(text)
+
+    def _marquee_option(self):
+        option = getattr(self._vlc, 'VideoMarqueeOption', None)
+        if option is None or not hasattr(self._player, 'video_set_marquee_int'):
+            return None
+        return option
+
+    def _setup_marquee(self):
+        """Enable the marquee once. The player keeps it for every later picture."""
+        option = self._marquee_option()
+        if option is None:
+            return
+        set_int = self._player.video_set_marquee_int
+        set_int(option.Enable, 1)
+        # Top left. Size 0 keeps VLC's default, which scales with the video height.
+        set_int(option.Position, 5)
+        set_int(option.X, 20)
+        set_int(option.Y, 20)
+        set_int(option.Opacity, 255)
+
+    def _set_marquee_text(self, text):
+        option = self._marquee_option()
+        if option is not None and self._player is not None:
+            self._player.video_set_marquee_string(option.Text, text)
 
     def is_playing(self) -> bool:
         return bool(self._player and self._player.is_playing())

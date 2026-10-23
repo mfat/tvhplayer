@@ -147,3 +147,63 @@ def test_close_stops_and_drops_the_player(monkeypatch):
     assert media.stopped is True
     assert engine.is_playing() is False
     engine.log_stats()
+
+
+class _MarqueeOption:
+    Enable, Text, Timeout, Position, X, Y, Opacity = range(7)
+
+
+class _MarqueePlayer(_MediaPlayer):
+    def __init__(self):
+        super().__init__()
+        self.marquee = {}
+        self.log = []
+
+    def video_set_marquee_int(self, option, value):
+        self.marquee[option] = value
+
+    def video_set_marquee_string(self, option, value):
+        self.marquee[option] = value
+        self.log.append(('text', value))
+
+    def set_media(self, media):
+        super().set_media(media)
+        self.log.append(('media', media))
+
+    def stop(self):
+        super().stop()
+        self.log.append(('stop', None))
+
+
+def test_messages_are_drawn_over_the_picture_and_never_carry_over(monkeypatch):
+    media = _MarqueePlayer()
+    _install_vlc(monkeypatch, _Instance(media))
+    sys.modules['vlc'].VideoMarqueeOption = _MarqueeOption
+    engine = VlcPlayer()
+    option = _MarqueeOption
+    assert media.marquee[option.Enable] == 1
+    assert media.marquee[option.Position] == 5
+
+    engine.play('http://tv.example/one')
+    engine.show_message('Volume 40', 2000)
+    assert media.marquee[option.Timeout] == 2000
+    assert media.marquee[option.Text] == 'Volume 40'
+
+    # A new picture inherits the last text, so it is cleared before the next media.
+    media.log.clear()
+    engine.play('http://tv.example/two')
+    assert media.log[:2] == [('text', ''), ('media', 'http://tv.example/two')]
+
+    media.log.clear()
+    engine.stop()
+    assert media.log == [('text', ''), ('stop', None)]
+
+
+def test_messages_are_skipped_without_marquee_support(monkeypatch):
+    media = _MediaPlayer()
+    _install_vlc(monkeypatch, _Instance(media))
+    engine = VlcPlayer()
+    engine.play('http://tv.example/one')
+    engine.show_message('Muted')
+    engine.stop()
+    assert media.stopped is True

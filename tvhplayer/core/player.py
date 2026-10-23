@@ -63,6 +63,9 @@ class Player(ABC):
     def set_muted(self, muted: bool):
         """Silence or restore sound."""
 
+    def show_message(self, text: str, duration_ms: int = 3000):
+        """Draw short text over the picture, then let it fade. The default does nothing."""
+
     def log_stats(self):
         """Print engine-specific playback stats. The default does nothing."""
 

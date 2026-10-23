@@ -2752,6 +2752,7 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage(
                 f"Recording started for: {channel.name} ({duration_minutes} minutes)"
             )
+            self._show_on_picture(f"Recording {channel.name} ({duration_minutes} min)")
             self.start_recording_indicator()
             self._refresh_tasks()
         except Exception as e:
@@ -2826,6 +2827,14 @@ class TVHeadendClient(QMainWindow):
         if hasattr(self, 'video_frame'):
             self.video_frame.setUpdatesEnabled(not playing and not waiting)
 
+    def _show_on_picture(self, text):
+        """Repeat a status message over the video, where it shows in fullscreen too.
+
+        Only while a picture is on screen; the status bar keeps the message for screen readers.
+        """
+        if getattr(self, '_playback_active', False) and getattr(self, 'player', None) is not None:
+            self.player.show_message(text)
+
     def _on_playback_started(self):
         self._awaiting_playback = False
         self._set_playback_spinner(False)
@@ -2834,6 +2843,7 @@ class TVHeadendClient(QMainWindow):
         channel = getattr(self, '_playback_channel', None)
         if channel is not None:
             self.statusbar.showMessage(f"Playing: {channel.name}")
+            self._show_on_picture(f"{channel.number}  {channel.name}" if channel.number else channel.name)
 
     def _on_playback_failed(self):
         self._awaiting_playback = False
@@ -3231,6 +3241,7 @@ class TVHeadendClient(QMainWindow):
     def on_volume_changed(self, value):
         print(f"Debug: Volume changed to {value}")
         self.player.set_volume(value)
+        self._show_on_picture(f"Volume {value}")
 
     def eventFilter(self, obj, event):
         """Keep the video surface stable and handle player gestures."""
@@ -3374,6 +3385,7 @@ class TVHeadendClient(QMainWindow):
             describe(self.mute_btn, "Unmute", "Turn sound on. Keyboard: M. The button stays pressed while muted.")
             self.mute_btn.setToolTip("Unmute (M)")
             self.statusbar.showMessage("Muted")
+            self._show_on_picture("Muted")
             print("Debug: Audio muted")
         else:  # Switching to unmuted
             self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
@@ -3381,6 +3393,7 @@ class TVHeadendClient(QMainWindow):
             describe(self.mute_btn, "Mute", "Turn sound off. Keyboard: M. The button stays pressed while muted.")
             self.mute_btn.setToolTip("Mute (M)")
             self.statusbar.showMessage("Sound on")
+            self._show_on_picture("Sound on")
             print("Debug: Audio unmuted")
 
     def show_about(self):
@@ -3492,6 +3505,7 @@ class TVHeadendClient(QMainWindow):
                 self.statusbar.showMessage(f"Stopped recording for {channel_name}")
             else:
                 self.statusbar.showMessage(f"Stopped {len(targets)} recordings for {channel_name}")
+            self._show_on_picture("Recording stopped")
         except Exception as e:
             print(f"Debug: Error stopping recordings: {str(e)}")
             print(f"Debug: Error type: {type(e)}")
@@ -3615,6 +3629,7 @@ class TVHeadendClient(QMainWindow):
             self.recording_monitor.timeout.connect(self.check_recording_status)
             self.recording_monitor.start(2000)
             self.statusbar.showMessage(f"Local recording started: {file_path}")
+            self._show_on_picture("Recording to this computer")
             self.start_recording_indicator()
             self._refresh_tasks(server=False)
             
@@ -3662,6 +3677,7 @@ class TVHeadendClient(QMainWindow):
                 self.recording_monitor = None
             self.local_recorder.stop()
             self.statusbar.showMessage("Local recording stopped")
+            self._show_on_picture("Recording to this computer stopped")
             self.sync_recording_indicator()
         except Exception as e:
             print(f"Debug: Error stopping local recording: {str(e)}")
