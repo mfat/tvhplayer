@@ -3,9 +3,13 @@ import json
 import os
 import random
 import stat
+import sys
 import threading
+import time
 
 from pathlib import Path
+
+import pytest
 
 from tvhplayer.core import builtin_server
 from tvhplayer.core.builtin_server import (
@@ -250,3 +254,89 @@ def test_supervisor_gives_up_when_the_child_never_answers(tmp_path):
     finally:
         supervisor.stop()
     app.processEvents()
+
+
+def _fake_proc(root, pid, argv, ppid):
+    folder = root / str(pid)
+    folder.mkdir(parents=True)
+    (folder / 'cmdline').write_bytes(b'\0'.join(arg.encode() for arg in argv) + b'\0')
+    (folder / 'stat').write_text(f'{pid} (odd name) x) S {ppid} 1 1 0\n')
+
+
+def test_finds_servers_on_the_builtin_config_folder(tmp_path):
+    from tvhplayer.core.builtin_server import owned_by_other_app, servers_using
+
+    config = tmp_path / 'tvheadend'
+    config.mkdir()
+    proc = tmp_path / 'proc'
+    _fake_proc(proc, 101, ['/app/bin/tvheadend', '-c', str(config), '-B'], 1)
+    _fake_proc(proc, 102, ['/usr/bin/tvheadend', '-c', '/var/lib/tvheadend'], 1)
+    _fake_proc(proc, 103, ['/usr/bin/python3', '/usr/share/tvhplayer/tvhplayer.py'], 1)
+    _fake_proc(proc, 104, ['/usr/bin/tvheadend', '--config', str(config)], 103)
+    assert sorted(servers_using(config, str(proc))) == [(101, 1), (104, 103)]
+    assert not owned_by_other_app(1, str(proc))
+    assert owned_by_other_app(103, str(proc))
+
+
+def test_leftover_server_is_stopped_but_another_window_keeps_its_own(tmp_path, monkeypatch):
+    import subprocess
+
+    import tvhplayer.core.builtin_server as builtin
+
+    config = tmp_path / 'tvheadend'
+    config.mkdir()
+    leftover = subprocess.Popen([
+        'bash', '-c',
+        f'exec -a tvheadend {sys.executable} -c "import time; time.sleep(60)" -c {config}',
+    ])
+    try:
+        for _ in range(50):
+            if builtin.servers_using(config):
+                break
+            time.sleep(0.05)
+        monkeypatch.setattr(builtin, 'owned_by_other_app', lambda _parent, _proc='/proc': True)
+        with pytest.raises(RuntimeError):
+            builtin.stop_leftover_servers(config)
+        assert leftover.poll() is None
+        monkeypatch.setattr(builtin, 'owned_by_other_app', lambda _parent, _proc='/proc': False)
+        assert builtin.stop_leftover_servers(config, timeout=5) == [leftover.pid]
+        assert leftover.wait(timeout=5) is not None
+    finally:
+        if leftover.poll() is None:
+            leftover.kill()
+
+
+@pytest.mark.skipif(not sys.platform.startswith('linux'), reason='Linux parent-death signal')
+def test_launched_server_stops_when_the_app_dies(tmp_path):
+    import subprocess
+
+    from tvhplayer.core.builtin_server import launch_command
+
+    pid_file = tmp_path / 'pid'
+    # A stand-in app: starts "Tvheadend" (sleep) through the launcher, then dies.
+    app = (
+        'import os, subprocess, sys, time\n'
+        'from tvhplayer.core.builtin_server import launch_command\n'
+        'program, args = launch_command(["/bin/sleep", "60"])\n'
+        'child = subprocess.Popen([program] + args)\n'
+        f'open({str(pid_file)!r}, "w").write(str(child.pid))\n'
+        'time.sleep(1)\n'
+        'os._exit(0)\n'
+    )
+    subprocess.run([sys.executable, '-c', app], check=True, cwd=str(Path(__file__).resolve().parents[1]))
+    child = int(pid_file.read_text())
+    for _ in range(50):
+        try:
+            with open(f'/proc/{child}/stat') as handle:
+                state = handle.read().rsplit(')', 1)[1].split()[0]
+        except FileNotFoundError:
+            break
+        if state == 'Z':
+            break
+        time.sleep(0.1)
+    else:
+        os.kill(child, 9)
+        pytest.fail('the launched process outlived its parent')
+    program, args = launch_command(['/bin/tvheadend', '-c', 'x'], parent_pid=42, python='/usr/bin/python3')
+    assert program == '/usr/bin/python3'
+    assert args[-4:] == ['42', '/bin/tvheadend', '-c', 'x']

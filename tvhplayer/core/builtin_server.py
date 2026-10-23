@@ -15,7 +15,9 @@ import os
 import random
 import re
 import secrets
+import signal
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -28,6 +30,8 @@ PORT_HIGH = 45000
 MAX_BIND_ATTEMPTS = 3
 STARTUP_TIMEOUT_SECONDS = 60
 SUPERUSER_NAME = 'tvhplayer'
+# Tvheadend exits with 78 when another process holds its config lock.
+CONFIG_LOCKED_EXIT = 78
 
 _BIND_FAILURE = re.compile(r'bind:\s+\S+:\d+:')
 _HTTP_STARTED = 'Starting HTTP server'
@@ -134,6 +138,112 @@ def command_args(binary, config_dir, http_port: int, htsp_port: int) -> list[str
         '--http_port', str(int(http_port)),
         '--htsp_port', str(int(htsp_port)),
     ]
+
+
+# Run by the app's Python before Tvheadend: ask Linux to send SIGTERM when
+# TVHplayer exits, even when it crashes or is killed, then become Tvheadend.
+# Qt has no process flag for this, and the Flatpak has no setpriv.
+PARENT_DEATH_LAUNCHER = (
+    'import ctypes, os, signal, sys\n'
+    'ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM, 0, 0, 0)\n'
+    'if os.getppid() != int(sys.argv[1]):\n'
+    '    sys.exit(1)\n'
+    'os.execv(sys.argv[2], sys.argv[2:])\n'
+)
+
+
+def launch_command(argv, parent_pid=None, python=None):
+    """``(program, args)`` that start ``argv`` so it stops when this app stops.
+
+    Linux only, and only when this app runs on a Python interpreter; a frozen
+    build starts Tvheadend directly.
+    """
+    python = sys.executable if python is None else python
+    if not sys.platform.startswith('linux') or getattr(sys, 'frozen', False) or not python:
+        return str(argv[0]), [str(arg) for arg in argv[1:]]
+    parent_pid = os.getpid() if parent_pid is None else parent_pid
+    return python, ['-I', '-c', PARENT_DEATH_LAUNCHER, str(parent_pid)] + [str(arg) for arg in argv]
+
+
+def _cmdline(pid, proc) -> list[str]:
+    try:
+        with open(f'{proc}/{pid}/cmdline', 'rb') as handle:
+            raw = handle.read()
+    except OSError:
+        return []
+    return [part.decode('utf-8', errors='replace') for part in raw.split(b'\0') if part]
+
+
+def _parent_pid(pid, proc) -> int:
+    try:
+        with open(f'{proc}/{pid}/stat', 'r', encoding='utf-8', errors='replace') as handle:
+            # The command name can hold spaces and parentheses; fields follow the last ')'.
+            return int(handle.read().rsplit(')', 1)[1].split()[1])
+    except (OSError, IndexError, ValueError):
+        return 0
+
+
+def _same_dir(first, second) -> bool:
+    try:
+        return Path(first).resolve() == Path(second).resolve()
+    except OSError:
+        return False
+
+
+def servers_using(config_dir, proc='/proc') -> list[tuple[int, int]]:
+    """``(pid, parent pid)`` of running Tvheadend processes on this config folder."""
+    found = []
+    try:
+        entries = os.listdir(proc)
+    except OSError:
+        return found
+    for entry in entries:
+        if not entry.isdigit() or int(entry) == os.getpid():
+            continue
+        argv = _cmdline(entry, proc)
+        if not argv or os.path.basename(argv[0]) != 'tvheadend':
+            continue
+        for index, arg in enumerate(argv[:-1]):
+            if arg in ('-c', '--config') and _same_dir(argv[index + 1], config_dir):
+                found.append((int(entry), _parent_pid(entry, proc)))
+                break
+    return found
+
+
+def owned_by_other_app(parent_pid, proc='/proc') -> bool:
+    """True when the parent is another running TVHplayer, not init or systemd."""
+    if parent_pid <= 1 or parent_pid == os.getpid():
+        return False
+    return any('tvhplayer' in arg.lower() for arg in _cmdline(parent_pid, proc))
+
+
+def stop_leftover_servers(config_dir, timeout=10.0, proc='/proc') -> list[int]:
+    """Stop built-in servers that a TVHplayer which is gone left running.
+
+    Returns the pids it stopped. Raises ``RuntimeError`` when another running
+    TVHplayer owns the server, which must be left alone.
+    """
+    leftovers = []
+    for pid, parent in servers_using(config_dir, proc):
+        if owned_by_other_app(parent, proc):
+            raise RuntimeError('The built-in server is already running in another TVHplayer window.')
+        leftovers.append(pid)
+    for pid in leftovers:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + timeout
+    alive = list(leftovers)
+    while alive and time.monotonic() < deadline:
+        time.sleep(0.2)
+        alive = [pid for pid in alive if os.path.exists(f'{proc}/{pid}') and _cmdline(pid, proc)]
+    for pid in alive:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    return leftovers
 
 
 def _usable_port(port, blocked) -> bool:

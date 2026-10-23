@@ -9,29 +9,35 @@ from PyQt6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, pyqtSig
 
 try:
     from .core.builtin_server import (
+        CONFIG_LOCKED_EXIT,
         MAX_BIND_ATTEMPTS,
         STARTUP_TIMEOUT_SECONDS,
         LineBuffer,
         command_args,
         ensure_superuser,
         initial_ports,
+        launch_command,
         pick_port_pair,
         serverinfo_ok,
         startup_result,
+        stop_leftover_servers,
     )
     from .core.logs import SERVER_LOGGER
     from .core.proxy import child_env
 except ImportError:
     from core.builtin_server import (
+        CONFIG_LOCKED_EXIT,
         MAX_BIND_ATTEMPTS,
         STARTUP_TIMEOUT_SECONDS,
         LineBuffer,
         command_args,
         ensure_superuser,
         initial_ports,
+        launch_command,
         pick_port_pair,
         serverinfo_ok,
         startup_result,
+        stop_leftover_servers,
     )
     from core.logs import SERVER_LOGGER
     from core.proxy import child_env
@@ -91,6 +97,13 @@ class BuiltinSupervisor(QObject):
             self.failed.emit('Built-in Tvheadend is not packaged in this build.')
             return
         try:
+            stopped = stop_leftover_servers(self.config_dir)
+        except RuntimeError as exc:
+            self._fail(str(exc))
+            return
+        if stopped:
+            log.info('Stopped a built-in server an earlier TVHplayer left running: pid %s', stopped)
+        try:
             self.username, self.password = ensure_superuser(self.config_dir)
         except OSError as exc:
             self._set_status('failed')
@@ -117,7 +130,7 @@ class BuiltinSupervisor(QObject):
         self._attempts += 1
         self._lines = LineBuffer()
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        args = command_args(self.binary, self.config_dir, self.http_port, self.htsp_port)[1:]
+        program, args = launch_command(command_args(self.binary, self.config_dir, self.http_port, self.htsp_port))
         self._set_status('starting')
         self._deadline = time.monotonic() + self.startup_timeout
         # VLC's http_proxy is hidden from this process. Tvheadend's own fetches keep it.
@@ -125,7 +138,7 @@ class BuiltinSupervisor(QObject):
         for key, value in child_env(None).items():
             environment.insert(key, value)
         self.process.setProcessEnvironment(environment)
-        self.process.start(str(self.binary), args)
+        self.process.start(program, args)
         self._poll.start()
 
     def _on_output(self) -> None:
@@ -201,7 +214,10 @@ class BuiltinSupervisor(QObject):
             self._set_status('stopped')
             return
         if self._status == 'starting':
-            self._fail('Built-in Tvheadend exited before it was ready.')
+            if code == CONFIG_LOCKED_EXIT:
+                self._fail('Another Tvheadend is using the built-in server settings, so the built-in server could not start.')
+            else:
+                self._fail('Built-in Tvheadend exited before it was ready.')
             return
         if self._status == 'running':
             self._fail('Built-in Tvheadend stopped.')
