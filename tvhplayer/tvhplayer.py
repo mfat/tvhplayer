@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 import os
 import sys
-import vlc
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QToolBar, QComboBox, QSplitter, QFrame,
@@ -29,6 +28,7 @@ try:
     from .core.errors import TvhError
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import LocalRecorder
+    from .core.vlc_player import VlcPlayer
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from core.backend import create_backend
@@ -36,6 +36,7 @@ except ImportError:
     from core.errors import TvhError
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import LocalRecorder
+    from core.vlc_player import VlcPlayer
 try:
     from .a11y import (
         ShortcutHelpDialog,
@@ -1086,83 +1087,28 @@ class TVHeadendClient(QMainWindow):
         self.recording_animation = None
         self.opacity_effect = None
         
-        # Initialize VLC with basic instance first
         print("Debug: Initializing VLC instance")
         try:
-            if getattr(sys, 'frozen', False):
-                # If running as compiled executable
-                base_path = sys._MEIPASS
-                plugin_path = os.path.join(base_path, 'vlc', 'plugins')
-                
-                # Set VLC plugin path via environment variable
-                os.environ['VLC_PLUGIN_PATH'] = plugin_path
-                
-                # On Linux, might also need these
-                if sys.platform.startswith('linux'):
-                    os.environ['LD_LIBRARY_PATH'] = base_path
-                    
-                print(f"Debug: VLC plugin path set to: {plugin_path}")
-                
-            # Initialize VLC with hardware acceleration parameters
-            vlc_args = [
-                # Enable hardware decoding
-                '--avcodec-hw=any',  # Try any hardware acceleration method
-                '--file-caching=1000',  # Increase file caching for smoother playback
-                '--network-caching=1000',  # Increase network caching for streaming
-                '--no-video-title-show',  # Don't show the video title
-                '--no-snapshot-preview',  # Don't show snapshot previews
-            ]
-            
-            self.instance = vlc.Instance(vlc_args)
-            if not self.instance:
-                raise RuntimeError("VLC Instance creation returned None")
-                
-            print("Debug: VLC instance created successfully with hardware acceleration")
-            
-            self.media_player = self.instance.media_player_new()
-            if not self.media_player:
-                raise RuntimeError("VLC media player creation returned None")
-                
+            self.player = VlcPlayer()
             print("Debug: VLC media player created successfully")
-            
         except Exception as e:
             print(f"Error initializing VLC: {str(e)}")
             raise RuntimeError(f"Failed to initialize VLC: {str(e)}")
-        
+
         # Then setup UI
         self.setup_ui()
         self._bind_playback_splash()
-        
+
         # Update to use config for last server
         self.server_combo.setCurrentIndex(self.config.get('last_server', 0))
-        
-        # Now configure hardware acceleration after UI is set up
+
         try:
-            # Set player window - with proper type conversion
-            if sys.platform.startswith('linux'):
-                handle = self.video_frame.winId().__int__()
-                if handle is not None:
-                    self.media_player.set_xwindow(handle)
-            elif sys.platform == "win32":
-                self.media_player.set_hwnd(self.video_frame.winId().__int__())
-            elif sys.platform == "darwin":
-                self.media_player.set_nsobject(self.video_frame.winId().__int__())
-            
-            # Set hardware decoding to automatic
-            if hasattr(self.media_player, 'set_hardware_decoding'):
-                self.media_player.set_hardware_decoding(True)
-            # Always let Qt receive clicks and keys on the video surface
-            self._release_vlc_input()
-            
-            # Add a timer to check which hardware acceleration method is being used
-            # This will check after playback starts
+            self.player.attach(self.video_frame.winId().__int__())
             self.hw_check_timer = QTimer()
             self.hw_check_timer.setSingleShot(True)
-            self.hw_check_timer.timeout.connect(self.check_hardware_acceleration)
-            self.hw_check_timer.start(5000)  # Check after 5 seconds of playback
-                
+            self.hw_check_timer.timeout.connect(self.player.log_stats)
+            self.hw_check_timer.start(5000)
             print("Debug: Hardware acceleration configured for VLC")
-            
         except Exception as e:
             print(f"Warning: Could not configure hardware acceleration: {str(e)}")
             print("Continuing without hardware acceleration")
@@ -1896,7 +1842,7 @@ class TVHeadendClient(QMainWindow):
         print("Debug: Stopping playback")
         self._playback_active = False
         self._playback_channel = None
-        self.media_player.stop()
+        self.player.stop()
         self._protect_video_surface(False)
         self.statusbar.showMessage("Playback stopped")
 
@@ -1922,11 +1868,11 @@ class TVHeadendClient(QMainWindow):
         if hasattr(self, 'video_frame'):
             self.video_frame.setUpdatesEnabled(not playing)
 
-    def _on_vlc_playing(self):
+    def _on_playback_started(self):
         self._protect_video_surface(True)
 
-    def _on_vlc_stopped(self):
-        # A menu or resize can make VLC tear down its output for a moment.
+    def _on_playback_stopped(self):
+        # A menu or resize can make the engine tear down its output for a moment.
         # Do not treat that as a real stop or the splash will flash.
         if self._playback_active:
             return
@@ -1937,39 +1883,23 @@ class TVHeadendClient(QMainWindow):
     def _show_splash_if_idle(self):
         if self._playback_active:
             return
-        if self.media_player and self.media_player.is_playing():
+        if self.player and self.player.is_playing():
             return
         self._protect_video_surface(False)
 
     def _bind_playback_splash(self):
-        """Keep the splash in sync if VLC starts or stops on its own."""
+        """Keep the splash in sync if playback starts or stops on its own."""
         self._splash_idle_timer = QTimer(self)
         self._splash_idle_timer.setSingleShot(True)
         self._splash_idle_timer.timeout.connect(self._show_splash_if_idle)
         try:
-            manager = self.media_player.event_manager()
-            manager.event_attach(
-                vlc.EventType.MediaPlayerPlaying,
-                lambda event: QTimer.singleShot(0, self._on_vlc_playing),
-            )
-            manager.event_attach(
-                vlc.EventType.MediaPlayerStopped,
-                lambda event: QTimer.singleShot(0, self._on_vlc_stopped),
-            )
-            manager.event_attach(
-                vlc.EventType.MediaPlayerEndReached,
-                lambda event: QTimer.singleShot(0, self._on_vlc_stopped),
+            self.player.set_handlers(
+                self._on_playback_started,
+                self._on_playback_stopped,
+                lambda fn: QTimer.singleShot(0, fn),
             )
         except Exception as e:
-            print(f"Debug: Could not attach VLC splash events: {e}")
-
-    def _release_vlc_input(self):
-        """Stop VLC from eating mouse and keyboard so Qt can handle them."""
-        try:
-            self.media_player.video_set_key_input(False)
-            self.media_player.video_set_mouse_input(False)
-        except Exception as e:
-            print(f"Debug: Could not disable VLC input grabbing: {e}")
+            print(f"Debug: Could not attach playback events: {e}")
 
     def toggle_fullscreen(self, checked=None):
         """Fill the screen with the current window; hide list, controls, and bars."""
@@ -2090,8 +2020,8 @@ class TVHeadendClient(QMainWindow):
         menu = QMenu(self)
         menu.setAccessibleName("Playback")
         channel = self.selected_channel()
-        playing = bool(self.media_player and self.media_player.is_playing())
-        muted = bool(self.media_player and self.media_player.audio_get_mute())
+        playing = bool(self.player and self.player.is_playing())
+        muted = bool(self.player and self.player.is_muted())
 
         play_action = menu.addAction(QIcon(f"{self.icons_dir}/play.svg"), "Play")
         play_action.setEnabled(channel is not None)
@@ -2244,7 +2174,7 @@ class TVHeadendClient(QMainWindow):
 
     def on_volume_changed(self, value):
         print(f"Debug: Volume changed to {value}")
-        self.media_player.audio_set_volume(value)
+        self.player.set_volume(value)
 
     def eventFilter(self, obj, event):
         """Keep the video surface stable and handle player gestures."""
@@ -2324,7 +2254,7 @@ class TVHeadendClient(QMainWindow):
             return
         if key in (Qt.Key.Key_VolumeMute, Qt.Key.Key_MediaTogglePlayPause):
             if key == Qt.Key.Key_MediaTogglePlayPause:
-                if self.media_player and self.media_player.is_playing():
+                if self.player and self.player.is_playing():
                     self.stop_playback()
                 else:
                     self.play_channel_by_data(self.selected_channel())
@@ -2375,8 +2305,8 @@ class TVHeadendClient(QMainWindow):
     def toggle_mute(self):
         """Toggle audio mute state"""
         print("Debug: Toggling mute")
-        is_muted = self.media_player.audio_get_mute()
-        self.media_player.audio_set_mute(not is_muted)
+        is_muted = self.player.is_muted()
+        self.player.set_muted(not is_muted)
         
         if not is_muted:  # Switching to muted
             self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/mute.svg"))
@@ -2566,9 +2496,7 @@ class TVHeadendClient(QMainWindow):
     def play_url(self, url):
         """Play media from URL"""
         try:
-            media = self.instance.media_new(url)
-            self.media_player.set_media(media)
-            self.media_player.play()
+            self.player.play(url)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to play media: {str(e)}")
 
@@ -2676,6 +2604,8 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
         self.local_recorder.stop()
         self.close_backend()
+        if getattr(self, 'player', None) is not None:
+            self.player.close()
         super().closeEvent(event)
 
     def show_channel_context_menu(self, position):
@@ -2757,10 +2687,7 @@ class TVHeadendClient(QMainWindow):
             self._playback_channel = channel
             stream_url = self.get_backend().stream_url(channel)
             print(f"Debug: Stream URL: {stream_url}")
-            media = self.instance.media_new(stream_url)
-            self.media_player.set_media(media)
-            self.media_player.play()
-            self._release_vlc_input()
+            self.player.play(stream_url)
             self._protect_video_surface(True)
             self.statusbar.showMessage(f"Playing: {channel.name}")
         except Exception as e:
@@ -2790,51 +2717,6 @@ class TVHeadendClient(QMainWindow):
                     search_text not in channel_name and search_text not in number,
                 )
 
-    def check_hardware_acceleration(self):
-        """Check and print which hardware acceleration method is being used"""
-        if not self.media_player:
-            return
-            
-        # This only works if a media is playing
-        if not self.media_player.is_playing():
-            return
-            
-        try:
-            # Get media statistics - handle different VLC Python binding versions
-            media = self.media_player.get_media()
-            if not media:
-                print("No media currently playing")
-                return
-                
-            # Different versions of python-vlc have different APIs for get_stats
-            try:
-                # Newer versions (direct call)
-                stats = media.get_stats()
-                print("VLC Playback Statistics:")
-                print(f"Decoded video blocks: {stats.decoded_video}")
-                print(f"Displayed pictures: {stats.displayed_pictures}")
-                print(f"Lost pictures: {stats.lost_pictures}")
-            except TypeError:
-                # Older versions (requiring a stats object parameter)
-                stats = vlc.MediaStats()
-                media.get_stats(stats)
-                print("VLC Playback Statistics:")
-                print(f"Decoded video blocks: {stats.decoded_video}")
-                print(f"Displayed pictures: {stats.displayed_pictures}")
-                print(f"Lost pictures: {stats.lost_pictures}")
-            
-            # Check if hardware decoding is enabled
-            if hasattr(self.media_player, 'get_role'):
-                print(f"Media player role: {self.media_player.get_role()}")
-            
-            # Try to get more detailed hardware acceleration info
-            print("Hardware acceleration is active if you see 'Using ... for hardware decoding' in the logs above")
-            print("For more details, run VLC with the same content and use:")
-            print("Tools -> Messages -> Info to see which decoder is being used")
-            
-        except Exception as e:
-            print(f"Error checking hardware acceleration: {e}")
-            print(f"Traceback: {traceback.format_exc()}")
 
 
 
