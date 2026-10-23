@@ -19,6 +19,7 @@ import signal
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -356,6 +357,27 @@ def serverinfo_ok(http_port: int, timeout: float = 0.4, username='', password=''
     return isinstance(payload, dict) and any(
         key in payload for key in ('sw_version', 'api_version', 'name')
     )
+
+
+# Tvheadend's "Authentication type" (config field ``digest``): 2 is plain and digest.
+PLAIN_AND_DIGEST_LOGIN = 2
+
+
+def allow_plain_login(http_port: int, username='', password='', timeout: float = 2.0) -> bool:
+    """Let the built-in server accept a plain login as well as digest.
+
+    Tvheadend defaults to digest only. VLC's HTTP access sends the login in
+    the stream URL as plain (Basic) and fails with 401 against digest. The
+    built-in server listens on 127.0.0.1 only and keeps its generated
+    password, so plain login does not open it to anyone else.
+    """
+    url = f'http://127.0.0.1:{int(http_port)}/api/config/save'
+    body = urllib.parse.urlencode({'node': json.dumps({'digest': PLAIN_AND_DIGEST_LOGIN})}).encode()
+    try:
+        with _direct_opener(url, username, password).open(url, data=body, timeout=timeout) as response:
+            return 200 <= response.status < 300
+    except (OSError, urllib.error.URLError, ValueError):
+        return False
 
 
 def ensure_builtin_server(servers, http_port=0, htsp_port=0, username='', password=''):

@@ -13,6 +13,7 @@ try:
         MAX_BIND_ATTEMPTS,
         STARTUP_TIMEOUT_SECONDS,
         LineBuffer,
+        allow_plain_login,
         command_args,
         ensure_superuser,
         initial_ports,
@@ -30,6 +31,7 @@ except ImportError:
         MAX_BIND_ATTEMPTS,
         STARTUP_TIMEOUT_SECONDS,
         LineBuffer,
+        allow_plain_login,
         command_args,
         ensure_superuser,
         initial_ports,
@@ -177,6 +179,8 @@ class BuiltinSupervisor(QObject):
             return
         result = startup_result(True, self._lines.watch, True)
         if result == 'ready':
+            if not allow_plain_login(self.http_port, self.username, self.password):
+                log.warning('Could not let the built-in server accept the player login; playback may fail with 401.')
             self._poll.stop()
             self._set_status('running')
             self.ready.emit(self.http_port, self.htsp_port)
