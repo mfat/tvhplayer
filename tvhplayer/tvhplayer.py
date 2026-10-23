@@ -518,6 +518,50 @@ def _entry_filesize(entry):
     return None
 
 
+def _recording_path(entry, storage_roots=()):
+    """Local path of a server recording, when the entry names one.
+
+    HTTP sends the full path as ``filename``. HTSP sends ``path`` and
+    ``files[].filename`` relative to the DVR storage directory.
+    """
+    raw = getattr(entry, 'raw', None) or {}
+    names = []
+    for key in ('filename', 'path'):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            names.append(value.strip())
+    files = raw.get('files')
+    if isinstance(files, list):
+        for item in files:
+            if isinstance(item, dict):
+                value = item.get('filename')
+            elif isinstance(item, str):
+                value = item
+            else:
+                value = ''
+            if isinstance(value, str) and value.strip():
+                names.append(value.strip())
+    candidates = []
+    for name in names:
+        candidates.append(name)
+        if not os.path.isabs(name):
+            for root in storage_roots:
+                root = str(root or '').strip()
+                if root:
+                    candidates.append(os.path.join(root, name))
+    seen = []
+    for name in candidates:
+        if name not in seen:
+            seen.append(name)
+    for name in seen:
+        if os.path.exists(name):
+            return name
+    for name in seen:
+        if os.path.isabs(name):
+            return name
+    return ''
+
+
 class TasksPanel(QFrame):
     """Ongoing, scheduled, and completed recordings, with search and a status filter."""
 
@@ -527,13 +571,13 @@ class TasksPanel(QFrame):
         self._host = parent
         self._server_tasks = []
         self._tasks = []
+        self._storage_roots = ()
         self._error_text = ""
         self._table_description = None
         self.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
         self.setAccessibleName("Tasks")
         self.setAccessibleDescription(
-            "Ongoing and scheduled recordings. "
-            "Choose Completed to see finished recordings. "
+            "Ongoing, scheduled, and completed recordings. "
             "Filter by text or by status, then stop, cancel, or reveal the selected one."
         )
         self.setMinimumWidth(220)
@@ -576,8 +620,8 @@ class TasksPanel(QFrame):
         describe(
             self.status_combo,
             "Task status",
-            "Show ongoing and scheduled tasks, only recordings, "
-            "only scheduled recordings, or completed recordings.",
+            "Show every task, only recordings, only scheduled recordings, "
+            "or only completed recordings.",
         )
         self.status_combo.currentIndexChanged.connect(self._apply_filter)
         show_row = QHBoxLayout()
@@ -606,8 +650,7 @@ class TasksPanel(QFrame):
         describe(
             self.task_table,
             "Tasks",
-            "Ongoing and scheduled recordings. Choose Completed to see finished recordings. "
-            "Recording rows are listed first.",
+            "Ongoing, scheduled, and completed recordings. Recording rows are listed first.",
         )
         self.task_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.task_table.customContextMenuRequested.connect(self._show_task_menu)
@@ -624,7 +667,7 @@ class TasksPanel(QFrame):
         describe(
             self.reveal_btn,
             "Reveal in File Manager",
-            "Show the selected local recording in the file manager, with the file selected.",
+            "Show the selected recording in the file manager, with the file selected.",
         )
         self.reveal_btn.clicked.connect(self.reveal_selected)
         self._set_reveal(False)
@@ -639,6 +682,7 @@ class TasksPanel(QFrame):
 
     def refresh(self, server=True):
         """Reload tasks. A failed server fetch keeps the rows already shown."""
+        self._storage_roots = self._fetch_storage_roots()
         if server:
             fetched, error = self._fetch_server_tasks()
             if error is None:
@@ -690,7 +734,7 @@ class TasksPanel(QFrame):
         self.refresh()
 
     def reveal_selected(self):
-        """Show the selected local recording in the file manager."""
+        """Show the selected recording in the file manager."""
         task = self.selected_task()
         path = (task or {}).get('path') or ''
         host = self._host
@@ -733,6 +777,25 @@ class TasksPanel(QFrame):
         except Exception as exc:
             return None, exc
         return self._tasks_from_entries(entries), None
+
+    def _fetch_storage_roots(self):
+        """DVR storage directories, used to turn HTSP's relative paths into files."""
+        host = self._host
+        cached = getattr(self, '_storage_roots', ())
+        if host is None or not hasattr(host, 'get_backend'):
+            return cached
+        try:
+            if hasattr(host, 'current_server') and not host.current_server():
+                return cached
+            configs = host.get_backend().list_dvr_configs()
+        except Exception:
+            return cached
+        roots = []
+        for config in configs or []:
+            storage = str(getattr(config, 'storage', '') or '').strip()
+            if storage and storage not in roots:
+                roots.append(storage)
+        return tuple(roots)
 
     def _tasks_from_entries(self, entries):
         tasks = []
@@ -780,18 +843,21 @@ class TasksPanel(QFrame):
                 'size': size_text,
                 'detail': detail,
                 'start': entry.start or 0,
-                'path': '',
+                'path': _recording_path(entry, getattr(self, '_storage_roots', ())),
             })
         return tasks
 
     def _local_task(self):
         host = self._host
         recorder = getattr(host, 'local_recorder', None) if host is not None else None
-        if recorder is None or not getattr(recorder, 'is_running', False):
+        if recorder is None:
             return None
+        running = bool(getattr(recorder, 'is_running', False))
         # Read the file here. LocalRecorder.status() is what counts stalls,
         # and the recording monitor is the only caller of that.
         path = getattr(recorder, 'file_path', None) or ''
+        if not running and (not path or not os.path.exists(path)):
+            return None
         try:
             size = os.path.getsize(path) if path and os.path.exists(path) else 0
         except OSError:
@@ -801,17 +867,24 @@ class TasksPanel(QFrame):
         title = Path(path).name or 'Local recording'
         started = getattr(recorder, 'started_at', None) or 0
         elapsed = time.time() - started if started else 0
-        detail = f"{path}, {_clock(elapsed)}"
-        if getattr(recorder, 'stall_count', 0) > STALL_LIMIT:
-            detail += ", stalled"
+        if running:
+            detail = f"{path}, {_clock(elapsed)}"
+            if getattr(recorder, 'stall_count', 0) > STALL_LIMIT:
+                detail += ", stalled"
+            bucket = 'recording'
+            status = 'Recording'
+        else:
+            detail = path
+            bucket = 'completed'
+            status = 'Completed'
         return {
             'kind': 'Local',
-            'bucket': 'recording',
+            'bucket': bucket,
             'key': ('local',),
             'entry': None,
             'channel': channel_name,
             'title': title,
-            'status': 'Recording',
+            'status': status,
             'size': _format_size(size),
             'detail': detail,
             'start': int(started),
@@ -826,11 +899,9 @@ class TasksPanel(QFrame):
         return (order, start, task.get('title') or '')
 
     def _can_reveal(self, task):
-        return bool(task and task.get('kind') == 'Local' and task.get('path'))
+        return bool(task and task.get('path'))
 
     def _matches(self, task, query, status_filter):
-        if status_filter == 'All' and task['bucket'] == 'completed':
-            return False
         if status_filter == 'Recording' and task['bucket'] != 'recording':
             return False
         if status_filter == 'Scheduled' and task['bucket'] != 'scheduled':
@@ -868,11 +939,7 @@ class TasksPanel(QFrame):
             self._restore_selection(selected)
         else:
             self.task_table.clearSelection()
-            # Completed rows stay out of All, so an empty All list is still "No tasks".
-            active = [task for task in self._tasks if task['bucket'] != 'completed']
-            if status_filter == 'All' and not query and not active:
-                self._set_empty("No tasks")
-            elif self._tasks:
+            if self._tasks:
                 self._set_empty("No matching tasks")
             else:
                 self._set_empty("No tasks")
@@ -984,8 +1051,7 @@ class TasksPanel(QFrame):
             description = message
         else:
             description = (
-                "Ongoing and scheduled recordings. Choose Completed to see finished recordings. "
-                "Recording rows are listed first."
+                "Ongoing, scheduled, and completed recordings. Recording rows are listed first."
             )
         if description == self._table_description:
             return
