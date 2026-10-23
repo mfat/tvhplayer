@@ -34,7 +34,6 @@ from .guide import (
     parse_channel_tag,
     parse_connection,
     parse_content_type,
-    parse_epg_event,
     parse_events,
     parse_input_status,
     parse_profile,

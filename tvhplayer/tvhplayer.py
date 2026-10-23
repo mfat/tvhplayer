@@ -3,25 +3,24 @@ import os
 import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QToolBar, QComboBox, QSplitter, QFrame,
+    QComboBox, QSplitter, QFrame,
     QListWidget, QDialog, QFormLayout, QLineEdit,
     QDialogButtonBox, QMessageBox, QApplication,
-    QPushButton, QLabel, QSlider, QStatusBar, QGridLayout, QMenuBar, QRadioButton, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
-    QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton, QCheckBox, QGroupBox,
+    QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
+    QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QRect, QEvent, QPoint
-from PyQt6.QtGui import QIcon, QPainter, QColor, QKeySequence, QPalette, QAction, QShortcut
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint
+from PyQt6.QtGui import QIcon, QAction, QShortcut
 import json
-import requests
 # Replace this line:
 #from . import resources_rc
 
 # With this more flexible import approach:
 try:
-    from . import resources_rc  # Try package import first
+    from . import resources_rc  # noqa: F401  # package import; registers Qt icons
 except ImportError:
-    import resources_rc  # Fall back to direct import when running from source
+    import resources_rc  # noqa: F401  # source-tree fallback; registers Qt icons
 try:
     from .core.backend import create_backend
     from .core.config import ConfigStore
@@ -854,7 +853,7 @@ class ServerStatusDialog(QDialog):
         try:
             # 1. Update Server Info Tab
             protocol = self.server.get('protocol', PROTOCOL_HTTP)
-            server_info = f"Server Information:\n\n"
+            server_info = "Server Information:\n\n"
             server_info += f"Name: {self.server.get('name', 'Unknown')}\n"
             server_info += f"URL: {self.server.get('url', 'Unknown')}\n"
             server_info += f"Protocol: {protocol.upper()}\n"

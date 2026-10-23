@@ -291,7 +291,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
 
 
 def test_playback_surface_ignores_transient_stop_and_qt_paints(monkeypatch, tmp_path):
-    from PyQt6.QtCore import QEvent, QPoint, QRect, Qt
+    from PyQt6.QtCore import QPoint, QRect, Qt
     from PyQt6.QtGui import QPaintEvent
 
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
