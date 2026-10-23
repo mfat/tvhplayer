@@ -7,14 +7,51 @@ TVHplayer always uses that HTTP path because VLC cannot demux HTSP muxpkt.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import List, Optional
 
 from .backend import TvhBackend, channel_sort_key
+from .dvr import (
+    GRID_LIMIT,
+    HtspRecordingFile,
+    MOVE_CATEGORIES,
+    PREVREC_ACTIONS,
+    RERECORD_ACTIONS,
+    autorec_htsp_args,
+    autorec_http_conf,
+    check_choice,
+    dvr_update_htsp_args,
+    entry_htsp_id,
+    entry_uuid,
+    file_move_args,
+    parse_autorec_entry,
+    parse_cutpoints,
+    parse_dvr_config,
+    parse_dvr_entry,
+    parse_timerec_entry,
+    response_id,
+    rule_htsp_id,
+    ticket_url,
+    timerec_htsp_args,
+    timerec_http_conf,
+)
 from .errors import TvhError
 from .htsp_connection import HtspConnection
-from .models import Channel, DvrEntry, EpgEvent, ServerInfo
+from .models import (
+    AutorecEntry,
+    AutorecSpec,
+    Channel,
+    DvrConfig,
+    DvrCutpoint,
+    DvrEntry,
+    DvrEntryUpdate,
+    EpgEvent,
+    ServerInfo,
+    TimerecEntry,
+    TimerecSpec,
+)
 from .urls import http_base_url, htsp_host_port, insert_basic_auth
 
 log = logging.getLogger(__name__)
@@ -253,12 +290,170 @@ class HtspBackend(TvhBackend):
         return list(self._dvr.values())
 
     def stop_dvr_entry(self, entry: DvrEntry) -> None:
+        self._rpc_ok('stopDvrEntry', {'id': entry_htsp_id(entry)}, 'stopDvrEntry')
+
+    def cancel_dvr_entry(self, entry: DvrEntry) -> None:
+        self._rpc_ok('cancelDvrEntry', {'id': entry_htsp_id(entry)}, 'cancelDvrEntry')
+
+    def remove_dvr_entry(self, entry: DvrEntry) -> None:
+        self._proxy('dvr/entry/remove', {'uuid': entry_uuid(entry)})
+
+    def delete_dvr_entry(self, entry: DvrEntry) -> None:
+        self._rpc_ok('deleteDvrEntry', {'id': entry_htsp_id(entry)}, 'deleteDvrEntry')
+
+    def set_dvr_rerecord(self, entry: DvrEntry, action: str) -> None:
+        action = check_choice(action, RERECORD_ACTIONS, 'Rerecord action')
+        self._proxy(f'dvr/entry/rerecord/{action}', {'uuid': entry_uuid(entry)})
+
+    def set_dvr_prevrec(self, entry: DvrEntry, action: str) -> None:
+        action = check_choice(action, PREVREC_ACTIONS, 'Previously-recorded action')
+        self._proxy(f'dvr/entry/prevrec/{action}', {'uuid': entry_uuid(entry)})
+
+    def update_dvr_entry(self, entry: DvrEntry, update: DvrEntryUpdate) -> None:
+        self._rpc_ok('updateDvrEntry', dvr_update_htsp_args(entry, update), 'updateDvrEntry')
+
+    def move_dvr_entry(self, entry: DvrEntry, category: str) -> None:
+        category = check_choice(category, MOVE_CATEGORIES, 'DVR category')
+        self._proxy(f'dvr/entry/move/{category}', {'uuid': entry_uuid(entry)})
+
+    def recording_url(self, entry: DvrEntry) -> str:
+        reply = self._rpc('getTicket', {'dvrId': entry_htsp_id(entry)})
+        url = ticket_url(
+            http_base_url(self.server.url),
+            str(reply.get('path') or ''),
+            str(reply.get('ticket') or ''),
+        )
+        return insert_basic_auth(url, self.server.username, self.server.password)
+
+    def open_recording(self, entry: DvrEntry) -> HtspRecordingFile:
+        htsp_id = entry_htsp_id(entry)
+        reply = self._rpc('fileOpen', {'file': f'/dvrfile/{htsp_id}'})
+        handle = reply.get('id')
+        if handle is None:
+            raise TvhError('fileOpen returned no handle')
+        size = reply.get('size')
+        mtime = reply.get('mtime')
+        return HtspRecordingFile(
+            lambda method, args=None: self._rpc(method, args),
+            handle,
+            size=int(size) if size is not None else None,
+            mtime=int(mtime) if mtime is not None else None,
+        )
+
+    def get_dvr_cutpoints(self, entry: DvrEntry) -> List[DvrCutpoint]:
+        reply = self._rpc('getDvrCutpoints', {'id': entry_htsp_id(entry)})
+        return parse_cutpoints(reply.get('cutpoints'))
+
+    def notify_dvr_file_moved(self, src: str, dst: str) -> None:
+        self._proxy('dvr/entry/filemoved', file_move_args(src, dst))
+
+    def list_dvr_configs(self) -> List[DvrConfig]:
+        return [parse_dvr_config(raw) for raw in self._grid('dvr/config/grid')]
+
+    def list_removed_dvr_entries(self) -> List[DvrEntry]:
+        return [parse_dvr_entry(raw) for raw in self._grid('dvr/entry/grid_removed')]
+
+    def create_dvr_entry_by_event(self, event_id: int, config_uuid: str = '') -> str:
+        args = {'eventId': int(event_id), 'enabled': 1}
+        if config_uuid:
+            args['configName'] = config_uuid
+        reply = self._rpc_ok('addDvrEntry', args, 'addDvrEntry')
+        if reply.get('id') is None:
+            return ''
+        return str(reply['id'])
+
+    def list_autorec_entries(self) -> List[AutorecEntry]:
+        return [parse_autorec_entry(raw) for raw in self._grid('dvr/autorec/grid')]
+
+    def create_autorec_entry(self, spec: AutorecSpec) -> str:
+        reply = self._rpc_ok('addAutorecEntry', autorec_htsp_args(spec, creating=True), 'addAutorecEntry')
+        if reply.get('id') is None:
+            return ''
+        return str(reply['id'])
+
+    def update_autorec_entry(self, entry: AutorecEntry, spec: AutorecSpec) -> None:
+        htsp_id = rule_htsp_id(entry)
+        if htsp_id:
+            self._rpc_ok(
+                'updateAutorecEntry',
+                autorec_htsp_args(spec, htsp_id=htsp_id),
+                'updateAutorecEntry',
+                require_success=False,
+            )
+            return
+        self._save_http_node(entry_uuid(entry), autorec_http_conf(spec))
+
+    def delete_autorec_entry(self, entry: AutorecEntry) -> None:
+        htsp_id = rule_htsp_id(entry)
+        if htsp_id:
+            self._rpc_ok('deleteAutorecEntry', {'id': htsp_id}, 'deleteAutorecEntry')
+            return
+        self._proxy('idnode/delete', {'uuid': entry_uuid(entry)})
+
+    def create_autorec_by_series(self, event_id: int, config_uuid: str = '') -> str:
+        data = {'event_id': int(event_id)}
+        if config_uuid:
+            data['config_uuid'] = config_uuid
+        return response_id(self._proxy('dvr/autorec/create_by_series', data))
+
+    def list_timerec_entries(self) -> List[TimerecEntry]:
+        return [parse_timerec_entry(raw) for raw in self._grid('dvr/timerec/grid')]
+
+    def create_timerec_entry(self, spec: TimerecSpec) -> str:
+        reply = self._rpc_ok('addTimerecEntry', timerec_htsp_args(spec, creating=True), 'addTimerecEntry')
+        if reply.get('id') is None:
+            return ''
+        return str(reply['id'])
+
+    def update_timerec_entry(self, entry: TimerecEntry, spec: TimerecSpec) -> None:
+        htsp_id = rule_htsp_id(entry)
+        if htsp_id:
+            self._rpc_ok(
+                'updateTimerecEntry',
+                timerec_htsp_args(spec, htsp_id=htsp_id),
+                'updateTimerecEntry',
+                require_success=False,
+            )
+            return
+        self._save_http_node(entry_uuid(entry), timerec_http_conf(spec))
+
+    def delete_timerec_entry(self, entry: TimerecEntry) -> None:
+        htsp_id = rule_htsp_id(entry)
+        if htsp_id:
+            self._rpc_ok('deleteTimerecEntry', {'id': htsp_id}, 'deleteTimerecEntry')
+            return
+        self._proxy('idnode/delete', {'uuid': entry_uuid(entry)})
+
+    def _rpc(self, method, args=None):
         self._ensure()
-        if entry.htsp_id is None:
-            raise TvhError('DVR entry has no HTSP id')
-        reply = self._conn.rpc('stopDvrEntry', {'id': int(entry.htsp_id)}, on_async=self._on_async)
-        if not reply.get('success'):
-            raise TvhError(reply.get('error') or 'stopDvrEntry failed')
+        return self._conn.rpc(method, args or {}, on_async=self._on_async)
+
+    def _rpc_ok(self, method, args, label, require_success=True):
+        reply = self._rpc(method, args)
+        # updateAutorecEntry and updateTimerecEntry document no success field.
+        if require_success:
+            if not reply.get('success'):
+                raise TvhError(reply.get('error') or f'{label} failed')
+        elif 'success' in reply and not reply.get('success'):
+            raise TvhError(reply.get('error') or f'{label} failed')
+        return reply
+
+    def _proxy(self, path, args=None):
+        response = self._api(path, args or {})
+        if isinstance(response, dict) and response.get('error'):
+            raise TvhError(str(response['error']))
+        return response
+
+    def _grid(self, path):
+        data = self._proxy(path, {'limit': GRID_LIMIT})
+        if not isinstance(data, dict):
+            return []
+        return data.get('entries') or []
+
+    def _save_http_node(self, uuid, fields):
+        node = {'uuid': uuid}
+        node.update(fields)
+        self._proxy('idnode/save', {'node': json.dumps(node)})
 
     def get_server_info(self) -> ServerInfo:
         self._ensure()

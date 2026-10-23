@@ -9,27 +9,44 @@ from typing import List, Optional
 import requests
 
 from .backend import TvhBackend, channel_sort_key
+from .dvr import (
+    GRID_LIMIT,
+    HttpRecordingFile,
+    autorec_http_conf,
+    check_choice,
+    dvr_update_http_node,
+    entry_uuid,
+    file_move_args,
+    localized_text,
+    parse_autorec_entry,
+    parse_dvr_config,
+    parse_dvr_entry,
+    parse_timerec_entry,
+    response_id,
+    timerec_http_conf,
+    MOVE_CATEGORIES,
+    PREVREC_ACTIONS,
+    RERECORD_ACTIONS,
+)
 from .errors import TvhAuthError, TvhConnectionError, TvhError
-from .models import Channel, DvrEntry, EpgEvent, ServerInfo
+from .models import (
+    AutorecEntry,
+    AutorecSpec,
+    Channel,
+    DvrConfig,
+    DvrCutpoint,
+    DvrEntry,
+    DvrEntryUpdate,
+    EpgEvent,
+    ServerInfo,
+    TimerecEntry,
+    TimerecSpec,
+)
 from .urls import http_auth, http_base_url, insert_basic_auth
 
 log = logging.getLogger(__name__)
 
-GRID_LIMIT = 10000
 DEFAULT_TIMEOUT = 10
-
-
-def _localized(value, default=''):
-    if isinstance(value, dict):
-        if 'eng' in value and value['eng']:
-            return str(value['eng'])
-        for item in value.values():
-            if item:
-                return str(item)
-        return default
-    if value is None:
-        return default
-    return str(value)
 
 
 class HttpBackend(TvhBackend):
@@ -87,8 +104,8 @@ class HttpBackend(TvhBackend):
                 EpgEvent(
                     start=int(entry.get('start') or 0),
                     stop=int(entry.get('stop') or 0),
-                    title=_localized(entry.get('title'), 'No title'),
-                    description=_localized(entry.get('description') or entry.get('summary')),
+                    title=localized_text(entry.get('title'), 'No title'),
+                    description=localized_text(entry.get('description') or entry.get('summary')),
                     channel_uuid=entry.get('channelUuid') or channel.uuid,
                     event_id=entry.get('eventId'),
                     raw=entry,
@@ -120,34 +137,131 @@ class HttpBackend(TvhBackend):
         self._request('POST', 'api/dvr/entry/create', data={'conf': json.dumps(conf)})
 
     def list_dvr_entries(self) -> List[DvrEntry]:
-        entries = []
-        for raw in self._grid('api/dvr/entry/grid'):
-            start = int(raw.get('start') or 0)
-            duration = int(raw.get('duration') or 0)
-            if not duration:
-                stop = int(raw.get('stop') or 0)
-                duration = max(0, stop - start)
-            entries.append(
-                DvrEntry(
-                    uuid=str(raw.get('uuid') or ''),
-                    title=_localized(raw.get('disp_title') or raw.get('title'), 'Unknown'),
-                    channel_name=raw.get('channelname') or 'Unknown',
-                    start=start,
-                    duration=duration,
-                    status=raw.get('status') or '',
-                    sched_status=raw.get('sched_status') or '',
-                    errors=int(raw.get('errors') or 0),
-                    errorcode=int(raw.get('errorcode') or 0),
-                    error=raw.get('error') or '',
-                    raw=raw,
-                )
-            )
-        return entries
+        return [parse_dvr_entry(raw) for raw in self._grid('api/dvr/entry/grid')]
 
     def stop_dvr_entry(self, entry: DvrEntry) -> None:
-        if not entry.uuid:
-            raise TvhError('DVR entry has no uuid')
-        self._request('POST', 'api/dvr/entry/stop', data={'uuid': entry.uuid})
+        self._post_uuid('dvr/entry/stop', entry)
+
+    def cancel_dvr_entry(self, entry: DvrEntry) -> None:
+        self._post_uuid('dvr/entry/cancel', entry)
+
+    def remove_dvr_entry(self, entry: DvrEntry) -> None:
+        self._post_uuid('dvr/entry/remove', entry)
+
+    def delete_dvr_entry(self, entry: DvrEntry) -> None:
+        self._post_form('idnode/delete', {'uuid': entry_uuid(entry)})
+
+    def set_dvr_rerecord(self, entry: DvrEntry, action: str) -> None:
+        action = check_choice(action, RERECORD_ACTIONS, 'Rerecord action')
+        self._post_uuid(f'dvr/entry/rerecord/{action}', entry)
+
+    def set_dvr_prevrec(self, entry: DvrEntry, action: str) -> None:
+        action = check_choice(action, PREVREC_ACTIONS, 'Previously-recorded action')
+        self._post_uuid(f'dvr/entry/prevrec/{action}', entry)
+
+    def update_dvr_entry(self, entry: DvrEntry, update: DvrEntryUpdate) -> None:
+        node = dvr_update_http_node(entry, update)
+        self._post_form('idnode/save', {'node': json.dumps(node)})
+
+    def move_dvr_entry(self, entry: DvrEntry, category: str) -> None:
+        category = check_choice(category, MOVE_CATEGORIES, 'DVR category')
+        self._post_uuid(f'dvr/entry/move/{category}', entry)
+
+    def recording_url(self, entry: DvrEntry) -> str:
+        return insert_basic_auth(
+            self._recording_http_url(entry),
+            self.server.username,
+            self.server.password,
+        )
+
+    def open_recording(self, entry: DvrEntry) -> HttpRecordingFile:
+        url = self._recording_http_url(entry)
+        size = None
+        try:
+            response = self._session.head(
+                url,
+                auth=self._auth,
+                timeout=self._timeout,
+                allow_redirects=True,
+            )
+        except requests.RequestException:
+            response = None
+        if response is not None and response.status_code < 400:
+            length = response.headers.get('Content-Length')
+            if length and str(length).isdigit():
+                size = int(length)
+        return HttpRecordingFile(self._session, url, self._auth, self._timeout, size=size)
+
+    def get_dvr_cutpoints(self, entry: DvrEntry) -> List[DvrCutpoint]:
+        raise TvhError('DVR cutpoints are available over HTSP only (getDvrCutpoints).')
+
+    def notify_dvr_file_moved(self, src: str, dst: str) -> None:
+        self._post_form('dvr/entry/filemoved', file_move_args(src, dst))
+
+    def list_dvr_configs(self) -> List[DvrConfig]:
+        return [parse_dvr_config(raw) for raw in self._grid('api/dvr/config/grid')]
+
+    def list_removed_dvr_entries(self) -> List[DvrEntry]:
+        return [parse_dvr_entry(raw) for raw in self._grid('api/dvr/entry/grid_removed')]
+
+    def create_dvr_entry_by_event(self, event_id: int, config_uuid: str = '') -> str:
+        data = {'event_id': int(event_id)}
+        if config_uuid:
+            data['config_uuid'] = config_uuid
+        return response_id(self._post_form('dvr/entry/create_by_event', data))
+
+    def list_autorec_entries(self) -> List[AutorecEntry]:
+        return [parse_autorec_entry(raw) for raw in self._grid('api/dvr/autorec/grid')]
+
+    def create_autorec_entry(self, spec: AutorecSpec) -> str:
+        conf = autorec_http_conf(spec, creating=True)
+        return response_id(self._post_form('dvr/autorec/create', {'conf': json.dumps(conf)}))
+
+    def update_autorec_entry(self, entry: AutorecEntry, spec: AutorecSpec) -> None:
+        node = {'uuid': entry_uuid(entry)}
+        node.update(autorec_http_conf(spec, creating=False))
+        self._post_form('idnode/save', {'node': json.dumps(node)})
+
+    def delete_autorec_entry(self, entry: AutorecEntry) -> None:
+        self._post_form('idnode/delete', {'uuid': entry_uuid(entry)})
+
+    def create_autorec_by_series(self, event_id: int, config_uuid: str = '') -> str:
+        data = {'event_id': int(event_id)}
+        if config_uuid:
+            data['config_uuid'] = config_uuid
+        return response_id(self._post_form('dvr/autorec/create_by_series', data))
+
+    def list_timerec_entries(self) -> List[TimerecEntry]:
+        return [parse_timerec_entry(raw) for raw in self._grid('api/dvr/timerec/grid')]
+
+    def create_timerec_entry(self, spec: TimerecSpec) -> str:
+        conf = timerec_http_conf(spec, creating=True)
+        return response_id(self._post_form('dvr/timerec/create', {'conf': json.dumps(conf)}))
+
+    def update_timerec_entry(self, entry: TimerecEntry, spec: TimerecSpec) -> None:
+        node = {'uuid': entry_uuid(entry)}
+        node.update(timerec_http_conf(spec, creating=False))
+        self._post_form('idnode/save', {'node': json.dumps(node)})
+
+    def delete_timerec_entry(self, entry: TimerecEntry) -> None:
+        self._post_form('idnode/delete', {'uuid': entry_uuid(entry)})
+
+    def _post_uuid(self, path, entry) -> dict:
+        return self._post_form(path, {'uuid': entry_uuid(entry)})
+
+    def _post_form(self, path, data) -> dict:
+        return self._request('POST', f'api/{path.lstrip("/")}', data=data) or {}
+
+    def _recording_http_url(self, entry: DvrEntry) -> str:
+        entry_uuid(entry)
+        relative = ''
+        if isinstance(entry.raw, dict):
+            relative = str(entry.raw.get('url') or '')
+        if relative.startswith(('http://', 'https://')):
+            return relative
+        if not relative:
+            relative = f'dvrfile/{entry.uuid}'
+        return f'{self._base}/{relative.lstrip("/")}'
 
     def get_server_info(self) -> ServerInfo:
         data = self._request('GET', 'api/serverinfo')

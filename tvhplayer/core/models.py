@@ -191,3 +191,166 @@ class ServerInfo:
     api_version: str = ''
     capabilities: List[str] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DvrEntryUpdate:
+    """Fields to change on one DVR entry. ``None`` leaves the stored value alone.
+
+    ``start`` and ``stop`` are Unix timestamps in seconds.
+
+    ``start_extra`` and ``stop_extra`` use the protocol's own unit. HTSP
+    documents ``startExtra`` and ``stopExtra`` as minutes. HTTP writes the
+    idnode fields ``start_extra`` and ``stop_extra`` unchanged.
+
+    ``priority`` is sent as HTSP ``priority`` and HTTP ``pri``. HTSP defines
+    0 important, 1 high, 2 normal, 3 low, 4 unimportant, and 5 not set.
+
+    ``config_name`` is a DVR configuration name or UUID. ``channel`` is a
+    ``Channel``: HTTP uses its UUID and HTSP uses its numeric channel id.
+    """
+
+    start: Optional[int] = None
+    stop: Optional[int] = None
+    title: Optional[str] = None
+    subtitle: Optional[str] = None
+    description: Optional[str] = None
+    comment: Optional[str] = None
+    channel: Optional[Channel] = None
+    start_extra: Optional[int] = None
+    stop_extra: Optional[int] = None
+    retention: Optional[int] = None
+    priority: Optional[int] = None
+    enabled: Optional[bool] = None
+    config_name: Optional[str] = None
+
+
+@dataclass
+class DvrConfig:
+    """One server DVR profile (HTTP ``dvr/config/grid``)."""
+
+    uuid: str
+    name: str = ''
+    comment: str = ''
+    storage: str = ''
+    profile: str = ''
+    enabled: bool = True
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DvrCutpoint:
+    """One HTSP cutpoint. ``type`` is 0 cut, 1 mute, 2 scene, 3 commercial break."""
+
+    start_ms: int
+    end_ms: int
+    type: int
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def kind(self) -> str:
+        return {
+            0: 'cut',
+            1: 'mute',
+            2: 'scene',
+            3: 'commercial',
+        }.get(self.type, 'unknown')
+
+
+@dataclass
+class AutorecSpec:
+    """Series-timer fields. ``None`` means do not send that field.
+
+    ``days_of_week`` is the HTSP bitmask: Monday is ``0x01``, Sunday is
+    ``0x40``. ``0`` means not set. HTTP receives the same days as a list of
+    1–7 (Monday–Sunday).
+
+    ``start`` and ``start_window`` are minutes from midnight, matching HTSP.
+    ``start_extra`` and ``stop_extra`` are minutes on HTSP (``startExtra`` /
+    ``stopExtra``). HTTP receives those integers as ``start_extra`` and
+    ``stop_extra``.
+
+    ``priority`` uses the HTSP scale documented on ``DvrEntryUpdate``. HTTP
+    sends it as ``pri``. ``dup_detect`` is HTSP ``dupDetect`` only.
+    ``broadcast_type`` is HTSP ``broadcastType`` and HTTP ``btype``.
+    ``directory`` is sent only on HTSP.
+    """
+
+    title: Optional[str] = None
+    enabled: Optional[bool] = None
+    name: Optional[str] = None
+    channel: Optional[Channel] = None
+    fulltext: Optional[bool] = None
+    directory: Optional[str] = None
+    config_name: Optional[str] = None
+    min_duration: Optional[int] = None
+    max_duration: Optional[int] = None
+    days_of_week: Optional[int] = None
+    priority: Optional[int] = None
+    start: Optional[int] = None
+    start_window: Optional[int] = None
+    start_extra: Optional[int] = None
+    stop_extra: Optional[int] = None
+    comment: Optional[str] = None
+    dup_detect: Optional[int] = None
+    broadcast_type: Optional[int] = None
+
+
+@dataclass
+class AutorecEntry:
+    """A series timer returned by ``dvr/autorec/grid``."""
+
+    uuid: str
+    title: str
+    name: str = ''
+    enabled: bool = True
+    channel_uuid: str = ''
+    comment: str = ''
+    days_of_week: int = 0
+    priority: Optional[int] = None
+    min_duration: int = 0
+    max_duration: int = 0
+    htsp_id: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class TimerecSpec:
+    """Time-based timer fields. ``None`` means do not send that field.
+
+    ``start`` and ``stop`` are minutes from midnight (HTSP). HTTP receives
+    ``HH:MM``. ``days_of_week`` and ``priority`` match ``AutorecSpec``.
+    ``directory`` is sent only on HTSP.
+    """
+
+    title: Optional[str] = None
+    name: Optional[str] = None
+    enabled: Optional[bool] = None
+    channel: Optional[Channel] = None
+    directory: Optional[str] = None
+    config_name: Optional[str] = None
+    days_of_week: Optional[int] = None
+    priority: Optional[int] = None
+    start: Optional[int] = None
+    stop: Optional[int] = None
+    retention: Optional[int] = None
+    comment: Optional[str] = None
+
+
+@dataclass
+class TimerecEntry:
+    """A time-based timer returned by ``dvr/timerec/grid``."""
+
+    uuid: str
+    title: str
+    name: str = ''
+    enabled: bool = True
+    channel_uuid: str = ''
+    start_minute: Optional[int] = None
+    stop_minute: Optional[int] = None
+    retention: int = 0
+    priority: Optional[int] = None
+    days_of_week: int = 0
+    comment: str = ''
+    htsp_id: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict)
