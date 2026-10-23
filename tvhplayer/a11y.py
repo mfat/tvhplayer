@@ -144,11 +144,13 @@ def quality_colors(percent):
 
 
 def row_emphasis(kind):
-    """Row colors for recording state. None under high contrast, where the status text is enough."""
+    """Row colors for status. None under high contrast, where the status text is enough."""
     if prefers_high_contrast() or not kind:
         return None
     if kind == "recording":
         return QColor("#166534"), QColor("#ffffff")
+    if kind == "playing":
+        return QColor("#1e3a8a"), QColor("#ffffff")
     if kind == "failed":
         return QColor("#7f1d1d"), QColor("#ffffff")
     return None

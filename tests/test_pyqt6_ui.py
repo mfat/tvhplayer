@@ -387,6 +387,95 @@ def test_spinner_shows_until_playback_starts(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def _channel_row(table, name):
+    for row in range(table.rowCount()):
+        item = table.item(row, 1)
+        if item is not None and item.text() == name:
+            return row
+    return -1
+
+
+def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
+    from PyQt6.QtCore import Qt
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        news = ui.Channel(uuid='news', name='News', number=1)
+        sport = ui.Channel(uuid='sport', name='Sport', number=2)
+
+        class Backend:
+            def get_channels(self):
+                return [news, sport]
+
+            def stream_url(self, channel):
+                return f'http://tv.example/stream/{channel.uuid}'
+
+        window.get_backend = lambda: Backend()
+        window.servers = [{
+            'name': 'local',
+            'url': 'http://127.0.0.1:9981',
+            'protocol': 'http',
+        }]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('local')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+
+        monkeypatch.undo()
+        window.fetch_channels()
+        app.processEvents()
+
+        news_row = _channel_row(window.channel_list, 'News')
+        sport_row = _channel_row(window.channel_list, 'Sport')
+        assert news_row >= 0 and sport_row >= 0
+        assert window.channel_list.item(news_row, 2).text() == ""
+        assert window.channel_list.item(sport_row, 2).text() == ""
+
+        window.play_channel_by_data(sport)
+        app.processEvents()
+
+        assert window.channel_list.currentRow() == sport_row
+        assert window.channel_list.item(sport_row, 2).text() == "Playing"
+        assert window.channel_list.item(sport_row, 2).data(
+            Qt.ItemDataRole.AccessibleTextRole
+        ) == "Playing"
+        assert "Playing." in window.channel_list.item(sport_row, 1).toolTip()
+        assert window.channel_list.item(news_row, 2).text() == ""
+        colors = ui.row_emphasis('playing')
+        if colors is not None:
+            assert window.channel_list.item(sport_row, 1).background().color().name() == colors[0].name()
+            assert window.channel_list.item(sport_row, 0).foreground().color().name() == colors[1].name()
+
+        window.channel_list.setCurrentCell(news_row, 1)
+        app.processEvents()
+        assert window.channel_list.item(sport_row, 2).text() == "Playing"
+        assert window.channel_list.item(news_row, 2).text() == ""
+
+        window.fetch_channels()
+        app.processEvents()
+        sport_row = _channel_row(window.channel_list, 'Sport')
+        news_row = _channel_row(window.channel_list, 'News')
+        assert window.channel_list.item(sport_row, 2).text() == "Playing"
+        assert window.channel_list.currentRow() == sport_row
+
+        window.stop_playback()
+        app.processEvents()
+        assert window.channel_list.item(sport_row, 2).text() == ""
+        assert window.channel_list.item(sport_row, 1).background().style() == Qt.BrushStyle.NoBrush
+        assert "Playing." not in window.channel_list.item(sport_row, 1).toolTip()
+
+        window.play_channel_by_data(news)
+        app.processEvents()
+        news_row = _channel_row(window.channel_list, 'News')
+        assert window.channel_list.item(news_row, 2).text() == "Playing"
+        fake_player._events.handlers['error'](None)
+        app.processEvents()
+        assert window.channel_list.item(news_row, 2).text() == ""
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     monkeypatch.setitem(
@@ -574,6 +663,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.video_frame.accessibleName() == "Video player"
         assert window.channel_list.accessibleName() == "Channels"
         assert window.channel_list.horizontalHeaderItem(0).text() == "Number"
+        assert window.channel_list.horizontalHeaderItem(2).text() == "Status"
         assert window.splitter.accessibleName() == "Channels, player, and tasks"
         assert window.splitter.handle(2).accessibleName() == "Resize player and tasks"
         assert window.tasks_pane.accessibleName() == "Tasks"

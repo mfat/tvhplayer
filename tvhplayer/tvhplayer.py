@@ -1608,6 +1608,7 @@ class TVHeadendClient(QMainWindow):
         self._pre_fullscreen_state = None
         self._playback_active = False
         self._awaiting_playback = False
+        self._playback_channel = None
         self._video_menu = None
 
         
@@ -1813,16 +1814,17 @@ class TVHeadendClient(QMainWindow):
 
         # Channel list
         self.channel_list = QTableWidget()
-        self.channel_list.setColumnCount(2)
-        self.channel_list.setHorizontalHeaderLabels(['Number', 'Channel Name'])
+        self.channel_list.setColumnCount(3)
+        self.channel_list.setHorizontalHeaderLabels(['Number', 'Channel Name', 'Status'])
         describe(
             self.channel_list,
             "Channels",
-            "Channel numbers and names. Type to jump to a channel. "
+            "Channel numbers, names, and playing status. Type to jump to a channel. "
             "Press Enter to play. Press Shift+F10 for more actions.",
         )
         self.channel_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.channel_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.channel_list.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.channel_list.verticalHeader().setVisible(False)
         self.channel_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.channel_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -2295,7 +2297,84 @@ class TVHeadendClient(QMainWindow):
             if channel:
                 return channel
         return getattr(self, '_playback_channel', None)
-        
+
+    def _channels_match(self, left, right):
+        if left is None or right is None:
+            return False
+        if left.uuid and right.uuid and str(left.uuid) == str(right.uuid):
+            return True
+        return left.htsp_id is not None and left.htsp_id == right.htsp_id
+
+    def _playing_channel(self):
+        """Channel that should show as playing, or None when playback is idle."""
+        channel = getattr(self, '_playback_channel', None)
+        if channel is None:
+            return None
+        if getattr(self, '_playback_active', False) or getattr(self, '_awaiting_playback', False):
+            return channel
+        return None
+
+    def _set_channel_row_playing(self, row, channel, is_playing, colors):
+        table = self.channel_list
+        status_item = table.item(row, 2)
+        if status_item is None:
+            status_item = QTableWidgetItem()
+            table.setItem(row, 2, status_item)
+        status = "Playing" if is_playing else ""
+        if status_item.text() != status:
+            status_item.setText(status)
+        if is_playing and channel is not None:
+            set_item_access(status_item, "Playing", f"{channel.name} is playing")
+        else:
+            status_item.setData(Qt.ItemDataRole.AccessibleTextRole, None)
+            status_item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, None)
+            status_item.setToolTip("")
+        for col in range(table.columnCount()):
+            item = table.item(row, col)
+            if item is None:
+                continue
+            if is_playing and colors is not None:
+                item.setBackground(colors[0])
+                item.setForeground(colors[1])
+            else:
+                item.setData(Qt.ItemDataRole.BackgroundRole, None)
+                item.setData(Qt.ItemDataRole.ForegroundRole, None)
+        name_item = table.item(row, 1)
+        if name_item is None or channel is None:
+            return
+        description = f"Channel {channel.number}, {channel.name}."
+        if is_playing:
+            description += " Playing."
+        description += " Press Enter to play."
+        set_item_access(name_item, channel.name, description)
+
+    def _mark_playing_channel(self, scroll=False):
+        """Highlight the channel that is on, and write Playing in its status cell.
+
+        Selection can move to another row. The playing row keeps its own color
+        and status so the list still shows what is on.
+        """
+        table = getattr(self, 'channel_list', None)
+        if table is None:
+            return
+        playing = self._playing_channel()
+        colors = row_emphasis('playing' if playing is not None else None)
+        sorting = table.isSortingEnabled()
+        table.setSortingEnabled(False)
+        playing_item = None
+        try:
+            for row in range(table.rowCount()):
+                channel = self.channel_from_row(row)
+                is_playing = playing is not None and self._channels_match(channel, playing)
+                self._set_channel_row_playing(row, channel, is_playing, colors)
+                if is_playing:
+                    playing_item = table.item(row, 1)
+        finally:
+            table.setSortingEnabled(sorting)
+        if scroll and playing_item is not None:
+            table.scrollToItem(playing_item)
+            table.setCurrentItem(playing_item)
+
     def fetch_channels(self):
         """Fetch channel list from current TVHeadend server"""
         server = None
@@ -2326,7 +2405,9 @@ class TVHeadendClient(QMainWindow):
                     f"Channel {channel.number}, {channel.name}. Press Enter to play.",
                 )
                 self.channel_list.setItem(row, 1, name_item)
+                self.channel_list.setItem(row, 2, QTableWidgetItem(""))
             self.channel_list.setSortingEnabled(True)
+            self._mark_playing_channel(scroll=True)
             self.statusbar.showMessage("Channels loaded successfully")
         except Exception as e:
             print(f"Debug: Error in fetch_channels: {str(e)}")
@@ -2393,6 +2474,7 @@ class TVHeadendClient(QMainWindow):
         self._awaiting_playback = False
         self._playback_active = False
         self._playback_channel = None
+        self._mark_playing_channel()
         self._set_playback_spinner(False)
         self.player.stop()
         self._protect_video_surface(False)
@@ -2455,6 +2537,7 @@ class TVHeadendClient(QMainWindow):
         self._awaiting_playback = False
         self._set_playback_spinner(False)
         self._protect_video_surface(True)
+        self._mark_playing_channel()
         channel = getattr(self, '_playback_channel', None)
         if channel is not None:
             self.statusbar.showMessage(f"Playing: {channel.name}")
@@ -2463,6 +2546,7 @@ class TVHeadendClient(QMainWindow):
         self._awaiting_playback = False
         self._playback_active = False
         self._playback_channel = None
+        self._mark_playing_channel()
         self._set_playback_spinner(False)
         self._protect_video_surface(False)
         self.statusbar.showMessage("Playback failed")
@@ -3366,6 +3450,7 @@ class TVHeadendClient(QMainWindow):
             stream_url = self.get_backend().stream_url(channel)
             print(f"Debug: Stream URL: {stream_url}")
             self._show_playback_wait()
+            self._mark_playing_channel(scroll=True)
             self.player.play(stream_url)
             self.statusbar.showMessage(f"Starting: {channel.name}")
         except Exception as e:
@@ -3375,6 +3460,8 @@ class TVHeadendClient(QMainWindow):
                 self._playback_active = False
                 self._set_playback_spinner(False)
                 self._protect_video_surface(False)
+            self._playback_channel = None
+            self._mark_playing_channel()
             self.statusbar.showMessage(f"Playback error: {str(e)}")
 
     def show_server_status(self):
