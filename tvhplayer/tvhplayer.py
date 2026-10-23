@@ -36,6 +36,7 @@ try:
         recording_titles,
     )
     from .core.config import ConfigStore
+    from .core.logs import SERVER_LOG, configure_logging, log_dir
     from .core.dvr import instant_recording_title
     from .core.errors import TvhError
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
@@ -61,6 +62,7 @@ except ImportError:
         recording_titles,
     )
     from core.config import ConfigStore
+    from core.logs import SERVER_LOG, configure_logging, log_dir
     from core.dvr import instant_recording_title
     from core.errors import TvhError
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
@@ -111,106 +113,6 @@ import platform
 
 
 
-
-class Logger:
-    def __init__(self, name="TVHplayer"):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(logging.DEBUG)
-        
-        # Create logs directory
-        log_dir = Path.home() / '.tvhplayer' / 'logs'
-        log_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Create timestamped log file
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_file = log_dir / f'tvhplayer_{timestamp}.log'
-        
-        # File handler with detailed formatting
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(logging.DEBUG)
-        file_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s - %(message)s'
-        )
-        file_handler.setFormatter(file_formatter)
-        
-        # Console handler with simpler formatting
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(logging.INFO)
-        console_formatter = logging.Formatter('%(levelname)s: %(message)s')
-        console_handler.setFormatter(console_formatter)
-        
-        # Add handlers
-        self.logger.addHandler(file_handler)
-        self.logger.addHandler(console_handler)
-        
-        # Store log file path
-        self.log_file = log_file
-        
-        # Log system info at startup
-        self.log_system_info()
-    
-    def log_system_info(self):
-        """Log detailed system information"""
-        import platform
-        import sys
-        try:
-            import psutil
-        except ImportError:
-            psutil = None
-        
-        self.logger.info("=== System Information ===")
-        self.logger.info(f"OS: {platform.platform()}")
-        self.logger.info(f"Python: {sys.version}")
-        self.logger.info(f"CPU: {platform.processor()}")
-        
-        if psutil:
-            self.logger.info(f"Memory: {psutil.virtual_memory().total / (1024**3):.2f} GB")
-            self.logger.info(f"Disk Space: {psutil.disk_usage('/').free / (1024**3):.2f} GB free")
-        
-        # Log environment variables
-        self.logger.info("=== Environment Variables ===")
-        for key, value in os.environ.items():
-            if any(sensitive in key.lower() for sensitive in ['password', 'secret', 'key', 'token']):
-                self.logger.info(f"{key}=<REDACTED>")
-            else:
-                self.logger.info(f"{key}={value}")
-        
-        self.logger.info("=== Dependencies ===")
-        try:
-            import PyQt6
-            self.logger.info(f"PyQt6 version: {PyQt6.QtCore.QT_VERSION_STR}")
-        except ImportError:
-            self.logger.error("PyQt6 not found")
-        
-        try:
-            import vlc
-            self.logger.info(f"python-vlc version: {vlc.__version__}")
-        except ImportError:
-            self.logger.error("python-vlc not found")
-        
-        try:
-            import requests
-            self.logger.info(f"requests version: {requests.__version__}")
-        except ImportError:
-            self.logger.error("requests not found")
-    
-    def debug(self, msg):
-        self.logger.debug(msg)
-    
-    def info(self, msg):
-        self.logger.info(msg)
-    
-    def warning(self, msg):
-        self.logger.warning(msg)
-    
-    def error(self, msg):
-        self.logger.error(msg)
-    
-    def critical(self, msg):
-        self.logger.critical(msg)
-    
-    def exception(self, msg):
-        self.logger.exception(msg)
 
 def fit_table_columns(table, stretch_columns):
     """Size short columns to their text and give the leftover window width to stretch_columns."""
@@ -1993,6 +1895,10 @@ class TVHeadendClient(QMainWindow):
         shortcuts_action.triggered.connect(self.show_keyboard_shortcuts)
         help_menu.addAction(shortcuts_action)
         
+        log_folder_action = QAction("Open &Log Folder", self)
+        log_folder_action.triggered.connect(self.open_log_folder)
+        help_menu.addAction(log_folder_action)
+
         # Add About action to Help menu
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.show_about)
@@ -3939,12 +3845,25 @@ class TVHeadendClient(QMainWindow):
                 self.server_combo.setCurrentIndex(index)
                 return
 
+    def open_log_folder(self):
+        folder = log_dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        self.statusbar.showMessage(f"Logs are in {folder}")
+
     def show_builtin_log(self):
         supervisor = getattr(self, 'builtin', None)
         text = supervisor.log_text() if supervisor is not None else ''
         dialog = QDialog(self)
         dialog.setWindowTitle("Built-in server log")
         layout = QVBoxLayout(dialog)
+        where = QLabel(f"The full log is saved in {log_dir() / SERVER_LOG}")
+        where.setWordWrap(True)
+        where.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(where)
         view = QTextEdit()
         view.setReadOnly(True)
         view.setPlainText(text or "No log yet.")
@@ -4167,6 +4086,7 @@ class EPGDialog(QDialog):
 
 def main():
     """Main entry point for the application"""
+    configure_logging()
     try:
         # VLC's window embedding is still more reliable on X11 than on Wayland.
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")

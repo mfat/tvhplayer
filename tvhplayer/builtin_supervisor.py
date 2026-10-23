@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 
 from PyQt6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, pyqtSignal
@@ -18,6 +19,7 @@ try:
         serverinfo_ok,
         startup_result,
     )
+    from .core.logs import SERVER_LOGGER
     from .core.proxy import child_env
 except ImportError:
     from core.builtin_server import (
@@ -31,7 +33,12 @@ except ImportError:
         serverinfo_ok,
         startup_result,
     )
+    from core.logs import SERVER_LOGGER
     from core.proxy import child_env
+
+
+log = logging.getLogger('tvhplayer.builtin')
+server_log = logging.getLogger(SERVER_LOGGER)
 
 
 class BuiltinSupervisor(QObject):
@@ -55,6 +62,7 @@ class BuiltinSupervisor(QObject):
         self._attempts = 0
         self._lines = LineBuffer()
         self._log = []
+        self._partial_line = ''
         self._stop_requested = False
         self._handling_exit = False
         self.process = QProcess(self)
@@ -127,6 +135,11 @@ class BuiltinSupervisor(QObject):
         self._log.append(data)
         if len(self._log) > 400:
             self._log = self._log[-400:]
+        self._partial_line += data
+        *lines, self._partial_line = self._partial_line.split('\n')
+        for line in lines:
+            if line.strip():
+                server_log.info(line.rstrip())
         self._lines.feed(data)
         if self._status == 'starting' and self._lines.watch.bind_failed:
             self._retry_or_fail(self._lines.watch.bind_line or 'bind failed')
@@ -172,23 +185,26 @@ class BuiltinSupervisor(QObject):
             self.http_port, self.htsp_port = pick_port_pair(avoid=(self.http_port, self.htsp_port))
             self._start_attempt()
             return
+        self._fail(reason)
+
+    def _fail(self, reason: str) -> None:
+        log.warning('Built-in server failed: %s', reason)
         self._set_status('failed')
         self.failed.emit(reason)
 
-    def _on_finished(self, _code, _status) -> None:
+    def _on_finished(self, code, _status) -> None:
         if self._handling_exit:
             return
         self._poll.stop()
+        log.info('Built-in Tvheadend exited with code %s', code)
         if self._stop_requested:
             self._set_status('stopped')
             return
         if self._status == 'starting':
-            self._set_status('failed')
-            self.failed.emit('Built-in Tvheadend exited before it was ready.')
+            self._fail('Built-in Tvheadend exited before it was ready.')
             return
         if self._status == 'running':
-            self._set_status('failed')
-            self.failed.emit('Built-in Tvheadend stopped.')
+            self._fail('Built-in Tvheadend stopped.')
 
     def _child_alive(self) -> bool:
         return self.process.state() != QProcess.ProcessState.NotRunning
