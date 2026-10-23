@@ -38,7 +38,9 @@ try:
         sync_playlist,
         unique_name,
     )
+    from .core.errors import PlaylistError, TvhError
     from .core.tvh_admin import TvhAdmin
+    from .core.xmltv import load_guide
 except ImportError:
     from a11y import announce_label, buddy_label, describe
     from core.playlist import load_playlist, plan_channels, playlist_commands, playlist_name
@@ -53,13 +55,16 @@ except ImportError:
         sync_playlist,
         unique_name,
     )
+    from core.errors import PlaylistError, TvhError
     from core.tvh_admin import TvhAdmin
+    from core.xmltv import load_guide
 
 
 class _Task(QThread):
     """Run ``fn(task)`` on a worker thread."""
 
     progress = pyqtSignal(int, int)
+    status = pyqtSignal(str)
     checkpoint = pyqtSignal(object)
     succeeded = pyqtSignal(object)
     failed = pyqtSignal(object)
@@ -155,7 +160,7 @@ class PlaylistJob(QObject):
         ffmpeg = ffmpeg_for_server(self.server)
         plans, skipped = plan_channels(self._playlist, ffmpeg, source.name, source.allow_commands)
         with TvhAdmin(self.server) as admin:
-            return sync_playlist(
+            result = sync_playlist(
                 admin,
                 source,
                 plans,
@@ -164,6 +169,14 @@ class PlaylistJob(QObject):
                 cancelled=lambda: self._cancelled,
                 checkpoint=lambda: task.checkpoint.emit(source.to_dict()),
             )
+            if self._playlist.guide_url and not result.cancelled:
+                task.status.emit('Loading the program guide…')
+                try:
+                    load_guide(admin, self.server, self._playlist.guide_url, result.added > 0)
+                except (PlaylistError, TvhError):
+                    # The channels are in; only the guide is missing.
+                    result.guide_failed = True
+            return result
 
     def _synced(self, result):
         self._host.store_playlist_source(self.source.to_dict())
@@ -183,6 +196,7 @@ class PlaylistJob(QObject):
     def _run(self, fn, on_success):
         task = _Task(fn, self)
         task.progress.connect(self.progress.emit)
+        task.status.connect(self.status.emit)
         task.checkpoint.connect(self._host.store_playlist_source)
         task.succeeded.connect(on_success)
         task.failed.connect(self._failed)
@@ -331,11 +345,15 @@ class ImportPlaylistDialog(QDialog):
             ask_commands=lambda count, name: ask_to_run_commands(self, count, name),
             parent=self,
         )
-        self._job.status.connect(self._set_status)
+        self._job.status.connect(self._step)
         self._job.progress.connect(self._progress)
         self._job.finished.connect(self._finished)
         self._job.failed.connect(self._failed)
         self._job.start()
+
+    def _step(self, message):
+        self.progress_bar.setRange(0, 0)
+        self._set_status(message)
 
     def _progress(self, done, total):
         self.progress_bar.setRange(0, max(total, 1))

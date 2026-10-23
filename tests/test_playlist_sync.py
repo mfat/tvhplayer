@@ -4,6 +4,7 @@ import json
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.request
@@ -28,6 +29,7 @@ from tvhplayer.core.playlist_sync import (
     unique_name,
 )
 from tvhplayer.core.tvh_admin import TvhAdmin
+from tvhplayer.core.xmltv import load_guide
 
 
 class FakeAdmin:
@@ -247,6 +249,15 @@ def media(tmp_path):
         check=True,
     )
     shutil.copy(folder / 'a.ts', folder / 'a2.ts')
+    start = time.strftime('%Y%m%d%H%M%S', time.gmtime(time.time() - 600))
+    stop = time.strftime('%Y%m%d%H%M%S', time.gmtime(time.time() + 3600))
+    (folder / 'guide.xml').write_text(
+        '<?xml version="1.0" encoding="UTF-8"?><tv>'
+        '<channel id="a"><display-name>Pattern</display-name></channel>'
+        f'<programme start="{start} +0000" stop="{stop} +0000" channel="a"><title>Test Card</title></programme>'
+        '</tv>\n',
+        encoding='utf-8',
+    )
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(folder))
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -256,10 +267,12 @@ def media(tmp_path):
 
 
 @pytest.fixture
-def tvheadend(tmp_path):
+def tvheadend():
+    # Short config path: the XMLTV socket inside it must fit a Unix socket name.
+    config = tempfile.mkdtemp(prefix='tvh', dir='/tmp')
     http_port, htsp_port = _free_port(), _free_port()
     process = subprocess.Popen(
-        [str(TVHEADEND), '-c', str(tmp_path / 'tvh'), '-C', '--noacl', '-B', '--bindaddr', '127.0.0.1',
+        [str(TVHEADEND), '-c', config, '-C', '--noacl', '-B', '--bindaddr', '127.0.0.1',
          '--http_port', str(http_port), '--htsp_port', str(htsp_port)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -280,6 +293,7 @@ def tvheadend(tmp_path):
             process.wait(timeout=20)
         except subprocess.TimeoutExpired:
             process.kill()
+        shutil.rmtree(config, ignore_errors=True)
 
 
 def _channels(port):
@@ -309,6 +323,10 @@ def test_import_plays_refreshes_and_removes(tvheadend, media):
         assert result.added == 2
 
         channels = _wait(lambda: len(_channels(port)) == 2 and _channels(port))
+        server = {'url': f'http://127.0.0.1:{port}', 'builtin': True}
+        assert load_guide(admin, server, f'{media}/guide.xml', new_channels=True)
+        events = _wait(lambda: _api(port, 'epg/events/grid?limit=10')['entries'])
+        assert [(row['channelName'], row['title']) for row in events] == [('Pattern', 'Test Card')]
         assert channels['Pattern']['number'] == 7
         pattern_uuid = channels['Pattern']['uuid']
         data = _first_bytes(port, pattern_uuid)

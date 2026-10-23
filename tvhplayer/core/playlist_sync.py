@@ -81,6 +81,7 @@ class SyncResult:
     removed: int = 0
     skipped: List[SkippedEntry] = field(default_factory=list)
     cancelled: bool = False
+    guide_failed: bool = False
 
 
 def server_key(server) -> str:
@@ -139,6 +140,8 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
     if result.skipped:
         count = len(result.skipped)
         message += ' 1 entry could not be added.' if count == 1 else f' {count} entries could not be added.'
+    if result.guide_failed:
+        message += ' The program guide could not be loaded.'
     return message
 
 

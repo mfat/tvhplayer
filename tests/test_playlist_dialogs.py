@@ -57,6 +57,12 @@ class FakeAdmin:
     def delete(self, uuids):
         pass
 
+    def enable_xmltv_socket(self):
+        return ''
+
+    def use_url_grabber(self, _url):
+        return False
+
     def delete_unused_tags(self, names):
         self.tags_deleted = list(names)
 
@@ -261,3 +267,16 @@ def test_one_job_per_playlist(app, tmp_path):
     _run(app, dialog)
     assert dialog.status_label.text() == dialogs.BUSY
     assert dialog.import_btn.isEnabled()
+
+
+def test_missing_guide_does_not_fail_the_import(app, tmp_path, monkeypatch):
+    def broken(*_args):
+        raise dialogs.PlaylistError('The program guide could not be loaded.')
+
+    monkeypatch.setattr(dialogs, 'load_guide', broken)
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    dialog = dialogs.ImportPlaylistDialog(host)
+    text = TWO.replace('#EXTM3U', '#EXTM3U x-tvg-url="http://127.0.0.1:1/guide.xml"')
+    dialog.location_input.setText(_playlist(tmp_path, text))
+    _run(app, dialog)
+    assert dialog.status_label.text() == 'Added 2 channels from news. The program guide could not be loaded.'

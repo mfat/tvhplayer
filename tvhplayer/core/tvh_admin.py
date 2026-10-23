@@ -7,6 +7,7 @@ is the viewing API (docs/backend.md).
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Dict, List, Optional
 
@@ -134,6 +135,43 @@ class TvhAdmin:
             if time.monotonic() >= deadline:
                 return None
             time.sleep(0.5)
+
+    def _node(self, uuid: str) -> dict:
+        """One idnode as {'class': ..., 'uuid': ..., <param id>: <value>}."""
+        entries = self._request('api/idnode/load', params={'uuid': uuid}).get('entries') or []
+        if not entries:
+            return {}
+        entry = entries[0]
+        node = {param.get('id'): param.get('value') for param in entry.get('params') or []}
+        node.update({'class': entry.get('class'), 'uuid': uuid})
+        return node
+
+    def _epggrab_modules(self) -> List[dict]:
+        return [row for row in self._request('api/epggrab/module/list').get('entries') or [] if row.get('uuid')]
+
+    def enable_xmltv_socket(self, wait=5) -> str:
+        """Turn on the External XMLTV module and return its socket path, or ''."""
+        for row in self._epggrab_modules():
+            node = self._node(row['uuid'])
+            if node.get('class') != 'epggrab_mod_ext_xmltv':
+                continue
+            path = node.get('path') or ''
+            if not node.get('enabled'):
+                self.save([{'uuid': row['uuid'], 'enabled': True}])
+            deadline = time.monotonic() + wait
+            while path and not os.path.exists(path) and time.monotonic() < deadline:
+                time.sleep(0.2)
+            return path
+        return ''
+
+    def use_url_grabber(self, url: str) -> bool:
+        """Point an installed ``tv_grab_url`` grabber at ``url`` and run it."""
+        for row in self._epggrab_modules():
+            if (row.get('title') or '').endswith('XMLTV URL grabber'):
+                self.save([{'uuid': row['uuid'], 'enabled': True, 'args': url}])
+                self._request('api/epggrab/internal/rerun', data={'rerun': 1})
+                return True
+        return False
 
     def delete_unused_tags(self, names: List[str], wait=BOUQUET_WAIT_SECONDS) -> None:
         """Delete channel tags with these names once no channel carries them.

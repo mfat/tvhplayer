@@ -170,18 +170,21 @@ It ignores `#KODIPROP`, catch-up attributes, and `tvg-shift`.
 
 ## Guide data
 
-When the playlist header names an XMLTV address, the app loads that guide without asking.
+When the playlist header names an XMLTV address, the app loads that guide without asking. It happens on every import and refresh, after the channels are written. A guide that cannot be loaded adds "The program guide could not be loaded." to the result; the channels stay.
 
-- **Built-in server.** TVHplayer downloads the guide (gzip accepted) on import, on refresh, and on start when refresh-on-start is on. It enables Tvheadend's *External: XMLTV* module and writes the file to `<config>/epggrab/xmltv.sock`. Channels match by `tvg-id` through `epgauto_default`.
-- **Other servers.** The socket is on that machine, so the app cannot write to it. The option is shown only when the server already lists an *XMLTV URL grabber* module (a `tv_grab_url` script, as TVH-IPTV-Config ships). The app then sets that module's arguments to the address.
+- **The built-in server, or a server on this machine.** TVHplayer downloads the guide (gzip accepted, up to 1 GB unpacked) and enables Tvheadend's *External: XMLTV* module. It then writes the file to that module's socket, using the socket path the module reports. Channels match by `tvg-id` through `epgauto_default`.
+  - On the first pass Tvheadend only links XMLTV channels to its channels and drops their programmes; a test showed the programmes arrive on the second pass. So the file is sent twice when the import added channels.
+  - A Unix socket path cannot exceed 107 bytes. The built-in server's path is about 60 bytes, or 85 in Flatpak.
+- **Other servers.** The socket is on that machine, so the app cannot write to it. When the server lists an *XMLTV URL grabber* module (a `tv_grab_url` script, as TVH-IPTV-Config ships), the app sets that module's arguments to the address and runs it. Otherwise the guide is left alone.
 
 ## Code layout
 
 | Piece | Where | Qt |
 | :--- | :--- | :--- |
 | Parser, entry plan, ffmpeg command builder | `tvhplayer/core/playlist.py` | no |
-| Admin API calls: network, mux, bouquet, tag, epggrab | `tvhplayer/core/tvh_admin.py`, a small client on `requests` that reuses `urls.http_auth` and `proxy.configure_session` | no |
+| Admin API calls: network, mux, bouquet, tag, guide modules | `tvhplayer/core/tvh_admin.py`, a small client on `requests` that reuses `urls.http_auth` and `proxy.configure_session` | no |
 | Sync: diff, batches, progress callback, cancel flag | `tvhplayer/core/playlist_sync.py` | no |
+| Guide download and socket | `tvhplayer/core/xmltv.py` | no |
 | Saved sources | `playlists` list in `tvhplayer.conf`, normalised in `core/config.py`; each source names its server by `builtin` or by URL | no |
 | Import dialog, progress, Playlists dialog | `tvhplayer/playlist_dialogs.py` | yes |
 | Background run | a `QThread` worker that calls the sync and emits progress | yes |
