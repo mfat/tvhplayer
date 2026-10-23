@@ -1,4 +1,9 @@
+import base64
+
+from requests import Request
+
 from tvhplayer.core.urls import (
+    TvhHttpAuth,
     http_auth,
     http_base_url,
     htsp_host_port,
@@ -23,4 +28,15 @@ def test_insert_basic_auth():
 
 def test_http_auth_none_when_empty():
     assert http_auth({'username': '', 'password': ''}) is None
-    assert http_auth({'username': 'u', 'password': ''}) == ('u', '')
+    auth = http_auth({'username': 'u', 'password': 'secret'})
+    assert isinstance(auth, TvhHttpAuth)
+    assert auth.username == 'u'
+    assert auth.password == 'secret'
+
+
+def test_http_auth_sends_basic_until_a_digest_nonce_is_known():
+    auth = http_auth({'username': 'u', 'password': 'secret'})
+    prepared = Request('GET', 'http://127.0.0.1:9981/api/serverinfo').prepare()
+    auth(prepared)
+    encoded = base64.b64encode(b'u:secret').decode('ascii')
+    assert prepared.headers['Authorization'] == f'Basic {encoded}'

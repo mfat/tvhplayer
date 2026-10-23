@@ -1,5 +1,23 @@
 from urllib.parse import urlparse
 
+from requests.auth import HTTPBasicAuth, HTTPDigestAuth
+
+
+class TvhHttpAuth(HTTPDigestAuth):
+    """Basic on the first request, digest when the server challenges for it.
+
+    Tvheadend's ``tvh-json.py`` installs both handlers unless one scheme is
+    pinned. Plain-auth servers accept the Basic header immediately. A
+    digest-only server returns 401 and ``HTTPDigestAuth`` retries with the
+    digest response.
+    """
+
+    def __call__(self, request):
+        request = HTTPDigestAuth.__call__(self, request)
+        if not getattr(self._thread_local, 'last_nonce', None):
+            request = HTTPBasicAuth.__call__(self, request)
+        return request
+
 
 def http_base_url(url):
     """Return a scheme://host[:port] base with no trailing slash."""
@@ -34,11 +52,15 @@ def htsp_host_port(url, htsp_port=None):
 
 
 def http_auth(server):
-    """Return a requests auth tuple, or None when no credentials are set."""
+    """Return requests auth for the HTTP API, or None when no credentials are set.
+
+    Playback URLs still use ``insert_basic_auth``. VLC and ffmpeg receive a
+    URL, not this handler.
+    """
     username = server.get('username') or ''
     password = server.get('password') or ''
     if username or password:
-        return (username, password)
+        return TvhHttpAuth(username, password)
     return None
 
 
