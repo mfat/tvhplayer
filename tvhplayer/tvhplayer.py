@@ -1855,8 +1855,8 @@ class TVHeadendClient(QMainWindow):
         
     def get_icon(self, icon_name):
         """Get icon path and verify it exists"""
-        # Always use app_dir/icons path
-        icon_path = self.app_dir / 'icons' / icon_name
+        # setup_paths found the folder: next to the code in packages, one up in a checkout.
+        icon_path = Path(self.icons_dir) / icon_name
         if not icon_path.exists():
             print(f"Warning: Icon not found: {icon_path}")
             return None
