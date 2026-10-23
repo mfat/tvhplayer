@@ -570,13 +570,13 @@ class TasksPanel(QFrame):
         layout.addLayout(filter_row)
 
         self.status_combo = QComboBox()
-        self.status_combo.addItems(["All", "Recording", "Scheduled", "Completed"])
+        self.status_combo.addItems(["Active", "All", "Recording", "Scheduled", "Completed"])
         self.status_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         describe(
             self.status_combo,
             "Task status",
-            "Show every task, only recordings, only scheduled recordings, "
-            "or only completed recordings.",
+            "Show scheduled and in-progress recordings, every task, only recordings, "
+            "only scheduled recordings, or only completed recordings.",
         )
         self.status_combo.currentIndexChanged.connect(self._apply_filter)
         show_row = QHBoxLayout()
@@ -837,6 +837,8 @@ class TasksPanel(QFrame):
         return bool(task and task.get('kind') == 'Local' and task.get('path'))
 
     def _matches(self, task, query, status_filter):
+        if status_filter == 'Active' and task['bucket'] not in ('recording', 'scheduled'):
+            return False
         if status_filter == 'Recording' and task['bucket'] != 'recording':
             return False
         if status_filter == 'Scheduled' and task['bucket'] != 'scheduled':

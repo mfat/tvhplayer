@@ -669,11 +669,11 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.tasks_pane.accessibleName() == "Tasks"
         assert window.tasks_pane.search_box.accessibleName() == "Filter tasks"
         assert window.tasks_pane.status_combo.accessibleName() == "Task status"
-        assert window.tasks_pane.status_combo.currentText() == "All"
+        assert window.tasks_pane.status_combo.currentText() == "Active"
         assert [
             window.tasks_pane.status_combo.itemText(index)
             for index in range(window.tasks_pane.status_combo.count())
-        ] == ["All", "Recording", "Scheduled", "Completed"]
+        ] == ["Active", "All", "Recording", "Scheduled", "Completed"]
         assert window.tasks_pane.task_table.accessibleName() == "Tasks"
         assert window.tasks_pane.task_table.isVisible()
         assert window.tasks_pane.task_table.rowCount() == 0
@@ -951,7 +951,8 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         panel.refresh()
 
         texts = _task_texts(panel)
-        assert len(texts) == 5
+        assert panel.status_combo.currentText() == 'Active'
+        assert len(texts) == 3
         assert 'Local' in texts[0] and 'recording_irinn.ts' in texts[0] and 'stalled' in texts[0]
         assert panel.task_table.item(0, 4).text().endswith('B')
         assert 'News' in texts[1] and 'Recording' in texts[1]
@@ -971,8 +972,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert 'Started' in panel.task_table.item(1, 5).toolTip()
         assert panel.task_table.item(2, 4).text() == ''
         assert 'Later' in texts[2] and 'Scheduled' in texts[2]
-        assert 'Old' in texts[3] and 'Completed' in texts[3]
-        assert 'Archive' in texts[4]
+        assert all('Old' not in text and 'Archive' not in text for text in texts)
         assert panel.action_btn.isEnabled() is False
         assert panel.reveal_btn.isEnabled() is False
 
