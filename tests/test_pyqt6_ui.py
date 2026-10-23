@@ -1234,3 +1234,51 @@ def test_stalled_local_recording_is_left_running(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_quit_asks_the_builtin_server_even_when_another_is_selected(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    from tvhplayer.core.models import DvrEntry
+
+    window.servers = [
+        {'name': 'NAS', 'url': 'http://nas:9981', 'protocol': 'http'},
+        {
+            'name': 'Built-in Server', 'url': 'http://127.0.0.1:24111', 'protocol': 'http',
+            'username': 'tvhplayer', 'password': 'secret-secret-secret', 'builtin': True,
+        },
+    ]
+    window.server_combo.blockSignals(True)
+    window.server_combo.clear()
+    window.server_combo.addItems(['NAS', 'Built-in Server'])
+    window.server_combo.setCurrentIndex(0)
+    window.server_combo.blockSignals(False)
+    window.builtin = types.SimpleNamespace(
+        is_running=lambda: True, username='tvhplayer', password='secret-secret-secret',
+        stop=lambda: None,
+    )
+
+    asked = []
+
+    class _Backend:
+        def __init__(self, server):
+            asked.append(server)
+
+        def list_dvr_entries(self):
+            return [DvrEntry(
+                uuid='1', title='News Hour', channel_name='One', start=0, duration=60,
+                status='Running', sched_status='recording',
+            )]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ui, 'create_backend', _Backend)
+    messages = []
+    monkeypatch.setattr(
+        ui.QMessageBox, 'question',
+        lambda _parent, _title, text, *a: messages.append(text) or ui.QMessageBox.StandardButton.No,
+    )
+    assert window._confirm_builtin_quit() is False
+    assert [server['name'] for server in asked] == ['Built-in Server']
+    assert 'News Hour' in messages[0]
+    app.processEvents()

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import time
+
 from PyQt6.QtCore import QObject, QProcess, QTimer, pyqtSignal
 
 try:
     from .core.builtin_server import (
         MAX_BIND_ATTEMPTS,
+        STARTUP_TIMEOUT_SECONDS,
         LineBuffer,
         command_args,
+        ensure_superuser,
         initial_ports,
         pick_port_pair,
         serverinfo_ok,
@@ -17,8 +21,10 @@ try:
 except ImportError:
     from core.builtin_server import (
         MAX_BIND_ATTEMPTS,
+        STARTUP_TIMEOUT_SECONDS,
         LineBuffer,
         command_args,
+        ensure_superuser,
         initial_ports,
         pick_port_pair,
         serverinfo_ok,
@@ -39,6 +45,10 @@ class BuiltinSupervisor(QObject):
         self.config_dir = config_dir
         self.http_port = int(http_port or 0)
         self.htsp_port = int(htsp_port or 0)
+        self.username = ''
+        self.password = ''
+        self.startup_timeout = STARTUP_TIMEOUT_SECONDS
+        self._deadline = 0.0
         self._status = 'stopped'
         self._attempts = 0
         self._lines = LineBuffer()
@@ -70,6 +80,12 @@ class BuiltinSupervisor(QObject):
             self._set_status('failed')
             self.failed.emit('Built-in Tvheadend is not packaged in this build.')
             return
+        try:
+            self.username, self.password = ensure_superuser(self.config_dir)
+        except OSError as exc:
+            self._set_status('failed')
+            self.failed.emit(f'Could not set up the built-in server login: {exc}')
+            return
         self._stop_requested = False
         self._attempts = 0
         self.http_port, self.htsp_port = initial_ports(self.http_port, self.htsp_port)
@@ -93,6 +109,7 @@ class BuiltinSupervisor(QObject):
         self.config_dir.mkdir(parents=True, exist_ok=True)
         args = command_args(self.binary, self.config_dir, self.http_port, self.htsp_port)[1:]
         self._set_status('starting')
+        self._deadline = time.monotonic() + self.startup_timeout
         self.process.start(str(self.binary), args)
         self._poll.start()
 
@@ -116,9 +133,14 @@ class BuiltinSupervisor(QObject):
             return
         if result == 'exited':
             return
+        if time.monotonic() > self._deadline:
+            self._retry_or_fail(
+                f'Built-in Tvheadend did not answer within {int(self.startup_timeout)} seconds.'
+            )
+            return
         if not (self._lines.watch.http_started and self._lines.watch.htsp_started):
             return
-        if not serverinfo_ok(self.http_port):
+        if not serverinfo_ok(self.http_port, username=self.username, password=self.password):
             return
         result = startup_result(True, self._lines.watch, True)
         if result == 'ready':

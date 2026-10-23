@@ -27,6 +27,7 @@ try:
         apply_builtin_endpoint,
         builtin_config_dir,
         ensure_builtin_server,
+        find_builtin_server,
         find_bundled_binary,
         builtin_requests_ready,
         is_builtin_server,
@@ -49,6 +50,7 @@ except ImportError:
         apply_builtin_endpoint,
         builtin_config_dir,
         ensure_builtin_server,
+        find_builtin_server,
         find_bundled_binary,
         builtin_requests_ready,
         is_builtin_server,
@@ -3122,6 +3124,7 @@ class TVHeadendClient(QMainWindow):
                 dialog.servers,
                 self.config.get('builtin_http_port') or 0,
                 self.config.get('builtin_htsp_port') or 0,
+                *self._builtin_credentials(),
             )
             self.config_store.servers = self.servers
             print(f"Debug: Updated servers list, now has {len(self.servers)} servers")
@@ -3680,16 +3683,34 @@ class TVHeadendClient(QMainWindow):
             self.player.close()
         super().closeEvent(event)
 
+    def _builtin_credentials(self):
+        supervisor = getattr(self, 'builtin', None)
+        if supervisor is None:
+            return '', ''
+        return supervisor.username, supervisor.password
+
     def _confirm_builtin_quit(self):
         supervisor = getattr(self, 'builtin', None)
         if supervisor is None or not supervisor.is_running():
             return True
         titles = []
         lookup_failed = False
+        # Ask the built-in server itself, whichever server is selected.
+        backend = None
         try:
-            titles = recording_titles(self.get_backend().list_dvr_entries())
+            server = find_builtin_server(self.servers)
+            if server is None:
+                raise TvhError('Built-in server entry is missing')
+            backend = create_backend(server)
+            titles = recording_titles(backend.list_dvr_entries())
         except Exception:
             lookup_failed = True
+        finally:
+            if backend is not None:
+                try:
+                    backend.close()
+                except Exception:
+                    pass
         message = quit_confirmation(titles, lookup_failed)
         if not message:
             return True
@@ -3703,7 +3724,9 @@ class TVHeadendClient(QMainWindow):
         return answer == QMessageBox.StandardButton.Yes
 
     def _on_builtin_ready(self, http_port, htsp_port):
-        self.servers = apply_builtin_endpoint(self.servers, http_port, htsp_port)
+        self.servers = apply_builtin_endpoint(
+            self.servers, http_port, htsp_port, *self._builtin_credentials()
+        )
         self.config['builtin_http_port'] = http_port
         self.config['builtin_htsp_port'] = htsp_port
         self.close_backend()
@@ -3739,7 +3762,12 @@ class TVHeadendClient(QMainWindow):
         if supervisor is None or not supervisor.is_running():
             self.statusbar.showMessage("The built-in server is not running.")
             return
+        # The page asks for a login. Hand over the password without putting it in the URL.
+        QApplication.clipboard().setText(supervisor.password)
         QDesktopServices.openUrl(QUrl(f"http://127.0.0.1:{supervisor.http_port}/"))
+        self.statusbar.showMessage(
+            f"Log in as \"{supervisor.username}\". The password is on the clipboard."
+        )
 
     def show_builtin_log(self):
         supervisor = getattr(self, 'builtin', None)

@@ -9,6 +9,7 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
+from .builtin_server import without_builtin_secrets
 from .models import ServerConfig
 
 log = logging.getLogger(__name__)
@@ -95,8 +96,9 @@ class ConfigStore:
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = _normalize(self.data)
+        on_disk = dict(payload, servers=without_builtin_secrets(payload['servers']))
         with self.path.open('w', encoding='utf-8') as handle:
-            json.dump(payload, handle, indent=2)
+            json.dump(on_disk, handle, indent=2)
         self.data = payload
         return payload
 

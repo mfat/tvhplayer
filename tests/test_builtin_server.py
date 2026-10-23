@@ -1,4 +1,9 @@
+import http.server
+import json
+import os
 import random
+import stat
+import threading
 
 from pathlib import Path
 
@@ -7,14 +12,19 @@ from tvhplayer.core.builtin_server import (
     LineBuffer,
     StderrWatch,
     bundled_binary_candidates,
+    apply_builtin_endpoint,
     command_args,
     ensure_builtin_server,
+    ensure_superuser,
+    find_builtin_server,
     initial_ports,
     pick_port_pair,
     quit_confirmation,
     recording_titles,
+    serverinfo_ok,
     startup_result,
     builtin_requests_ready,
+    without_builtin_secrets,
 )
 from tvhplayer.core.models import DvrEntry, ServerConfig
 
@@ -36,6 +46,7 @@ def test_command_stays_in_the_foreground_without_a_pid_file():
     assert '--firstrun' not in args
     assert '--logfile' not in args
     assert '--nostderr' not in args
+    assert '--noacl' not in args
     assert '--bindaddr' in args
     assert args[args.index('--http_port') + 1] == '24111'
     assert args[args.index('--htsp_port') + 1] == '24112'
@@ -130,3 +141,107 @@ def test_builtin_requests_wait_until_the_child_has_a_url():
 def test_builtin_flag_roundtrips():
     cfg = ServerConfig.from_dict({'name': 'Built-in Server', 'url': '', 'builtin': True})
     assert cfg.to_dict()['builtin'] is True
+
+
+def test_superuser_login_is_generated_once_and_owner_only(tmp_path):
+    config_dir = tmp_path / 'tvheadend'
+    username, password = ensure_superuser(config_dir)
+    path = config_dir / 'superuser'
+    assert json.loads(path.read_text()) == {'username': username, 'password': password}
+    assert len(password) >= 16
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+    assert ensure_superuser(config_dir) == (username, password)
+
+
+def test_unusable_superuser_file_is_replaced(tmp_path):
+    config_dir = tmp_path / 'tvheadend'
+    config_dir.mkdir()
+    (config_dir / 'superuser').write_text('{"username": "admin", "password": ""}')
+    username, password = ensure_superuser(config_dir)
+    assert password
+    assert json.loads((config_dir / 'superuser').read_text())['password'] == password
+
+
+def test_builtin_entry_carries_the_generated_login(monkeypatch):
+    monkeypatch.setattr('tvhplayer.core.builtin_server.sys.platform', 'linux')
+    servers = ensure_builtin_server([], 24111, 24112, 'tvhplayer', 'secret-secret-secret')
+    entry = find_builtin_server(servers)
+    assert (entry['username'], entry['password']) == ('tvhplayer', 'secret-secret-secret')
+    moved = apply_builtin_endpoint(servers, 24113, 24114, 'tvhplayer', 'another-secret-value')
+    assert find_builtin_server(moved)['url'] == 'http://127.0.0.1:24113'
+    assert find_builtin_server(moved)['password'] == 'another-secret-value'
+    nas = {'name': 'NAS', 'url': 'http://nas:9981', 'username': 'me', 'password': 'pw'}
+    cleaned = without_builtin_secrets([nas] + moved)
+    assert cleaned[0] == nas
+    assert cleaned[1]['password'] == '' and cleaned[1]['username'] == ''
+    assert find_builtin_server(moved)['password'] == 'another-secret-value'
+
+
+def test_config_file_never_holds_the_builtin_password(tmp_path):
+    from tvhplayer.core.config import ConfigStore
+
+    store = ConfigStore(tmp_path / 'tvhplayer.conf')
+    store.servers = [{
+        'name': 'Built-in Server', 'url': 'http://127.0.0.1:24111',
+        'username': 'tvhplayer', 'password': 'secret-secret-secret', 'builtin': True,
+    }]
+    store.save()
+    assert 'secret-secret-secret' not in (tmp_path / 'tvhplayer.conf').read_text()
+    assert store.servers[0]['password'] == 'secret-secret-secret'
+
+
+class _ServerInfo(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b'{"sw_version": "4.3", "api_version": 19, "name": "Tvheadend"}'
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def test_serverinfo_check_ignores_a_proxy_from_the_environment(monkeypatch):
+    server = http.server.HTTPServer(('127.0.0.1', 0), _ServerInfo)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for name in ('http_proxy', 'HTTP_PROXY'):
+            monkeypatch.setenv(name, 'http://127.0.0.1:9')
+        for name in ('no_proxy', 'NO_PROXY'):
+            monkeypatch.delenv(name, raising=False)
+        assert serverinfo_ok(server.server_address[1], timeout=2)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_supervisor_gives_up_when_the_child_never_answers(tmp_path):
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtCore import QCoreApplication, QEventLoop, QTimer
+
+    from tvhplayer.builtin_supervisor import BuiltinSupervisor
+
+    app = QCoreApplication.instance() or QCoreApplication([])
+    binary = tmp_path / 'tvheadend'
+    binary.write_text('#!/bin/sh\nexec sleep 30\n')
+    binary.chmod(0o755)
+    supervisor = BuiltinSupervisor(binary, tmp_path / 'config', 24111, 24112)
+    supervisor.startup_timeout = 0.3
+    reasons = []
+    loop = QEventLoop()
+    supervisor.failed.connect(lambda reason: (reasons.append(reason), loop.quit()))
+    QTimer.singleShot(5000, loop.quit)
+    supervisor.start()
+    loop.exec()
+    try:
+        assert reasons and 'did not answer' in reasons[0]
+        assert supervisor.status == 'failed'
+        assert not supervisor.is_running()
+        assert supervisor.username == 'tvhplayer'
+    finally:
+        supervisor.stop()
+    app.processEvents()

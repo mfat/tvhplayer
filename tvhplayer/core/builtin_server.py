@@ -2,6 +2,10 @@
 
 The child stays in the foreground. Tvheadend writes a pid file only when
 ``-f`` is passed, so this module does not use ``--pid``.
+
+Access control stays on. The app writes a Tvheadend ``superuser`` file with a
+generated password, so a web page or another local user cannot drive the
+built-in server through 127.0.0.1.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ import json
 import os
 import random
 import re
+import secrets
 import sys
 import urllib.error
 import urllib.request
@@ -21,6 +26,8 @@ STANDARD_HTSP_PORT = 9982
 PORT_LOW = 20000
 PORT_HIGH = 45000
 MAX_BIND_ATTEMPTS = 3
+STARTUP_TIMEOUT_SECONDS = 60
+SUPERUSER_NAME = 'tvhplayer'
 
 _BIND_FAILURE = re.compile(r'bind:\s+\S+:\d+:')
 _HTTP_STARTED = 'Starting HTTP server'
@@ -78,14 +85,55 @@ def builtin_config_dir(app_config_dir) -> Path:
     return Path(app_config_dir) / 'tvheadend'
 
 
+def superuser_path(config_dir) -> Path:
+    return Path(config_dir) / 'superuser'
+
+
+def _read_superuser(path: Path):
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    username = data.get('username')
+    password = data.get('password')
+    if isinstance(username, str) and username and isinstance(password, str) and len(password) >= 16:
+        return username, password
+    return None
+
+
+def ensure_superuser(config_dir) -> tuple[str, str]:
+    """Return the built-in admin login, writing one on first use.
+
+    Tvheadend reads ``<config>/superuser`` at startup and gives that account
+    full rights over HTTP and HTSP. The folder and file are owner-only.
+    """
+    config_dir = Path(config_dir)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(config_dir, 0o700)
+    path = superuser_path(config_dir)
+    existing = _read_superuser(path)
+    if existing is not None:
+        os.chmod(path, 0o600)
+        return existing
+    username = SUPERUSER_NAME
+    password = secrets.token_urlsafe(24)
+    payload = json.dumps({'username': username, 'password': password}, indent=2)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+        handle.write(payload)
+    os.chmod(path, 0o600)
+    return username, password
+
+
 def command_args(binary, config_dir, http_port: int, htsp_port: int) -> list[str]:
-    """Foreground command. No ``-f``, ``-C``, ``--pid``, ``--logfile``, or ``--nostderr``."""
+    """Foreground command. No ``-f``, ``-C``, ``--pid``, ``--logfile``, ``--nostderr``, or ``--noacl``."""
     return [
         str(binary),
         '-c', str(config_dir),
         '-B',
         '--bindaddr', '127.0.0.1',
-        '--noacl',
         '--http_port', str(int(http_port)),
         '--htsp_port', str(int(htsp_port)),
     ]
@@ -180,10 +228,21 @@ def startup_result(alive: bool, watch: StderrWatch, serverinfo_ok: bool) -> str:
     return 'pending'
 
 
-def serverinfo_ok(http_port: int, timeout: float = 0.4) -> bool:
+def _direct_opener(url, username, password):
+    """Loopback opener: no http_proxy from the environment, digest login when given."""
+    handlers = [urllib.request.ProxyHandler({})]
+    if username:
+        passwords = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+        passwords.add_password(None, url, username, password)
+        handlers.append(urllib.request.HTTPDigestAuthHandler(passwords))
+    return urllib.request.build_opener(*handlers)
+
+
+def serverinfo_ok(http_port: int, timeout: float = 0.4, username='', password='') -> bool:
+    """With access control on, Tvheadend answers ``/api`` only after a login."""
     url = f'http://127.0.0.1:{int(http_port)}/api/serverinfo'
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
+        with _direct_opener(url, username, password).open(url, timeout=timeout) as response:
             payload = json.loads(response.read().decode('utf-8', errors='replace'))
     except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
         return False
@@ -192,7 +251,7 @@ def serverinfo_ok(http_port: int, timeout: float = 0.4) -> bool:
     )
 
 
-def ensure_builtin_server(servers, http_port=0, htsp_port=0):
+def ensure_builtin_server(servers, http_port=0, htsp_port=0, username='', password=''):
     """Return a server list that contains one permanent built-in entry."""
     servers = list(servers or [])
     if not platform_supports_builtin():
@@ -215,8 +274,8 @@ def ensure_builtin_server(servers, http_port=0, htsp_port=0):
         entry['name'] = BUILTIN_NAME
         entry['builtin'] = True
         entry['protocol'] = 'http'
-        entry['username'] = ''
-        entry['password'] = ''
+        entry['username'] = username
+        entry['password'] = password
         if url:
             entry['url'] = url
             entry['htsp_port'] = htsp
@@ -225,8 +284,8 @@ def ensure_builtin_server(servers, http_port=0, htsp_port=0):
         kept.append({
             'name': BUILTIN_NAME,
             'url': url,
-            'username': '',
-            'password': '',
+            'username': username,
+            'password': password,
             'protocol': 'http',
             'htsp_port': htsp,
             'builtin': True,
@@ -234,7 +293,7 @@ def ensure_builtin_server(servers, http_port=0, htsp_port=0):
     return kept
 
 
-def apply_builtin_endpoint(servers, http_port: int, htsp_port: int):
+def apply_builtin_endpoint(servers, http_port: int, htsp_port: int, username='', password=''):
     updated = []
     for server in servers or []:
         if not is_builtin_server(server):
@@ -243,10 +302,31 @@ def apply_builtin_endpoint(servers, http_port: int, htsp_port: int):
         entry = dict(server)
         entry['url'] = f'http://127.0.0.1:{int(http_port)}'
         entry['htsp_port'] = int(htsp_port)
+        entry['username'] = username
+        entry['password'] = password
         entry['builtin'] = True
         entry['name'] = BUILTIN_NAME
         updated.append(entry)
     return updated
+
+
+def without_builtin_secrets(servers):
+    """Server dicts for the app config file. The built-in login stays in its superuser file."""
+    cleaned = []
+    for server in servers or []:
+        if is_builtin_server(server):
+            server = dict(server)
+            server['username'] = ''
+            server['password'] = ''
+        cleaned.append(server)
+    return cleaned
+
+
+def find_builtin_server(servers):
+    for server in servers or []:
+        if is_builtin_server(server):
+            return server
+    return None
 
 
 def recording_titles(entries) -> list[str]:
