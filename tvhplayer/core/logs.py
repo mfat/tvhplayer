@@ -4,17 +4,20 @@ Linux follows the XDG Base Directory spec: ``$XDG_STATE_HOME/tvhplayer``,
 which is ``~/.local/state/tvhplayer`` by default. Flatpak points
 ``XDG_STATE_HOME`` inside the app's sandbox folder.
 
-``app.log`` has the app's messages, including what it prints. ``tvheadend.log``
+``app.log`` has the app's messages and everything the process writes to its
+terminal, including VLC and Qt. ``tvheadend.log``
 has the built-in server's output. Both rotate at 10 MB and keep 5 old files.
 """
 
 from __future__ import annotations
 
+import atexit
 import io
 import logging
 import os
 import re
 import sys
+import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -71,8 +74,62 @@ def _file_handler(path: Path) -> logging.Handler:
     return handler
 
 
+class _FdCapture:
+    """Route a file descriptor through a pipe.
+
+    Everything written to it, by Python, VLC, Qt, or a child program, reaches
+    the terminal with secrets hidden, and each line goes to app.log.
+    """
+
+    def __init__(self, fd, logger, level):
+        self.fd = fd
+        self.terminal = os.dup(fd)
+        read_end, write_end = os.pipe()
+        os.dup2(write_end, fd)
+        os.close(write_end)
+        self._read_end = read_end
+        self._logger = logger
+        self._level = level
+        self._thread = threading.Thread(target=self._pump, name=f'log-fd{fd}', daemon=True)
+        self._thread.start()
+
+    def _pump(self):
+        pending = b''
+        while True:
+            try:
+                chunk = os.read(self._read_end, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            pending += chunk
+            *lines, pending = pending.split(b'\n')
+            for raw in lines:
+                self._emit(raw)
+        if pending:
+            self._emit(pending)
+        os.close(self._read_end)
+
+    def _emit(self, raw):
+        text = sanitize(raw.decode('utf-8', errors='replace').rstrip('\r'))
+        try:
+            os.write(self.terminal, (text + '\n').encode('utf-8', errors='replace'))
+        except OSError:
+            pass
+        if text.strip():
+            try:
+                self._logger.log(self._level, text)
+            except Exception:  # a broken log file must not stop the program's output
+                pass
+
+    def close(self, timeout=1.0):
+        """Point the descriptor back at the terminal and let the pipe drain."""
+        os.dup2(self.terminal, self.fd)
+        self._thread.join(timeout)
+
+
 class _Tee(io.TextIOBase):
-    """Keep writing to the real stream and copy each finished line to a logger."""
+    """Where descriptors cannot be redirected: copy Python's own output to a logger."""
 
     def __init__(self, stream, logger, level):
         super().__init__()
@@ -82,16 +139,17 @@ class _Tee(io.TextIOBase):
         self._pending = ''
 
     def write(self, text):
-        if self._stream is not None:
-            try:
-                self._stream.write(text)
-            except (OSError, ValueError):
-                pass
         self._pending += text
         while '\n' in self._pending:
             line, self._pending = self._pending.split('\n', 1)
+            line = sanitize(line.rstrip())
+            if self._stream is not None:
+                try:
+                    self._stream.write(line + '\n')
+                except (OSError, ValueError):
+                    pass
             if line.strip():
-                self._logger.log(self._level, line.rstrip())
+                self._logger.log(self._level, line)
         return len(text)
 
     def flush(self):
@@ -109,12 +167,53 @@ class _Tee(io.TextIOBase):
         return getattr(self._stream, 'encoding', 'utf-8')
 
 
+_captures = {}
+
+
+def _stop_captures():
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (OSError, ValueError, AttributeError):
+            pass
+    for fd in list(_captures):
+        _captures.pop(fd).close()
+
+
+def _capture(output):
+    """Capture fds 1 and 2 on POSIX; elsewhere wrap sys.stdout and sys.stderr."""
+    if os.name != 'posix':
+        if not isinstance(sys.stdout, _Tee):
+            sys.stdout = _Tee(sys.stdout, output, logging.INFO)
+        if not isinstance(sys.stderr, _Tee):
+            sys.stderr = _Tee(sys.stderr, output, logging.WARNING)
+        return None
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (OSError, ValueError, AttributeError):
+            pass
+    if not _captures:
+        _captures[1] = _FdCapture(1, output, logging.INFO)
+        _captures[2] = _FdCapture(2, output, logging.WARNING)
+        atexit.register(_stop_captures)
+    for stream in (sys.stdout, sys.stderr):
+        # A pipe is block-buffered by default; keep messages in step with events.
+        reconfigure = getattr(stream, 'reconfigure', None)
+        if reconfigure is not None:
+            try:
+                reconfigure(line_buffering=True)
+            except (OSError, ValueError):
+                pass
+    return _captures[2].terminal
+
+
 def configure_logging(directory=None, capture_output=True) -> Path:
     """Write app.log and tvheadend.log; return the folder.
 
-    ``capture_output`` copies print() and stderr into app.log while they still
-    reach the terminal. A folder that cannot be created leaves logging on the
-    console only.
+    ``capture_output`` copies the process's stdout and stderr into app.log
+    while they still reach the terminal, with secrets hidden in both. A
+    folder that cannot be created leaves logging on the console only.
     """
     directory = Path(directory) if directory is not None else log_dir()
     try:
@@ -134,12 +233,6 @@ def configure_logging(directory=None, capture_output=True) -> Path:
     root.addHandler(app_handler)
     # One line per HTTP request would bury the app's own messages.
     logging.getLogger('urllib3').setLevel(logging.WARNING)
-    console = logging.StreamHandler(sys.__stderr__)
-    console.setLevel(logging.WARNING)
-    console.setFormatter(SanitizingFormatter('%(levelname)s: %(name)s: %(message)s'))
-    console._tvhplayer_managed = True
-    root.addHandler(console)
-
     server = logging.getLogger(SERVER_LOGGER)
     for handler in list(server.handlers):
         server.removeHandler(handler)
@@ -148,14 +241,20 @@ def configure_logging(directory=None, capture_output=True) -> Path:
     server.setLevel(logging.DEBUG)
     server.addHandler(server_handler)
 
+    terminal = None
     if capture_output:
         output = logging.getLogger(OUTPUT_LOGGER)
         output.handlers = [app_handler]
         output.propagate = False
         output.setLevel(logging.DEBUG)
-        if not isinstance(sys.stdout, _Tee):
-            sys.stdout = _Tee(sys.stdout, output, logging.INFO)
-        if not isinstance(sys.stderr, _Tee):
-            sys.stderr = _Tee(sys.stderr, output, logging.WARNING)
+        terminal = _capture(output)
+    # Warnings from loggers also reach the terminal, written straight to it so
+    # the capture does not copy them into app.log a second time.
+    stream = os.fdopen(os.dup(terminal), 'w', buffering=1) if terminal is not None else sys.__stderr__
+    console = logging.StreamHandler(stream)
+    console.setLevel(logging.WARNING)
+    console.setFormatter(SanitizingFormatter('%(levelname)s: %(name)s: %(message)s'))
+    console._tvhplayer_managed = True
+    root.addHandler(console)
     logging.getLogger('tvhplayer').info('Logging to %s', directory)
     return directory

@@ -46,24 +46,56 @@ def restore_logging():
             handler.close()
 
 
-def test_configure_writes_app_and_server_logs(tmp_path, restore_logging, capsys):
-    folder = logs.configure_logging(tmp_path / 'logs')
-    print('Debug: Fetching channels from http://u:pw@tv.lan:9981')
+def test_configure_writes_app_and_server_logs(tmp_path, restore_logging):
+    folder = logs.configure_logging(tmp_path / 'logs', capture_output=False)
     logging.getLogger('tvhplayer.test').warning('something odd')
     logging.getLogger(logs.SERVER_LOGGER).info('Starting HTTP server')
     for handler in logging.getLogger().handlers + logging.getLogger(logs.SERVER_LOGGER).handlers:
         handler.flush()
     app_log = (folder / logs.APP_LOG).read_text(encoding='utf-8')
     server_log = (folder / logs.SERVER_LOG).read_text(encoding='utf-8')
-    assert 'Debug: Fetching channels from http://u:***@tv.lan:9981' in app_log
     assert 'something odd' in app_log
     assert 'Starting HTTP server' in server_log
     assert 'Starting HTTP server' not in app_log
-    assert 'Fetching channels' in capsys.readouterr().out
+
+
+def test_everything_the_process_writes_is_logged_and_hidden(tmp_path):
+    """print(), a C library writing to fd 2 (like VLC), and a child program."""
+    import subprocess
+    from pathlib import Path
+
+    script = (
+        'import logging, os, subprocess, sys\n'
+        'from tvhplayer.core import logs\n'
+        f'logs.configure_logging({str(tmp_path / "logs")!r})\n'
+        'print("Debug: Stream URL: http://tvhplayer:s3cret@127.0.0.1:9981/stream/channel/x")\n'
+        'os.write(2, b"[0000] access stream error: HTTP 401 error\\n")\n'
+        'subprocess.run(["sh", "-c", "echo child says hello >&2"])\n'
+        'logging.getLogger("tvhplayer.test").warning("a warning")\n'
+    )
+    done = subprocess.run(
+        [sys.executable, '-c', script],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert done.returncode == 0, done.stderr
+    terminal = done.stdout + done.stderr
+    assert 's3cret' not in terminal
+    assert 'http://tvhplayer:***@127.0.0.1:9981' in done.stdout
+    assert 'HTTP 401 error' in done.stderr
+    assert 'child says hello' in done.stderr
+    assert terminal.count('a warning') == 1
+    app_log = (tmp_path / 'logs' / logs.APP_LOG).read_text(encoding='utf-8')
+    assert 's3cret' not in app_log
+    for text in ('Debug: Stream URL: http://tvhplayer:***@', 'HTTP 401 error', 'child says hello'):
+        assert text in app_log
+    assert app_log.count('a warning') == 1
 
 
 def test_unwritable_folder_keeps_the_console(tmp_path, restore_logging):
     blocker = tmp_path / 'file'
     blocker.write_text('x')
-    logs.configure_logging(blocker / 'logs')
+    logs.configure_logging(blocker / 'logs', capture_output=False)
     print('still printed')
