@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .builtin_server import without_builtin_secrets
 from .models import ServerConfig
+from .playlist_sync import PlaylistSource
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def default_config():
         'builtin_autostart': False,
         'builtin_http_port': 0,
         'builtin_htsp_port': 0,
+        'playlists': [],
     }
 
 
@@ -58,6 +60,11 @@ def _normalize(data):
     for raw in data.get('servers') or []:
         servers.append(ServerConfig.from_dict(raw).to_dict())
     cfg['servers'] = servers
+    cfg['playlists'] = [
+        PlaylistSource.from_dict(raw).to_dict()
+        for raw in data.get('playlists') or []
+        if isinstance(raw, dict)
+    ]
     try:
         cfg['last_server'] = int(cfg.get('last_server') or 0)
     except (TypeError, ValueError):

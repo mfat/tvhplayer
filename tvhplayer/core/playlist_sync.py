@@ -8,13 +8,18 @@ changed stream address or name edits the channel instead of replacing it.
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
-from .errors import PlaylistError
+from .errors import PlaylistError, TvhAuthError, TvhConnectionError
 from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry
 
 BUILTIN_SERVER_KEY = 'builtin'
+# Distro packages and the common Docker images install ffmpeg here. A bare
+# name can match ffmpegthumbnailer in Tvheadend's PATH lookup (issue 1632).
+REMOTE_FFMPEG = '/usr/bin/ffmpeg'
+NO_FFMPEG = 'TVHplayer could not find ffmpeg, which it needs to play imported channels.'
 MAX_STREAMS = 2
 CHECKPOINT_EVERY = 50
 
@@ -79,6 +84,72 @@ def server_key(server) -> str:
     if server.get('builtin'):
         return BUILTIN_SERVER_KEY
     return (server.get('url') or '').strip().rstrip('/')
+
+
+def ffmpeg_for_server(server, which=shutil.which) -> str:
+    """The ffmpeg Tvheadend should run. The built-in server shares this app's PATH."""
+    if server.get('builtin'):
+        path = which('ffmpeg')
+        if not path:
+            raise PlaylistError(NO_FFMPEG)
+        return path
+    return REMOTE_FFMPEG
+
+
+def find_source(sources: List[PlaylistSource], location: str, key: str) -> Optional[PlaylistSource]:
+    location = (location or '').strip()
+    for source in sources:
+        if source.server == key and source.location == location:
+            return source
+    return None
+
+
+def unique_name(sources: List[PlaylistSource], name: str, key: str) -> str:
+    taken = {source.name for source in sources if source.server == key}
+    if name not in taken:
+        return name
+    number = 2
+    while f'{name} {number}' in taken:
+        number += 1
+    return f'{name} {number}'
+
+
+def _channels(count: int) -> str:
+    return '1 channel' if count == 1 else f'{count} channels'
+
+
+def result_message(name: str, result: SyncResult, first_import: bool) -> str:
+    if result.cancelled:
+        return f'Import stopped. {_channels(result.added)} from {name} were added.'
+    if first_import:
+        message = f'Added {_channels(result.added)} from {name}.'
+    elif result.added or result.removed:
+        parts = []
+        if result.added:
+            parts.append(f'{result.added} added')
+        if result.removed:
+            parts.append(f'{result.removed} removed')
+        message = f'Updated the channels from {name}: {", ".join(parts)}.'
+    else:
+        message = f'The channels from {name} are up to date.'
+    if result.skipped:
+        count = len(result.skipped)
+        message += ' 1 entry could not be added.' if count == 1 else f' {count} entries could not be added.'
+    return message
+
+
+def error_message(exc: Exception, server_name: str) -> str:
+    """Plain words for a failed import."""
+    if isinstance(exc, PlaylistError):
+        return str(exc)
+    if isinstance(exc, TvhAuthError):
+        return (
+            f'This account cannot add channels to {server_name}. '
+            'Sign in with an administrator account in Manage Servers.'
+        )
+    if isinstance(exc, TvhConnectionError):
+        return f'Could not reach {server_name}. Check that it is running and that its address is right.'
+    return f'{server_name} could not add the channels: {exc}'
 
 
 def mux_conf(plan: ChannelPlan) -> dict:

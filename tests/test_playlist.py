@@ -4,14 +4,17 @@ import pytest
 
 from tvhplayer.core.errors import PlaylistError
 from tvhplayer.core.playlist import (
+    FILE_FAILED,
     MAX_PIPE_ARGS,
     NOT_A_PLAYLIST,
     decode_playlist,
     ffmpeg_command,
     ffmpeg_input,
+    load_playlist,
     parse_playlist,
     plan_channels,
     playlist_commands,
+    playlist_name,
     shell_command,
     tvh_split,
 )
@@ -192,3 +195,20 @@ def test_shell_command_round_trips():
     args = tvh_split(command[7:])
     assert args[:2] == ['/bin/sh', '-c']
     assert shlex.split(args[2])[:3] == ['prog', 'a b', "it's"]
+
+
+def test_playlist_names_come_from_file_or_host():
+    assert playlist_name('https://iptv-org.github.io/iptv/countries/ir.m3u') == 'ir'
+    assert playlist_name('http://www.provider.tv/get.php?username=a&type=m3u') == 'provider.tv'
+    assert playlist_name('/home/me/My Channels.m3u8') == 'My Channels'
+    assert playlist_name('file:///home/me/list.m3u') == 'list'
+
+
+def test_load_playlist_reads_files(tmp_path):
+    path = tmp_path / 'a.m3u'
+    path.write_bytes(b'#EXTM3U\n#EXTINF:-1,A\nhttp://x/a.ts\n')
+    assert load_playlist(str(path)).entries[0].name == 'A'
+    assert load_playlist(path.as_uri()).entries[0].name == 'A'
+    with pytest.raises(PlaylistError) as info:
+        load_playlist(str(tmp_path / 'missing.m3u'))
+    assert str(info.value) == FILE_FAILED

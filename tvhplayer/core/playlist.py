@@ -15,10 +15,21 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlsplit
 
+import requests
+
 from .errors import PlaylistError
+from .proxy import configure_session
 
 NOT_A_PLAYLIST = 'This file is not a TV playlist.'
 NO_CHANNELS = 'This playlist has no channels TVHplayer can add.'
+DOWNLOAD_FAILED = 'Could not download the playlist. Check the address and your internet connection.'
+FILE_FAILED = 'Could not open the playlist file.'
+TOO_LARGE = 'This playlist is too large to import.'
+
+MAX_PLAYLIST_BYTES = 50 * 1024 * 1024
+DOWNLOAD_TIMEOUT = 30
+# File and path stems that say nothing about the playlist; the host names it instead.
+_GENERIC_STEMS = {'', 'playlist', 'index', 'get', 'channels', 'list', 'tv', 'iptv', 'live', 'm3u', 'm3u8', 'playlist_m3u'}
 
 # Tvheadend's spawn_parse_args keeps at most 63 arguments.
 MAX_PIPE_ARGS = 63
@@ -85,6 +96,42 @@ def decode_playlist(data: bytes) -> str:
         return data.decode('utf-8')
     except UnicodeDecodeError:
         return data.decode('latin-1')
+
+
+def is_web_address(location: str) -> bool:
+    return (location or '').strip().lower().startswith(('http://', 'https://'))
+
+
+def load_playlist(location: str) -> Playlist:
+    """Download or read a playlist and parse it. Raises ``PlaylistError``."""
+    location = (location or '').strip()
+    if is_web_address(location):
+        data = _download(location)
+    else:
+        path = unquote(location[7:]) if location.startswith('file://') else location
+        try:
+            with open(path, 'rb') as handle:
+                data = handle.read(MAX_PLAYLIST_BYTES + 1)
+        except OSError as exc:
+            raise PlaylistError(FILE_FAILED) from exc
+        if len(data) > MAX_PLAYLIST_BYTES:
+            raise PlaylistError(TOO_LARGE)
+    return parse_playlist(decode_playlist(data))
+
+
+def playlist_name(location: str) -> str:
+    """A short name: the file name, or the web host when the file name is generic."""
+    location = (location or '').strip()
+    if is_web_address(location):
+        parts = urlsplit(location)
+        stem = posixpath.splitext(posixpath.basename(unquote(parts.path).rstrip('/')))[0]
+        host = parts.hostname or ''
+        if host.startswith('www.'):
+            host = host[4:]
+        return stem if stem.lower() not in _GENERIC_STEMS else (host or 'Playlist')
+    path = location[7:] if location.startswith('file://') else location
+    stem = posixpath.splitext(posixpath.basename(path.replace('\\', '/').rstrip('/')))[0]
+    return stem or 'Playlist'
 
 
 def parse_playlist(text: str) -> Playlist:
@@ -275,6 +322,25 @@ def tvh_split(command: str) -> List[str]:
             if pos < len(chars):
                 pos += 1
     return args
+
+
+def _download(url: str) -> bytes:
+    with requests.Session() as session:
+        configure_session(session, url)
+        try:
+            with session.get(url, timeout=DOWNLOAD_TIMEOUT, stream=True) as response:
+                if response.status_code >= 400:
+                    raise PlaylistError(DOWNLOAD_FAILED)
+                chunks = []
+                size = 0
+                for chunk in response.iter_content(64 * 1024):
+                    size += len(chunk)
+                    if size > MAX_PLAYLIST_BYTES:
+                        raise PlaylistError(TOO_LARGE)
+                    chunks.append(chunk)
+        except requests.RequestException as exc:
+            raise PlaylistError(DOWNLOAD_FAILED) from exc
+    return b''.join(chunks)
 
 
 def _stream_command(entry, ffmpeg, provider, allow_commands):

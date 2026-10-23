@@ -29,3 +29,20 @@ def test_missing_file_uses_defaults(tmp_path):
     assert store.data == default_config()
     store.save()
     assert json.loads((tmp_path / 'missing.conf').read_text())['volume'] == 50
+
+
+def test_playlists_are_saved_and_cleaned(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    path.write_text(json.dumps({'playlists': [
+        {'name': 'ir', 'location': 'http://a/ir.m3u', 'server': 'builtin', 'muxes': {'id:a': 'm1'}},
+        'junk',
+    ]}), encoding='utf-8')
+    store = ConfigStore(path)
+    assert store.data['playlists'] == [{
+        'name': 'ir',
+        'location': 'http://a/ir.m3u',
+        'server': 'builtin',
+        'network_uuid': '',
+        'muxes': {'id:a': 'm1'},
+        'allow_commands': False,
+    }]

@@ -11,15 +11,21 @@ import urllib.request
 import pytest
 
 from tvhplayer.core.builtin_server import find_bundled_binary
-from tvhplayer.core.errors import PlaylistError
-from tvhplayer.core.playlist import parse_playlist, plan_channels
+from tvhplayer.core.errors import PlaylistError, TvhAuthError, TvhConnectionError
+from tvhplayer.core.playlist import SkippedEntry, parse_playlist, plan_channels
 from tvhplayer.core.playlist_sync import (
     NETWORK_CONF,
     PlaylistSource,
+    SyncResult,
+    error_message,
+    ffmpeg_for_server,
+    find_source,
     mux_conf,
     remove_playlist,
+    result_message,
     server_key,
     sync_playlist,
+    unique_name,
 )
 from tvhplayer.core.tvh_admin import TvhAdmin
 
@@ -318,3 +324,41 @@ def test_import_plays_refreshes_and_removes(tvheadend, media):
         assert _wait(lambda: _channels(port) == {})
         tags = [row['name'] for row in _api(port, 'channeltag/grid')['entries']]
         assert not any(name.startswith('*** ') for name in tags)
+
+
+def test_ffmpeg_location_per_server():
+    assert ffmpeg_for_server({'builtin': True}, which=lambda _name: '/app/bin/ffmpeg') == '/app/bin/ffmpeg'
+    with pytest.raises(PlaylistError):
+        ffmpeg_for_server({'builtin': True}, which=lambda _name: None)
+    assert ffmpeg_for_server({'url': 'http://tv.lan:9981'}) == '/usr/bin/ffmpeg'
+
+
+def test_sources_are_found_and_named_per_server():
+    sources = [PlaylistSource('ir', 'http://a/ir.m3u', 'builtin')]
+    assert find_source(sources, ' http://a/ir.m3u ', 'builtin') is sources[0]
+    assert find_source(sources, 'http://a/ir.m3u', 'http://tv.lan') is None
+    assert unique_name(sources, 'ir', 'builtin') == 'ir 2'
+    assert unique_name(sources, 'ir', 'http://tv.lan') == 'ir'
+
+
+def test_result_messages_read_naturally():
+    assert result_message('ir', SyncResult(added=1), True) == 'Added 1 channel from ir.'
+    assert result_message('ir', SyncResult(added=3, removed=2), False) == (
+        'Updated the channels from ir: 3 added, 2 removed.'
+    )
+    assert result_message('ir', SyncResult(updated=4), False) == 'The channels from ir are up to date.'
+    skipped = [SkippedEntry('a', 'x'), SkippedEntry('b', 'y')]
+    assert result_message('ir', SyncResult(added=5, skipped=skipped), True) == (
+        'Added 5 channels from ir. 2 entries could not be added.'
+    )
+    assert result_message('ir', SyncResult(added=2, cancelled=True), True) == (
+        'Import stopped. 2 channels from ir were added.'
+    )
+
+
+def test_error_messages_are_plain():
+    assert 'administrator' in error_message(TvhAuthError('HTTP 403'), 'Home')
+    assert error_message(TvhConnectionError('refused'), 'Home').startswith('Could not reach Home.')
+    assert error_message(PlaylistError('This file is not a TV playlist.'), 'Home') == (
+        'This file is not a TV playlist.'
+    )
