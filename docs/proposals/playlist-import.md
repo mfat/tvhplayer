@@ -65,22 +65,28 @@ Plain-language errors:
 Settings the user never sees:
 - **Connection limit:** 2, enough to watch one channel while recording another.
 - **ffmpeg location:** found automatically for the built-in server; `/usr/bin/ffmpeg` on other servers.
-- **Which entries go through ffmpeg:** decided per entry by the table below.
+- **How streams are received:** always through ffmpeg, as described below.
 
 ## How each entry is received
 
-The app decides per entry. The user is not asked.
+Every entry is received through an ffmpeg command that TVHplayer builds. The user is not asked.
 
-| Entry address | Default | Why |
-| :--- | :--- | :--- |
-| `udp://`, `rtp://` | Direct | Tvheadend reads these natively. |
-| `http(s)://` ending in `.ts`, or with a `video/mp2t` type hint | Direct | Plain MPEG-TS works natively. Headers go into the mux's *Custom HTTP headers*. |
-| `http(s)://` HLS (`.m3u8`) | ffmpeg | Tvheadend's HLS reader fails on malformed master playlists, cannot join separate audio renditions (ZDF), and does not reconnect when a stream drops. Forum threads from 2017 to October 2026 converge on ffmpeg for stalls and short recordings. |
-| `http(s)://` anything else | Direct | Unknown containers are left to Tvheadend. The user can switch the row to ffmpeg. |
-| `rtsp://`, `rtmp://`, DASH `.mpd` | ffmpeg | Tvheadend's README lists only UDP, HTTP, and pipe input (issue 2005). |
-| `pipe://ffmpeg … -i URL …` in the playlist | ffmpeg, rebuilt by the app | Playlists made for Tvheadend, such as kodinerds-iptv, wrap every stream this way. The app takes the input address and any `-headers`, `-user_agent`, or `-referer` from the command and builds its own ffmpeg command. The playlist's other options are dropped, so nothing from the playlist runs as given. |
-| any other `pipe://` command | Asked once | One question before the import: "This playlist wants to run 3 programs on <server>. Only allow this if you trust where the playlist came from." **Allow** or **Skip them**. |
-| `file://` | Skipped | It names a file on whichever machine runs Tvheadend. |
+A single path keeps import fast and makes every channel behave the same:
+
+- **Program number.** The network creates each service without scanning (*Service ID* = 1), and that service only plays a stream whose program number is 1. A test showed a stream with program 1234 delivering no picture. ffmpeg's output always carries program 1 (`-mpegts_service_id 1`), whatever the source used.
+- **Reconnects.** Tvheadend does not reconnect when an HTTP stream drops, so recordings end early without being marked failed. Forum threads from 2017 to October 2026 converge on ffmpeg with reconnect options.
+- **Formats.** Tvheadend's HLS reader fails on malformed master playlists (Telewebion) and cannot join separate audio renditions (ZDF). RTSP, RTMP, and DASH are not Tvheadend inputs at all (issue 2005). ffmpeg reads all of these.
+
+The cost is one ffmpeg process per stream being watched or recorded. Nothing runs while a channel is idle.
+
+| Entry address | What the app does |
+| :--- | :--- |
+| `http(s)://`, `udp://`, `rtp://`, `rtsp://`, `rtmp://`, and other ffmpeg inputs | Builds an ffmpeg command for it. `\|` headers and `#EXTVLCOPT` headers become ffmpeg options. |
+| `pipe://ffmpeg … -i URL …` | Playlists made for Tvheadend, such as kodinerds-iptv, wrap every stream this way. The app takes the input address and any `-headers`, `-user_agent`, or `-referer` from the command and builds its own command. The playlist's other options are dropped, so nothing from the playlist runs as given. |
+| any other `pipe://` command | One question before the import: "This playlist wants to run 3 programs on <server>. Only allow this if you trust where the playlist came from." **Allow** or **Skip them**. An allowed command runs as `/bin/sh -c 'COMMAND \| FFMPEG -i pipe:0 … pipe:1'`, so its output also carries program 1. |
+| `file://` | Skipped. It names a file on whichever machine runs Tvheadend. |
+
+The built-in server always has ffmpeg: the Flatpak builds it, and the deb and rpm depend on it. If the app cannot find it anyway, the import stops with "TVHplayer could not find ffmpeg, which it needs to play imported channels."
 
 ### The ffmpeg command
 
@@ -88,16 +94,16 @@ The app decides per entry. The user is not asked.
 
 ```
 pipe://FFMPEG -nostdin -hide_banner -loglevel error
-  -reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_delay_max 5
+  [-reconnect 1 -reconnect_streamed 1 -reconnect_on_network_error 1 -reconnect_delay_max 5]
   [-user_agent "UA"] [-headers "Referer: R\r\n"]
   -i "URL" -c copy
   -metadata service_name="NAME" -metadata service_provider="PLAYLIST"
-  -f mpegts -mpegts_flags resend_headers pipe:1
+  -mpegts_service_id 1 -f mpegts -mpegts_flags resend_headers pipe:1
 ```
 
 - No `-map 0`. On an HLS master it would copy every variant. ffmpeg's default picks the best video and audio, the same as the user's current Telewebion command.
 - The service name and provider are set inside the stream, as the kodinerds-iptv playlist does.
-- The reconnect options exist in FFmpeg 4.3 and later. The Flatpak builds 4.4.5.
+- The reconnect options are added for `http(s)` inputs only. They exist in FFmpeg 4.3 and later; the Flatpak builds 4.4.5.
 - Tvheadend stored a 759-character command intact in a test.
 
 ## What is written to the server
@@ -120,8 +126,7 @@ One **mux** per included entry:
 
 | Mux field | From the playlist |
 | :--- | :--- |
-| `iptv_url` | address, or the built ffmpeg command |
-| `iptv_hdr` | headers, direct `http(s)` only, as `Key: value` lines |
+| `iptv_url` | the built ffmpeg command |
 | `iptv_sname`, `iptv_muxname` | entry name |
 | `channel_number` | `tvh-chnum`, `tvg-chno`, or `channel-number` |
 | `iptv_icon` | `tvg-logo` |

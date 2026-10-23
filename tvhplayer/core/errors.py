@@ -12,3 +12,7 @@ class TvhAuthError(TvhError):
 
 class TvhProtocolError(TvhError):
     """Malformed HTSP/HTTP payload."""
+
+
+class PlaylistError(Exception):
+    """A playlist could not be read or imported. The message is shown to the user."""
