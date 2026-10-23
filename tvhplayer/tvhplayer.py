@@ -1708,7 +1708,10 @@ class TVHeadendClient(QMainWindow):
         self.config_dir = str(self.config_store.path.parent)
         self.config = self.config_store.data
         print(f"Debug: Config file location: {self.config_file}")
-        print(f"Debug: Current config: {json.dumps(self.config, indent=2)}")
+        print(
+            f"Debug: Config has {len(self.config.get('servers') or [])} servers and "
+            f"{len(self.config.get('playlists') or [])} playlists"
+        )
         print("Debug: Initializing TVHeadendClient")
         
         # Initialize fullscreen state        

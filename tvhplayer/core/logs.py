@@ -132,6 +132,8 @@ def configure_logging(directory=None, capture_output=True) -> Path:
             handler.close()
     root.setLevel(logging.DEBUG)
     root.addHandler(app_handler)
+    # One line per HTTP request would bury the app's own messages.
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
     console = logging.StreamHandler(sys.__stderr__)
     console.setLevel(logging.WARNING)
     console.setFormatter(SanitizingFormatter('%(levelname)s: %(name)s: %(message)s'))
