@@ -22,3 +22,7 @@ __pycache__/
 /macos/vlc-plugins-staging/
 /macos/*.log
 /macos/TVHplayer-*.spec
+
+# Built-in Tvheadend sources and build output for the deb and rpm packages
+/packaging/tvheadend/sources/
+/packaging/tvheadend/work/
