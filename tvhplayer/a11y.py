@@ -64,17 +64,17 @@ def prefers_high_contrast():
 
 
 def describe(widget, name=None, description=""):
-    """Set the accessible name and the longer description, tooltip, and status tip."""
+    """Set the accessible name and the longer description.
+
+    Hover text is separate. A status tip replaces the status bar for as long
+    as the pointer is over the widget, so help text does not belong there.
+    """
     if name:
         widget.setAccessibleName(name)
     if description:
         widget.setAccessibleDescription(description)
-    if description and hasattr(widget, "setStatusTip"):
-        widget.setStatusTip(description)
-    if description and hasattr(widget, "setWhatsThis"):
-        widget.setWhatsThis(description)
-    if description and hasattr(widget, "toolTip") and not widget.toolTip():
-        widget.setToolTip(description)
+        if hasattr(widget, "setWhatsThis"):
+            widget.setWhatsThis(description)
     return widget
 
 
@@ -115,10 +115,10 @@ def announce_label(label, message):
 
 
 def set_item_access(item, name, description=""):
+    """Name and description for assistive technology. Does not add a hover popup."""
     item.setData(Qt.ItemDataRole.AccessibleTextRole, name)
     if description:
         item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, description)
-        item.setToolTip(description)
 
 
 def quality_phrase(percent):

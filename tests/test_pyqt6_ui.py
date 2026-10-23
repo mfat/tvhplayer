@@ -439,7 +439,9 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         assert window.channel_list.item(sport_row, 2).data(
             Qt.ItemDataRole.AccessibleTextRole
         ) == "Playing"
-        assert "Playing." in window.channel_list.item(sport_row, 1).toolTip()
+        assert "Playing." in window.channel_list.item(sport_row, 1).data(
+            Qt.ItemDataRole.AccessibleDescriptionRole
+        )
         assert window.channel_list.item(news_row, 2).text() == ""
         colors = ui.row_emphasis('playing')
         if colors is not None:
@@ -462,7 +464,9 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         app.processEvents()
         assert window.channel_list.item(sport_row, 2).text() == ""
         assert window.channel_list.item(sport_row, 1).background().style() == Qt.BrushStyle.NoBrush
-        assert "Playing." not in window.channel_list.item(sport_row, 1).toolTip()
+        assert "Playing." not in window.channel_list.item(sport_row, 1).data(
+            Qt.ItemDataRole.AccessibleDescriptionRole
+        )
 
         window.play_channel_by_data(news)
         app.processEvents()
@@ -651,7 +655,29 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
 
         assert app.applicationName() == "TVHplayer"
         assert window.play_btn.accessibleName() == "Play"
+        assert window.play_btn.toolTip() == "Play the selected channel (P)"
+        assert window.play_btn.statusTip() == ""
         assert window.stop_btn.accessibleName() == "Stop"
+        assert window.stop_btn.toolTip() == "Stop playback (Ctrl+.)"
+        assert window.stop_btn.statusTip() == ""
+        assert window.start_record_btn.toolTip() == "Record on the server (Ctrl+R)"
+        assert window.start_record_btn.statusTip() == ""
+        assert window.stop_record_btn.toolTip() == "Stop the server recording (Ctrl+E)"
+        assert window.start_local_record_btn.toolTip() == "Record on this computer (Ctrl+Shift+R)"
+        assert window.stop_local_record_btn.toolTip() == "Stop the recording on this computer (Ctrl+Shift+E)"
+        assert window.mute_btn.toolTip() == "Mute (M)"
+        assert window.volume_slider.toolTip() == "Volume"
+        assert window.fullscreen_btn.toolTip() == "Fullscreen (F11)"
+        assert window.fullscreen_btn.statusTip() == ""
+        assert window.video_frame.toolTip() == ""
+        assert window.video_frame.statusTip() == ""
+        assert window.channel_list.toolTip() == ""
+        assert window.channel_list.statusTip() == ""
+        assert window.search_box.toolTip() == ""
+        assert window.search_box.statusTip() == ""
+        assert window.server_combo.statusTip() == ""
+        assert window.status_label.toolTip() == ""
+        assert window.status_label.statusTip() == ""
         assert window.start_record_btn.accessibleName() == "Record on server"
         assert window.stop_record_btn.accessibleName() == "Stop server recording"
         assert window.start_local_record_btn.accessibleName() == "Record locally"

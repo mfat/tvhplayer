@@ -624,6 +624,7 @@ class TasksPanel(QFrame):
             "Reveal in File Manager",
             "Show the selected local recording in the file manager, with the file selected.",
         )
+        self.reveal_btn.setToolTip("Show the file in the file manager")
         self.reveal_btn.clicked.connect(self.reveal_selected)
         self._set_reveal(False)
         action_row = QHBoxLayout()
@@ -965,7 +966,7 @@ class TasksPanel(QFrame):
         self.action_btn.setText(name)
         self.action_btn.setEnabled(enabled)
         describe(self.action_btn, name, description)
-        self.action_btn.setToolTip(description)
+        self.action_btn.setToolTip("")
 
     def _set_reveal(self, enabled):
         self.reveal_btn.setEnabled(enabled)
@@ -1816,20 +1817,17 @@ class TVHeadendClient(QMainWindow):
 
         shortcuts_action = QAction("Keyboard &Shortcuts", self)
         shortcuts_action.setShortcut("F1")
-        shortcuts_action.setStatusTip("Show keyboard shortcuts")
         shortcuts_action.triggered.connect(self.show_keyboard_shortcuts)
         help_menu.addAction(shortcuts_action)
         
         # Add About action to Help menu
         about_action = QAction("&About", self)
-        about_action.setStatusTip("About TVHplayer")
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
         
         # F11 is the menu shortcut. Plain F is handled when it will not interrupt typing.
         self.fullscreen_action = QAction("Fullscreen", self)
         self.fullscreen_action.setShortcut("F11")
-        self.fullscreen_action.setStatusTip("Toggle fullscreen. F11, or F when not typing in the channel list.")
         self.fullscreen_action.setCheckable(True)
         self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(self.fullscreen_action)
@@ -1840,7 +1838,6 @@ class TVHeadendClient(QMainWindow):
         
         # Create actions
         exit_action = QAction("E&xit", self)
-        exit_action.setStatusTip("Quit TVHplayer")
         if sys.platform == "darwin":  # macOS
             exit_action.setShortcut("Cmd+Q")
         else:  # Windows/Linux
@@ -1884,12 +1881,12 @@ class TVHeadendClient(QMainWindow):
                 "QToolButton { font-size: 18px; } "
                 "QToolButton:focus { border: 2px solid palette(highlight); }"
             )
-        self.manage_servers_btn.setToolTip("Manage servers")
         describe(
             self.manage_servers_btn,
             "Manage servers",
             "Add, edit, or remove TVHeadend servers",
         )
+        self.manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(self.manage_servers_btn)
         left_layout.addLayout(server_layout)
         
@@ -1949,7 +1946,6 @@ class TVHeadendClient(QMainWindow):
             "Playback picture. F or F11 toggles fullscreen, Escape leaves fullscreen, "
             "M mutes, P plays, and Ctrl+. stops. Shift+F10 opens the playback menu.",
         )
-        self.video_frame.setToolTip("")
         self.video_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.video_frame.customContextMenuRequested.connect(self.show_video_context_menu)
         self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
@@ -2003,8 +1999,8 @@ class TVHeadendClient(QMainWindow):
         self.play_btn.setIconSize(QSize(48, 48))
         self.play_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
         self.play_btn.clicked.connect(lambda: self.play_channel_by_data(self.selected_channel()))
-        self.play_btn.setToolTip("Play selected channel")
         describe(self.play_btn, "Play", "Play the selected channel. Keyboard: P, or Enter on the channel list.")
+        self.play_btn.setToolTip("Play the selected channel (P)")
         playback_layout.addWidget(self.play_btn)
         
         # Stop button
@@ -2014,8 +2010,8 @@ class TVHeadendClient(QMainWindow):
         self.stop_btn.setIconSize(QSize(48, 48))
         self.stop_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
         self.stop_btn.clicked.connect(self.stop_playback)
-        self.stop_btn.setToolTip("Stop playback")
         describe(self.stop_btn, "Stop", "Stop playback. Keyboard: Ctrl+.")
+        self.stop_btn.setToolTip("Stop playback (Ctrl+.)")
         playback_layout.addWidget(self.stop_btn)
         
         controls_layout.addWidget(playback_frame)
@@ -2036,8 +2032,8 @@ class TVHeadendClient(QMainWindow):
         self.start_record_btn.setIcon(QIcon(f"{self.icons_dir}/record.svg"))
         self.start_record_btn.setIconSize(QSize(48, 48))
         self.start_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        self.start_record_btn.setToolTip("Start Recording")
         describe(self.start_record_btn, "Record on server", "Record the selected channel on the TVHeadend server. Keyboard: Ctrl+R.")
+        self.start_record_btn.setToolTip("Record on the server (Ctrl+R)")
         self.start_record_btn.clicked.connect(self.start_recording)
         record_layout.addWidget(self.start_record_btn)
 
@@ -2047,8 +2043,8 @@ class TVHeadendClient(QMainWindow):
         self.stop_record_btn.setIcon(QIcon(f"{self.icons_dir}/stoprec.svg"))
         self.stop_record_btn.setIconSize(QSize(48, 48))
         self.stop_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        self.stop_record_btn.setToolTip("Stop Recording")
         describe(self.stop_record_btn, "Stop server recording", "Stop the recording on the TVHeadend server. Keyboard: Ctrl+E.")
+        self.stop_record_btn.setToolTip("Stop the server recording (Ctrl+E)")
         self.stop_record_btn.clicked.connect(self.stop_recording)
         record_layout.addWidget(self.stop_record_btn)
         
@@ -2069,12 +2065,12 @@ class TVHeadendClient(QMainWindow):
         self.start_local_record_btn.setIcon(QIcon(f"{self.icons_dir}/reclocal.svg"))
         self.start_local_record_btn.setIconSize(QSize(48, 48))
         self.start_local_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        self.start_local_record_btn.setToolTip("Start Local Recording")
         describe(
             self.start_local_record_btn,
             "Record locally",
             "Save the selected channel on this computer. Keyboard: Ctrl+Shift+R.",
         )
+        self.start_local_record_btn.setToolTip("Record on this computer (Ctrl+Shift+R)")
         self.start_local_record_btn.clicked.connect(
             lambda: self.start_local_recording(self.selected_channel())
         )
@@ -2086,12 +2082,12 @@ class TVHeadendClient(QMainWindow):
         self.stop_local_record_btn.setIcon(QIcon(f"{self.icons_dir}/stopreclocal.svg"))
         self.stop_local_record_btn.setIconSize(QSize(48, 48))
         self.stop_local_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        self.stop_local_record_btn.setToolTip("Stop Local Recording")
         describe(
             self.stop_local_record_btn,
             "Stop local recording",
             "Stop the recording saved on this computer. Keyboard: Ctrl+Shift+E.",
         )
+        self.stop_local_record_btn.setToolTip("Stop the recording on this computer (Ctrl+Shift+E)")
         self.stop_local_record_btn.clicked.connect(self.stop_local_recording)
         local_record_layout.addWidget(self.stop_local_record_btn)
 
@@ -2110,9 +2106,9 @@ class TVHeadendClient(QMainWindow):
         self.mute_btn.setFixedSize(32, 32)  # Remove extra parenthesis
         self.mute_btn.setCheckable(True)  # Make the button checkable
         self.mute_btn.clicked.connect(self.toggle_mute)
-        self.mute_btn.setToolTip("Mute")
         self.mute_btn.setStyleSheet(button_stylesheet("border: none;"))
         describe(self.mute_btn, "Mute", "Turn sound off. Keyboard: M. The button stays pressed while muted.")
+        self.mute_btn.setToolTip("Mute (M)")
 
         
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
@@ -2123,6 +2119,7 @@ class TVHeadendClient(QMainWindow):
         self.volume_slider.setPageStep(10)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         describe(self.volume_slider, "Volume", "Playback volume from 0 to 100. Keyboard: Ctrl+Up and Ctrl+Down.")
+        self.volume_slider.setToolTip("Volume")
         
         # Fullscreen button with icon
         self.fullscreen_btn = QPushButton()
@@ -2131,9 +2128,9 @@ class TVHeadendClient(QMainWindow):
         self.fullscreen_btn.setFixedSize(32, 32)
         self.fullscreen_btn.setCheckable(True)
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        self.fullscreen_btn.setToolTip("Toggle Fullscreen")
         self.fullscreen_btn.setStyleSheet(button_stylesheet("border: none;"))
         describe(self.fullscreen_btn, "Fullscreen", "Fill the screen with the picture. Keyboard: F11 or F. Escape leaves fullscreen.")
+        self.fullscreen_btn.setToolTip("Fullscreen (F11)")
         
         controls_layout.addStretch()  # Add stretch to push widgets to the right
         controls_layout.addWidget(self.mute_btn)
@@ -2835,11 +2832,11 @@ class TVHeadendClient(QMainWindow):
             self.fullscreen_action.blockSignals(False)
         if hasattr(self, 'fullscreen_btn'):
             if self.is_fullscreen:
-                self.fullscreen_btn.setToolTip('Exit Fullscreen')
-                describe(self.fullscreen_btn, 'Exit fullscreen', 'Return to the window. Keyboard: Escape, F11, or F.')
+                self.fullscreen_btn.setToolTip("Exit fullscreen (Esc)")
+                describe(self.fullscreen_btn, "Exit fullscreen", "Return to the window. Keyboard: Escape, F11, or F.")
             else:
-                self.fullscreen_btn.setToolTip('Toggle Fullscreen')
-                describe(self.fullscreen_btn, 'Fullscreen', 'Fill the screen with the picture. Keyboard: F11 or F.')
+                self.fullscreen_btn.setToolTip("Fullscreen (F11)")
+                describe(self.fullscreen_btn, "Fullscreen", "Fill the screen with the picture. Keyboard: F11 or F.")
             self.fullscreen_btn.setChecked(self.is_fullscreen)
         if hasattr(self, 'video_frame'):
             announce(
@@ -3150,16 +3147,16 @@ class TVHeadendClient(QMainWindow):
         
         if not is_muted:  # Switching to muted
             self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/mute.svg"))
-            self.mute_btn.setToolTip("Unmute")
             self.mute_btn.setChecked(True)
             describe(self.mute_btn, "Unmute", "Turn sound on. Keyboard: M. The button stays pressed while muted.")
+            self.mute_btn.setToolTip("Unmute (M)")
             self.statusbar.showMessage("Muted")
             print("Debug: Audio muted")
         else:  # Switching to unmuted
             self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
-            self.mute_btn.setToolTip("Mute")
             self.mute_btn.setChecked(False)
             describe(self.mute_btn, "Mute", "Turn sound off. Keyboard: M. The button stays pressed while muted.")
+            self.mute_btn.setToolTip("Mute (M)")
             self.statusbar.showMessage("Sound on")
             print("Debug: Audio unmuted")
 
@@ -3477,19 +3474,15 @@ class TVHeadendClient(QMainWindow):
             
             # Add menu actions
             play_action = menu.addAction("Play")
-            play_action.setStatusTip("Play this channel")
             play_action.triggered.connect(lambda: self.play_channel_by_data(channel_data))
             record_action = menu.addAction("Record")
-            record_action.setStatusTip("Record this channel on the server")
             record_action.triggered.connect(lambda: self.start_recording())
             local_record_action = menu.addAction("Record Locally")
-            local_record_action.setStatusTip("Save this channel on this computer")
             local_record_action.triggered.connect(
                 lambda: self.start_local_recording(channel_data))
             
             # Add EPG action
             epg_action = menu.addAction("Show EPG")
-            epg_action.setStatusTip("Show the program guide for this channel")
             epg_action.triggered.connect(lambda: self.show_channel_epg(channel_data))
             
             # Show the menu at the cursor position
