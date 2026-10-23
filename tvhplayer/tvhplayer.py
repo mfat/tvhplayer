@@ -178,6 +178,17 @@ class Logger:
     def exception(self, msg):
         self.logger.exception(msg)
 
+def fit_table_columns(table, stretch_columns):
+    """Size short columns to their text and give the leftover window width to stretch_columns."""
+    header = table.horizontalHeader()
+    header.setStretchLastSection(False)
+    header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+    for column in stretch_columns:
+        header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+    table.setWordWrap(False)
+    table.setTextElideMode(Qt.TextElideMode.ElideRight)
+
+
 class DVRStatusDialog(QDialog):
     def __init__(self, backend, parent=None):
         super().__init__(parent)
@@ -211,7 +222,7 @@ class DVRStatusDialog(QDialog):
         self.upcoming_table = QTableWidget()
         self.upcoming_table.setColumnCount(5)  # Added one more column for status
         self.upcoming_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Duration', 'Status'])
-        self.upcoming_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        fit_table_columns(self.upcoming_table, (1,))
         self._prepare_table(self.upcoming_table)
         describe(
             self.upcoming_table,
@@ -224,7 +235,7 @@ class DVRStatusDialog(QDialog):
         self.finished_table = QTableWidget()
         self.finished_table.setColumnCount(4)
         self.finished_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Duration'])
-        self.finished_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        fit_table_columns(self.finished_table, (1,))
         self._prepare_table(self.finished_table)
         describe(self.finished_table, "Finished recordings", "Channel, title, start time, and duration.")
         self.tabs.addTab(self.finished_table, "Finished")
@@ -233,7 +244,7 @@ class DVRStatusDialog(QDialog):
         self.failed_table = QTableWidget()
         self.failed_table.setColumnCount(4)
         self.failed_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Error'])
-        self.failed_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        fit_table_columns(self.failed_table, (1, 3))
         self._prepare_table(self.failed_table)
         describe(self.failed_table, "Failed recordings", "Channel, title, start time, and the error text.")
         self.tabs.addTab(self.failed_table, "Failed")
@@ -815,7 +826,7 @@ class ServerStatusDialog(QDialog):
             'Duration',
             'Type/Status'
         ])
-        self.subscriptions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        fit_table_columns(self.subscriptions_table, (0, 4))
         describe(self.subscriptions_table, "Active streams", "Connections and subscriptions, with type or status in the last column.")
         self.tabs.addTab(self.subscriptions_table, "Active Streams")
         
@@ -829,7 +840,7 @@ class ServerStatusDialog(QDialog):
             'Stream',
             'Weight'
         ])
-        self.signal_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        fit_table_columns(self.signal_table, (0, 3))
         describe(
             self.signal_table,
             "Signal status",

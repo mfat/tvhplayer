@@ -473,6 +473,80 @@ def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
         app.processEvents()
 
 
+def _column_widths_fill_viewport(table):
+    header = table.horizontalHeader()
+    widths = sum(header.sectionSize(column) for column in range(table.columnCount()))
+    return abs(widths - table.viewport().width()) <= 2
+
+
+def test_status_dialogs_fill_window_width(monkeypatch):
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    monkeypatch.setitem(
+        sys.modules,
+        'vlc',
+        types.SimpleNamespace(Instance=lambda *a, **k: None, MediaStats=object, __version__='stub'),
+    )
+    sys.modules.pop('tvhplayer.tvhplayer', None)
+    import tvhplayer.tvhplayer as ui
+    from PyQt6.QtWidgets import QApplication, QHeaderView
+
+    app = QApplication.instance() or QApplication([])
+
+    class Backend:
+        def __init__(self):
+            self.server = types.SimpleNamespace(to_dict=lambda: {
+                "name": "local",
+                "url": "http://127.0.0.1:9981",
+                "protocol": "http",
+            })
+
+        def list_dvr_entries(self):
+            return []
+
+        def get_server_info(self):
+            raise RuntimeError("offline")
+
+        def get_inputs(self):
+            return []
+
+        def get_connections(self):
+            return []
+
+        def get_subscriptions(self):
+            return []
+
+    backend = Backend()
+    dvr = ui.DVRStatusDialog(backend, None)
+    server = ui.ServerStatusDialog(backend, None)
+    dvr.update_timer.stop()
+    server.update_timer.stop()
+    try:
+        for dialog in (dvr, server):
+            dialog.resize(900, 500)
+            dialog.show()
+        app.processEvents()
+
+        assert dvr.upcoming_table.horizontalHeader().sectionResizeMode(1) == QHeaderView.ResizeMode.Stretch
+        assert dvr.finished_table.horizontalHeader().sectionResizeMode(1) == QHeaderView.ResizeMode.Stretch
+        assert dvr.failed_table.horizontalHeader().sectionResizeMode(3) == QHeaderView.ResizeMode.Stretch
+        assert server.subscriptions_table.horizontalHeader().sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
+        assert server.signal_table.horizontalHeader().sectionResizeMode(3) == QHeaderView.ResizeMode.Stretch
+
+        for table in (
+            dvr.upcoming_table,
+            dvr.finished_table,
+            dvr.failed_table,
+            server.subscriptions_table,
+            server.signal_table,
+        ):
+            assert table.viewport().width() > 100
+            assert _column_widths_fill_viewport(table)
+    finally:
+        dvr.close()
+        server.close()
+        app.processEvents()
+
+
 def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
     from PyQt6.QtCore import QEvent, Qt
     from PyQt6.QtGui import QKeyEvent
