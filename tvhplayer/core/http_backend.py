@@ -130,6 +130,17 @@ class HttpBackend(TvhBackend):
             raise TvhError(f'EPG event {event_id} was not found')
         return events[0]
 
+    def load_events(self, event_ids: List[int]) -> List[EpgEvent]:
+        ids = [int(event_id) for event_id in event_ids or []]
+        if not ids:
+            return []
+        data = self._request('POST', 'api/epg/events/load', data={'eventId': json.dumps(ids)})
+        return parse_events(_rows(data))
+
+    def list_channel_services(self) -> List[dict]:
+        params = {'list': 'uuid,channel,dvb_servicetype,encrypted,provider', 'hidemode': 'none'}
+        return [row for row in self._grid('api/mpegts/service/grid', params) if isinstance(row, dict)]
+
     def list_related_events(self, event_id: int) -> List[EpgEvent]:
         return self._epg_list('api/epg/events/related', event_id)
 

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+from .channel_info import NowNext, event_ids_for_channels, match_now_next, next_event_ids
 from .dvr import RecordingFile
 from .models import (
     PROTOCOL_HTSP,
@@ -78,6 +79,40 @@ class TvhBackend(ABC):
         HTTP ``api/epg/events/load``. HTSP ``getEvent``. Raises ``TvhError``
         when the server has no such event.
         """
+
+    @abstractmethod
+    def load_events(self, event_ids: List[int]) -> List[EpgEvent]:
+        """Return several programmes in one request.
+
+        HTTP ``api/epg/events/load`` with ``eventId`` as a JSON list. HTSP
+        sends the same path through ``api``. Unknown ids are left out.
+        """
+
+    def get_now_next(self, channels: List[Channel]) -> Dict[str, NowNext]:
+        """Current and next programme per channel, keyed by ``channel_key``.
+
+        HTSP channels carry ``eventId`` and ``nextEventId``, so one load
+        is enough. Otherwise the grid's ``mode=now`` gives the current
+        programmes and their ``nextEventId`` values are loaded after.
+        """
+        ids = event_ids_for_channels(channels)
+        if ids:
+            events = self.load_events(ids)
+        else:
+            events = self.query_epg(EpgQuery(mode='now', limit=10000))
+            following = next_event_ids(events)
+            if following:
+                events = events + self.load_events(following)
+        return match_now_next(channels, events)
+
+    def list_channel_services(self) -> List[dict]:
+        """Service rows that tell radio, HD, and encrypted channels apart.
+
+        HTTP ``mpegts/service/grid`` with ``channel``, ``dvb_servicetype``,
+        ``encrypted``, and ``provider``. The grid needs admin rights; HTSP
+        sends the same facts with each channel, so it returns nothing.
+        """
+        return []
 
     @abstractmethod
     def list_related_events(self, event_id: int) -> List[EpgEvent]:

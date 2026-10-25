@@ -293,6 +293,12 @@ class HtspBackend(TvhBackend):
             return parse_epg_event(reply)
         raise TvhError(f'EPG event {event_id} was not found')
 
+    def load_events(self, event_ids: List[int]) -> List[EpgEvent]:
+        ids = [int(event_id) for event_id in event_ids or []]
+        if not ids:
+            return []
+        return parse_events(_rows(self._proxy('epg/events/load', {'eventId': ids})))
+
     def list_related_events(self, event_id: int) -> List[EpgEvent]:
         return self._epg_list('epg/events/related', event_id)
 
