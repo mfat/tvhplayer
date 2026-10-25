@@ -1,6 +1,7 @@
 import ast
 import os
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -1413,3 +1414,170 @@ def test_startup_refresh_moves_on_when_a_playlist_reaches_its_stream_test(monkey
         assert [job.source.name for job in started] == ['eng', 'fas', 'ar']
     finally:
         window.close()
+
+
+def _channel_list_window(monkeypatch, tmp_path, backend):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    window.get_backend = lambda: backend
+    window.servers = [{'name': 'local', 'url': 'http://127.0.0.1:9981', 'protocol': 'http'}]
+    window.server_combo.blockSignals(True)
+    window.server_combo.addItem('local')
+    window.server_combo.setCurrentIndex(0)
+    window.server_combo.blockSignals(False)
+    window.logo_loader = ui.LogoLoader(window, cache_dir=tmp_path / 'cache')
+    window.logo_loader.loaded.connect(window._on_logo_loaded)
+    monkeypatch.undo()
+    return app, ui, window
+
+
+class _ExtrasBackend:
+    def __init__(self, now):
+        from tvhplayer.core.channel_info import NowNext
+        from tvhplayer.core.models import Channel, ChannelTag, EpgEvent
+
+        self.news = Channel(uuid='news', name='News', number=1, tag_ids=['t-news'],
+                               raw={'icon_public_url': 'imagecache/1'})
+        self.sport = Channel(uuid='sport', name='Sport', number=2, tag_ids=['t-hd'])
+        self.off = Channel(uuid='off', name='Off', number=3, enabled=False)
+        self.tags = [ChannelTag(uuid='t-news', name='News'), ChannelTag(uuid='t-hd', name='HDTV')]
+        headline = EpgEvent(start=now - 600, stop=now + 600, title='Headlines', channel_uuid='news', event_id=1)
+        weather = EpgEvent(start=now + 600, stop=now + 1200, title='Weather', channel_uuid='news', event_id=2)
+        self.now_next = {'news': NowNext(headline, weather)}
+        self.now_next_calls = 0
+        self.service_calls = 0
+        self.image_requests = []
+
+    def get_channels(self):
+        return [self.news, self.sport, self.off]
+
+    def list_channel_tags(self):
+        return self.tags
+
+    def list_channel_services(self):
+        self.service_calls += 1
+        return [{'channel': ['news'], 'dvb_servicetype': 2, 'encrypted': True}]
+
+    def get_now_next(self, channels):
+        self.now_next_calls += 1
+        return self.now_next
+
+    def image_url(self, reference):
+        self.image_requests.append(reference)
+        return f'http://127.0.0.1:9981/{reference}'
+
+    def stream_url(self, channel):
+        return f'http://tv.example/stream/{channel.uuid}'
+
+
+def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+    from PyQt6.QtGui import QPixmap
+
+    from tvhplayer.core.models import DvrEntry
+
+    now = int(time.time())
+    backend = _ExtrasBackend(now)
+    requested = []
+    app, ui, window = _channel_list_window(monkeypatch, tmp_path, backend)
+    window.logo_loader.request = lambda server, reference, url: requested.append((reference, url))
+    try:
+        table = window.channel_list
+        header = table.horizontalHeader()
+        window.fetch_channels()
+        app.processEvents()
+
+        # Defaults: number, name, now, and status show; disabled channels are left out.
+        assert [table.item(row, ui.COL_NAME).text() for row in range(table.rowCount())] == ['News', 'Sport']
+        assert not header.isSectionHidden(ui.COL_NOW)
+        assert header.isSectionHidden(ui.COL_NEXT) and header.isSectionHidden(ui.COL_TYPE)
+        news_row = _channel_row(table, 'News')
+        now_item = table.item(news_row, ui.COL_NOW)
+        assert now_item.text() == 'Headlines'
+        assert 'min left' in now_item.toolTip()
+        assert abs(now_item.data(ui.PROGRESS_ROLE) - 0.5) < 0.01
+        assert table.item(news_row, ui.COL_NEXT).text().endswith('Weather')
+        assert 'Now: Headlines.' in table.item(news_row, ui.COL_NAME).data(Qt.ItemDataRole.AccessibleDescriptionRole)
+        assert backend.service_calls == 0
+        assert requested == [('imagecache/1', 'http://127.0.0.1:9981/imagecache/1')]
+
+        # A logo that arrives later is drawn next to the name.
+        image = QPixmap(80, 40)
+        image.fill(Qt.GlobalColor.red)
+        data = QByteArray()
+        buffer = QBuffer(data)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        image.save(buffer, 'PNG')
+        window._on_logo_loaded('imagecache/1', bytes(data))
+        assert not table.item(news_row, ui.COL_NAME).icon().isNull()
+
+        # Columns: the menu shows and hides them, and the choice is saved.
+        window._channel_column_actions['type'].setChecked(True)
+        assert not header.isSectionHidden(ui.COL_TYPE)
+        assert backend.service_calls == 1
+        assert table.item(_channel_row(table, 'News'), ui.COL_TYPE).text() == 'Radio, Encrypted'
+        assert table.item(_channel_row(table, 'Sport'), ui.COL_TYPE).text() == 'HD'
+        window._channel_column_actions['now'].setChecked(False)
+        assert header.isSectionHidden(ui.COL_NOW)
+        saved = window.config_store.load()['channel_list']
+        assert saved['columns']['type'] is True and saved['columns']['now'] is False
+
+        # Dragging a column saves the new order.
+        header.moveSection(header.visualIndex(ui.COL_STATUS), 0)
+        assert window.config_store.load()['channel_list']['order'][0] == 'status'
+
+        # Options: progress bar, disabled channels, and the group filter.
+        window._channel_option_actions['now_progress'].setChecked(False)
+        assert table.item(_channel_row(table, 'News'), ui.COL_NOW).data(ui.PROGRESS_ROLE) is None
+        window._channel_option_actions['hide_disabled'].setChecked(False)
+        assert _channel_row(table, 'Off') >= 0
+        assert window.tag_row.isVisibleTo(window)
+        window.tag_combo.setCurrentIndex(window.tag_combo.findData('t-hd'))
+        visible = [table.item(row, ui.COL_NAME).text() for row in range(table.rowCount()) if not table.isRowHidden(row)]
+        assert visible == ['Sport']
+        assert window.config_store.load()['channel_list']['tag'] == 't-hd'
+        window._channel_option_actions['tag_filter'].setChecked(False)
+        assert not window.tag_row.isVisibleTo(window)
+        assert all(not table.isRowHidden(row) for row in range(table.rowCount()))
+
+        # Recording marks come from the tasks pane's DVR read.
+        entry = DvrEntry(uuid='r', title='T', channel_name='Sport', start=now, duration=60,
+                         sched_status='recording', raw={'channel': 'sport'})
+        window.channel_recordings_changed([entry])
+        sport_row = _channel_row(table, 'Sport')
+        assert table.item(sport_row, ui.COL_STATUS).text() == 'Recording'
+        window.play_channel_by_data(backend.sport)
+        assert table.item(_channel_row(table, 'Sport'), ui.COL_STATUS).text() == 'Playing, Recording'
+        window._channel_option_actions['recording_status'].setChecked(False)
+        assert table.item(_channel_row(table, 'Sport'), ui.COL_STATUS).text() == 'Playing'
+
+        # Reset brings the defaults back.
+        window._reset_channel_list_layout()
+        assert header.visualIndex(ui.COL_NUMBER) == 0
+        assert not header.isSectionHidden(ui.COL_NOW) and header.isSectionHidden(ui.COL_TYPE)
+        assert _channel_row(table, 'Off') < 0
+        assert window._channel_option_actions['tag_filter'].isChecked()
+        assert window.config_store.load()['channel_list']['tag'] == ''
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_now_next_is_fetched_again_when_a_programme_ends(monkeypatch, tmp_path):
+    now = int(time.time())
+    backend = _ExtrasBackend(now)
+    app, ui, window = _channel_list_window(monkeypatch, tmp_path, backend)
+    window.logo_loader.request = lambda *args: None
+    try:
+        window.fetch_channels()
+        assert backend.now_next_calls == 1
+        window._tick_now_next()
+        assert backend.now_next_calls == 1
+        backend.now_next['news'].now.stop = now - 1
+        window._now_next_fetched -= 61
+        window._tick_now_next()
+        assert backend.now_next_calls == 2
+        news_row = _channel_row(window.channel_list, 'News')
+        assert window.channel_list.item(news_row, ui.COL_NOW).text() == ''
+    finally:
+        window.close()
+        app.processEvents()

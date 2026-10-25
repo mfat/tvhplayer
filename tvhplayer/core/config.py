@@ -10,6 +10,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from .builtin_server import without_builtin_secrets
+from .channel_info import channel_list_options
 from .models import ServerConfig
 from .playlist_sync import PlaylistSource
 
@@ -28,6 +29,16 @@ def default_config_dir():
     return base / 'tvhplayer'
 
 
+def default_cache_dir():
+    if sys.platform == 'darwin':
+        return Path.home() / 'Library' / 'Caches' / 'TVHplayer'
+    if sys.platform == 'win32':
+        return Path(os.environ.get('LOCALAPPDATA') or Path.home()) / 'TVHplayer' / 'Cache'
+    xdg = os.environ.get('XDG_CACHE_HOME')
+    base = Path(xdg) if xdg else Path.home() / '.cache'
+    return base / 'tvhplayer'
+
+
 def default_config_path():
     return default_config_dir() / 'tvhplayer.conf'
 
@@ -43,6 +54,7 @@ def default_config():
         'builtin_http_port': 0,
         'builtin_htsp_port': 0,
         'playlists': [],
+        'channel_list': channel_list_options(None),
     }
 
 
@@ -73,6 +85,7 @@ def _normalize(data):
         cfg['volume'] = int(cfg.get('volume') or 50)
     except (TypeError, ValueError):
         cfg['volume'] = 50
+    cfg['channel_list'] = channel_list_options(data.get('channel_list'))
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
     for key in ('builtin_http_port', 'builtin_htsp_port'):
         try:

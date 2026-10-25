@@ -47,6 +47,33 @@ try:
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
+    from .core.channel_info import (
+        channel_icon_reference,
+        channel_key,
+        channel_kinds,
+        channel_list_options,
+        channels_in_tag,
+        progress,
+        recording_channel_keys,
+    )
+    from .channel_view import (
+        COL_NAME,
+        COL_NEXT,
+        COL_NOW,
+        COL_NUMBER,
+        COL_STATUS,
+        COL_TYPE,
+        COLUMN_INDEX,
+        COLUMN_KEYS,
+        COLUMN_MENU,
+        COLUMN_TITLES,
+        LOGO_SIZE,
+        PROGRESS_ROLE,
+        LogoLoader,
+        ProgressDelegate,
+        logo_pixmap,
+        padded_pixmap,
+    )
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from core.backend import create_backend
@@ -74,6 +101,33 @@ except ImportError:
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
+    from core.channel_info import (
+        channel_icon_reference,
+        channel_key,
+        channel_kinds,
+        channel_list_options,
+        channels_in_tag,
+        progress,
+        recording_channel_keys,
+    )
+    from channel_view import (
+        COL_NAME,
+        COL_NEXT,
+        COL_NOW,
+        COL_NUMBER,
+        COL_STATUS,
+        COL_TYPE,
+        COLUMN_INDEX,
+        COLUMN_KEYS,
+        COLUMN_MENU,
+        COLUMN_TITLES,
+        LOGO_SIZE,
+        PROGRESS_ROLE,
+        LogoLoader,
+        ProgressDelegate,
+        logo_pixmap,
+        padded_pixmap,
+    )
 try:
     from .a11y import (
         ShortcutHelpDialog,
@@ -115,6 +169,11 @@ import logging
 import platform
 
 CHANNEL_RELOAD_SECONDS = 30
+# Now/next is asked for again this often, and sooner when a programme ends.
+NOW_NEXT_REFRESH_SECONDS = 600
+NOW_NEXT_TICK_MS = 30000
+LOGO_ROLE = Qt.ItemDataRole.UserRole + 2
+CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
 
 
 
@@ -666,6 +725,11 @@ class TasksPanel(QFrame):
             if error is None:
                 self._server_tasks = fetched
                 self._set_error("")
+                host = self._host
+                if host is not None and hasattr(host, 'channel_recordings_changed'):
+                    host.channel_recordings_changed(
+                        [task['entry'] for task in fetched if task.get('entry') is not None]
+                    )
             else:
                 print(f"Debug: Error refreshing tasks: {error}")
                 self._set_error("Couldn't refresh server recordings")
@@ -1871,6 +1935,20 @@ class TVHeadendClient(QMainWindow):
         self._channel_reload_timer.setSingleShot(True)
         self._channel_reload_timer.timeout.connect(self._reload_changed_channels)
         self._last_channel_reload = 0.0
+        # Extras shown beside each channel, keyed by channel_key().
+        self._channels = []
+        self._channel_tags = []
+        self._now_next = {}
+        self._now_next_fetched = 0.0
+        self._channel_kinds = {}
+        self._recording_keys = set()
+        self._logo_pixmaps = {}
+        self._logo_server = None
+        self.logo_loader = LogoLoader(self)
+        self.logo_loader.loaded.connect(self._on_logo_loaded)
+        self._now_next_timer = QTimer(self)
+        self._now_next_timer.timeout.connect(self._tick_now_next)
+        self._now_next_timer.start(NOW_NEXT_TICK_MS)
         self.local_recorder = LocalRecorder()
         self.builtin = None
         if platform_supports_builtin():
@@ -2108,19 +2186,35 @@ class TVHeadendClient(QMainWindow):
         
     
 
-        # Channel list
+        # Channel list. Which columns show, their order, logos, and the group
+        # filter are user settings kept under channel_list in the config.
+        self.channel_options = channel_list_options(self.config.get('channel_list'))
         self.channel_list = QTableWidget()
-        self.channel_list.setColumnCount(3)
-        self.channel_list.setHorizontalHeaderLabels(['Number', 'Channel Name', 'Status'])
+        self.channel_list.setColumnCount(len(COLUMN_TITLES))
+        self.channel_list.setHorizontalHeaderLabels(
+            [COLUMN_TITLES[column] for column in range(len(COLUMN_TITLES))]
+        )
         describe(
             self.channel_list,
             "Channels",
-            "Channel numbers, names, and playing status. Type to jump to a channel. "
+            "Channel numbers, names, what is on now, and playing status. Type to jump to a channel. "
             "Press Enter to play. Press Shift+F10 for more actions.",
         )
-        self.channel_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.channel_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.channel_list.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header = self.channel_list.horizontalHeader()
+        for column in (COL_NUMBER, COL_STATUS, COL_TYPE):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        for column in (COL_NAME, COL_NOW, COL_NEXT):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        header.setSectionsMovable(True)
+        header.sectionMoved.connect(self._channel_columns_moved)
+        header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        header.customContextMenuRequested.connect(self._show_channel_column_menu)
+        header.setToolTip("Drag a column to move it. Right-click to choose columns.")
+        self.channel_list.setWordWrap(False)
+        self.channel_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.channel_list.setIconSize(LOGO_SIZE)
+        self._progress_delegate = ProgressDelegate(self.channel_list)
+        self.channel_list.setItemDelegateForColumn(COL_NOW, self._progress_delegate)
         self.channel_list.verticalHeader().setVisible(False)
         self.channel_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.channel_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -2136,6 +2230,26 @@ class TVHeadendClient(QMainWindow):
         self.channel_list.installEventFilter(self)
         
         left_layout.addWidget(self.channel_list)
+        self._build_channel_list_menu(view_menu)
+
+        # Channel group (Tvheadend channel tag) filter. Built here because the
+        # first channel load runs before the rest of the pane; it sits under
+        # the search box.
+        self.tag_row = QWidget(self.left_pane)
+        tag_layout = QHBoxLayout(self.tag_row)
+        tag_layout.setContentsMargins(0, 0, 0, 5)
+        tag_layout.setSpacing(5)
+        self.tag_combo = QComboBox()
+        self.tag_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.tag_combo.addItem("All channels", "")
+        self.tag_combo.currentIndexChanged.connect(self._on_channel_tag_changed)
+        describe(
+            self.tag_combo,
+            description="Show only the channels in one group. Groups are the channel tags set on the server.",
+        )
+        tag_layout.addWidget(buddy_label("&Group:", self.tag_combo))
+        tag_layout.addWidget(self.tag_combo, 1)
+        self.tag_row.setVisible(False)
         
         # Right pane
         self.right_pane = QFrame()
@@ -2458,6 +2572,9 @@ class TVHeadendClient(QMainWindow):
         # Add margins to search layout
         search_layout.setContentsMargins(0, 5, 0, 5)
         search_layout.setSpacing(5)
+
+        left_layout.addWidget(self.tag_row)
+        self._apply_channel_columns()
         self._apply_tab_order()
         self.tasks_pane.refresh()
 
@@ -2468,6 +2585,7 @@ class TVHeadendClient(QMainWindow):
             self.manage_servers_btn,
             self.channel_list,
             self.search_box,
+            self.tag_combo,
             self.video_frame,
             self.play_btn,
             self.stop_btn,
@@ -2619,51 +2737,73 @@ class TVHeadendClient(QMainWindow):
             return channel
         return None
 
-    def _set_channel_row_playing(self, row, channel, is_playing, colors):
+    def _channel_description(self, channel, is_playing=False, is_recording=False):
+        description = f"Channel {channel.number}, {channel.name}."
+        if is_playing:
+            description += " Playing."
+        if is_recording:
+            description += " Recording."
+        now_next = self._now_next.get(channel_key(channel))
+        if now_next is not None and now_next.now is not None:
+            description += f" Now: {now_next.now.title}."
+        description += " Press Enter to play."
+        return description
+
+    def _set_channel_row_playing(self, row, channel, is_playing, colors, is_recording=False):
         table = self.channel_list
-        status_item = table.item(row, 2)
+        status_item = table.item(row, COL_STATUS)
         if status_item is None:
             status_item = QTableWidgetItem()
-            table.setItem(row, 2, status_item)
-        status = "Playing" if is_playing else ""
+            table.setItem(row, COL_STATUS, status_item)
+        parts = []
+        if is_playing:
+            parts.append("Playing")
+        if is_recording:
+            parts.append("Recording")
+        status = ", ".join(parts)
         if status_item.text() != status:
             status_item.setText(status)
-        if is_playing and channel is not None:
-            set_item_access(status_item, "Playing", f"{channel.name} is playing")
+        if status and channel is not None:
+            set_item_access(status_item, status, f"{channel.name}: {status.lower()}")
         else:
             status_item.setData(Qt.ItemDataRole.AccessibleTextRole, None)
             status_item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, None)
             status_item.setToolTip("")
+        if not is_playing and is_recording:
+            colors = row_emphasis('recording')
+        emphasize = (is_playing or is_recording) and colors is not None
         for col in range(table.columnCount()):
             item = table.item(row, col)
             if item is None:
                 continue
-            if is_playing and colors is not None:
+            if emphasize:
                 item.setBackground(colors[0])
                 item.setForeground(colors[1])
             else:
                 item.setData(Qt.ItemDataRole.BackgroundRole, None)
                 item.setData(Qt.ItemDataRole.ForegroundRole, None)
-        name_item = table.item(row, 1)
+        name_item = table.item(row, COL_NAME)
         if name_item is None or channel is None:
             return
-        description = f"Channel {channel.number}, {channel.name}."
-        if is_playing:
-            description += " Playing."
-        description += " Press Enter to play."
-        set_item_access(name_item, channel.name, description)
+        set_item_access(
+            name_item,
+            channel.name,
+            self._channel_description(channel, is_playing, is_recording),
+        )
 
     def _mark_playing_channel(self, scroll=False):
         """Highlight the channel that is on, and write Playing in its status cell.
 
         Selection can move to another row. The playing row keeps its own color
-        and status so the list still shows what is on.
+        and status so the list still shows what is on. Channels the server is
+        recording say so too, unless the user turned that off.
         """
         table = getattr(self, 'channel_list', None)
         if table is None:
             return
         playing = self._playing_channel()
         colors = row_emphasis('playing' if playing is not None else None)
+        recording = self._recording_keys if self.channel_options['recording_status'] else set()
         sorting = table.isSortingEnabled()
         table.setSortingEnabled(False)
         playing_item = None
@@ -2671,14 +2811,415 @@ class TVHeadendClient(QMainWindow):
             for row in range(table.rowCount()):
                 channel = self.channel_from_row(row)
                 is_playing = playing is not None and self._channels_match(channel, playing)
-                self._set_channel_row_playing(row, channel, is_playing, colors)
+                is_recording = channel is not None and channel_key(channel) in recording
+                self._set_channel_row_playing(row, channel, is_playing, colors, is_recording)
                 if is_playing:
-                    playing_item = table.item(row, 1)
+                    playing_item = table.item(row, COL_NAME)
         finally:
             table.setSortingEnabled(sorting)
         if scroll and playing_item is not None:
             table.scrollToItem(playing_item)
             table.setCurrentItem(playing_item)
+
+    def _visible_channel_column(self, key):
+        return bool(self.channel_options['columns'].get(key))
+
+    def _wants_now_next(self):
+        return self._visible_channel_column('now') or self._visible_channel_column('next')
+
+    def _load_channel_extras(self, backend):
+        """Tags, channel kinds, and now/next for the channels just fetched.
+
+        Each one is optional. A server that refuses one (the service grid
+        needs admin rights) leaves that part of the list empty.
+        """
+        try:
+            self._channel_tags = [tag for tag in backend.list_channel_tags() if tag.enabled]
+        except Exception as e:
+            print(f"Debug: Could not load channel tags: {e}")
+            self._channel_tags = []
+        self._load_channel_kinds(backend)
+        self._fetch_now_next(backend)
+        self._recording_keys = recording_channel_keys(self._channels, getattr(self, '_dvr_entries', []))
+
+    def _load_channel_kinds(self, backend):
+        services = []
+        if self._visible_channel_column('type'):
+            try:
+                services = backend.list_channel_services()
+            except Exception as e:
+                print(f"Debug: Could not load channel services: {e}")
+        self._channel_kinds = channel_kinds(self._channels, services, self._channel_tags)
+
+    def _fetch_now_next(self, backend):
+        if not self._wants_now_next() or not self._channels:
+            self._now_next = {}
+            return
+        try:
+            self._now_next = backend.get_now_next(self._channels)
+        except Exception as e:
+            print(f"Debug: Could not load now and next: {e}")
+        self._now_next_fetched = time.monotonic()
+
+    def _tick_now_next(self):
+        """Move the progress bars on, and fetch now/next again when a programme ends."""
+        if not self._channels or not self._wants_now_next():
+            return
+        now = int(time.time())
+        since = time.monotonic() - self._now_next_fetched
+        ended = any(
+            entry.now is not None and entry.now.stop and entry.now.stop <= now
+            for entry in self._now_next.values()
+        )
+        if since >= NOW_NEXT_REFRESH_SECONDS or (ended and since >= 60):
+            try:
+                if self.current_server() and self._server_requests_ready():
+                    self._fetch_now_next(self.get_backend())
+            except Exception as e:
+                print(f"Debug: Could not refresh now and next: {e}")
+        self._update_channel_extras()
+
+    def _row_key(self, row):
+        item = self.channel_list.item(row, COL_NAME)
+        return item.data(CHANNEL_KEY_ROLE) if item is not None else None
+
+    def _fill_channel_rows(self):
+        """Rebuild the table from the fetched channels and the current settings."""
+        table = self.channel_list
+        options = self.channel_options
+        shown = self._channels
+        if options['hide_disabled']:
+            shown = [channel for channel in shown if channel.enabled]
+        backend = None
+        # Blank space keeps names lined up, but only when some channel has a logo.
+        logos = options['logos'] and any(channel_icon_reference(channel) for channel in shown)
+        table.setSortingEnabled(False)
+        table.setRowCount(0)
+        for channel in shown:
+            row = table.rowCount()
+            table.insertRow(row)
+            number_item = QTableWidgetItem()
+            number_item.setData(Qt.ItemDataRole.DisplayRole, channel.number)
+            set_item_access(number_item, f"Channel {channel.number}", "Channel number")
+            table.setItem(row, COL_NUMBER, number_item)
+            name_item = QTableWidgetItem(channel.name)
+            name_item.setData(Qt.ItemDataRole.UserRole, channel.to_raw())
+            name_item.setData(CHANNEL_KEY_ROLE, channel_key(channel))
+            set_item_access(name_item, channel.name, self._channel_description(channel))
+            if logos:
+                reference = channel_icon_reference(channel)
+                name_item.setData(LOGO_ROLE, reference)
+                if reference and backend is None:
+                    backend = self._logo_backend()
+                pixmap = self._logo_for(reference, backend) if reference else None
+                name_item.setIcon(QIcon(pixmap if pixmap is not None else padded_pixmap()))
+            table.setItem(row, COL_NAME, name_item)
+            for column in (COL_STATUS, COL_NOW, COL_NEXT, COL_TYPE):
+                table.setItem(row, column, QTableWidgetItem(""))
+        self._update_channel_extras(sort=False)
+        table.setSortingEnabled(True)
+        self._apply_channel_filter()
+
+    def _update_channel_extras(self, sort=True):
+        """Write now, next, and type into each row from what was last fetched."""
+        table = self.channel_list
+        now = int(time.time())
+        show_progress = self.channel_options['now_progress']
+        sorting = table.isSortingEnabled()
+        table.setSortingEnabled(False)
+        try:
+            for row in range(table.rowCount()):
+                key = self._row_key(row)
+                now_next = self._now_next.get(key)
+                current = now_next.now if now_next is not None else None
+                following = now_next.next if now_next is not None else None
+                now_item = table.item(row, COL_NOW)
+                if now_item is not None:
+                    if current is not None and current.stop and current.stop <= now:
+                        current = None
+                    self._set_programme_cell(now_item, current, now, show_progress)
+                next_item = table.item(row, COL_NEXT)
+                if next_item is not None:
+                    self._set_programme_cell(next_item, following, now, False, with_start=True)
+                type_item = table.item(row, COL_TYPE)
+                if type_item is not None:
+                    kind = self._channel_kinds.get(key)
+                    label = kind.label() if kind is not None else ""
+                    if type_item.text() != label:
+                        type_item.setText(label)
+                    type_item.setToolTip(f"Provider: {kind.provider}" if kind is not None and kind.provider else "")
+        finally:
+            table.setSortingEnabled(sorting and sort)
+        table.viewport().update()
+
+    def _set_programme_cell(self, item, event, now, show_progress, with_start=False):
+        if event is None:
+            item.setText("")
+            item.setToolTip("")
+            item.setData(PROGRESS_ROLE, None)
+            item.setData(Qt.ItemDataRole.AccessibleTextRole, None)
+            return
+        start = datetime.fromtimestamp(event.start).strftime('%H:%M') if event.start else ""
+        stop = datetime.fromtimestamp(event.stop).strftime('%H:%M') if event.stop else ""
+        text = f"{start} {event.title}" if with_start and start else event.title
+        if item.text() != text:
+            item.setText(text)
+        lines = [event.title]
+        if event.subtitle:
+            lines.append(event.subtitle)
+        when = f"{start}–{stop}" if start and stop else start
+        if not with_start and event.stop and event.stop > now:
+            minutes = max(1, (event.stop - now + 59) // 60)
+            when = f"{when}, {minutes} min left" if when else f"{minutes} min left"
+        if when:
+            lines.append(when)
+        if event.summary and event.summary != event.subtitle:
+            lines.append(event.summary)
+        item.setToolTip("\n".join(lines))
+        item.setData(Qt.ItemDataRole.AccessibleTextRole, ", ".join(lines[:3]))
+        item.setData(PROGRESS_ROLE, progress(event, now) if show_progress else None)
+
+    def _logo_backend(self):
+        try:
+            if self.current_server() and self._server_requests_ready():
+                return self.get_backend()
+        except Exception as e:
+            print(f"Debug: Could not reach the server for logos: {e}")
+        return None
+
+    def _logo_for(self, reference, backend):
+        """Pixmap for a logo reference, or None while it loads in the background."""
+        pixmap = self._logo_pixmaps.get(reference)
+        if pixmap is not None:
+            return pixmap
+        server = self.current_server() or {}
+        pixmap = logo_pixmap(self.logo_loader.cached(server.get('url') or '', reference))
+        if pixmap is not None:
+            self._logo_pixmaps[reference] = pixmap
+            return pixmap
+        if backend is not None:
+            try:
+                url = backend.image_url(reference)
+            except Exception as e:
+                print(f"Debug: No URL for logo {reference}: {e}")
+                url = ''
+            if url.startswith(('http://', 'https://')):
+                self.logo_loader.request(server, reference, url)
+        return None
+
+    def _on_logo_loaded(self, reference, data):
+        pixmap = logo_pixmap(data)
+        if pixmap is None:
+            return
+        self._logo_pixmaps[reference] = pixmap
+        if not self.channel_options['logos']:
+            return
+        icon = QIcon(pixmap)
+        table = self.channel_list
+        for row in range(table.rowCount()):
+            item = table.item(row, COL_NAME)
+            if item is not None and item.data(LOGO_ROLE) == reference:
+                item.setIcon(icon)
+
+    def channel_recordings_changed(self, entries):
+        """The tasks pane read the server's recordings; mark channels being recorded."""
+        self._dvr_entries = list(entries or [])
+        keys = recording_channel_keys(self._channels, self._dvr_entries)
+        if keys != self._recording_keys:
+            self._recording_keys = keys
+            self._mark_playing_channel()
+
+    def _selected_channel_tag(self):
+        if not self.channel_options['tag_filter']:
+            return None
+        uuid = self.tag_combo.currentData() or ''
+        if not uuid:
+            return None
+        for tag in self._channel_tags:
+            if tag.uuid == uuid:
+                return tag
+        return None
+
+    def _refresh_tag_combo(self):
+        combo = self.tag_combo
+        wanted = self.channel_options['tag']
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("All channels", "")
+            for tag in self._channel_tags:
+                count = len(channels_in_tag(self._channels, tag))
+                if count:
+                    combo.addItem(f"{tag.name or 'Unnamed'} ({count})", tag.uuid)
+            index = combo.findData(wanted) if wanted else 0
+            combo.setCurrentIndex(max(index, 0))
+        finally:
+            combo.blockSignals(False)
+        self.tag_row.setVisible(self.channel_options['tag_filter'] and combo.count() > 1)
+
+    def _on_channel_tag_changed(self, index):
+        self.channel_options['tag'] = self.tag_combo.itemData(index) or ''
+        self._save_channel_options()
+        self._apply_channel_filter()
+
+    def filter_channels(self, search_text):
+        """Filter channel list based on search text"""
+        self._apply_channel_filter()
+
+    def _apply_channel_filter(self):
+        """Hide rows that miss the search text or the selected group."""
+        table = self.channel_list
+        search_text = self.search_box.text().lower() if hasattr(self, 'search_box') else ""
+        tag = self._selected_channel_tag()
+        members = None
+        if tag is not None:
+            members = {channel_key(channel) for channel in channels_in_tag(self._channels, tag)}
+        for row in range(table.rowCount()):
+            item = table.item(row, COL_NAME)
+            number_item = table.item(row, COL_NUMBER)
+            if item is None:
+                continue
+            channel_name = item.text().lower()
+            number = number_item.text().lower() if number_item else ""
+            hidden = search_text not in channel_name and search_text not in number
+            if members is not None and item.data(CHANNEL_KEY_ROLE) not in members:
+                hidden = True
+            table.setRowHidden(row, hidden)
+
+    def _build_channel_list_menu(self, view_menu):
+        """View > Channel List: columns, logos, progress, recording marks, groups."""
+        menu = view_menu.addMenu("&Channel List")
+        menu.setToolTipsVisible(True)
+        self.channel_columns_menu = menu.addMenu("C&olumns")
+        self.channel_columns_menu.setAccessibleName("Channel list columns")
+        self._channel_column_actions = {}
+        for key, label in COLUMN_MENU:
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(self._visible_channel_column(key))
+            action.toggled.connect(lambda checked, key=key: self._set_channel_column(key, checked))
+            self.channel_columns_menu.addAction(action)
+            self._channel_column_actions[key] = action
+        menu.addSeparator()
+        self._channel_option_actions = {}
+        for key, label, tip in (
+            ('logos', "Channel &Logos", "Show each channel's logo next to its name"),
+            ('now_progress', "&Progress Bar Under Now Playing", "Show how far the current programme has got"),
+            ('recording_status', "Mark &Recording Channels", "Show Recording on channels the server is recording"),
+            ('tag_filter', "&Group Filter", "Show a list for picking one channel group"),
+            ('hide_disabled', "&Hide Disabled Channels", "Leave out channels that are turned off on the server"),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(bool(self.channel_options[key]))
+            action.setToolTip(tip)
+            action.setStatusTip(tip)
+            action.toggled.connect(lambda checked, key=key: self._set_channel_option(key, checked))
+            menu.addAction(action)
+            self._channel_option_actions[key] = action
+        menu.addSeparator()
+        reset = menu.addAction("Reset Channel List &Layout")
+        reset.setStatusTip("Bring back the default columns, column order, and channel list options")
+        reset.triggered.connect(self._reset_channel_list_layout)
+
+    def _show_channel_column_menu(self, position):
+        header = self.channel_list.horizontalHeader()
+        self.channel_columns_menu.exec(header.mapToGlobal(position))
+
+    def _save_channel_options(self):
+        self.config['channel_list'] = channel_list_options(self.channel_options)
+        self.save_config()
+
+    def _apply_channel_columns(self):
+        """Show the chosen columns in the chosen order."""
+        header = self.channel_list.horizontalHeader()
+        header.blockSignals(True)
+        try:
+            for position, key in enumerate(self.channel_options['order']):
+                logical = COLUMN_INDEX[key]
+                current = header.visualIndex(logical)
+                if current != position:
+                    header.moveSection(current, position)
+            for key, visible in self.channel_options['columns'].items():
+                header.setSectionHidden(COLUMN_INDEX[key], not visible)
+        finally:
+            header.blockSignals(False)
+        self._progress_delegate.enabled = self.channel_options['now_progress']
+
+    def _channel_columns_moved(self, logical, old_visual, new_visual):
+        header = self.channel_list.horizontalHeader()
+        self.channel_options['order'] = [
+            COLUMN_KEYS[header.logicalIndex(visual)] for visual in range(header.count())
+        ]
+        self._save_channel_options()
+
+    def _set_channel_column(self, key, visible):
+        had_now_next = self._wants_now_next()
+        self.channel_options['columns'][key] = bool(visible)
+        self._save_channel_options()
+        self._apply_channel_columns()
+        if not visible or not self._channels:
+            return
+        backend = self._logo_backend()
+        if backend is None:
+            return
+        if key == 'type':
+            self._load_channel_kinds(backend)
+        elif key in ('now', 'next') and not had_now_next:
+            self._fetch_now_next(backend)
+        self._update_channel_extras()
+        self._mark_playing_channel()
+
+    def _set_channel_option(self, key, value):
+        self.channel_options[key] = bool(value)
+        self._save_channel_options()
+        if key in ('logos', 'hide_disabled'):
+            self._reload_channel_rows()
+        elif key == 'now_progress':
+            self._progress_delegate.enabled = bool(value)
+            self._update_channel_extras()
+        elif key == 'recording_status':
+            self._mark_playing_channel()
+        elif key == 'tag_filter':
+            self.tag_row.setVisible(bool(value) and self.tag_combo.count() > 1)
+            self._apply_channel_filter()
+
+    def _reload_channel_rows(self):
+        """Rebuild the rows from fetched data, keeping the selection and scroll place."""
+        table = self.channel_list
+        selected = self.channel_from_row(table.currentRow())
+        scroll = table.verticalScrollBar().value()
+        self._fill_channel_rows()
+        self._mark_playing_channel()
+        if selected is not None:
+            for row in range(table.rowCount()):
+                if self._channels_match(self.channel_from_row(row), selected):
+                    table.setCurrentCell(row, COL_NAME)
+                    break
+        table.verticalScrollBar().setValue(scroll)
+
+    def _reset_channel_list_layout(self):
+        had_type = self._visible_channel_column('type')
+        had_now_next = self._wants_now_next()
+        self.channel_options = channel_list_options(None)
+        for key, action in self._channel_column_actions.items():
+            action.blockSignals(True)
+            action.setChecked(self._visible_channel_column(key))
+            action.blockSignals(False)
+        for key, action in self._channel_option_actions.items():
+            action.blockSignals(True)
+            action.setChecked(bool(self.channel_options[key]))
+            action.blockSignals(False)
+        self._save_channel_options()
+        self._apply_channel_columns()
+        backend = self._logo_backend() if self._channels else None
+        if backend is not None:
+            if self._visible_channel_column('type') and not had_type:
+                self._load_channel_kinds(backend)
+            if self._wants_now_next() and not had_now_next:
+                self._fetch_now_next(backend)
+        self._refresh_tag_combo()
+        self._reload_channel_rows()
 
     def fetch_channels(self):
         """Fetch channel list from current TVHeadend server"""
@@ -2705,26 +3246,15 @@ class TVHeadendClient(QMainWindow):
                 return
             print(f"Debug: Fetching channels from server: {server['url']}")
             self.statusbar.showMessage("Connecting to server...")
-            channels = self.get_backend().get_channels()
-            self.channel_list.setSortingEnabled(False)
-            self.channel_list.setRowCount(0)
-            for channel in channels:
-                row = self.channel_list.rowCount()
-                self.channel_list.insertRow(row)
-                number_item = QTableWidgetItem()
-                number_item.setData(Qt.ItemDataRole.DisplayRole, channel.number)
-                set_item_access(number_item, f"Channel {channel.number}", "Channel number")
-                self.channel_list.setItem(row, 0, number_item)
-                name_item = QTableWidgetItem(channel.name)
-                name_item.setData(Qt.ItemDataRole.UserRole, channel.to_raw())
-                set_item_access(
-                    name_item,
-                    channel.name,
-                    f"Channel {channel.number}, {channel.name}. Press Enter to play.",
-                )
-                self.channel_list.setItem(row, 1, name_item)
-                self.channel_list.setItem(row, 2, QTableWidgetItem(""))
-            self.channel_list.setSortingEnabled(True)
+            backend = self.get_backend()
+            if server.get('url') != self._logo_server:
+                self.logo_loader.forget()
+                self._logo_pixmaps.clear()
+                self._logo_server = server.get('url')
+            self._channels = backend.get_channels()
+            self._load_channel_extras(backend)
+            self._refresh_tag_combo()
+            self._fill_channel_rows()
             self._mark_playing_channel(scroll=True)
             self.statusbar.showMessage("Channels loaded successfully")
         except Exception as e:
@@ -2746,7 +3276,7 @@ class TVHeadendClient(QMainWindow):
             else:
                 print("Debug: Connection attempt aborted by user")
                 self.statusbar.showMessage("Connection aborted")
-                self.channel_list.clear()
+                self.channel_list.setRowCount(0)
         
 
     def start_recording(self):
@@ -3300,6 +3830,8 @@ class TVHeadendClient(QMainWindow):
             self.save_config()
                 
             self.close_backend()
+            self._dvr_entries = []
+            self._recording_keys = set()
             self.fetch_channels()
             pane = getattr(self, 'tasks_pane', None)
             if pane is not None:
@@ -3773,6 +4305,8 @@ class TVHeadendClient(QMainWindow):
             if not job.shutdown(10000):
                 print("Debug: A playlist refresh did not stop in time")
         self.local_recorder.stop()
+        self._now_next_timer.stop()
+        self.logo_loader.shutdown()
         self.close_backend()
         if getattr(self, 'player', None) is not None:
             self.player.close()
@@ -4149,21 +4683,6 @@ class TVHeadendClient(QMainWindow):
         except Exception as e:
             print(f"Debug: Error showing server status: {str(e)}")
             self.statusbar.showMessage("Error showing server status")
-
-    def filter_channels(self, search_text):
-        """Filter channel list based on search text"""
-        search_text = search_text.lower()
-        for row in range(self.channel_list.rowCount()):
-            item = self.channel_list.item(row, 1)  # Get name column item
-            number_item = self.channel_list.item(row, 0)
-            if item:
-                channel_name = item.text().lower()
-                number = number_item.text().lower() if number_item else ""
-                self.channel_list.setRowHidden(
-                    row,
-                    search_text not in channel_name and search_text not in number,
-                )
-
 
 
 

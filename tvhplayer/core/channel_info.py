@@ -14,11 +14,14 @@ from .models import Channel, ChannelTag, DvrEntry, EpgEvent, _optional_int
 
 # Columns the user can show or hide. Name is always shown.
 COLUMN_NUMBER = 'number'
+COLUMN_NAME = 'name'
 COLUMN_NOW = 'now'
 COLUMN_NEXT = 'next'
 COLUMN_TYPE = 'type'
 COLUMN_STATUS = 'status'
 OPTIONAL_COLUMNS = (COLUMN_NUMBER, COLUMN_NOW, COLUMN_NEXT, COLUMN_TYPE, COLUMN_STATUS)
+# Left-to-right order the list starts with. The user can drag columns around.
+DEFAULT_ORDER = (COLUMN_NUMBER, COLUMN_NAME, COLUMN_NOW, COLUMN_NEXT, COLUMN_TYPE, COLUMN_STATUS)
 
 CHANNEL_LIST_DEFAULTS = {
     'columns': {
@@ -34,7 +37,7 @@ CHANNEL_LIST_DEFAULTS = {
     'tag_filter': True,
     'hide_disabled': True,
     'tag': '',
-    'header_state': '',
+    'order': list(DEFAULT_ORDER),
 }
 
 # DVB service_type values from the Tvheadend MPEGts API page.
@@ -55,7 +58,7 @@ _TAG_KINDS = {'radio': KIND_RADIO, 'sdtv': KIND_SD, 'hdtv': KIND_HD, 'uhdtv': KI
 def channel_list_options(raw) -> dict:
     """Return the ``channel_list`` setting with every key present."""
     options = {
-        key: (dict(value) if isinstance(value, dict) else value)
+        key: (type(value)(value) if isinstance(value, (dict, list)) else value)
         for key, value in CHANNEL_LIST_DEFAULTS.items()
     }
     if not isinstance(raw, dict):
@@ -68,9 +71,13 @@ def channel_list_options(raw) -> dict:
     for key in ('logos', 'now_progress', 'recording_status', 'tag_filter', 'hide_disabled'):
         if key in raw:
             options[key] = bool(raw[key])
-    for key in ('tag', 'header_state'):
-        if isinstance(raw.get(key), str):
-            options[key] = raw[key]
+    if isinstance(raw.get('tag'), str):
+        options['tag'] = raw['tag']
+    order = raw.get('order')
+    if isinstance(order, list):
+        known = [key for key in order if key in DEFAULT_ORDER]
+        known = list(dict.fromkeys(known))
+        options['order'] = known + [key for key in DEFAULT_ORDER if key not in known]
     return options
 
 

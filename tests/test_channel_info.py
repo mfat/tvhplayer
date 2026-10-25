@@ -36,7 +36,9 @@ def test_options_fill_missing_keys_and_ignore_bad_values():
         'columns': {'next': True, 'number': 0, 'bogus': True},
         'logos': False,
         'tag': 7,
+        'order': ['status', 'name', 'status', 'nonsense'],
     })
+    assert options['order'] == ['status', 'name', 'number', 'now', 'next', 'type']
     assert options['columns']['next'] is True
     assert options['columns']['number'] is False
     assert 'bogus' not in options['columns']
@@ -44,7 +46,9 @@ def test_options_fill_missing_keys_and_ignore_bad_values():
     assert options['tag'] == ''
     # The defaults are copied, not shared.
     options['columns']['now'] = False
+    options['order'].clear()
     assert CHANNEL_LIST_DEFAULTS['columns']['now'] is True
+    assert CHANNEL_LIST_DEFAULTS['order']
 
 
 def test_icon_prefers_the_imagecache_url_and_skips_server_files():

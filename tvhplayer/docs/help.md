@@ -37,6 +37,17 @@ To connect TVHPlayer to your TVHeadend server:
 
 Press the play button or double-click a channel on the channel list to start playback.
 
+### Customizing the channel list
+
+Besides the channel name, the list can show the channel number, the program on now (with a bar showing how far it has got), the program on next, the channel type (Radio, SD, HD, UHD, Encrypted), and a status column that says when a channel is playing or recording.
+
+- To choose columns, right-click the column headings, or choose **View → Channel List → Columns**.
+- To move a column, drag its heading.
+- **View → Channel List** also turns on or off channel logos, the progress bar, recording marks, the **Group** list (the channel tags set on your server), and hiding channels that are turned off on the server.
+- **Reset Channel List Layout** brings back the defaults.
+
+Your choices are saved and used the next time TVHplayer starts. The program and type columns only fill in when your server has guide data and service information for the channels. Some servers only share the channel type with admin users.
+
 ### Adding channels from a playlist
 
 You can add internet TV channels from an M3U playlist.
