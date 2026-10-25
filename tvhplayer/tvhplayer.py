@@ -8,10 +8,13 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
-from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices
+from PyQt6.QtGui import (
+    QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
+    QFont, QFontDatabase, QFontMetrics, QKeySequence,
+)
 import json
 # Replace this line:
 #from . import resources_rc
@@ -1182,149 +1185,682 @@ class RecordingDurationDialog(QDialog):
         minutes = self.minutes_spin.value()
         return (hours * 3600) + (minutes * 60)
 
+SERVER_STATUS_ROLE = Qt.ItemDataRole.UserRole + 1
+URL_HINT = "Include http:// or https:// and the port."
+UNTITLED_SERVER = "Untitled server"
+# Status dot colours. The status is always spelled out too.
+STATUS_CONNECTED = '#27ae60'
+STATUS_UNREACHABLE = '#da4453'
+STATUS_INVALID = '#f67400'
+STATUS_TESTING = '#3daee9'
+STATUS_UNKNOWN = '#bdc3c7'
+STATUS_STOPPED = '#7f8c8d'
+POSITIVE_TEXT = '#27ae60'
+NEGATIVE_TEXT = '#da4453'
+
+
+def validate_server_url(url):
+    """What is wrong with a server address, or '' when it looks usable."""
+    if not url:
+        return "Enter the server address"
+    if url.startswith('http://'):
+        rest = url[7:]
+    elif url.startswith('https://'):
+        rest = url[8:]
+    else:
+        return "Must start with http:// or https://"
+    host = rest.split('/', 1)[0]
+    if ':' in host:
+        host, port = host.split(':', 1)
+        if not (port.isascii() and port.isdigit()):
+            return "Invalid port number"
+        if not 1 <= int(port) <= 65535:
+            return "Port must be between 1 and 65535"
+    if not host:
+        return "Enter a host name or IP address"
+    if all(c in '0123456789.' for c in host):
+        parts = host.split('.')
+        if len(parts) != 4 or not all(parts):
+            return "Invalid IP address format"
+        if any(int(part) > 255 for part in parts):
+            return "IP numbers must be between 0 and 255"
+    return ""
+
+
+def status_dot(color, size=10):
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawEllipse(QRectF(1, 1, size - 2, size - 2))
+    painter.end()
+    return pixmap
+
+
+def _smaller_font(font):
+    small = QFont(font)
+    if small.pointSizeF() > 0:
+        small.setPointSizeF(max(small.pointSizeF() - 1, 6))
+    elif small.pixelSize() > 0:
+        small.setPixelSize(max(small.pixelSize() - 1, 8))
+    return small
+
+
+def _text_color(label, color):
+    """Colour a label's text, or use the style's own colour."""
+    label.setStyleSheet(f"color: {color};" if color and not prefers_high_contrast() else "")
+
+
+class ServerListDelegate(QStyledItemDelegate):
+    """The server name, with a smaller status line under it."""
+
+    PADDING = 10
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        height = (
+            QFontMetrics(option.font).height()
+            + QFontMetrics(_smaller_font(option.font)).height()
+            + self.PADDING
+        )
+        return QSize(size.width(), max(size.height(), height))
+
+    def paint(self, painter, option, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        name = opt.text
+        status = index.data(SERVER_STATUS_ROLE) or ''
+        widget = opt.widget
+        style = widget.style() if widget is not None else QApplication.style()
+        opt.text = ''
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+        opt.text = name
+        rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, widget)
+        rect = rect.adjusted(2, 0, -2, 0)
+        palette = opt.palette
+        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        main = palette.highlightedText().color() if selected else palette.text().color()
+        dim = main if selected or prefers_high_contrast() else palette.placeholderText().color()
+        small = _smaller_font(opt.font)
+        name_metrics = QFontMetrics(opt.font)
+        status_metrics = QFontMetrics(small)
+        top = rect.top() + (rect.height() - name_metrics.height() - status_metrics.height()) // 2
+        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        painter.save()
+        painter.setFont(opt.font)
+        painter.setPen(main)
+        painter.drawText(
+            QRect(rect.left(), top, rect.width(), name_metrics.height()),
+            align,
+            name_metrics.elidedText(name, Qt.TextElideMode.ElideRight, rect.width()),
+        )
+        painter.setFont(small)
+        painter.setPen(dim)
+        painter.drawText(
+            QRect(rect.left(), top + name_metrics.height(), rect.width(), status_metrics.height()),
+            align,
+            status_metrics.elidedText(status, Qt.TextElideMode.ElideRight, rect.width()),
+        )
+        painter.restore()
+
+
+class ConnectionTest(QObject):
+    """Try to reach one server off the UI thread."""
+
+    # token, ok, milliseconds, error text
+    done = pyqtSignal(int, bool, int, str)
+
+    def __init__(self, server, token):
+        super().__init__()
+        self._server = dict(server)
+        self._token = token
+        self._thread = threading.Thread(target=self._run, name='server-test', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _run(self):
+        started = time.monotonic()
+        backend = None
+        ok, error = True, ''
+        try:
+            backend = create_backend(self._server)
+            backend.ping()
+        except Exception as exc:
+            ok, error = False, str(exc) or exc.__class__.__name__
+        finally:
+            if backend is not None:
+                try:
+                    backend.close()
+                except Exception:
+                    pass
+        self.done.emit(self._token, ok, int((time.monotonic() - started) * 1000), error)
+
+
 class ServerDialog(QDialog):
+    """Servers on the left, the selected one's settings on the right.
+
+    Edits apply as they are typed. Closing keeps them once every server has
+    a name and a usable address.
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Server Management")
         self.setModal(True)
+        self.servers = []
+        # id(server) -> {'phase': 'testing'|'done', 'ok', 'ms', 'error', 'token'}
+        self.test_results = {}
+        self._tests = set()
+        self._test_token = 0
+        self._loading = False
+        self._supervisor = getattr(parent, 'builtin', None)
         self.setup_ui()
-        
+        self.setMinimumSize(780, 480)
+
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        
         self.setAccessibleName("Server Management")
-        self.setAccessibleDescription("Add, edit, or remove TVHeadend servers.")
-        # Server list
-        self.server_list = QListWidget()
-        describe(self.server_list, "Configured servers", "Double-click or press Enter to edit the selected server.")
-        layout.addWidget(buddy_label("&Configured servers:", self.server_list))
-        layout.addWidget(self.server_list)
-        
-        # Enter and double-click both activate the selected server.
-        self.server_list.itemActivated.connect(lambda _item: self.edit_server())
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        add_btn = QPushButton("&Add Server")
-        self.edit_btn = QPushButton("&Edit Server")
-        self.remove_btn = QPushButton("&Remove Server")
-        
-        add_btn.clicked.connect(self.add_server)
-        self.edit_btn.clicked.connect(self.edit_server)
-        self.remove_btn.clicked.connect(self.remove_server)
-        
-        btn_layout.addWidget(add_btn)
-        btn_layout.addWidget(self.edit_btn)
-        btn_layout.addWidget(self.remove_btn)
-        self._setup_server_options(layout, btn_layout)
-        self._sync_server_options()
-        
-        # Close button
-        close_btn = QPushButton("&Close")
-        close_btn.clicked.connect(self.accept)
-        close_btn.setAutoDefault(True)
-        layout.addWidget(close_btn)
-        
-    def load_servers(self, servers):
-        self.servers = servers
-        self.server_list.clear()
-        for server in self.servers:
-            self.server_list.addItem(server['name'])
-            
-    def add_server(self):
-        print("Debug: Opening add server dialog")
-        dialog = ServerConfigDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            server = dialog.get_server_config()
-            print(f"Debug: Adding new server: {server['name']}")
-            self.servers.append(server)
-            self.server_list.addItem(server['name'])
-            
-    def edit_server(self):
-        current_row = self.server_list.currentRow()
-        if current_row >= 0 and self.servers[current_row].get('builtin'):
-            QMessageBox.information(
-                self,
-                "Built-in Server",
-                "The built-in server is managed by TVHplayer. Its address cannot be edited.",
-            )
-            return
-        if current_row >= 0:
-            print(f"Debug: Editing server at index {current_row}")
-            dialog = ServerConfigDialog(self)
-            dialog.set_server_config(self.servers[current_row])
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                self.servers[current_row] = dialog.get_server_config()
-                print(f"Debug: Updated server: {self.servers[current_row]['name']}")
-                self.server_list.item(current_row).setText(self.servers[current_row]['name'])
-                self._sync_server_options()
-                
-    def remove_server(self):
-        current_row = self.server_list.currentRow()
-        if current_row >= 0 and self.servers[current_row].get('builtin'):
-            QMessageBox.information(
-                self,
-                "Built-in Server",
-                "The built-in server stays in the server list.",
-            )
-            return
-        if current_row >= 0:
-            server_name = self.servers[current_row]['name']
-            print(f"Debug: Removing server: {server_name}")
-            self.servers.pop(current_row)
-            self.server_list.takeItem(current_row)
-        else:
-            print("Debug: No server selected for removal")
+        self.setAccessibleDescription(
+            "Add, edit, or remove TVHeadend servers. Changes are kept when the window closes."
+        )
+        columns = QHBoxLayout()
+        columns.setSpacing(12)
+        layout.addLayout(columns, 1)
 
-    def _setup_server_options(self, layout, row):
-        parent = self.parent()
-        self._supervisor = getattr(parent, 'builtin', None)
-        # Options for the selected row; ones that do not apply to it are hidden.
-        self.open_web_btn = QPushButton("Open &Web Interface")
-        self.open_web_btn.clicked.connect(self._open_web)
+        left = QWidget()
+        left.setFixedWidth(250)
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        self.server_list = QListWidget()
+        self.server_list.setItemDelegate(ServerListDelegate(self.server_list))
+        self.server_list.setIconSize(QSize(10, 10))
+        describe(
+            self.server_list,
+            "Servers",
+            "Press Enter to edit the selected server, or Delete to remove it.",
+        )
+        left_layout.addWidget(buddy_label("&Servers:", self.server_list))
+        left_layout.addWidget(self.server_list, 1)
+        self.add_btn = QPushButton("+ &Add Server…")
+        describe(self.add_btn, "Add server", "Add a new server to the list")
+        self.add_btn.clicked.connect(self.add_server)
+        left_layout.addWidget(self.add_btn)
+        columns.addWidget(left)
+
+        self.detail_panel = QFrame()
+        self.detail_panel.setFrameShape(QFrame.Shape.StyledPanel)
+        detail = QVBoxLayout(self.detail_panel)
+        detail.setContentsMargins(16, 14, 16, 14)
+        detail.setSpacing(14)
+        header = QHBoxLayout()
+        heading = QVBoxLayout()
+        heading.setSpacing(2)
+        self.title_label = QLabel()
+        title_font = QFont(self.title_label.font())
+        title_font.setBold(True)
+        if title_font.pointSizeF() > 0:
+            title_font.setPointSizeF(title_font.pointSizeF() + 2)
+        self.title_label.setFont(title_font)
+        heading.addWidget(self.title_label)
+        status_row = QHBoxLayout()
+        status_row.setSpacing(6)
+        self.status_dot = QLabel()
+        self.status_label = QLabel()
+        self.status_label.setFont(_smaller_font(self.status_label.font()))
+        status_row.addWidget(self.status_dot)
+        status_row.addWidget(self.status_label, 1)
+        heading.addLayout(status_row)
+        header.addLayout(heading, 1)
+        self.duplicate_btn = QPushButton("Dupl&icate")
+        describe(self.duplicate_btn, "Duplicate", "Add a copy of the selected server below it")
+        self.duplicate_btn.clicked.connect(self.duplicate_server)
+        self.remove_btn = QPushButton("&Remove")
+        describe(self.remove_btn, "Remove", "Remove the selected server from the list")
+        self.remove_btn.clicked.connect(self.remove_server)
+        header.addWidget(self.duplicate_btn)
+        header.addWidget(self.remove_btn)
+        detail.addLayout(header)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        detail.addWidget(separator)
+
+        self.pages = QStackedWidget()
+        self.pages.addWidget(self._remote_page())
+        self.pages.addWidget(self._builtin_page())
+        detail.addWidget(self.pages)
+        detail.addStretch(1)
+
+        footer = QHBoxLayout()
+        self.open_web_btn = QPushButton("Open W&eb Interface")
         describe(
             self.open_web_btn,
             "Open Web Interface",
             "Open the selected server's web interface in the default browser",
         )
-        self.log_btn = QPushButton("Server &log")
+        self.open_web_btn.clicked.connect(self._open_web)
+        self.log_btn = QPushButton("Server &Log")
         describe(self.log_btn, "Server log", "Show the selected server's log")
         self.log_btn.clicked.connect(self._show_log)
-        row.addWidget(self.open_web_btn)
-        row.addWidget(self.log_btn)
-        layout.addLayout(row)
-        self.autostart = QCheckBox("&Start with TVHplayer")
+        footer.addWidget(self.open_web_btn)
+        footer.addWidget(self.log_btn)
+        footer.addStretch(1)
+        detail.addLayout(footer)
+        columns.addWidget(self.detail_panel, 1)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close_btn = buttons.button(QDialogButtonBox.StandardButton.Close)
+        close_btn.setText("&Close")
+        close_btn.setDefault(True)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        # Enter and double-click both move to the selected server's settings.
+        self.server_list.itemActivated.connect(lambda _item: self._edit_selected())
+        self.server_list.currentRowChanged.connect(lambda _row: self._show_selected())
+        delete = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.server_list)
+        delete.setContext(Qt.ShortcutContext.WidgetShortcut)
+        delete.activated.connect(self.remove_server)
+        if self._supervisor is not None:
+            self._supervisor.status_changed.connect(self._on_builtin_status)
+        self._show_selected()
+
+    def _remote_page(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("My Server")
+        form.addRow(buddy_label("&Name:", self.name_input), self.name_input)
+        self.url_input = QLineEdit()
+        self.url_input.setPlaceholderText("http://127.0.0.1:9981")
+        describe(self.url_input, description=URL_HINT)
+        form.addRow(buddy_label("Server a&ddress:", self.url_input), self.url_input)
+        self.url_hint = QLabel(URL_HINT)
+        self.url_hint.setWordWrap(True)
+        self.url_hint.setFont(_smaller_font(self.url_hint.font()))
+        form.addRow("", self.url_hint)
+
+        self.protocol_combo = QComboBox()
+        self.protocol_combo.addItem("HTTP JSON API", PROTOCOL_HTTP)
+        self.protocol_combo.addItem("HTSP", PROTOCOL_HTSP)
+        self.htsp_port_input = QSpinBox()
+        self.htsp_port_input.setRange(1, 65535)
+        self.htsp_port_input.setValue(9982)
+        describe(self.htsp_port_input, "HTSP port", "Port for the HTSP protocol, usually 9982.")
+        self.port_label = buddy_label("P&ort:", self.htsp_port_input)
+        protocol_row = QHBoxLayout()
+        protocol_row.addWidget(self.protocol_combo)
+        protocol_row.addWidget(self.port_label)
+        protocol_row.addWidget(self.htsp_port_input)
+        protocol_row.addStretch(1)
+        form.addRow(buddy_label("&Protocol:", self.protocol_combo), protocol_row)
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Optional")
+        form.addRow(buddy_label("&Username:", self.username_input), self.username_input)
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("Optional")
+        describe(self.password_input, description="Password is hidden while you type.")
+        form.addRow(buddy_label("Pass&word:", self.password_input), self.password_input)
+
+        self.test_btn = QPushButton("&Test Connection")
+        describe(self.test_btn, "Test connection", "Check that TVHplayer can reach this server")
+        self.test_btn.clicked.connect(self.test_connection)
+        self.test_label = QLabel()
+        self.test_label.setWordWrap(True)
+        self.test_label.setFont(_smaller_font(self.test_label.font()))
+        self.test_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        test_row = QHBoxLayout()
+        test_row.addWidget(self.test_btn)
+        test_row.addWidget(self.test_label, 1)
+        form.addRow("", test_row)
+
+        self.name_input.textChanged.connect(lambda text: self._edit('name', text))
+        self.url_input.textChanged.connect(lambda text: self._edit('url', text))
+        self.protocol_combo.currentIndexChanged.connect(
+            lambda _index: self._edit('protocol', self.protocol_combo.currentData() or PROTOCOL_HTTP)
+        )
+        self.htsp_port_input.valueChanged.connect(lambda value: self._edit('htsp_port', value))
+        self.username_input.textChanged.connect(lambda text: self._edit('username', text))
+        self.password_input.textChanged.connect(lambda text: self._edit('password', text))
+        return page
+
+    def _builtin_page(self):
+        page = QWidget()
+        form = QFormLayout(page)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setVerticalSpacing(12)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.run_btn = QPushButton("S&tart Server")
+        describe(self.run_btn, "Start or stop the built-in server")
+        self.run_btn.clicked.connect(self._toggle_builtin)
+        run_row = QHBoxLayout()
+        run_row.addWidget(self.run_btn)
+        run_row.addStretch(1)
+        form.addRow("Server:", run_row)
+        self.builtin_address = QLabel()
+        self.builtin_address.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.builtin_address.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        form.addRow("Address:", self.builtin_address)
+        self.autostart = QCheckBox("Start &with TVHplayer")
         describe(
             self.autostart,
             "Start with TVHplayer",
             "Start the built-in server when TVHplayer opens",
         )
-        layout.addWidget(self.autostart)
+        parent = self.parent()
         if self._supervisor is not None:
             self.autostart.setChecked(bool(parent.config.get('builtin_autostart')))
             self.autostart.toggled.connect(parent._set_builtin_autostart)
-            self._supervisor.status_changed.connect(lambda _status: self._sync_server_options())
-        self.server_list.currentRowChanged.connect(lambda _row: self._sync_server_options())
+        else:
+            self.autostart.setEnabled(False)
+        form.addRow("", self.autostart)
+        note = QLabel("Managed by TVHplayer. Its address can’t be edited and it can’t be removed.")
+        note.setWordWrap(True)
+        note.setFont(_smaller_font(note.font()))
+        form.addRow("", note)
+        return page
+
+    def load_servers(self, servers):
+        # A copy, so the main window's list changes only when the dialog closes.
+        self.servers = [dict(server) for server in servers]
+        self.test_results.clear()
+        self.server_list.blockSignals(True)
+        self.server_list.clear()
+        for row in range(len(self.servers)):
+            self.server_list.addItem(QListWidgetItem())
+            self._sync_item(row)
+        if self.servers:
+            self.server_list.setCurrentRow(0)
+        self.server_list.blockSignals(False)
+        self._show_selected()
 
     def _selected_server(self):
         row = self.server_list.currentRow()
-        servers = getattr(self, 'servers', [])
-        return servers[row] if 0 <= row < len(servers) else None
+        return self.servers[row] if 0 <= row < len(self.servers) else None
 
-    def _sync_server_options(self):
+    def _builtin_state(self):
+        if self._supervisor is None:
+            return 'stopped'
+        if self._supervisor.status == 'running' and not self._supervisor.is_running():
+            return 'stopped'
+        return self._supervisor.status
+
+    def _builtin_url(self, server):
+        if self._supervisor is not None and self._supervisor.is_running():
+            return f"http://127.0.0.1:{self._supervisor.http_port}"
+        return server.get('url') or ''
+
+    def _status(self, server):
+        """Dot colour and words for a server's state."""
+        if server.get('builtin'):
+            return {
+                'running': (STATUS_CONNECTED, "Running on this computer"),
+                'starting': (STATUS_TESTING, "Starting…"),
+                'failed': (STATUS_UNREACHABLE, "Could not start"),
+            }.get(self._builtin_state(), (STATUS_STOPPED, "Stopped"))
+        if validate_server_url(server.get('url') or ''):
+            return STATUS_INVALID, "Address needs fixing"
+        result = self.test_results.get(id(server))
+        if result is None:
+            return STATUS_UNKNOWN, "Not checked"
+        if result['phase'] == 'testing':
+            return STATUS_TESTING, "Testing…"
+        if result['ok']:
+            return STATUS_CONNECTED, "Connected"
+        return STATUS_UNREACHABLE, "Unreachable"
+
+    def _sync_item(self, row):
+        item = self.server_list.item(row)
+        if item is None:
+            return
+        server = self.servers[row]
+        name = server.get('name') or UNTITLED_SERVER
+        color, text = self._status(server)
+        item.setText(name)
+        item.setData(SERVER_STATUS_ROLE, text)
+        item.setIcon(QIcon(status_dot(color)))
+        set_item_access(item, f"{name}, {text}")
+
+    def _sync_server(self, server):
+        for row, entry in enumerate(self.servers):
+            if entry is server:
+                self._sync_item(row)
+
+    def _show_selected(self):
+        """Fill the right side from the selected server."""
         server = self._selected_server()
         builtin = bool(server and server.get('builtin'))
-        self.edit_btn.setVisible(not builtin)
-        self.remove_btn.setVisible(not builtin)
-        self.edit_btn.setEnabled(server is not None)
-        self.remove_btn.setEnabled(server is not None)
-        show_builtin = builtin and self._supervisor is not None
-        self.log_btn.setVisible(show_builtin or bool(server and not builtin and server.get('url')))
-        self.autostart.setVisible(show_builtin)
-        if builtin:
-            self.open_web_btn.setEnabled(show_builtin and self._supervisor.is_running())
+        self.pages.setCurrentIndex(1 if builtin else 0)
+        self.pages.setVisible(server is not None)
+        self.duplicate_btn.setVisible(server is not None and not builtin)
+        self.remove_btn.setVisible(server is not None and not builtin)
+        if server is not None and not builtin:
+            self._loading = True
+            try:
+                self.name_input.setText(server.get('name') or '')
+                self.url_input.setText(server.get('url') or '')
+                index = self.protocol_combo.findData((server.get('protocol') or PROTOCOL_HTTP).lower())
+                self.protocol_combo.setCurrentIndex(index if index >= 0 else 0)
+                try:
+                    self.htsp_port_input.setValue(int(server.get('htsp_port') or 9982))
+                except (TypeError, ValueError):
+                    self.htsp_port_input.setValue(9982)
+                self.username_input.setText(server.get('username') or '')
+                self.password_input.setText(server.get('password') or '')
+            finally:
+                self._loading = False
+        self._refresh_selected()
+
+    def _refresh_selected(self):
+        """Update the status, hints, and buttons for the selected server."""
+        server = self._selected_server()
+        if server is None:
+            self.title_label.setText("No server selected")
+            self.status_dot.clear()
+            self.status_label.clear()
+            self.open_web_btn.setEnabled(False)
+            self.log_btn.setEnabled(False)
+            return
+        self._sync_item(self.server_list.currentRow())
+        color, text = self._status(server)
+        self.title_label.setText(server.get('name') or UNTITLED_SERVER)
+        self.status_dot.setPixmap(status_dot(color))
+        self.status_label.setText(text)
+        if server.get('builtin'):
+            state = self._builtin_state()
+            active = state in ('starting', 'running')
+            self.run_btn.setText("S&top Server" if active else "S&tart Server")
+            self.run_btn.setEnabled(self._supervisor is not None)
+            self.builtin_address.setText(self._builtin_url(server) or "Chosen when the server starts")
+            self.open_web_btn.setEnabled(state == 'running')
+            self.log_btn.setEnabled(self._supervisor is not None)
+            return
+        error = validate_server_url(server.get('url') or '')
+        self.url_hint.setText(error or URL_HINT)
+        describe(self.url_input, description=error or URL_HINT)
+        _text_color(self.url_hint, NEGATIVE_TEXT if error else self.palette().placeholderText().color().name())
+        if error and not prefers_high_contrast():
+            self.url_input.setStyleSheet(
+                f"QLineEdit {{ border: 1px solid {NEGATIVE_TEXT}; border-radius: 3px; padding: 2px 4px; }}"
+            )
         else:
-            self.open_web_btn.setEnabled(bool(server and server.get('url')))
+            self.url_input.setStyleSheet("")
+        htsp = (server.get('protocol') or PROTOCOL_HTTP).lower() == PROTOCOL_HTSP
+        self.port_label.setVisible(htsp)
+        self.htsp_port_input.setVisible(htsp)
+        result = self.test_results.get(id(server))
+        testing = bool(result and result['phase'] == 'testing')
+        self._show_test_result(server, error, result)
+        self.test_btn.setEnabled(not error and not testing)
+        self.open_web_btn.setEnabled(not error)
+        self.log_btn.setEnabled(not error)
+
+    def _show_test_result(self, server, error, result):
+        color = None
+        if error:
+            text = "Fix the address to test this server."
+        elif result is None:
+            text = "Not tested yet."
+        elif result['phase'] == 'testing':
+            text = f"Connecting to {server.get('url')}…"
+        elif result['ok']:
+            text = f"Connected to Tvheadend in {result['ms']} ms."
+            color = POSITIVE_TEXT
+        else:
+            text = f"Could not connect: {result['error'].rstrip('.')}."
+            color = NEGATIVE_TEXT
+        _text_color(self.test_label, color)
+        if self.test_label.text() != text:
+            announce_label(self.test_label, text)
+
+    def _edit(self, key, value):
+        if self._loading:
+            return
+        server = self._selected_server()
+        if server is None or server.get('builtin'):
+            return
+        server[key] = value
+        self.test_results.pop(id(server), None)
+        self._refresh_selected()
+
+    def _edit_selected(self):
+        server = self._selected_server()
+        if server is None:
+            return
+        if server.get('builtin'):
+            self.run_btn.setFocus()
+        else:
+            self.name_input.setFocus()
+
+    def _insert_server(self, row, server):
+        self.servers.insert(row, server)
+        self.server_list.insertItem(row, QListWidgetItem())
+        self._sync_item(row)
+        self.server_list.setCurrentRow(row)
+
+    def add_server(self):
+        self._insert_server(len(self.servers), {
+            'name': 'New server',
+            'url': '',
+            'username': '',
+            'password': '',
+            'protocol': PROTOCOL_HTTP,
+            'htsp_port': 9982,
+        })
+        self.name_input.setFocus()
+        self.name_input.selectAll()
+
+    def duplicate_server(self):
+        row = self.server_list.currentRow()
+        server = self._selected_server()
+        if server is None or server.get('builtin'):
+            return
+        copy = dict(server)
+        copy['name'] = f"{server.get('name') or UNTITLED_SERVER} (copy)"
+        self._insert_server(row + 1, copy)
+
+    def remove_server(self):
+        row = self.server_list.currentRow()
+        server = self._selected_server()
+        if server is None or server.get('builtin'):
+            return
+        self.test_results.pop(id(server), None)
+        self.servers.pop(row)
+        self.server_list.takeItem(row)
+        if self.servers:
+            self.server_list.setCurrentRow(min(row, len(self.servers) - 1))
+        self._show_selected()
+
+    def test_connection(self):
+        server = self._selected_server()
+        if server is None or server.get('builtin') or validate_server_url(server.get('url') or ''):
+            return
+        self._test_token += 1
+        token = self._test_token
+        self.test_results[id(server)] = {'phase': 'testing', 'token': token}
+        test = ConnectionTest(server, token)
+        test.done.connect(
+            lambda done_token, ok, ms, error, test=test, server=server:
+            self._tested(test, server, done_token, ok, ms, error)
+        )
+        self._tests.add(test)
+        test.start()
+        self._refresh_selected()
+
+    def _tested(self, test, server, token, ok, ms, error):
+        self._tests.discard(test)
+        current = self.test_results.get(id(server))
+        # Ignore a result for a server that was edited or removed meanwhile.
+        if not current or current.get('token') != token or not any(s is server for s in self.servers):
+            return
+        self.test_results[id(server)] = {'phase': 'done', 'ok': ok, 'ms': ms, 'error': error}
+        self._sync_server(server)
+        if self._selected_server() is server:
+            self._refresh_selected()
+
+    def _on_builtin_status(self, _status):
+        for row, server in enumerate(self.servers):
+            if server.get('builtin'):
+                self._sync_item(row)
+        server = self._selected_server()
+        if server is not None and server.get('builtin'):
+            self._refresh_selected()
+
+    def _toggle_builtin(self):
+        if self._supervisor is None:
+            return
+        if self._builtin_state() in ('starting', 'running'):
+            self._supervisor.stop()
+        else:
+            self._supervisor.start()
+        self._refresh_selected()
+
+    def accept(self):
+        for row, server in enumerate(self.servers):
+            if server.get('builtin'):
+                continue
+            field = None
+            if not (server.get('name') or '').strip():
+                problem, field = "Give this server a name.", self.name_input
+            else:
+                error = validate_server_url(server.get('url') or '')
+                if error:
+                    problem, field = f"Fix the server address: {error}.", self.url_input
+            if field is not None:
+                self.server_list.setCurrentRow(row)
+                QMessageBox.warning(
+                    self,
+                    "Check Server Settings",
+                    f"{server.get('name') or UNTITLED_SERVER}: {problem}",
+                )
+                field.setFocus()
+                return
+        super().accept()
+
+    def reject(self):
+        # Edits apply as they are typed, so every way of closing keeps them.
+        self.accept()
+
+    def done(self, result):
+        for test in self._tests:
+            try:
+                test.done.disconnect()
+            except TypeError:
+                pass
+        self._tests.clear()
+        if self._supervisor is not None:
+            try:
+                self._supervisor.status_changed.disconnect(self._on_builtin_status)
+            except TypeError:
+                pass
+        super().done(result)
 
     def _show_log(self):
         server = self._selected_server()
@@ -1344,141 +1880,6 @@ class ServerDialog(QDialog):
         else:
             QDesktopServices.openUrl(QUrl(server['url']))
 
-class ServerConfigDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Server Configuration")
-        self.setModal(True)
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QFormLayout(self)
-        self.setAccessibleName("Server Configuration")
-        self.setAccessibleDescription("Name, address, protocol, and optional sign-in for a TVHeadend server.")
-        
-        self.name_input = QLineEdit()
-        self.url_input = QLineEdit()
-        self.username_input = QLineEdit()
-        self.password_input = QLineEdit()
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        describe(self.password_input, description="Password is hidden while you type.")
-        
-        self.name_input.setPlaceholderText("My Server")
-        self.url_input.setPlaceholderText("http://127.0.0.1:9981")
-        self.username_input.setPlaceholderText("Optional")
-        self.password_input.setPlaceholderText("Optional")
-        layout.addRow(buddy_label("&Name:", self.name_input), self.name_input)
-        layout.addRow(buddy_label("Server &address:", self.url_input), self.url_input)
-        describe(self.url_input, description="Include http:// or https:// and the port.")
-        self.protocol_combo = QComboBox()
-        self.protocol_combo.addItem("HTTP JSON API", PROTOCOL_HTTP)
-        self.protocol_combo.addItem("HTSP", PROTOCOL_HTSP)
-        layout.addRow(buddy_label("&Protocol:", self.protocol_combo), self.protocol_combo)
-        self.htsp_port_input = QSpinBox()
-        self.htsp_port_input.setRange(1, 65535)
-        self.htsp_port_input.setValue(9982)
-        describe(self.htsp_port_input, "HTSP port", "Port for the HTSP protocol, usually 9982.")
-        layout.addRow(buddy_label("&HTSP port:", self.htsp_port_input), self.htsp_port_input)
-        layout.addRow(buddy_label("&Username:", self.username_input), self.username_input)
-        layout.addRow(buddy_label("Pass&word:", self.password_input), self.password_input)
-        
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-        
-    def get_server_config(self):
-        protocol = self.protocol_combo.currentData() or PROTOCOL_HTTP
-        return {
-            'name': self.name_input.text(),
-            'url': self.url_input.text(),
-            'username': self.username_input.text(),
-            'password': self.password_input.text(),
-            'protocol': protocol,
-            'htsp_port': self.htsp_port_input.value(),
-        }
-        
-    def set_server_config(self, config):
-        self.name_input.setText(config.get('name', ''))
-        self.url_input.setText(config.get('url', ''))
-        self.username_input.setText(config.get('username', ''))
-        self.password_input.setText(config.get('password', ''))
-        protocol = (config.get('protocol') or PROTOCOL_HTTP).lower()
-        index = self.protocol_combo.findData(protocol)
-        self.protocol_combo.setCurrentIndex(index if index >= 0 else 0)
-        try:
-            self.htsp_port_input.setValue(int(config.get('htsp_port') or 9982))
-        except (TypeError, ValueError):
-            self.htsp_port_input.setValue(9982)
-
-    def validate_url(self, url):
-        """Validate server URL format"""
-        if not url.startswith('http://') and not url.startswith('https://'):
-            return False, "URL must start with http:// or https://"
-            
-        # Remove http:// or https:// for validation
-        if url.startswith('http://'):
-            url = url[7:]
-        else:  # https://
-            url = url[8:]
-            
-        # Split URL into host:port and path parts
-        url_parts = url.split('/', 1)
-        host_port = url_parts[0]
-            
-        # Split host and port
-        if ':' in host_port:
-            host, port = host_port.split(':')
-            # Validate port
-            try:
-                port = int(port)
-                if port < 1 or port > 65535:
-                    return False, "Port must be between 1 and 65535"
-            except ValueError:
-                return False, "Invalid port number"
-        else:
-            host = host_port
-            
-        # Validate IP address format if it looks like an IP
-        if all(c.isdigit() or c == '.' for c in host):
-            parts = host.split('.')
-            if len(parts) != 4:
-                return False, "Invalid IP address format"
-            for part in parts:
-                try:
-                    num = int(part)
-                    if num < 0 or num > 255:
-                        return False, "IP numbers must be between 0 and 255"
-                except ValueError:
-                    return False, "Invalid IP address format"
-                    
-        return True, ""
-
-    def accept(self):
-        print("Debug: Validating server configuration")
-        config = self.get_server_config()
-        print(f"Debug: Server config: {config['name']} @ {config['url']}")
-        
-        if not config['name']:
-            QMessageBox.warning(self, "Invalid Configuration",
-                              "Please provide a server name")
-            return
-            
-        if not config['url']:
-            QMessageBox.warning(self, "Invalid Configuration",
-                              "Please provide a server URL")
-            return
-            
-        # Validate URL format
-        is_valid, error_msg = self.validate_url(config['url'])
-        if not is_valid:
-            QMessageBox.warning(self, "Invalid Configuration",
-                              f"Invalid server URL: {error_msg}")
-            return
-            
-        super().accept()
 class ConnectionErrorDialog(QDialog):
     def __init__(self, server_name, error_msg, parent=None):
         super().__init__(parent)

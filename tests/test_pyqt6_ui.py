@@ -41,14 +41,15 @@ def test_ui_module_uses_pyqt6(monkeypatch):
     duration.set_duration(1, 30)
     assert duration.get_duration() == 5400
 
-    config_dialog = ui.ServerConfigDialog()
-    config_dialog.set_server_config({
+    server_dialog = ui.ServerDialog()
+    server_dialog.load_servers([{
         'name': 'local',
         'url': 'http://127.0.0.1:9981',
         'protocol': 'htsp',
         'htsp_port': 9982,
-    })
-    assert config_dialog.get_server_config()['protocol'] == 'htsp'
+    }])
+    assert server_dialog.protocol_combo.currentData() == 'htsp'
+    assert server_dialog.htsp_port_input.value() == 9982
 
     error_dialog = ui.ConnectionErrorDialog('local', 'connection refused')
     assert error_dialog.windowTitle() == 'Connection Error'
@@ -840,10 +841,11 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert any(label.buddy() is duration.hours_spin for label in duration.findChildren(ui.QLabel))
         duration.close()
 
-        config = ui.ServerConfigDialog()
+        config = ui.ServerDialog()
         assert config.password_input.echoMode() == ui.QLineEdit.EchoMode.Password
         assert any(label.buddy() is config.password_input for label in config.findChildren(ui.QLabel))
         assert any(label.buddy() is config.url_input for label in config.findChildren(ui.QLabel))
+        assert any(label.buddy() is config.server_list for label in config.findChildren(ui.QLabel))
         config.close()
 
         channel = Channel(uuid="c", name="News", number=1)
