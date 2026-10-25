@@ -7,7 +7,7 @@ child widgets cannot cover.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QByteArray, QEvent, QPoint, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
@@ -408,9 +408,9 @@ class PlayerBar(QWidget):
 
 
 class FloatingBar(QWidget):
-    """Holds the player bar over the bottom of the picture in fullscreen.
+    """Holds the player bar over the bottom left of the picture in fullscreen.
 
-    It appears when the pointer moves or a key is pressed, and fades out
+    It is only as wide as its controls need. It appears when the pointer moves or a key is pressed, and fades out
     of the way after a few seconds unless the pointer rests on it.
     """
 
@@ -444,6 +444,7 @@ class FloatingBar(QWidget):
         self._bar = bar
         bar.set_floating(True)
         self.layout().addWidget(bar)
+        bar.installEventFilter(self)
         bar.show()
 
     def release(self):
@@ -451,16 +452,24 @@ class FloatingBar(QWidget):
         self._hide_timer.stop()
         self.hide()
         if bar is not None:
+            bar.removeEventFilter(self)
             self.layout().removeWidget(bar)
             bar.set_floating(False)
         return bar
 
+    def eventFilter(self, obj, event):
+        # Record turning into Stop recording changes the width the bar needs.
+        if obj is self._bar and event.type() == QEvent.Type.LayoutRequest and self.isVisible():
+            self.place()
+        return super().eventFilter(obj, event)
+
     def place(self):
         frame = self._window.geometry()
-        height = self._bar.sizeHint().height() if self._bar is not None else 52
-        width = max(frame.width() - 2 * self.MARGIN_X, 200)
+        hint = self._bar.sizeHint() if self._bar is not None else QSize(200, 52)
+        width = min(hint.width(), max(frame.width() - 2 * self.MARGIN_X, 200))
+        height = hint.height()
         self.setGeometry(
-            frame.x() + (frame.width() - width) // 2,
+            frame.x() + self.MARGIN_X,
             frame.y() + frame.height() - self.MARGIN_BOTTOM - height,
             width,
             height,
