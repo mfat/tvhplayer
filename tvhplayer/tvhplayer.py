@@ -1864,6 +1864,8 @@ class TVHeadendClient(QMainWindow):
         self._backend_key = None
         self._busy_playlists = set()
         self._builtin_playlists_refreshed = False
+        self._playlist_jobs = []
+        self._closing = False
         # A playlist check shows and hides channels for hours; reload the list at most this often.
         self._channel_reload_timer = QTimer(self)
         self._channel_reload_timer.setSingleShot(True)
@@ -3756,9 +3758,16 @@ class TVHeadendClient(QMainWindow):
         if not self._confirm_builtin_quit():
             event.ignore()
             return
+        self._closing = True
         self.save_config()
+        for job in self._playlist_jobs:
+            job.cancel()
         if self.builtin is not None:
             self.builtin.stop()
+        # With the server gone, a running stream test notices within seconds.
+        for job in self._playlist_jobs:
+            if not job.shutdown(10000):
+                print("Debug: A playlist refresh did not stop in time")
         self.local_recorder.stop()
         self.close_backend()
         if getattr(self, 'player', None) is not None:
@@ -3879,10 +3888,11 @@ class TVHeadendClient(QMainWindow):
         queue = [source for source in self.playlist_sources() if source.server == server_key(server or {})]
 
         def next_job():
-            if not queue:
+            if not queue or self._closing:
                 return
             source = queue.pop(0)
             job = PlaylistJob(self, source, server, parent=self)
+            self._playlist_jobs.append(job)
             moved_on = []
 
             def move_on(*_args):

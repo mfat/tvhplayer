@@ -128,6 +128,14 @@ class PlaylistJob(QObject):
     def cancel(self):
         self._cancelled = True
 
+    def shutdown(self, timeout_ms):
+        """Cancel and wait for the worker, so Qt never destroys it while it runs."""
+        self._cancelled = True
+        task = self._task
+        if task is not None and task.isRunning():
+            return task.wait(timeout_ms)
+        return True
+
     def is_running(self):
         return self._busy
 
@@ -224,6 +232,9 @@ class PlaylistJob(QObject):
         self.finished.emit(f'Removed the channels from {self.source.name}.', [])
 
     def _run(self, fn, on_success):
+        if self._cancelled:
+            self._stop_with('Import stopped.')
+            return
         task = _Task(fn, self)
         task.progress.connect(self.progress.emit)
         task.status.connect(self.status.emit)
