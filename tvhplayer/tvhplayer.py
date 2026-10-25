@@ -52,7 +52,15 @@ try:
     from .core.playback_status import STARTING, find_subscription, starting_caption
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
-    from .player_bar import FloatingBar, PlayerBar
+    from .player_bar import (
+        DOT_SVG,
+        PILL_DARK,
+        PILL_DARK_HOVER,
+        RECORD_RED,
+        FloatingBar,
+        PlayerBar,
+        svg_icon,
+    )
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from .core.channel_info import (
         channel_icon_reference,
@@ -109,7 +117,15 @@ except ImportError:
     from core.playback_status import STARTING, find_subscription, starting_caption
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
-    from player_bar import FloatingBar, PlayerBar
+    from player_bar import (
+        DOT_SVG,
+        PILL_DARK,
+        PILL_DARK_HOVER,
+        RECORD_RED,
+        FloatingBar,
+        PlayerBar,
+        svg_icon,
+    )
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from core.channel_info import (
         channel_icon_reference,
@@ -5615,7 +5631,7 @@ class EPGDialog(QDialog):
         describe(
             self.epg_list,
             f"Programs on {self.channel_name}",
-            "Each row is a program. Use the Rec button to schedule it.",
+            "Each row is a program. Use the Record button to schedule it.",
         )
         layout.addWidget(self.epg_list)
         
@@ -5633,11 +5649,16 @@ class EPGDialog(QDialog):
             info_label.setToolTip(description)
             info_label.setAccessibleDescription(description)
             item_layout.addWidget(info_label, stretch=1)
-            record_btn = QPushButton("Rec")
-            record_btn.setMinimumWidth(48)
+            # The same dark pill with a red dot as Record in the player bar.
+            record_btn = QPushButton(" Record")
+            record_btn.setIcon(svg_icon(DOT_SVG, RECORD_RED, 12))
+            record_btn.setIconSize(QSize(12, 12))
             record_btn.setFixedHeight(32)
+            record_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             record_btn.setStyleSheet(button_stylesheet(
-                "border: 1px solid palette(mid); border-radius: 16px; padding: 0px;",
+                f"background: {PILL_DARK}; color: #ededed; font-weight: 500; border: none;"
+                " border-radius: 16px; padding: 0 12px; }"
+                f" QPushButton:hover {{ background: {PILL_DARK_HOVER};",
                 radius=16,
             ))
             record_btn.setToolTip("Schedule Recording")
