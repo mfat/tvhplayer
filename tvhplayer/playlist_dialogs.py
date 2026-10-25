@@ -7,7 +7,7 @@ UI thread and reports the outcome in plain words.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -92,6 +92,7 @@ class _Task(QThread):
 
 
 BUSY = 'This playlist is being updated. Try again in a moment.'
+BUSY_POLL_MS = 1000
 
 
 class PlaylistJob(QObject):
@@ -520,6 +521,7 @@ class PlaylistsDialog(QDialog):
         super().__init__(parent)
         self._host = host
         self._job = None
+        self._stopping = None
         self.setWindowTitle('Playlists')
         self.setModal(True)
         self.setMinimumWidth(480)
@@ -560,13 +562,16 @@ class PlaylistsDialog(QDialog):
         self.playlist_list.currentRowChanged.connect(lambda _row: self._sync_buttons())
         layout.addWidget(self.buttons)
         self._load()
+        # Updates started elsewhere (at startup, from Settings, or by an import
+        # window that was closed) end on their own; follow them.
+        self._busy_timer = QTimer(self)
+        self._busy_timer.timeout.connect(self._follow_busy)
+        self._busy_timer.start(BUSY_POLL_MS)
 
     def _load(self):
         self.playlist_list.clear()
         for source in self._host.playlist_sources():
-            server = self._host.server_for_playlist(source)
-            where = server.get('name', '') if server else 'a server that was removed'
-            item = QListWidgetItem(f'{source.name} — {where}')
+            item = QListWidgetItem(self._label(source))
             item.setData(Qt.ItemDataRole.UserRole, source.to_dict())
             self.playlist_list.addItem(item)
         empty = self.playlist_list.count() == 0
@@ -576,16 +581,32 @@ class PlaylistsDialog(QDialog):
             self.playlist_list.setCurrentRow(0)
         self._sync_buttons()
 
+    def _label(self, source):
+        server = self._host.server_for_playlist(source)
+        where = server.get('name', '') if server else 'a server that was removed'
+        busy = ' — updating…' if self._host.is_playlist_busy(source) else ''
+        return f'{source.name} — {where}{busy}'
+
+    def _follow_busy(self):
+        for row in range(self.playlist_list.count()):
+            item = self.playlist_list.item(row)
+            text = self._label(PlaylistSource.from_dict(item.data(Qt.ItemDataRole.UserRole)))
+            if item.text() != text:
+                item.setText(text)
+        self._sync_buttons()
+
     def _selected(self):
         item = self.playlist_list.currentItem()
         return PlaylistSource.from_dict(item.data(Qt.ItemDataRole.UserRole)) if item is not None else None
 
     def _sync_buttons(self):
         source = self._selected()
-        running = self._job is not None and self._job.is_running()
+        running = (self._job is not None and self._job.is_running()) or self._stopping is not None
+        busy = source is not None and self._host.is_playlist_busy(source)
         has_server = source is not None and self._host.server_for_playlist(source) is not None
-        self.refresh_btn.setEnabled(not running and has_server)
+        self.refresh_btn.setEnabled(not running and not busy and has_server)
         self.remove_btn.setEnabled(not running and source is not None)
+        self.refresh_btn.setToolTip('This playlist is being updated.' if busy and not running else '')
         self.playlist_list.setEnabled(not running)
 
     def _confirm_remove(self):
@@ -596,18 +617,45 @@ class PlaylistsDialog(QDialog):
             self._host.forget_playlist_source(source.to_dict())
             self._load()
             return
+        busy = self._host.is_playlist_busy(source)
+        question = (
+            f'{source.name} is being updated. Stop the update and remove its channels?' if busy
+            else f'Remove the channels from {source.name}?'
+        )
         answer = QMessageBox.question(
             self,
             'Remove Playlist',
-            f'Remove the channels from {source.name}?',
+            question,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
-        if answer == QMessageBox.StandardButton.Yes:
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not busy:
             self._run(remove=True)
+            return
+        job = self._host.stop_playlist_job(source)
+        if job is None:
+            announce_label(self.status_label, BUSY)
+            return
+        self._stopping = job
+        announce_label(self.status_label, 'Stopping the update…')
+        job.finished.connect(lambda *_args: self._stopped(source))
+        job.failed.connect(lambda *_args: self._stopped(source))
+        self._sync_buttons()
 
-    def _run(self, remove):
-        source = self._selected()
+    def _stopped(self, source):
+        if self._stopping is None:
+            return
+        self._stopping = None
+        # The stopped job saved the playlist's latest state; remove that one.
+        current = find_source(self._host.playlist_sources(), source.location, source.server)
+        self._load()
+        if current is not None:
+            self._run(remove=True, source=current)
+
+    def _run(self, remove, source=None):
+        source = source or self._selected()
         server = self._host.server_for_playlist(source) if source is not None else None
         if server is None:
             return

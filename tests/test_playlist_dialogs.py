@@ -136,6 +136,16 @@ class FakeHost:
     def release_playlist(self, source):
         self.busy.discard((source.server, source.location))
 
+    def is_playlist_busy(self, source):
+        return (source.server, source.location) in self.busy
+
+    def stop_playlist_job(self, source):
+        for job in self.kept:
+            if job.is_running() and job.source.location == source.location:
+                job.cancel()
+                return job
+        return None
+
     def forget_playlist_source(self, data):
         self.stored = [item for item in self.stored if item['location'] != data['location']]
 
@@ -430,3 +440,68 @@ def test_settings_toggle_hiding_and_check_now(app):
     dialog.check_btn.click()
     assert host.checks == 1
     assert dialog.status_label.text() == 'There are no imported playlists to check.'
+
+
+def test_a_playlist_being_updated_cannot_be_refreshed(app, tmp_path):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    importer = dialogs.ImportPlaylistDialog(host)
+    location = _playlist(tmp_path, TWO)
+    importer.location_input.setText(location)
+    _run(app, importer)
+
+    # An update started elsewhere, such as the refresh at startup.
+    host.busy.add(('builtin', location))
+    dialog = dialogs.PlaylistsDialog(host)
+    assert dialog.playlist_list.item(0).text() == 'news — Built-in Server — updating…'
+    assert not dialog.refresh_btn.isEnabled()
+    assert dialog.remove_btn.isEnabled()
+
+    host.busy.clear()
+    dialog._follow_busy()
+    assert dialog.playlist_list.item(0).text() == 'news — Built-in Server'
+    assert dialog.refresh_btn.isEnabled()
+    assert dialog.remove_btn.isEnabled()
+
+
+def test_removing_a_playlist_being_updated_stops_the_update_first(app, tmp_path, monkeypatch):
+    class SlowScan(FakeAdmin):
+        def create_mux(self, network_uuid, conf):
+            uuid = super().create_mux(network_uuid, conf)
+            self.muxes[uuid].update(scan_state=1, scan_result=0)
+            return uuid
+
+    monkeypatch.setattr(dialogs, 'TvhAdmin', SlowScan)
+    removed = []
+    monkeypatch.setattr(dialogs, 'remove_playlist', lambda _admin, source: removed.append(source.network_uuid))
+    questions = []
+
+    def yes(_parent, _title, text, *_args):
+        questions.append(text)
+        return dialogs.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(dialogs.QMessageBox, 'question', yes)
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
+    job = dialogs.PlaylistJob(host, source, BUILTIN, first_import=True)
+    host.kept.append(job)
+    job.start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not job.is_checking():
+        app.processEvents()
+        time.sleep(0.02)
+
+    dialog = dialogs.PlaylistsDialog(host)
+    assert dialog.remove_btn.isEnabled()
+    assert not dialog.refresh_btn.isEnabled()
+    dialog.remove_btn.click()
+    assert questions == ['news is being updated. Stop the update and remove its channels?']
+    assert dialog.status_label.text() == 'Stopping the update…'
+    assert not dialog.remove_btn.isEnabled()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not removed:
+        app.processEvents()
+        time.sleep(0.02)
+    _wait_job(app, dialog)
+    assert removed == ['net']
+    assert host.stored == []
+    assert dialog.status_label.text() == 'Removed the channels from news.'

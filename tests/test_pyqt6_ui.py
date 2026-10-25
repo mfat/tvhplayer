@@ -1618,8 +1618,10 @@ def test_startup_refresh_moves_on_when_a_playlist_reaches_its_stream_test(monkey
         assert [job.source.name for job in started] == ['eng', 'fas']
         started[0].finished.emit('done', [])
         assert len(started) == 2
+        # 'ar' was removed while it waited; it is skipped, not imported again.
+        sources.pop()
         started[1].failed.emit('Could not reach it.')
-        assert [job.source.name for job in started] == ['eng', 'fas', 'ar']
+        assert [job.source.name for job in started] == ['eng', 'fas']
     finally:
         window.close()
 

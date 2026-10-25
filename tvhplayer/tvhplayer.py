@@ -48,7 +48,7 @@ try:
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import STALL_LIMIT, LocalRecorder
     from .core.vlc_player import VlcPlayer
-    from .core.playlist_sync import PlaylistSource, server_key
+    from .core.playlist_sync import PlaylistSource, find_source, server_key
     from .core.playback_status import STARTING, find_subscription, starting_caption
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
@@ -114,7 +114,7 @@ except ImportError:
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import STALL_LIMIT, LocalRecorder
     from core.vlc_player import VlcPlayer
-    from core.playlist_sync import PlaylistSource, server_key
+    from core.playlist_sync import PlaylistSource, find_source, server_key
     from core.playback_status import STARTING, find_subscription, starting_caption
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
@@ -5327,6 +5327,17 @@ class TVHeadendClient(QMainWindow):
     def release_playlist(self, source):
         self._busy_playlists.discard((source.server, source.location))
 
+    def is_playlist_busy(self, source):
+        return (source.server, source.location) in self._busy_playlists
+
+    def stop_playlist_job(self, source):
+        """Stop the update of ``source`` running here. Returns its job, or None."""
+        for job in self._playlist_jobs:
+            if job.is_running() and (job.source.server, job.source.location) == (source.server, source.location):
+                job.cancel()
+                return job
+        return None
+
     def forget_playlist_source(self, data):
         gone = PlaylistSource.from_dict(data)
         self.config['playlists'] = [
@@ -5350,7 +5361,11 @@ class TVHeadendClient(QMainWindow):
         def next_job():
             if not queue or self._closing:
                 return
-            source = queue.pop(0)
+            # Read again: the playlist may have been removed or updated meanwhile.
+            source = find_source(self.playlist_sources(), queue.pop(0).location, server_key(server or {}))
+            if source is None:
+                next_job()
+                return
             job = PlaylistJob(self, source, server, parent=self)
             self._playlist_jobs.append(job)
             moved_on = []
