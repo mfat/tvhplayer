@@ -8,13 +8,14 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
     QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
-    QFont, QFontDatabase, QFontMetrics, QKeySequence, QPalette,
+    QFont, QFontDatabase, QFontMetrics, QKeySequence, QPalette, QValidator,
 )
+import html
 import json
 # Replace this line:
 #from . import resources_rc
@@ -51,6 +52,7 @@ try:
     from .core.playback_status import STARTING, find_subscription, starting_caption
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
+    from .player_bar import FloatingBar, PlayerBar
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from .core.channel_info import (
         channel_icon_reference,
@@ -107,6 +109,7 @@ except ImportError:
     from core.playback_status import STARTING, find_subscription, starting_caption
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
+    from player_bar import FloatingBar, PlayerBar
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from core.channel_info import (
         channel_icon_reference,
@@ -1178,81 +1181,241 @@ class TasksPanel(QFrame):
         self.task_table.setAccessibleDescription(description)
 
 
-class RecordingDurationDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Recording Duration")
-        self.setModal(True)
-        self.setup_ui()
-        
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        self.setAccessibleName("Recording Duration")
-        self.setAccessibleDescription("Choose how long to record the selected channel.")
-        
-        # Quick duration buttons
-        quick_duration_layout = QHBoxLayout()
-        
-        btn_30min = QPushButton("30 minutes")
-        btn_1hr = QPushButton("1 hour") 
-        btn_2hr = QPushButton("2 hours")
-        btn_4hr = QPushButton("4 hours")
-        describe(btn_30min, "30 minutes", "Set the recording length to 30 minutes")
-        describe(btn_1hr, "1 hour", "Set the recording length to 1 hour")
-        describe(btn_2hr, "2 hours", "Set the recording length to 2 hours")
-        describe(btn_4hr, "4 hours", "Set the recording length to 4 hours")
-        
-        btn_30min.clicked.connect(lambda: self.set_duration(0, 30))
-        btn_1hr.clicked.connect(lambda: self.set_duration(1, 0))
-        btn_2hr.clicked.connect(lambda: self.set_duration(2, 0))
-        btn_4hr.clicked.connect(lambda: self.set_duration(4, 0))
-        
-        quick_duration_layout.addWidget(btn_30min)
-        quick_duration_layout.addWidget(btn_1hr)
-        quick_duration_layout.addWidget(btn_2hr)
-        quick_duration_layout.addWidget(btn_4hr)
-        
-        layout.addLayout(quick_duration_layout)
+def format_minutes(minutes):
+    """'1 h 30 min', '45 min', '2 h'."""
+    hours, rest = divmod(int(minutes), 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} h")
+    if rest:
+        parts.append(f"{rest} min")
+    return ' '.join(parts) or '0 min'
 
-        # Duration spinboxes
-        duration_layout = QHBoxLayout()
-        
-        self.hours_spin = QSpinBox()
-        self.hours_spin.setRange(0, 24)
-        self.hours_spin.setSuffix(" hours")
-        describe(self.hours_spin, "Hours", "Recording length in hours, from 0 to 24")
-        
-        self.minutes_spin = QSpinBox()
-        self.minutes_spin.setRange(0, 59)
-        self.minutes_spin.setSuffix(" minutes")
-        describe(self.minutes_spin, "Minutes", "Additional minutes, from 0 to 59")
-        
-        duration_layout.addWidget(buddy_label("&Hours:", self.hours_spin))
-        duration_layout.addWidget(self.hours_spin)
-        duration_layout.addWidget(buddy_label("&Minutes:", self.minutes_spin))
-        duration_layout.addWidget(self.minutes_spin)
-        
-        heading = QLabel("Set a custom recording duration:")
-        heading.setAccessibleName("Set a custom recording duration")
-        layout.addWidget(heading)
-        layout.addLayout(duration_layout)
-        
-        # Buttons
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
+
+class MinutesSpinBox(QSpinBox):
+    """Minutes, shown as '1 h 30 min'."""
+
+    def textFromValue(self, value):
+        return format_minutes(value)
+
+    def valueFromText(self, text):
+        hours = minutes = 0
+        parts = text.replace('h', ' h ').replace('min', ' min ').split()
+        for number, unit in zip(parts, parts[1:]):
+            if number.isdigit() and unit == 'h':
+                hours = int(number)
+            elif number.isdigit() and unit == 'min':
+                minutes = int(number)
+        if text.strip().isdigit():
+            minutes = int(text.strip())
+        return hours * 60 + minutes
+
+    def validate(self, text, pos):
+        return QValidator.State.Acceptable, text, pos
+
+
+class RecordingDurationDialog(QDialog):
+    """Record on Server: how long to record, and when it will stop.
+
+    With the programme on now known, "This programme" records until it ends.
+    """
+
+    PRESETS = [('30', "30 min", 30), ('60', "1 h", 60), ('120', "2 h", 120), ('240', "4 h", 240)]
+    CUSTOM_STEP = 15
+
+    def __init__(self, parent=None, channel=None, event=None):
+        super().__init__(parent)
+        self.setWindowTitle("Record on Server")
+        self.setModal(True)
+        self._channel = channel
+        now = int(time.time())
+        self._event = event if event is not None and event.event_id and event.stop > now else None
+        self._choice = 'prog' if self._event is not None else '60'
+        self.setup_ui()
+        # The start is "now", so keep the end time shown up to date.
+        self._clock = QTimer(self)
+        self._clock.timeout.connect(self._update_summary)
+        self._clock.start(15000)
+
+    def setup_ui(self):
+        contrast = prefers_high_contrast()
+        self.setMinimumWidth(440)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(14)
+        self.setAccessibleName("Record on Server")
+        self.setAccessibleDescription("Choose how long to record the selected channel on the server.")
+
+        if self._channel is not None:
+            heading = QVBoxLayout()
+            heading.setSpacing(2)
+            name = QLabel(self._channel.name)
+            font = name.font()
+            font.setBold(True)
+            if font.pointSizeF() > 0:
+                font.setPointSizeF(font.pointSizeF() + 2)
+            name.setFont(font)
+            heading.addWidget(name)
+            if self._event is not None:
+                until = datetime.fromtimestamp(self._event.stop).strftime('%H:%M')
+                now_label = QLabel(f"Now: {self._event.title} · until {until}")
+                _text_color(now_label, '#5b6065')
+                heading.addWidget(now_label)
+            layout.addLayout(heading)
+
+        choose = QVBoxLayout()
+        choose.setSpacing(6)
+        record_for = QLabel("Record for")
+        choose.addWidget(record_for)
+        segments = QFrame()
+        segments.setObjectName("segments")
+        if not contrast:
+            segments.setStyleSheet(
+                "#segments { border: 1px solid #b6b9bc; border-radius: 4px; background: #fcfcfc; }"
+                "#segments QPushButton { border: none; border-left: 1px solid #d1d3d5; "
+                "background: transparent; color: #232629; min-height: 32px; padding: 0 6px; }"
+                "#segments QPushButton[first=\"true\"] { border-left: none; }"
+                "#segments QPushButton:checked { background: #3daee9; color: #ffffff; font-weight: 600; }"
+                "#segments QPushButton:focus { border: 2px solid palette(highlight); }"
+            )
+        segment_layout = QHBoxLayout(segments)
+        segment_layout.setContentsMargins(0, 0, 0, 0)
+        segment_layout.setSpacing(0 if not contrast else 4)
+        self.preset_group = QButtonGroup(self)
+        self.preset_group.setExclusive(True)
+        self.preset_buttons = {}
+        options = []
+        if self._event is not None:
+            options.append(('prog', "This programme", f"Record until {self._event.title} ends"))
+        for key, label, minutes in self.PRESETS:
+            options.append((key, label, f"Record for {format_minutes(minutes)}"))
+        options.append(('custom', "Custom", "Choose the length in steps of 15 minutes"))
+        for index, (key, label, description) in enumerate(options):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setProperty('first', index == 0)
+            describe(button, label, description)
+            button.toggled.connect(lambda on, key=key: on and self._choose(key))
+            self.preset_group.addButton(button)
+            self.preset_buttons[key] = button
+            segment_layout.addWidget(button, 2 if key == 'prog' else 1)
+        record_for.setBuddy(self.preset_buttons[options[0][0]])
+        choose.addWidget(segments)
+        layout.addLayout(choose)
+
+        self.custom_row = QWidget()
+        custom_layout = QHBoxLayout(self.custom_row)
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        custom_layout.setSpacing(8)
+        self.less_btn = QPushButton("−")
+        self.less_btn.setFixedSize(32, 32)
+        describe(self.less_btn, "Shorter", "15 minutes shorter")
+        self.custom_spin = MinutesSpinBox()
+        self.custom_spin.setRange(self.CUSTOM_STEP, 24 * 60)
+        self.custom_spin.setSingleStep(self.CUSTOM_STEP)
+        self.custom_spin.setValue(90)
+        self.custom_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        self.custom_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.custom_spin.setFixedSize(110, 32)
+        describe(self.custom_spin, "Length", "Recording length, in steps of 15 minutes. Up and Down change it.")
+        self.more_btn = QPushButton("+")
+        self.more_btn.setFixedSize(32, 32)
+        describe(self.more_btn, "Longer", "15 minutes longer")
+        self.less_btn.clicked.connect(self.custom_spin.stepDown)
+        self.more_btn.clicked.connect(self.custom_spin.stepUp)
+        self.custom_spin.valueChanged.connect(self._update_summary)
+        steps = QLabel("steps of 15 min")
+        _text_color(steps, '#5b6065')
+        custom_layout.addWidget(self.less_btn)
+        custom_layout.addWidget(self.custom_spin)
+        custom_layout.addWidget(self.more_btn)
+        custom_layout.addWidget(steps)
+        custom_layout.addStretch(1)
+        layout.addWidget(self.custom_row)
+
+        summary = QFrame()
+        summary.setObjectName("summary")
+        if not contrast:
+            summary.setStyleSheet(
+                "#summary { background: #fcfcfc; border: 1px solid #d6d8da; border-radius: 4px; }"
+            )
+        summary_layout = QHBoxLayout(summary)
+        summary_layout.setContentsMargins(12, 10, 12, 10)
+        summary_layout.setSpacing(8)
+        dot = QLabel()
+        dot.setPixmap(status_dot(STATUS_UNREACHABLE, 10))
+        summary_layout.addWidget(dot)
+        self.summary_label = QLabel()
+        self.summary_label.setTextFormat(Qt.TextFormat.RichText)
+        summary_layout.addWidget(self.summary_label, 1)
+        layout.addWidget(summary)
+
+        buttons = QDialogButtonBox()
+        cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        self.record_btn = buttons.addButton(" &Record", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.record_btn.setIcon(QIcon(status_dot('#ffffff' if not contrast else STATUS_UNREACHABLE, 10)))
+        self.record_btn.setDefault(True)
+        if not contrast:
+            self.record_btn.setStyleSheet(
+                "QPushButton { background: #3daee9; color: #ffffff; font-weight: 600; "
+                "border: 1px solid #2a95cf; border-radius: 3px; min-width: 96px; min-height: 28px; "
+                "padding: 0 10px; } QPushButton:focus { border: 2px solid palette(highlight); }"
+            )
+        describe(cancel, "Cancel")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        
+
+        self.preset_buttons[self._choice].setChecked(True)
+        self._choose(self._choice)
+
+    def _choose(self, key):
+        self._choice = key
+        self.custom_row.setVisible(key == 'custom')
+        self._update_summary()
+        self.adjustSize()
+
+    def _minutes(self):
+        if self._choice == 'custom':
+            return self.custom_spin.value()
+        for key, _label, minutes in self.PRESETS:
+            if key == self._choice:
+                return minutes
+        return 0
+
+    def _update_summary(self):
+        start = datetime.now()
+        start_text = start.strftime('%H:%M')
+        if self.programme_event() is not None:
+            end = datetime.fromtimestamp(self._event.stop)
+            detail = f"stops when {html.escape(self._event.title)} ends"
+        else:
+            end = start + timedelta(minutes=self._minutes())
+            detail = format_minutes(self._minutes())
+        self.summary_label.setText(f"Records <b>{start_text} – {end.strftime('%H:%M')}</b> · {detail}")
+        self.summary_label.setAccessibleName(
+            f"Records {start_text} to {end.strftime('%H:%M')}, {html.unescape(detail)}"
+        )
+
+    def programme_event(self):
+        """The programme on now when "This programme" is chosen, else None."""
+        return self._event if self._choice == 'prog' else None
+
     def set_duration(self, hours, minutes):
-        self.hours_spin.setValue(hours)
-        self.minutes_spin.setValue(minutes)
+        total = hours * 60 + minutes
+        for key, _label, preset in self.PRESETS:
+            if preset == total:
+                self.preset_buttons[key].setChecked(True)
+                return
+        self.custom_spin.setValue(total)
+        self.preset_buttons['custom'].setChecked(True)
+
     def get_duration(self):
         """Return duration in seconds"""
-        hours = self.hours_spin.value()
-        minutes = self.minutes_spin.value()
-        return (hours * 3600) + (minutes * 60)
+        event = self.programme_event()
+        if event is not None:
+            return max(event.stop - int(time.time()), 0)
+        return self._minutes() * 60
 
 SERVER_STATUS_ROLE = Qt.ItemDataRole.UserRole + 1
 URL_HINT = "Include http:// or https:// and the port."
@@ -2766,11 +2929,6 @@ class TVHeadendClient(QMainWindow):
         """Setup the UI elements"""
 
         
-        # Create buttons with icons
-        self.play_btn = QAction(QIcon(self.get_icon('play.svg')), 'Play', self)
-        self.stop_btn = QAction(QIcon(self.get_icon('stop.svg')), 'Stop', self)
-        self.record_btn = QAction(QIcon(self.get_icon('record.svg')), 'Record', self)
-        self.stop_record_btn = QAction(QIcon(self.get_icon('stoprec.svg')), 'Stop Recording', self)
         
 
         
@@ -2914,6 +3072,8 @@ class TVHeadendClient(QMainWindow):
         self.channel_list.setItemDelegateForColumn(COL_NOW, self._progress_delegate)
         self.channel_list.verticalHeader().setVisible(False)
         self.channel_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        # Stop recording follows the highlighted channel.
+        self.channel_list.currentCellChanged.connect(lambda *_: self._sync_record_controls())
         self.channel_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.channel_list.setSortingEnabled(True)
         self.channel_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -2981,6 +3141,8 @@ class TVHeadendClient(QMainWindow):
         self.video_frame = QWidget()
         self.video_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_frame.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # Pointer movement brings back the floating bar in fullscreen.
+        self.video_frame.setMouseTracking(True)
         describe(
             self.video_frame,
             "Video player",
@@ -3019,165 +3181,41 @@ class TVHeadendClient(QMainWindow):
         self.right_layout.addWidget(self.player_container, 1)
         self._set_idle_splash(True)
         
-        # Player controls
-        self.controls_bar = QWidget()
-        controls_layout = QHBoxLayout(self.controls_bar)
-        controls_layout.setContentsMargins(0, 0, 0, 0)
-       # Create frame for play/stop buttons
-        playback_frame = QFrame()
-        if not prefers_high_contrast():
-            playback_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}")
-        playback_frame.setAccessibleName("Playback")
-        playback_frame.setWindowTitle("Playback")
-        playback_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        playback_frame.setLineWidth(5)  # Make frame thicker
-        playback_layout = QHBoxLayout(playback_frame)
-        
-        # Play button
-        self.play_btn = QPushButton()
-        self.play_btn.setFixedSize(48, 48)
-        self.play_btn.setIcon(QIcon(f"{self.icons_dir}/play.svg"))
-        self.play_btn.setIconSize(QSize(48, 48))
-        self.play_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        self.play_btn.clicked.connect(lambda: self.play_channel_by_data(self.selected_channel()))
-        describe(self.play_btn, "Play", "Play the selected channel. Keyboard: P, or Enter on the channel list.")
-        self.play_btn.setToolTip("Play the selected channel (P)")
-        playback_layout.addWidget(self.play_btn)
-        
-        # Stop button
-        self.stop_btn = QPushButton()
-        self.stop_btn.setFixedSize(48, 48)
-        self.stop_btn.setIcon(QIcon(f"{self.icons_dir}/stop.svg"))
-        self.stop_btn.setIconSize(QSize(48, 48))
-        self.stop_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        self.stop_btn.clicked.connect(self.stop_playback)
-        describe(self.stop_btn, "Stop", "Stop playback. Keyboard: Ctrl+.")
-        self.stop_btn.setToolTip("Stop playback (Ctrl+.)")
-        playback_layout.addWidget(self.stop_btn)
-        
-        controls_layout.addWidget(playback_frame)
-        
-        # Create frame for record buttons
-        record_frame = QFrame()
-        if not prefers_high_contrast():
-            record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}")
-        record_frame.setAccessibleName("Server recording")
-        record_frame.setWindowTitle("Recording")
-        record_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        record_frame.setLineWidth(5)  # Make frame thicker
-        record_layout = QHBoxLayout(record_frame)
-        
-        # Start Record button
-        self.start_record_btn = QPushButton()
-        self.start_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
-        self.start_record_btn.setIcon(QIcon(f"{self.icons_dir}/record.svg"))
-        self.start_record_btn.setIconSize(QSize(48, 48))
-        self.start_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        describe(self.start_record_btn, "Record on server", "Record the selected channel on the TVHeadend server. Keyboard: Ctrl+R.")
-        self.start_record_btn.setToolTip("Record on the server (Ctrl+R)")
-        self.start_record_btn.clicked.connect(self.start_recording)
-        record_layout.addWidget(self.start_record_btn)
-
-        # Stop Record button 
-        self.stop_record_btn = QPushButton()
-        self.stop_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
-        self.stop_record_btn.setIcon(QIcon(f"{self.icons_dir}/stoprec.svg"))
-        self.stop_record_btn.setIconSize(QSize(48, 48))
-        self.stop_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        describe(self.stop_record_btn, "Stop server recording", "Stop the recording on the TVHeadend server. Keyboard: Ctrl+E.")
-        self.stop_record_btn.setToolTip("Stop the server recording (Ctrl+E)")
-        self.stop_record_btn.clicked.connect(self.stop_recording)
-        record_layout.addWidget(self.stop_record_btn)
-        
-        controls_layout.addWidget(record_frame)
-        
-        # Create frame for local record buttons
-        local_record_frame = QFrame()
-        if not prefers_high_contrast():
-            local_record_frame.setStyleSheet(".QFrame{border: 1px solid grey; border-radius: 8px;}")
-        local_record_frame.setAccessibleName("Local recording")
-        local_record_frame.setWindowTitle("Local Recording")
-        local_record_frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        local_record_layout = QHBoxLayout(local_record_frame)
-
-        # Start Local Record button
-        self.start_local_record_btn = QPushButton()
-        self.start_local_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
-        self.start_local_record_btn.setIcon(QIcon(f"{self.icons_dir}/reclocal.svg"))
-        self.start_local_record_btn.setIconSize(QSize(48, 48))
-        self.start_local_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        describe(
-            self.start_local_record_btn,
-            "Record locally",
-            "Save the selected channel on this computer. Keyboard: Ctrl+Shift+R.",
-        )
-        self.start_local_record_btn.setToolTip("Record on this computer (Ctrl+Shift+R)")
-        self.start_local_record_btn.clicked.connect(
+        # Player controls, joined to the bottom of the picture.
+        self.right_layout.setSpacing(0)
+        self.controls_bar = PlayerBar()
+        bar = self.controls_bar
+        self.play_btn = bar.play_btn
+        self.play_btn.clicked.connect(self.toggle_playback)
+        self.record_btn = bar.record_btn
+        self.stop_record_btn = bar.stop_record_btn
+        self.stop_record_btn.clicked.connect(self.stop_any_recording)
+        self.record_more_btn = bar.record_more_btn
+        bar.record_server_action.triggered.connect(self.start_recording)
+        bar.record_local_action.triggered.connect(
             lambda: self.start_local_recording(self.selected_channel())
         )
-        local_record_layout.addWidget(self.start_local_record_btn)
+        bar.stop_server_action.triggered.connect(self.stop_recording)
+        bar.stop_local_action.triggered.connect(self.stop_local_recording)
+        bar.stop_both_action.triggered.connect(self.stop_both_recordings)
 
-        # Stop Local Record button
-        self.stop_local_record_btn = QPushButton()
-        self.stop_local_record_btn.setFixedSize(48, 48)  # Remove extra parenthesis
-        self.stop_local_record_btn.setIcon(QIcon(f"{self.icons_dir}/stopreclocal.svg"))
-        self.stop_local_record_btn.setIconSize(QSize(48, 48))
-        self.stop_local_record_btn.setStyleSheet(button_stylesheet("border-radius: 24px;", radius=24))
-        describe(
-            self.stop_local_record_btn,
-            "Stop local recording",
-            "Stop the recording saved on this computer. Keyboard: Ctrl+Shift+E.",
-        )
-        self.stop_local_record_btn.setToolTip("Stop the recording on this computer (Ctrl+Shift+E)")
-        self.stop_local_record_btn.clicked.connect(self.stop_local_recording)
-        local_record_layout.addWidget(self.stop_local_record_btn)
-
-        controls_layout.addWidget(local_record_frame)
-
-        
-
-        # Volume slider and mute button
-        # Mute button with icons for different states
-        
-        
-        
-        self.mute_btn = QPushButton()
-        self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
-        self.mute_btn.setIconSize(QSize(32, 32))
-        self.mute_btn.setFixedSize(32, 32)  # Remove extra parenthesis
-        self.mute_btn.setCheckable(True)  # Make the button checkable
+        self.mute_btn = bar.mute_btn
         self.mute_btn.clicked.connect(self.toggle_mute)
-        self.mute_btn.setStyleSheet(button_stylesheet("border: none;"))
         describe(self.mute_btn, "Mute", "Turn sound off. Keyboard: M. The button stays pressed while muted.")
         self.mute_btn.setToolTip("Mute (M)")
 
-        
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(50)
-        self.volume_slider.setFixedWidth(150)  # Set fixed width to make slider less wide
-        self.volume_slider.setSingleStep(1)
-        self.volume_slider.setPageStep(10)
+        self.volume_slider = bar.volume_slider
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         describe(self.volume_slider, "Volume", "Playback volume from 0 to 100. Keyboard: Ctrl+Up and Ctrl+Down.")
         self.volume_slider.setToolTip("Volume")
-        
-        # Fullscreen button with icon
-        self.fullscreen_btn = QPushButton()
-        self.fullscreen_btn.setIcon(QIcon(f"{self.icons_dir}/fullscreen.svg"))
-        self.fullscreen_btn.setIconSize(QSize(32, 32))
-        self.fullscreen_btn.setFixedSize(32, 32)
-        self.fullscreen_btn.setCheckable(True)
+
+        self.fullscreen_btn = bar.fullscreen_btn
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        self.fullscreen_btn.setStyleSheet(button_stylesheet("border: none;"))
         describe(self.fullscreen_btn, "Fullscreen", "Fill the screen with the picture. Keyboard: F11 or F. Escape leaves fullscreen.")
         self.fullscreen_btn.setToolTip("Fullscreen (F11)")
-        
-        controls_layout.addStretch()  # Add stretch to push widgets to the right
-        controls_layout.addWidget(self.mute_btn)
-        controls_layout.addWidget(self.volume_slider)
-        controls_layout.addWidget(self.fullscreen_btn)
         self.right_layout.addWidget(self.controls_bar)
+        # In fullscreen the bar moves into this window, over the picture.
+        self.floating_bar = FloatingBar(self)
         
         # Add panes to splitter instead of layout
         self.tasks_pane = TasksPanel(self)
@@ -3301,11 +3339,9 @@ class TVHeadendClient(QMainWindow):
             self.tag_combo,
             self.video_frame,
             self.play_btn,
-            self.stop_btn,
-            self.start_record_btn,
+            self.record_btn,
             self.stop_record_btn,
-            self.start_local_record_btn,
-            self.stop_local_record_btn,
+            self.record_more_btn,
             self.mute_btn,
             self.volume_slider,
             self.fullscreen_btn,
@@ -3727,6 +3763,7 @@ class TVHeadendClient(QMainWindow):
         if keys != self._recording_keys:
             self._recording_keys = keys
             self._mark_playing_channel()
+        self._sync_record_controls()
 
     def _selected_channel_tag(self):
         if not self.channel_options['tag_filter']:
@@ -4052,6 +4089,21 @@ class TVHeadendClient(QMainWindow):
         if had_focus:
             self.channel_list.setFocus(Qt.FocusReason.OtherFocusReason)
 
+    def _programme_on_now(self, channel):
+        """The channel's programme on now, from the list's guide data or the server."""
+        now_next = self._now_next.get(channel_key(channel))
+        if now_next is None:
+            try:
+                now_next = self.get_backend().get_now_next([channel]).get(channel_key(channel))
+            except Exception as e:
+                print(f"Debug: No programme information for {channel.name}: {e}")
+                return None
+        event = now_next.now if now_next is not None else None
+        now = time.time()
+        if event is None or not event.event_id or not event.start <= now < event.stop:
+            return None
+        return event
+
     def start_recording(self):
         print("Debug: Starting recording")
         try:
@@ -4061,26 +4113,36 @@ class TVHeadendClient(QMainWindow):
                 self.statusbar.showMessage("Please select a channel to record")
                 return
 
-            duration_dialog = RecordingDurationDialog(self)
+            duration_dialog = RecordingDurationDialog(self, channel, self._programme_on_now(channel))
             if duration_dialog.exec() != QDialog.DialogCode.Accepted:
                 print("Debug: Recording cancelled by user")
                 return
             
-            duration = duration_dialog.get_duration()
-            now = int(datetime.now().timestamp())
-            self.get_backend().create_dvr_entry(
-                channel,
-                now,
-                now + duration,
-                title=instant_recording_title(channel.name, datetime.fromtimestamp(now)),
-                description='Recorded via TVHplayer',
-                comment='Instant recording via TVHplayer',
-            )
-            duration_minutes = duration // 60
-            self.statusbar.showMessage(
-                f"Recording started for: {channel.name} ({duration_minutes} minutes)"
-            )
-            self._show_on_picture(f"Recording {channel.name} ({duration_minutes} min)")
+            event = duration_dialog.programme_event()
+            if event is not None:
+                # The server records the programme and stops when it ends.
+                self.get_backend().create_dvr_entry_by_event(event.event_id)
+                until = datetime.fromtimestamp(event.stop).strftime('%H:%M')
+                self.statusbar.showMessage(
+                    f"Recording started for: {channel.name} ({event.title}, until {until})"
+                )
+                self._show_on_picture(f"Recording {event.title} (until {until})")
+            else:
+                duration = duration_dialog.get_duration()
+                now = int(datetime.now().timestamp())
+                self.get_backend().create_dvr_entry(
+                    channel,
+                    now,
+                    now + duration,
+                    title=instant_recording_title(channel.name, datetime.fromtimestamp(now)),
+                    description='Recorded via TVHplayer',
+                    comment='Instant recording via TVHplayer',
+                )
+                duration_minutes = duration // 60
+                self.statusbar.showMessage(
+                    f"Recording started for: {channel.name} ({duration_minutes} minutes)"
+                )
+                self._show_on_picture(f"Recording {channel.name} ({duration_minutes} min)")
             self.start_recording_indicator()
             self._refresh_tasks()
         except Exception as e:
@@ -4090,6 +4152,51 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Traceback: {traceback.format_exc()}")
             self.statusbar.showMessage(f"Recording error: {str(e)}")
             
+    def toggle_playback(self):
+        """The Play/Stop button and P: stop what plays, or play the selected channel."""
+        if self._playback_active or self._awaiting_playback:
+            self.stop_playback()
+        else:
+            self.play_channel_by_data(self.selected_channel())
+
+    def _sync_play_button(self):
+        bar = getattr(self, 'controls_bar', None)
+        if bar is not None:
+            bar.set_playing(
+                bool(getattr(self, '_playback_active', False) or getattr(self, '_awaiting_playback', False))
+            )
+
+    def _server_recordings_to_stop(self):
+        return recordings_to_stop(getattr(self, '_dvr_entries', None) or [], self.active_channel())
+
+    def _sync_record_controls(self):
+        """Show Stop recording while the server records the active channel or this computer records."""
+        bar = getattr(self, 'controls_bar', None)
+        if bar is None:
+            return
+        server = bool(self._server_recordings_to_stop())
+        recorder = getattr(self, 'local_recorder', None)
+        local = bool(recorder is not None and recorder.is_running)
+        channel = self.active_channel()
+        bar.set_recording(server, local, channel.name if channel is not None else '')
+
+    def stop_any_recording(self):
+        """Stop recording ends whichever recording runs, and asks only when both do."""
+        server = bool(self._server_recordings_to_stop())
+        recorder = getattr(self, 'local_recorder', None)
+        local = bool(recorder is not None and recorder.is_running)
+        if server and local:
+            bar = self.controls_bar
+            bar.popup_above(bar.stop_menu, bar.recording_group)
+        elif local:
+            self.stop_local_recording()
+        else:
+            self.stop_recording()
+
+    def stop_both_recordings(self):
+        self.stop_recording()
+        self.stop_local_recording()
+
     def stop_playback(self):
         """Stop current playback"""
         print("Debug: Stopping playback")
@@ -4099,6 +4206,7 @@ class TVHeadendClient(QMainWindow):
         self._playback_channel = None
         self._mark_playing_channel()
         self._set_playback_spinner(False)
+        self._sync_play_button()
         self.player.stop()
         self._protect_video_surface(False)
         self.statusbar.showMessage("Playback stopped")
@@ -4144,6 +4252,7 @@ class TVHeadendClient(QMainWindow):
         if spinner is not None:
             spinner.set_caption(STARTING)
         self._set_playback_spinner(True)
+        self._sync_play_button()
         self._watch_start()
         if hasattr(self, 'video_frame'):
             self.video_frame.setUpdatesEnabled(False)
@@ -4188,6 +4297,7 @@ class TVHeadendClient(QMainWindow):
     def _protect_video_surface(self, playing):
         """While a channel is on, do not let Qt paint or flash the splash."""
         self._playback_active = playing
+        self._sync_play_button()
         if hasattr(self, '_splash_idle_timer'):
             self._splash_idle_timer.stop()
         waiting = bool(getattr(self, '_awaiting_playback', False))
@@ -4220,6 +4330,7 @@ class TVHeadendClient(QMainWindow):
         self._stop_start_watch()
         self._awaiting_playback = False
         self._playback_active = False
+        self._sync_play_button()
         self._playback_channel = None
         self._mark_playing_channel()
         self._set_playback_spinner(False)
@@ -4355,7 +4466,8 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.hide()
             self.left_pane.hide()
             self.tasks_pane.hide()
-            self.controls_bar.hide()
+            self.right_layout.removeWidget(self.controls_bar)
+            self.floating_bar.hold(self.controls_bar)
             self.right_pane.setFrameStyle(QFrame.Shape.NoFrame)
             self.right_pane.setLineWidth(0)
             self.splitter.setFrameStyle(QFrame.Shape.NoFrame)
@@ -4370,6 +4482,8 @@ class TVHeadendClient(QMainWindow):
             self.setUpdatesEnabled(True)
             self._protect_video_surface(self._playback_active)
         self.is_fullscreen = True
+        # Show the bar once so it is clear where the controls went.
+        QTimer.singleShot(300, lambda: self.is_fullscreen and self.floating_bar.poke())
 
     def _exit_fullscreen(self):
         state = self._pre_fullscreen_state or {}
@@ -4383,7 +4497,10 @@ class TVHeadendClient(QMainWindow):
             self.menuBar().show()
             self.statusbar.show()
             self.left_pane.show()
-            self.controls_bar.show()
+            bar = self.floating_bar.release()
+            if bar is not None:
+                self.right_layout.addWidget(bar)
+                bar.show()
             self.right_pane.setFrameStyle(
                 state.get('right_frame', QFrame.Shape.Panel | QFrame.Shadow.Raised)
             )
@@ -4435,7 +4552,7 @@ class TVHeadendClient(QMainWindow):
             else:
                 self.fullscreen_btn.setToolTip("Fullscreen (F11)")
                 describe(self.fullscreen_btn, "Fullscreen", "Fill the screen with the picture. Keyboard: F11 or F.")
-            self.fullscreen_btn.setChecked(self.is_fullscreen)
+            self.controls_bar.set_fullscreen(self.is_fullscreen)
         if hasattr(self, 'video_frame'):
             announce(
                 self.video_frame,
@@ -4650,6 +4767,8 @@ class TVHeadendClient(QMainWindow):
             return False
         video_frame = getattr(self, 'video_frame', None)
         if video_frame is not None and obj is video_frame:
+            if event.type() == QEvent.Type.MouseMove and self.is_fullscreen:
+                self.floating_bar.poke()
             if event.type() == QEvent.Type.MouseButtonDblClick:
                 self.toggle_fullscreen()
                 return True
@@ -4665,6 +4784,8 @@ class TVHeadendClient(QMainWindow):
             self.toggle_fullscreen()
             event.accept()
             return
+        if self.is_fullscreen:
+            self.floating_bar.poke()
 
         modifiers = event.modifiers()
         key = event.key()
@@ -4706,10 +4827,7 @@ class TVHeadendClient(QMainWindow):
             return
         if key in (Qt.Key.Key_VolumeMute, Qt.Key.Key_MediaTogglePlayPause):
             if key == Qt.Key.Key_MediaTogglePlayPause:
-                if self.player and self.player.is_playing():
-                    self.stop_playback()
-                else:
-                    self.play_channel_by_data(self.selected_channel())
+                self.toggle_playback()
             else:
                 self.toggle_mute()
             event.accept()
@@ -4744,7 +4862,7 @@ class TVHeadendClient(QMainWindow):
                 event.accept()
                 return
             if key == Qt.Key.Key_P and not ctrl and not shift:
-                self.play_channel_by_data(self.selected_channel())
+                self.toggle_playback()
                 event.accept()
                 return
             if key == Qt.Key.Key_S and not ctrl and not shift:
@@ -4760,17 +4878,14 @@ class TVHeadendClient(QMainWindow):
         is_muted = self.player.is_muted()
         self.player.set_muted(not is_muted)
         
+        self.controls_bar.set_muted(not is_muted)
         if not is_muted:  # Switching to muted
-            self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/mute.svg"))
-            self.mute_btn.setChecked(True)
             describe(self.mute_btn, "Unmute", "Turn sound on. Keyboard: M. The button stays pressed while muted.")
             self.mute_btn.setToolTip("Unmute (M)")
             self.statusbar.showMessage("Muted")
             self._show_on_picture("Muted")
             print("Debug: Audio muted")
         else:  # Switching to unmuted
-            self.mute_btn.setIcon(QIcon(f"{self.icons_dir}/unmute.svg"))
-            self.mute_btn.setChecked(False)
             describe(self.mute_btn, "Mute", "Turn sound off. Keyboard: M. The button stays pressed while muted.")
             self.mute_btn.setToolTip("Mute (M)")
             self.statusbar.showMessage("Sound on")
@@ -4845,13 +4960,6 @@ class TVHeadendClient(QMainWindow):
                 QMessageBox.StandardButton.Ok
             )
 
-    def toggle_recording(self):
-        """Toggle between starting and stopping recording"""
-        if self.record_btn.isChecked():
-            self.start_recording()
-        else:
-            self.stop_recording()
-
     def stop_recording(self):
         """Stop the running recording for the active channel.
 
@@ -4879,6 +4987,7 @@ class TVHeadendClient(QMainWindow):
             for entry in targets:
                 print(f"Debug: Stopping recording: {entry.title} ({entry.uuid}) on {entry.channel_name}")
                 backend.stop_dvr_entry(entry)
+            self.channel_recordings_changed([entry for entry in entries if entry not in targets])
             if len(targets) >= len(running):
                 self.sync_recording_indicator()
             channel_name = targets[0].channel_name or (channel.name if channel else 'channel')
@@ -4922,6 +5031,7 @@ class TVHeadendClient(QMainWindow):
         
         # Start the animation
         self.recording_animation.start()
+        self._sync_record_controls()
 
     def stop_recording_indicator(self):
         """Stop the recording indicator and its animation"""
@@ -4938,6 +5048,7 @@ class TVHeadendClient(QMainWindow):
         describe(self.recording_indicator, "Not recording", "Shown only while a recording is in progress")
         self.recording_indicator.setProperty("recording", False)
         self.recording_indicator.style().polish(self.recording_indicator)
+        self._sync_record_controls()
 
     def show_dvr_status(self):
         """Show DVR status dialog"""
@@ -5060,6 +5171,7 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage("Local recording stopped")
             self._show_on_picture("Recording to this computer stopped")
             self.sync_recording_indicator()
+            self._sync_record_controls()
         except Exception as e:
             print(f"Debug: Error stopping local recording: {str(e)}")
             self.statusbar.showMessage(f"Error stopping local recording: {str(e)}")

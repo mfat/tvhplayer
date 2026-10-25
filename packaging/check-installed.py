@@ -34,7 +34,7 @@ if missing:
 
 # The launcher runs tvhplayer.py from APP_DIR, which imports core.* as top-level modules.
 sys.path.insert(0, str(APP_DIR))
-modules = ['tvhplayer', 'builtin_supervisor', 'a11y', 'file_manager']
+modules = ['tvhplayer', 'builtin_supervisor', 'a11y', 'file_manager', 'player_bar']
 modules += [f'core.{path.stem}' for path in sorted((APP_DIR / 'core').glob('*.py')) if path.stem != '__init__']
 for name in modules:
     module = importlib.import_module(name)

@@ -186,7 +186,13 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert window.idle_splash.isVisible()
         assert not window.left_pane.isVisible()
         assert not window.tasks_pane.isVisible()
-        assert not window.controls_bar.isVisible()
+        # The controls float over the picture, in a window of their own.
+        assert window.floating_bar.bar is window.controls_bar
+        window.floating_bar.poke()
+        app.processEvents()
+        assert window.controls_bar.isVisible()
+        assert window.floating_bar.isVisible()
+        assert window.floating_bar.geometry().bottom() <= window.geometry().bottom()
         assert not window.menuBar().isVisible()
         assert window.right_pane.frameStyle() == int(ui.QFrame.Shape.NoFrame)
         assert window.right_layout.contentsMargins().left() == 0
@@ -207,6 +213,8 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert window.left_pane.isVisible()
         assert window.tasks_pane.isVisible()
         assert window.controls_bar.isVisible()
+        assert window.controls_bar.parent() is window.right_pane
+        assert not window.floating_bar.isVisible()
         assert window.menuBar().isVisible()
         assert window.right_pane.frameStyle() == windowed_frame
         assert window.splitter.handleWidth() == windowed_handle
@@ -757,16 +765,12 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
 
         assert app.applicationName() == "TVHplayer"
         assert window.play_btn.accessibleName() == "Play"
-        assert window.play_btn.toolTip() == "Play the selected channel (P)"
+        assert window.play_btn.toolTip() == "Play / Stop (P)"
         assert window.play_btn.statusTip() == ""
-        assert window.stop_btn.accessibleName() == "Stop"
-        assert window.stop_btn.toolTip() == "Stop playback (Ctrl+.)"
-        assert window.stop_btn.statusTip() == ""
-        assert window.start_record_btn.toolTip() == "Record on the server (Ctrl+R)"
-        assert window.start_record_btn.statusTip() == ""
-        assert window.stop_record_btn.toolTip() == "Stop the server recording (Ctrl+E)"
-        assert window.start_local_record_btn.toolTip() == "Record on this computer (Ctrl+Shift+R)"
-        assert window.stop_local_record_btn.toolTip() == "Stop the recording on this computer (Ctrl+Shift+E)"
+        assert window.record_btn.toolTip() == "Record (Ctrl+R / Ctrl+Shift+R)"
+        assert window.record_btn.statusTip() == ""
+        assert window.record_btn.isVisible()
+        assert not window.stop_record_btn.isVisible()
         assert window.mute_btn.toolTip() == "Mute (M)"
         assert window.volume_slider.toolTip() == "Volume"
         assert window.fullscreen_btn.toolTip() == "Fullscreen (F11)"
@@ -780,10 +784,9 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.server_combo.statusTip() == ""
         assert window.status_label.toolTip() == ""
         assert window.status_label.statusTip() == ""
-        assert window.start_record_btn.accessibleName() == "Record on server"
-        assert window.stop_record_btn.accessibleName() == "Stop server recording"
-        assert window.start_local_record_btn.accessibleName() == "Record locally"
-        assert window.stop_local_record_btn.accessibleName() == "Stop local recording"
+        assert window.record_btn.accessibleName() == "Record"
+        assert window.stop_record_btn.accessibleName() == "Stop recording"
+        assert window.record_more_btn.accessibleName() == "Start another recording"
         assert window.mute_btn.accessibleName() == "Mute"
         assert window.fullscreen_btn.accessibleName() == "Fullscreen"
         assert window.manage_servers_btn.accessibleName() == "Manage servers"
@@ -935,9 +938,9 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.video_frame.accessibleName() == "Video player"
 
         duration = ui.RecordingDurationDialog()
-        assert duration.hours_spin.accessibleName() == "Hours"
-        assert duration.minutes_spin.accessibleName() == "Minutes"
-        assert any(label.buddy() is duration.hours_spin for label in duration.findChildren(ui.QLabel))
+        assert duration.custom_spin.accessibleName() == "Length"
+        assert duration.preset_buttons['60'].accessibleName() == "1 h"
+        assert any(label.buddy() is duration.preset_buttons['30'] for label in duration.findChildren(ui.QLabel))
         duration.close()
 
         config = ui.ServerDialog()
@@ -1785,6 +1788,143 @@ def test_now_next_is_fetched_again_when_a_programme_ends(monkeypatch, tmp_path):
         assert backend.now_next_calls == 2
         news_row = _channel_row(window.channel_list, 'News')
         assert window.channel_list.item(news_row, ui.COL_NOW).text() == ''
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_record_dialog_offers_the_programme_on_now(monkeypatch, tmp_path):
+    import time
+
+    from tvhplayer.core.models import Channel, EpgEvent
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.close()
+    now = int(time.time())
+    event = EpgEvent(start=now - 600, stop=now + 1800, title='Newsday', event_id=42)
+    dialog = ui.RecordingDurationDialog(channel=Channel(uuid='c', name='BBC News'), event=event)
+    try:
+        assert dialog.windowTitle() == "Record on Server"
+        assert list(dialog.preset_buttons) == ['prog', '30', '60', '120', '240', 'custom']
+        assert dialog.preset_buttons['prog'].isChecked()
+        assert dialog.programme_event() is event
+        assert 1790 <= dialog.get_duration() <= 1800
+        assert "stops when Newsday ends" in dialog.summary_label.text()
+        assert dialog.custom_row.isHidden()
+
+        dialog.preset_buttons['120'].setChecked(True)
+        assert dialog.programme_event() is None
+        assert dialog.get_duration() == 7200
+        assert "2 h" in dialog.summary_label.text()
+
+        dialog.preset_buttons['custom'].setChecked(True)
+        assert not dialog.custom_row.isHidden()
+        assert dialog.custom_spin.text() == "1 h 30 min"
+        dialog.more_btn.click()
+        assert dialog.get_duration() == 105 * 60
+        dialog.less_btn.click()
+        dialog.less_btn.click()
+        assert dialog.custom_spin.text() == "1 h 15 min"
+        dialog.set_duration(0, 30)
+        assert dialog.preset_buttons['30'].isChecked()
+    finally:
+        dialog.close()
+
+    # Without guide data, or once the programme is over, there is nothing to offer.
+    ended = EpgEvent(start=now - 3600, stop=now - 60, title='Old', event_id=7)
+    for given in (None, ended):
+        dialog = ui.RecordingDurationDialog(event=given)
+        assert 'prog' not in dialog.preset_buttons
+        assert dialog.preset_buttons['60'].isChecked()
+        assert dialog.get_duration() == 3600
+        dialog.close()
+    app.processEvents()
+
+
+def test_player_bar_play_stop_and_record_controls(monkeypatch, tmp_path):
+    import time
+
+    from tvhplayer.core.models import Channel, DvrEntry
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+
+    class FakeRecorder:
+        is_running = False
+        file_path = ''
+
+        def stop(self):
+            self.is_running = False
+
+    try:
+        window.show()
+        app.processEvents()
+        bar = window.controls_bar
+        assert window.play_btn.accessibleName() == "Play"
+
+        played = []
+        stopped = []
+        window.play_channel_by_data = lambda channel: played.append(channel)
+        real_stop = window.stop_playback
+        window.stop_playback = lambda: (stopped.append(True), real_stop())
+        window.play_btn.click()
+        assert played and not stopped
+
+        window._show_playback_wait()
+        assert window.play_btn.accessibleName() == "Stop"
+        window._on_playback_started()
+        assert window.play_btn.accessibleName() == "Stop"
+        window.play_btn.click()
+        assert stopped == [True]
+        assert window.play_btn.accessibleName() == "Play"
+
+        recorder = FakeRecorder()
+        window.local_recorder = recorder
+        channel = Channel(uuid='c', name='BBC News')
+        window.active_channel = lambda: channel
+        recording = DvrEntry(
+            uuid='r', title='Newsday', channel_name='BBC News', raw={'channel': 'c'},
+            start=int(time.time()) - 60, duration=600, status='Running', sched_status='recording',
+        )
+        assert recording.category() == 'recording'
+
+        # Recording on the server: the red pill stops it straight away.
+        window.channel_recordings_changed([recording])
+        assert not window.record_btn.isVisible()
+        assert window.stop_record_btn.isVisible()
+        assert bar.record_server_action.isEnabled() is False
+        assert bar.record_local_action.isEnabled() is True
+        calls = []
+        window.stop_recording = lambda: calls.append('server')
+        window.stop_local_recording = lambda: calls.append('local')
+        window.stop_record_btn.click()
+        assert calls == ['server']
+
+        # Both kinds: Stop asks which, and the menu can stop both.
+        recorder.is_running = True
+        window._sync_record_controls()
+        assert bar.record_local_action.isEnabled() is False
+        assert "BBC News" in bar._stop_detail.text()
+        window.stop_record_btn.click()
+        app.processEvents()
+        assert bar.stop_menu.isVisible()
+        bar.stop_menu.hide()
+        assert calls == ['server']
+        bar.stop_both_action.trigger()
+        assert calls == ['server', 'server', 'local']
+
+        # Only this computer: Stop ends the local recording.
+        window.channel_recordings_changed([])
+        window.stop_record_btn.click()
+        assert calls[-1] == 'local'
+
+        recorder.is_running = False
+        window._sync_record_controls()
+        assert window.record_btn.isVisible()
+        assert not window.stop_record_btn.isVisible()
+        window.record_btn.click()
+        app.processEvents()
+        assert bar.record_menu.isVisible()
+        bar.record_menu.hide()
     finally:
         window.close()
         app.processEvents()

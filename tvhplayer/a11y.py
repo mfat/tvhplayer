@@ -28,7 +28,7 @@ Channels
   S                Focus channel search (not while typing in the list)
 
 Playback
-  P                Play the selected channel
+  P                Play the selected channel, or stop playback
   Ctrl+.           Stop playback
   M                Mute or unmute
   Ctrl+Up          Raise volume
