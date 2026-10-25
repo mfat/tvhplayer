@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QGroupBox,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices
@@ -1133,9 +1133,8 @@ class ServerDialog(QDialog):
         btn_layout.addWidget(add_btn)
         btn_layout.addWidget(self.edit_btn)
         btn_layout.addWidget(self.remove_btn)
-        layout.addLayout(btn_layout)
-        self._setup_server_group(layout)
-        self._sync_server_group()
+        self._setup_server_options(layout, btn_layout)
+        self._sync_server_options()
         
         # Close button
         close_btn = QPushButton("&Close")
@@ -1175,7 +1174,7 @@ class ServerDialog(QDialog):
                 self.servers[current_row] = dialog.get_server_config()
                 print(f"Debug: Updated server: {self.servers[current_row]['name']}")
                 self.server_list.item(current_row).setText(self.servers[current_row]['name'])
-                self._sync_server_group()
+                self._sync_server_options()
                 
     def remove_server(self):
         current_row = self.server_list.currentRow()
@@ -1194,13 +1193,10 @@ class ServerDialog(QDialog):
         else:
             print("Debug: No server selected for removal")
 
-    def _setup_server_group(self, layout):
+    def _setup_server_options(self, layout, row):
         parent = self.parent()
         self._supervisor = getattr(parent, 'builtin', None)
-        # Options for the selected row; built-in-only ones hide for other servers.
-        self.server_group = QGroupBox()
-        group_layout = QVBoxLayout(self.server_group)
-        row = QHBoxLayout()
+        # Options for the selected row; ones that do not apply to it are hidden.
         self.open_web_btn = QPushButton("Open &Web Interface")
         self.open_web_btn.clicked.connect(self._open_web)
         describe(
@@ -1212,44 +1208,40 @@ class ServerDialog(QDialog):
         describe(self.log_btn, "Server log", "Show the built-in server log")
         row.addWidget(self.open_web_btn)
         row.addWidget(self.log_btn)
-        row.addStretch()
-        group_layout.addLayout(row)
+        layout.addLayout(row)
         self.autostart = QCheckBox("&Start with TVHplayer")
         describe(
             self.autostart,
             "Start with TVHplayer",
             "Start the built-in server when TVHplayer opens",
         )
-        group_layout.addWidget(self.autostart)
+        layout.addWidget(self.autostart)
         if self._supervisor is not None:
             self.log_btn.clicked.connect(parent.show_builtin_log)
             self.autostart.setChecked(bool(parent.config.get('builtin_autostart')))
             self.autostart.toggled.connect(parent._set_builtin_autostart)
-            self._supervisor.status_changed.connect(lambda _status: self._sync_server_group())
-        layout.addWidget(self.server_group)
-        self.server_list.currentRowChanged.connect(lambda _row: self._sync_server_group())
+            self._supervisor.status_changed.connect(lambda _status: self._sync_server_options())
+        self.server_list.currentRowChanged.connect(lambda _row: self._sync_server_options())
 
     def _selected_server(self):
         row = self.server_list.currentRow()
         servers = getattr(self, 'servers', [])
         return servers[row] if 0 <= row < len(servers) else None
 
-    def _sync_server_group(self):
+    def _sync_server_options(self):
         server = self._selected_server()
         builtin = bool(server and server.get('builtin'))
-        self.edit_btn.setEnabled(server is not None and not builtin)
-        self.remove_btn.setEnabled(server is not None and not builtin)
-        self.server_group.setVisible(server is not None)
-        if server is None:
-            return
-        self.server_group.setTitle(server.get('name') or "Server")
+        self.edit_btn.setVisible(not builtin)
+        self.remove_btn.setVisible(not builtin)
+        self.edit_btn.setEnabled(server is not None)
+        self.remove_btn.setEnabled(server is not None)
         show_builtin = builtin and self._supervisor is not None
         self.log_btn.setVisible(show_builtin)
         self.autostart.setVisible(show_builtin)
         if builtin:
             self.open_web_btn.setEnabled(show_builtin and self._supervisor.is_running())
         else:
-            self.open_web_btn.setEnabled(bool(server.get('url')))
+            self.open_web_btn.setEnabled(bool(server and server.get('url')))
 
     def _open_web(self):
         server = self._selected_server()
