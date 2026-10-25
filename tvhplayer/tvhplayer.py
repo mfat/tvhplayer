@@ -5350,6 +5350,14 @@ class TVHeadendClient(QMainWindow):
 
         next_job()
 
+    def keep_playlist_job(self, job):
+        """Let a playlist's stream test go on after its window closes."""
+        job.setParent(self)
+        if job not in self._playlist_jobs:
+            self._playlist_jobs.append(job)
+        job.finished.connect(lambda message, _skipped: self._playlist_refreshed(message, job.server))
+        job.failed.connect(self.statusbar.showMessage)
+
     def _playlist_refresh_failed(self, source, message):
         # An import the user started is already updating this playlist.
         if message != PLAYLIST_BUSY:

@@ -92,6 +92,7 @@ class FakeHost:
         self.imported = []
         self.changed = []
         self.shown = []
+        self.kept = []
 
     def import_targets(self):
         return list(self.targets)
@@ -116,6 +117,9 @@ class FakeHost:
 
     def show_server(self, server):
         self.shown.append(server)
+
+    def keep_playlist_job(self, job):
+        self.kept.append(job)
 
 
     def claim_playlist(self, source):
@@ -314,3 +318,39 @@ def test_job_says_when_only_the_stream_test_is_left(app, tmp_path):
         time.sleep(0.02)
     app.processEvents()
     assert events == ['checking', 'Updated the channels from news: 2 added.']
+
+
+def test_closing_while_checking_hands_the_job_to_the_host(app, tmp_path, monkeypatch):
+    class SlowScan(FakeAdmin):
+        def create_mux(self, network_uuid, conf):
+            uuid = super().create_mux(network_uuid, conf)
+            self.muxes[uuid].update(scan_state=1, scan_result=0)
+            return uuid
+
+    monkeypatch.setattr(dialogs, 'TvhAdmin', SlowScan)
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    dialog = dialogs.ImportPlaylistDialog(host)
+    dialog.location_input.setText(_playlist(tmp_path, TWO))
+    dialog.import_btn.click()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and dialog.hint_label.isHidden():
+        app.processEvents()
+        time.sleep(0.02)
+    assert dialog.hint_label.text() == dialogs.CHECK_HINT
+    assert dialog.close_btn.text() == 'Close'
+
+    job = dialog._job
+    finished = []
+    dialog.close_btn.click()
+    assert host.kept == [job]
+    assert dialog._job is None
+    assert job.is_checking()
+    job.finished.connect(lambda message, _skipped: finished.append(message))
+    for mux in FakeAdmin.servers[BUILTIN['url']]['muxes'].values():
+        mux.update(scan_state=0, scan_result=1)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and job.is_running():
+        app.processEvents()
+        time.sleep(0.02)
+    app.processEvents()
+    assert finished == ['Added 2 channels from news.']

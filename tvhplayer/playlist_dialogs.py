@@ -144,6 +144,18 @@ class PlaylistJob(QObject):
         """Busy with more than the server's stream test."""
         return self._busy and not self._checking
 
+    def is_checking(self):
+        """Only the server's stream test is left, which can go on without a window."""
+        return self._busy and self._checking
+
+    def detach(self):
+        """Drop every window's connection, for the host to take the job over."""
+        for signal in (self.status, self.progress, self.checking, self.finished, self.failed):
+            try:
+                signal.disconnect()
+            except TypeError:
+                pass
+
     def _release(self):
         self._busy = False
         self._host.release_playlist(self.source)
@@ -278,6 +290,9 @@ def show_skipped(parent, skipped):
     box.exec()
 
 
+CHECK_HINT = 'Working channels appear in the list as they pass. You can close this window; checking goes on.'
+
+
 class ImportPlaylistDialog(QDialog):
     """One step: choose a playlist and a server, then Import."""
 
@@ -333,6 +348,10 @@ class ImportPlaylistDialog(QDialog):
         self.progress_bar.hide()
         describe(self.progress_bar, 'Import progress')
         layout.addWidget(self.progress_bar)
+        self.hint_label = QLabel(CHECK_HINT)
+        self.hint_label.setWordWrap(True)
+        self.hint_label.hide()
+        layout.addWidget(self.hint_label)
 
         self.buttons = QDialogButtonBox()
         self.import_btn = self.buttons.addButton('&Import', QDialogButtonBox.ButtonRole.AcceptRole)
@@ -364,6 +383,7 @@ class ImportPlaylistDialog(QDialog):
         self.import_btn.setEnabled(not running)
         self.close_btn.setText('Cancel' if running else 'Close')
         self.progress_bar.setVisible(running)
+        self.hint_label.hide()
 
     def _start(self):
         location = self.location_input.text().strip()
@@ -396,6 +416,7 @@ class ImportPlaylistDialog(QDialog):
         )
         self._job.status.connect(self._step)
         self._job.progress.connect(self._progress)
+        self._job.checking.connect(self._checking)
         self._job.finished.connect(self._finished)
         self._job.failed.connect(self._failed)
         self._job.start()
@@ -409,6 +430,10 @@ class ImportPlaylistDialog(QDialog):
         self.progress_bar.setRange(0, max(total, 1))
         self.progress_bar.setValue(done)
         self.status_label.setText(f'{self._step_text} {done} of {total}')
+
+    def _checking(self):
+        self.close_btn.setText('Close')
+        self.hint_label.show()
 
     def _finished(self, message, skipped):
         self._set_running(False)
@@ -429,7 +454,11 @@ class ImportPlaylistDialog(QDialog):
         self.accept()
 
     def reject(self):
-        if self._job is not None and self._job.is_running():
+        if self._job is not None and self._job.is_checking():
+            self._job.detach()
+            self._host.keep_playlist_job(self._job)
+            self._job = None
+        elif self._job is not None and self._job.is_running():
             self._job.cancel()
             self._set_status('Stopping…')
             return
@@ -466,6 +495,10 @@ class PlaylistsDialog(QDialog):
         self.progress_bar.hide()
         describe(self.progress_bar, 'Progress')
         layout.addWidget(self.progress_bar)
+        self.hint_label = QLabel(CHECK_HINT)
+        self.hint_label.setWordWrap(True)
+        self.hint_label.hide()
+        layout.addWidget(self.hint_label)
 
         self.buttons = QDialogButtonBox()
         self.refresh_btn = self.buttons.addButton('&Refresh', QDialogButtonBox.ButtonRole.ActionRole)
@@ -533,6 +566,7 @@ class PlaylistsDialog(QDialog):
         self._job = PlaylistJob(self._host, source, server, remove=remove, parent=self)
         self._job.status.connect(lambda message: announce_label(self.status_label, message))
         self._job.progress.connect(self._progress)
+        self._job.checking.connect(self.hint_label.show)
         self._job.finished.connect(self._finished)
         self._job.failed.connect(self._failed)
         self.progress_bar.setRange(0, 0)
@@ -546,17 +580,23 @@ class PlaylistsDialog(QDialog):
 
     def _finished(self, message, _skipped):
         self.progress_bar.hide()
+        self.hint_label.hide()
         announce_label(self.status_label, message)
         self._host.playlist_imported(self._job.server)
         self._load()
 
     def _failed(self, message):
         self.progress_bar.hide()
+        self.hint_label.hide()
         announce_label(self.status_label, message)
         self._sync_buttons()
 
     def reject(self):
-        if self._job is not None and self._job.is_running():
+        if self._job is not None and self._job.is_checking():
+            self._job.detach()
+            self._host.keep_playlist_job(self._job)
+            self._job = None
+        elif self._job is not None and self._job.is_running():
             self._job.cancel()
             announce_label(self.status_label, 'Stopping…')
             return

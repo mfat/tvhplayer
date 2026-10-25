@@ -25,7 +25,8 @@ BUILTIN_SERVER_KEY = 'builtin'
 # name can match ffmpegthumbnailer in Tvheadend's PATH lookup (issue 1632).
 REMOTE_FFMPEG = '/usr/bin/ffmpeg'
 NO_FFMPEG = 'TVHplayer could not find ffmpeg, which it needs to play imported channels.'
-MAX_STREAMS = 2
+# Also how many streams the server tests at once; each failing one waits max_timeout.
+MAX_STREAMS = 6
 CHECKPOINT_EVERY = 50
 CHECK_POLL_SECONDS = 2
 NOT_WORKING = 'It is not working right now.'
@@ -236,7 +237,11 @@ def sync_playlist(
         checkpoint()
     else:
         # A switched-off network is never scanned and its channels do not play.
-        admin.update_network(source.network_uuid, {'enabled': True, 'max_timeout': NETWORK_CONF['max_timeout']})
+        admin.update_network(source.network_uuid, {
+            'enabled': True,
+            'max_timeout': NETWORK_CONF['max_timeout'],
+            'max_streams': NETWORK_CONF['max_streams'],
+        })
 
     rows = {row['uuid']: row for row in admin.list_muxes(source.network_uuid) if row.get('uuid')}
     known = {key: uuid for key, uuid in source.muxes.items() if uuid in rows}

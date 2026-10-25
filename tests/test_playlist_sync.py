@@ -15,6 +15,7 @@ from tvhplayer.core.builtin_server import find_bundled_binary
 from tvhplayer.core.errors import PlaylistError, TvhAuthError, TvhConnectionError
 from tvhplayer.core.playlist import SkippedEntry, parse_playlist, plan_channels
 from tvhplayer.core.playlist_sync import (
+    MAX_STREAMS,
     NETWORK_CONF,
     NOT_WORKING,
     PlaylistSource,
@@ -250,9 +251,11 @@ def test_refresh_switches_the_network_back_on():
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
     sync_playlist(admin, source, _plans(FIRST))
     admin.networks[source.network_uuid]['enabled'] = False
+    admin.networks[source.network_uuid]['max_streams'] = 2
     sync_playlist(admin, source, _plans(FIRST))
     assert admin.networks[source.network_uuid]['enabled'] is True
     assert admin.networks[source.network_uuid]['max_timeout'] == 30
+    assert admin.networks[source.network_uuid]['max_streams'] == MAX_STREAMS
     assert admin.orphans_cleared == [source.network_uuid]
 
 
