@@ -51,9 +51,6 @@ def test_ui_module_uses_pyqt6(monkeypatch):
     assert server_dialog.protocol_combo.currentData() == 'htsp'
     assert server_dialog.htsp_port_input.value() == 9982
 
-    error_dialog = ui.ConnectionErrorDialog('local', 'connection refused')
-    assert error_dialog.windowTitle() == 'Connection Error'
-
     app.processEvents()
 
 
@@ -148,7 +145,7 @@ def _make_player(monkeypatch, tmp_path):
 
     store = ConfigStore(tmp_path / 'tvhplayer.conf')
     monkeypatch.setattr(ui, 'ConfigStore', lambda *a, **k: store)
-    monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self: None)
+    monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
 
     from PyQt6.QtWidgets import QApplication
 
@@ -398,6 +395,107 @@ def _channel_row(table, name):
     return -1
 
 
+def _wait_for_channels(app, window, timeout=5.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while window._channel_fetch is not None:
+        assert time.monotonic() < deadline, "channel fetch did not finish"
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+
+def test_channel_list_shows_loading_empty_and_error_states(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        news = ui.Channel(uuid='news', name='News', number=1)
+        gate = threading.Event()
+        answers = []
+        finished = []
+
+        class Backend:
+            def __init__(self, answer):
+                self.answer = answer
+
+            def get_channels(self):
+                gate.wait(5)
+                finished.append(self.answer)
+                if isinstance(self.answer, Exception):
+                    raise self.answer
+                return self.answer
+
+        # Each fetch takes its answer when it starts, so the order is fixed.
+        window._open_channel_backend = lambda server: Backend(answers.pop(0))
+        window.servers = [{'name': 'Home', 'url': 'http://127.0.0.1:9981', 'protocol': 'http'}]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('Home')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+        monkeypatch.undo()
+        state = window.channel_state
+
+        # First load: a spinner page stands in for the list.
+        answers.append(OSError('Connection refused'))
+        window.fetch_channels()
+        assert window.channel_stack.currentWidget() is state
+        assert not state.ring.isHidden()
+        assert state.retry_btn.isHidden()
+        assert "Loading channels from Home" in state.message.text()
+        gate.set()
+        _wait_for_channels(app, window)
+
+        # Failure: the message and a Retry button, no dialog.
+        assert window.channel_stack.currentWidget() is state
+        assert state.ring.isHidden()
+        assert not state.retry_btn.isHidden()
+        assert "Could not connect to Home" in state.message.text()
+        assert "Connection refused" in state.message.text()
+
+        answers.append([news])
+        state.retry_btn.click()
+        _wait_for_channels(app, window)
+        assert window.channel_stack.currentWidget() is window.channel_list
+        assert _channel_row(window.channel_list, 'News') >= 0
+
+        # Reload of the same server: the list stays and a thin bar runs.
+        gate.clear()
+        answers.append(OSError('timed out'))
+        window.fetch_channels()
+        assert window.channel_stack.currentWidget() is window.channel_list
+        assert not window.channel_busy.isHidden()
+        gate.set()
+        _wait_for_channels(app, window)
+        assert window.channel_busy.isHidden()
+        assert window.channel_stack.currentWidget() is window.channel_list
+        assert _channel_row(window.channel_list, 'News') >= 0
+
+        # A fetch replaced by a newer one is ignored when it ends.
+        gate.clear()
+        finished.clear()
+        answers.extend([[ui.Channel(uuid='old', name='Old', number=9)], []])
+        window.fetch_channels()
+        window.fetch_channels()
+        gate.set()
+        _wait_for_channels(app, window)
+        deadline = time.monotonic() + 5
+        while len(finished) < 2 and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        for _ in range(20):
+            app.processEvents()
+            time.sleep(0.01)
+        assert _channel_row(window.channel_list, 'Old') == -1
+        assert window.channel_stack.currentWidget() is state
+        assert "no channels" in state.message.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
     from PyQt6.QtCore import Qt
 
@@ -414,6 +512,7 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
                 return f'http://tv.example/stream/{channel.uuid}'
 
         window.get_backend = lambda: Backend()
+        window._open_channel_backend = lambda server: Backend()
         window.servers = [{
             'name': 'local',
             'url': 'http://127.0.0.1:9981',
@@ -426,7 +525,7 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
 
         monkeypatch.undo()
         window.fetch_channels()
-        app.processEvents()
+        _wait_for_channels(app, window)
 
         news_row = _channel_row(window.channel_list, 'News')
         sport_row = _channel_row(window.channel_list, 'Sport')
@@ -457,7 +556,7 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         assert window.channel_list.item(news_row, 2).text() == ""
 
         window.fetch_channels()
-        app.processEvents()
+        _wait_for_channels(app, window)
         sport_row = _channel_row(window.channel_list, 'Sport')
         news_row = _channel_row(window.channel_list, 'News')
         assert window.channel_list.item(sport_row, 2).text() == "Playing"
@@ -1343,7 +1442,8 @@ def test_channel_list_reloads_at_most_every_30_seconds_during_a_playlist_check(m
         server = {'name': 'Built-in Server', 'url': 'http://127.0.0.1:1', 'builtin': True}
         monkeypatch.setattr(window, 'is_current_server', lambda candidate: candidate is server)
         monkeypatch.setattr(window, 'current_server', lambda: server)
-        monkeypatch.setattr(window, 'playlist_imported', lambda candidate: reloads.append(candidate))
+        # The reload keeps the selected row and scroll place.
+        monkeypatch.setattr(window, 'fetch_channels', lambda keep_place=False: keep_place and reloads.append(server))
         clock = [1000.0]
         monkeypatch.setattr(ui.time, 'monotonic', lambda: clock[0])
 
@@ -1448,6 +1548,7 @@ def test_startup_refresh_moves_on_when_a_playlist_reaches_its_stream_test(monkey
 def _channel_list_window(monkeypatch, tmp_path, backend):
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
     window.get_backend = lambda: backend
+    window._open_channel_backend = lambda server: backend
     window.servers = [{'name': 'local', 'url': 'http://127.0.0.1:9981', 'protocol': 'http'}]
     window.server_combo.blockSignals(True)
     window.server_combo.addItem('local')
@@ -1513,7 +1614,7 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         table = window.channel_list
         header = table.horizontalHeader()
         window.fetch_channels()
-        app.processEvents()
+        _wait_for_channels(app, window)
 
         # Defaults: number, name, now, and status show; disabled channels are left out.
         assert [table.item(row, ui.COL_NAME).text() for row in range(table.rowCount())] == ['News', 'Sport']
@@ -1598,6 +1699,7 @@ def test_now_next_is_fetched_again_when_a_programme_ends(monkeypatch, tmp_path):
     window.logo_loader.request = lambda *args: None
     try:
         window.fetch_channels()
+        _wait_for_channels(app, window)
         assert backend.now_next_calls == 1
         window._tick_now_next()
         assert backend.now_next_calls == 1

@@ -8,12 +8,12 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
     QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
-    QFont, QFontDatabase, QFontMetrics, QKeySequence,
+    QFont, QFontDatabase, QFontMetrics, QKeySequence, QPalette,
 )
 import json
 # Replace this line:
@@ -1880,50 +1880,6 @@ class ServerDialog(QDialog):
         else:
             QDesktopServices.openUrl(QUrl(server['url']))
 
-class ConnectionErrorDialog(QDialog):
-    def __init__(self, server_name, error_msg, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Connection Error")
-        self.setup_ui(server_name, error_msg)
-        
-    def setup_ui(self, server_name, error_msg):
-        layout = QVBoxLayout(self)
-        message = (
-            f"Failed to connect to server: {server_name}\n"
-            f"Error: {error_msg}\n\n"
-            "Would you like to retry the connection?"
-        )
-        self.setAccessibleName("Connection Error")
-        self.setAccessibleDescription(message)
-        
-        # Error icon and message
-        message_layout = QHBoxLayout()
-        icon_label = QLabel()
-        icon_label.setPixmap(QMessageBox.standardIcon(QMessageBox.Icon.Critical))
-        icon_label.setAccessibleName("Error")
-        icon_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        message_layout.addWidget(icon_label)
-        
-        error_text = QLabel(message)
-        error_text.setWordWrap(True)
-        error_text.setAccessibleName(message)
-        message_layout.addWidget(error_text)
-        layout.addLayout(message_layout)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        retry_btn = QPushButton("&Retry")
-        abort_btn = QPushButton("&Abort")
-        retry_btn.setDefault(True)
-        retry_btn.setAutoDefault(True)
-        
-        retry_btn.clicked.connect(self.accept)
-        abort_btn.clicked.connect(self.reject)
-        
-        button_layout.addWidget(retry_btn)
-        button_layout.addWidget(abort_btn)
-        layout.addLayout(button_layout)
-
 class ServerStatusDialog(QDialog):
     def __init__(self, backend, parent=None):
         super().__init__(parent)
@@ -2253,6 +2209,136 @@ class PlaybackSpinner(QWidget):
         painter.end()
 
 
+class BusyRing(QWidget):
+    """Small spinning ring in the theme's text color. It only turns while shown."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._angle = 0
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._advance)
+        self.setFixedSize(36, 36)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def showEvent(self, event):
+        self._timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self._timer.stop()
+        super().hideEvent(event)
+
+    def _advance(self):
+        self._angle = (self._angle + 8) % 360
+        self.update()
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        thickness = 4
+        rect = QRectF(self.rect()).adjusted(thickness, thickness, -thickness, -thickness)
+        color = self.palette().color(QPalette.ColorRole.WindowText)
+        track = QColor(color)
+        track.setAlpha(50)
+        pen = QPen(track, thickness)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawEllipse(rect)
+        pen.setColor(color)
+        painter.setPen(pen)
+        painter.drawArc(rect, int(-self._angle * 16), int(110 * 16))
+        painter.end()
+
+
+class ChannelListState(QWidget):
+    """Shown in place of the channel list while it loads, when it is empty, or when loading failed."""
+
+    retry = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+        layout.addStretch(1)
+        self.ring = BusyRing(self)
+        layout.addWidget(self.ring, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.message = QLabel(self)
+        self.message.setWordWrap(True)
+        self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.message)
+        self.retry_btn = QPushButton("&Retry", self)
+        self.retry_btn.clicked.connect(self.retry)
+        describe(self.retry_btn, description="Try to load the channel list again")
+        layout.addWidget(self.retry_btn, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(2)
+
+    def show_state(self, text, busy=False, retry=False):
+        self.ring.setVisible(busy)
+        self.retry_btn.setVisible(retry)
+        announce_label(self.message, text)
+
+
+class ChannelFetch(QObject):
+    """Fetch a server's channels and what is shown beside them, off the UI thread.
+
+    It uses its own backend connection, so it never shares one with the window.
+    Exactly one of loaded or failed is emitted.
+    """
+
+    loaded = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, server, kinds, now_next, open_backend=create_backend, parent=None):
+        super().__init__(parent)
+        self.server = dict(server)
+        self.key = server_key(self.server)
+        self._kinds = kinds
+        self._now_next = now_next
+        self._open_backend = open_backend
+        self._thread = threading.Thread(target=self._run, name='channel-fetch', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _run(self):
+        backend = None
+        try:
+            backend = self._open_backend(self.server)
+            channels = backend.get_channels()
+            # Everything after the channels is optional. A server that refuses
+            # one (the service grid needs admin rights) leaves that part empty.
+            result = {'channels': channels, 'tags': [], 'services': [], 'now_next': {}}
+            try:
+                result['tags'] = [tag for tag in backend.list_channel_tags() if tag.enabled]
+            except Exception as e:
+                print(f"Debug: Could not load channel tags: {e}")
+            if self._kinds:
+                try:
+                    result['services'] = backend.list_channel_services()
+                except Exception as e:
+                    print(f"Debug: Could not load channel services: {e}")
+            if self._now_next and channels:
+                try:
+                    result['now_next'] = backend.get_now_next(channels)
+                except Exception as e:
+                    # None keeps what was shown before.
+                    result['now_next'] = None
+                    print(f"Debug: Could not load now and next: {e}")
+        except Exception as e:
+            print(f"Debug: Could not fetch channels: {e}")
+            self.failed.emit(str(e) or type(e).__name__)
+            return
+        finally:
+            if backend is not None:
+                try:
+                    backend.close()
+                except Exception:
+                    pass
+        self.loaded.emit(result)
+
+
 class StartWatch(QObject):
     """Follow the server's status for a channel that is starting, off the UI thread.
 
@@ -2476,6 +2562,9 @@ class TVHeadendClient(QMainWindow):
         self._last_channel_reload = 0.0
         # Extras shown beside each channel, keyed by channel_key().
         self._channels = []
+        # server_key() of the server _channels came from, and the fetch still running.
+        self._channels_server = None
+        self._channel_fetch = None
         self._channel_tags = []
         self._now_next = {}
         self._now_next_fetched = 0.0
@@ -2768,7 +2857,21 @@ class TVHeadendClient(QMainWindow):
         self.channel_list.customContextMenuRequested.connect(self.show_channel_context_menu)
         self.channel_list.installEventFilter(self)
         
-        left_layout.addWidget(self.channel_list)
+        # A thin bar shows a reload while the old list stays usable. A first
+        # load, an empty list, or a failure shows a page in place of the list.
+        self.channel_busy = QProgressBar()
+        self.channel_busy.setRange(0, 0)
+        self.channel_busy.setTextVisible(False)
+        self.channel_busy.setFixedHeight(4)
+        describe(self.channel_busy, "Refreshing channels")
+        self.channel_busy.hide()
+        left_layout.addWidget(self.channel_busy)
+        self.channel_state = ChannelListState()
+        self.channel_state.retry.connect(lambda: self.fetch_channels())
+        self.channel_stack = QStackedWidget()
+        self.channel_stack.addWidget(self.channel_list)
+        self.channel_stack.addWidget(self.channel_state)
+        left_layout.addWidget(self.channel_stack)
         self._build_channel_list_menu(view_menu)
 
         # Channel group (Tvheadend channel tag) filter. Built here because the
@@ -3124,6 +3227,7 @@ class TVHeadendClient(QMainWindow):
             self.server_combo,
             self.manage_servers_btn,
             self.channel_list,
+            self.channel_state.retry_btn,
             self.search_box,
             self.tag_combo,
             self.video_frame,
@@ -3367,21 +3471,6 @@ class TVHeadendClient(QMainWindow):
 
     def _wants_now_next(self):
         return self._visible_channel_column('now') or self._visible_channel_column('next')
-
-    def _load_channel_extras(self, backend):
-        """Tags, channel kinds, and now/next for the channels just fetched.
-
-        Each one is optional. A server that refuses one (the service grid
-        needs admin rights) leaves that part of the list empty.
-        """
-        try:
-            self._channel_tags = [tag for tag in backend.list_channel_tags() if tag.enabled]
-        except Exception as e:
-            print(f"Debug: Could not load channel tags: {e}")
-            self._channel_tags = []
-        self._load_channel_kinds(backend)
-        self._fetch_now_next(backend)
-        self._recording_keys = recording_channel_keys(self._channels, getattr(self, '_dvr_entries', []))
 
     def _load_channel_kinds(self, backend):
         services = []
@@ -3762,63 +3851,137 @@ class TVHeadendClient(QMainWindow):
         self._refresh_tag_combo()
         self._reload_channel_rows()
 
-    def fetch_channels(self):
-        """Fetch channel list from current TVHeadend server"""
-        server = None
-        try:
-            if not self.servers:
-                print("Debug: No servers configured")
-                self.statusbar.showMessage("No servers configured")
+    def fetch_channels(self, keep_place=False):
+        """Load the channel list from the current server in the background.
+
+        With keep_place, a reload of the same server keeps the selected row and
+        the scroll position instead of moving to the playing channel.
+        """
+        # A fetch still running for an earlier request is ignored when it ends.
+        self._channel_fetch = None
+        self.channel_busy.hide()
+        server = self.current_server()
+        if not server:
+            self._clear_channels()
+            self._show_channel_state("No servers yet. Add one with the ⚙️ button above.")
+            self.statusbar.showMessage("No servers configured")
+            return
+        if is_builtin_server(server) and not self._server_requests_ready():
+            self._clear_channels()
+            supervisor = getattr(self, 'builtin', None)
+            if supervisor is None:
+                message = "Built-in server is not available in this build."
+                self._show_channel_state(message)
+                self.statusbar.showMessage(message)
                 return
-                
-            server = self.current_server()
-            if is_builtin_server(server) and not self._server_requests_ready():
-                self.channel_list.setRowCount(0)
-                supervisor = getattr(self, 'builtin', None)
-                if supervisor is None:
-                    self.statusbar.showMessage("Built-in server is not available in this build.")
-                    return
-                if supervisor.binary is None:
-                    self.statusbar.showMessage("Built-in Tvheadend is not packaged in this build.")
-                    print("Debug: Built-in Tvheadend binary was not found in this build.")
-                    return
-                self.statusbar.showMessage("Starting built-in server...")
-                supervisor.start()
+            if supervisor.binary is None:
+                message = "Built-in Tvheadend is not packaged in this build."
+                self._show_channel_state(message)
+                self.statusbar.showMessage(message)
+                print("Debug: Built-in Tvheadend binary was not found in this build.")
                 return
-            print(f"Debug: Fetching channels from server: {server['url']}")
-            self.statusbar.showMessage("Connecting to server...")
-            backend = self.get_backend()
-            if server.get('url') != self._logo_server:
-                self.logo_loader.forget()
-                self._logo_pixmaps.clear()
-                self._logo_server = server.get('url')
-            self._channels = backend.get_channels()
-            self._load_channel_extras(backend)
-            self._refresh_tag_combo()
+            self._show_channel_state("Starting built-in server…", busy=True)
+            self.statusbar.showMessage("Starting built-in server...")
+            supervisor.start()
+            return
+        print(f"Debug: Fetching channels from server: {server['url']}")
+        fetch = ChannelFetch(
+            server,
+            kinds=self._visible_channel_column('type'),
+            now_next=self._wants_now_next(),
+            open_backend=self._open_channel_backend,
+            parent=self,
+        )
+        fetch.keep_place = keep_place
+        fetch.loaded.connect(lambda result, fetch=fetch: self._on_channels_loaded(fetch, result))
+        fetch.failed.connect(lambda message, fetch=fetch: self._on_channels_failed(fetch, message))
+        self._channel_fetch = fetch
+        if self._channels and self._channels_server == fetch.key:
+            self.channel_busy.show()
+        else:
+            self._clear_channels()
+            self._show_channel_state(f"Loading channels from {server.get('name') or 'the server'}…", busy=True)
+        self.statusbar.showMessage("Connecting to server...")
+        fetch.start()
+
+    def _open_channel_backend(self, server):
+        return create_backend(server)
+
+    def _on_channels_loaded(self, fetch, result):
+        fetch.deleteLater()
+        if fetch is not self._channel_fetch:
+            return
+        self._channel_fetch = None
+        self.channel_busy.hide()
+        reload = bool(self._channels) and self._channels_server == fetch.key
+        url = fetch.server.get('url')
+        if url != self._logo_server:
+            self.logo_loader.forget()
+            self._logo_pixmaps.clear()
+            self._logo_server = url
+        self._channels = result['channels']
+        self._channels_server = fetch.key
+        self._channel_tags = result['tags']
+        self._channel_kinds = channel_kinds(self._channels, result['services'], self._channel_tags)
+        if result['now_next'] is not None:
+            self._now_next = result['now_next']
+        self._now_next_fetched = time.monotonic()
+        self._recording_keys = recording_channel_keys(self._channels, getattr(self, '_dvr_entries', []))
+        self._refresh_tag_combo()
+        if reload and fetch.keep_place:
+            self._reload_channel_rows()
+        else:
             self._fill_channel_rows()
             self._mark_playing_channel(scroll=True)
-            self.statusbar.showMessage("Channels loaded successfully")
-        except Exception as e:
-            print(f"Debug: Error in fetch_channels: {str(e)}")
-            print(f"Debug: Error type: {type(e)}")
-            import traceback
-            print(f"Debug: Traceback: {traceback.format_exc()}")
-            
-            # Show error dialog
-            dialog = ConnectionErrorDialog(
-                (server or {}).get('name', 'server'),
-                f"Unexpected error: {str(e)}", 
-                self
-            )
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                print("Debug: Retrying connection...")
-                self.close_backend()
-                self.fetch_channels()
-            else:
-                print("Debug: Connection attempt aborted by user")
-                self.statusbar.showMessage("Connection aborted")
-                self.channel_list.setRowCount(0)
-        
+        if self._channels:
+            self._show_channel_list()
+        else:
+            self._show_channel_state("This server has no channels yet.")
+        self.statusbar.showMessage("Channels loaded successfully")
+
+    def _on_channels_failed(self, fetch, message):
+        fetch.deleteLater()
+        if fetch is not self._channel_fetch:
+            return
+        self._channel_fetch = None
+        self.channel_busy.hide()
+        name = fetch.server.get('name') or 'the server'
+        if self._channels and self._channels_server == fetch.key:
+            # Keep the list from the last load; it is still useful.
+            self.statusbar.showMessage(f"Could not refresh channels from {name}: {message}")
+            return
+        self._clear_channels()
+        self._show_channel_state(f"Could not connect to {name}.\n{message}", retry=True)
+        self.statusbar.showMessage(f"Could not connect to {name}")
+
+    def _clear_channels(self):
+        self._channels = []
+        self._channels_server = None
+        self._channel_tags = []
+        self._channel_kinds = {}
+        self._now_next = {}
+        self.channel_list.setRowCount(0)
+        self._refresh_tag_combo()
+
+    def _show_channel_state(self, text, busy=False, retry=False):
+        """Put a message, and a spinner or Retry button, where the channel list is."""
+        stack = self.channel_stack
+        focus = QApplication.focusWidget()
+        had_focus = focus is not None and (focus is stack or stack.isAncestorOf(focus))
+        self.channel_state.show_state(text, busy=busy, retry=retry)
+        stack.setCurrentWidget(self.channel_state)
+        if had_focus and retry:
+            self.channel_state.retry_btn.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _show_channel_list(self):
+        stack = self.channel_stack
+        if stack.currentWidget() is self.channel_list:
+            return
+        focus = QApplication.focusWidget()
+        had_focus = focus is not None and (focus is stack or stack.isAncestorOf(focus))
+        stack.setCurrentWidget(self.channel_list)
+        if had_focus:
+            self.channel_list.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def start_recording(self):
         print("Debug: Starting recording")
@@ -4923,6 +5086,8 @@ class TVHeadendClient(QMainWindow):
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
         self.statusbar.showMessage(message)
+        if is_builtin_server(self.current_server()) and not self._channels:
+            self._show_channel_state(message, retry=True)
 
     def _set_builtin_autostart(self, checked):
         self.config['builtin_autostart'] = bool(checked)
@@ -5093,16 +5258,8 @@ class TVHeadendClient(QMainWindow):
 
     def _reload_changed_channels(self):
         self._last_channel_reload = time.monotonic()
-        table = self.channel_list
-        selected = self.channel_from_row(table.currentRow())
-        scroll = table.verticalScrollBar().value()
-        self.playlist_imported(self.current_server())
-        if selected is not None:
-            for row in range(table.rowCount()):
-                if self._channels_match(self.channel_from_row(row), selected):
-                    table.setCurrentCell(row, 1)
-                    break
-        table.verticalScrollBar().setValue(scroll)
+        self.close_backend()
+        self.fetch_channels(keep_place=True)
 
     def show_server(self, server):
         for index, candidate in enumerate(self.servers):
