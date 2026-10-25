@@ -79,6 +79,9 @@ class FakeAdmin:
     def map_network_bouquet(self, _network_uuid):
         pass
 
+    def delete_orphan_channels(self, _network_uuid):
+        return 0
+
 
 class FakeHost:
     def __init__(self, targets, current=None):

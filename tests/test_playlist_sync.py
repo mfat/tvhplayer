@@ -45,6 +45,7 @@ class FakeAdmin:
         self.deleted = []
         self.mapped = []
         self.scanned = []
+        self.orphans_cleared = []
         self.dead = set(dead)
         self._next = 0
 
@@ -114,6 +115,10 @@ class FakeAdmin:
 
     def map_network_bouquet(self, network_uuid):
         self.mapped.append(network_uuid)
+
+    def delete_orphan_channels(self, network_uuid):
+        self.orphans_cleared.append(network_uuid)
+        return 0
 
     def delete_network(self, network_uuid):
         self.delete([uuid for uuid, row in self.muxes.items() if row['network_uuid'] == network_uuid])
@@ -235,6 +240,7 @@ def test_refresh_switches_the_network_back_on():
     admin.networks[source.network_uuid]['enabled'] = False
     sync_playlist(admin, source, _plans(FIRST))
     assert admin.networks[source.network_uuid]['enabled'] is True
+    assert admin.orphans_cleared == [source.network_uuid]
 
 
 def test_server_values_compare_equal_to_planned_values():

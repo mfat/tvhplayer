@@ -153,6 +153,22 @@ class TvhAdmin:
                 return None
             time.sleep(0.5)
 
+    def delete_orphan_channels(self, network_uuid: str) -> int:
+        """Delete the network bouquet's channels that lost their service.
+
+        Such a channel shows as ``{name-not-set}`` and has nothing to play.
+        Servers that older versions filled with duplicate playlists have them.
+        """
+        bouquet = self.find_bouquet(network_uuid)
+        if bouquet is None:
+            return 0
+        orphans = [
+            row['uuid'] for row in self._grid('api/channel/grid')
+            if row.get('bouquet') == bouquet['uuid'] and not row.get('services') and row.get('uuid')
+        ]
+        self.delete(orphans)
+        return len(orphans)
+
     def _node(self, uuid: str) -> dict:
         """One idnode as {'class': ..., 'uuid': ..., <param id>: <value>}."""
         entries = self._request('api/idnode/load', params={'uuid': uuid}).get('entries') or []

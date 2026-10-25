@@ -311,6 +311,8 @@ def sync_playlist(
     # Hide the new channels before the bouquet maps them.
     apply_checks(admin, source)
     admin.map_network_bouquet(source.network_uuid)
+    if refresh:
+        admin.delete_orphan_channels(source.network_uuid)
     return result
 
 
