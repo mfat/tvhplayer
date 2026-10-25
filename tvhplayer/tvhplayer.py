@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QGroupBox,
 )
 from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices
@@ -1133,15 +1133,8 @@ class ServerDialog(QDialog):
         btn_layout.addWidget(add_btn)
         btn_layout.addWidget(edit_btn)
         btn_layout.addWidget(remove_btn)
-        open_web_btn = QPushButton("Open Web Interface")
-        open_web_btn.clicked.connect(self._open_builtin_web)
-        describe(
-            open_web_btn,
-            "Open Web Interface",
-            "Open the built-in server web interface in the default browser",
-        )
-        btn_layout.addWidget(open_web_btn)
         layout.addLayout(btn_layout)
+        self._setup_builtin_group(layout)
         
         # Close button
         close_btn = QPushButton("&Close")
@@ -1199,10 +1192,44 @@ class ServerDialog(QDialog):
         else:
             print("Debug: No server selected for removal")
 
-    def _open_builtin_web(self):
+    def _setup_builtin_group(self, layout):
         parent = self.parent()
-        if parent is not None and hasattr(parent, 'open_builtin_web'):
-            parent.open_builtin_web()
+        supervisor = getattr(parent, 'builtin', None)
+        if supervisor is None:
+            return
+        group = QGroupBox("Built-in server")
+        group_layout = QVBoxLayout(group)
+        row = QHBoxLayout()
+        self.open_web_btn = QPushButton("Open &Web Interface")
+        self.open_web_btn.clicked.connect(parent.open_builtin_web)
+        describe(
+            self.open_web_btn,
+            "Open Web Interface",
+            "Open the built-in server web interface in the default browser",
+        )
+        log_btn = QPushButton("Server &log")
+        log_btn.clicked.connect(parent.show_builtin_log)
+        describe(log_btn, "Server log", "Show the built-in server log")
+        row.addWidget(self.open_web_btn)
+        row.addWidget(log_btn)
+        row.addStretch()
+        group_layout.addLayout(row)
+        autostart = QCheckBox("&Start with TVHplayer")
+        autostart.setChecked(bool(parent.config.get('builtin_autostart')))
+        autostart.toggled.connect(parent._set_builtin_autostart)
+        describe(
+            autostart,
+            "Start with TVHplayer",
+            "Start the built-in server when TVHplayer opens",
+        )
+        group_layout.addWidget(autostart)
+        layout.addWidget(group)
+        self._supervisor = supervisor
+        supervisor.status_changed.connect(self._sync_open_web)
+        self._sync_open_web()
+
+    def _sync_open_web(self, *_args):
+        self.open_web_btn.setEnabled(self._supervisor.is_running())
             
 class ServerConfigDialog(QDialog):
     def __init__(self, parent=None):
@@ -1755,7 +1782,6 @@ class TVHeadendClient(QMainWindow):
             )
             self.builtin.ready.connect(self._on_builtin_ready)
             self.builtin.failed.connect(self._on_builtin_failed)
-            self.builtin.status_changed.connect(lambda _status: self._sync_builtin_controls())
         print(f"Debug: Loaded {len(self.servers)} servers")
         
         # Initialize channels list
@@ -1794,7 +1820,6 @@ class TVHeadendClient(QMainWindow):
             self.server_combo.setCurrentIndex(last_server)
         if self.builtin is not None and self.config.get('builtin_autostart'):
             self.builtin.start()
-        self._sync_builtin_controls()
 
         try:
             self.player.attach(self.video_frame.winId().__int__())
@@ -1979,30 +2004,6 @@ class TVHeadendClient(QMainWindow):
         )
         self.manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(self.manage_servers_btn)
-        self.open_web_btn = QPushButton("Open Web Interface")
-        self.open_web_btn.setVisible(False)
-        self.open_web_btn.clicked.connect(self.open_builtin_web)
-        describe(
-            self.open_web_btn,
-            "Open Web Interface",
-            "Open the built-in server web interface in the default browser",
-        )
-        self.builtin_log_btn = QPushButton("Server log")
-        self.builtin_log_btn.setVisible(False)
-        self.builtin_log_btn.clicked.connect(self.show_builtin_log)
-        describe(self.builtin_log_btn, "Server log", "Show the built-in server log")
-        self.builtin_autostart = QCheckBox("Start with TVHplayer")
-        self.builtin_autostart.setVisible(False)
-        self.builtin_autostart.setChecked(bool(self.config.get('builtin_autostart')))
-        self.builtin_autostart.toggled.connect(self._set_builtin_autostart)
-        describe(
-            self.builtin_autostart,
-            "Start with TVHplayer",
-            "Start the built-in server when TVHplayer opens",
-        )
-        server_layout.addWidget(self.open_web_btn)
-        server_layout.addWidget(self.builtin_log_btn)
-        server_layout.addWidget(self.builtin_autostart)
         left_layout.addLayout(server_layout)
         
     
@@ -3077,8 +3078,7 @@ class TVHeadendClient(QMainWindow):
             
             # Refresh channels
             self.fetch_channels()
-            self._sync_builtin_controls()
-
+    
     def save_config(self):
         """Save current configuration"""
         try:
@@ -3160,7 +3160,6 @@ class TVHeadendClient(QMainWindow):
             if pane is not None:
                 pane.clear_server_tasks()
                 pane.refresh()
-        self._sync_builtin_controls()
 
     def on_volume_changed(self, value):
         print(f"Debug: Volume changed to {value}")
@@ -3670,7 +3669,6 @@ class TVHeadendClient(QMainWindow):
         self.config['builtin_http_port'] = http_port
         self.config['builtin_htsp_port'] = htsp_port
         self.close_backend()
-        self._sync_builtin_controls()
         if is_builtin_server(self.current_server()):
             self.fetch_channels()
         self._refresh_builtin_playlists()
@@ -3678,25 +3676,9 @@ class TVHeadendClient(QMainWindow):
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
         self.statusbar.showMessage(message)
-        self._sync_builtin_controls()
 
     def _set_builtin_autostart(self, checked):
         self.config['builtin_autostart'] = bool(checked)
-
-    def _sync_builtin_controls(self):
-        buttons = (
-            getattr(self, 'open_web_btn', None),
-            getattr(self, 'builtin_log_btn', None),
-            getattr(self, 'builtin_autostart', None),
-        )
-        if buttons[0] is None:
-            return
-        selected = is_builtin_server(self.current_server())
-        running = self.builtin is not None and self.builtin.is_running()
-        self.open_web_btn.setVisible(selected)
-        self.builtin_log_btn.setVisible(selected)
-        self.builtin_autostart.setVisible(selected)
-        self.open_web_btn.setEnabled(selected and running)
 
     def open_builtin_web(self):
         supervisor = getattr(self, 'builtin', None)
