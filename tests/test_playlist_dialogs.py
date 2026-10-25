@@ -421,6 +421,12 @@ def test_settings_toggle_hiding_and_check_now(app):
         def hides_dead_channels(self):
             return self.hide
 
+        def plays_on_start(self):
+            return False
+
+        def set_plays_on_start(self, on):
+            self.play = on
+
         def set_hides_dead_channels(self, on):
             self.hide = on
 
@@ -434,6 +440,9 @@ def test_settings_toggle_hiding_and_check_now(app):
     host = Host()
     dialog = SettingsDialog(host)
     assert dialog.hide_check.isChecked()
+    assert not dialog.play_check.isChecked()
+    dialog.play_check.click()
+    assert host.play is True
     dialog.hide_check.click()
     assert host.hide is False
     assert 'shown again' in dialog.status_label.text()

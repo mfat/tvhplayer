@@ -1626,6 +1626,32 @@ def test_startup_refresh_moves_on_when_a_playlist_reaches_its_stream_test(monkey
         window.close()
 
 
+def test_last_channel_plays_at_start_when_asked(monkeypatch, tmp_path):
+    from tvhplayer.core.models import Channel
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        played = []
+        monkeypatch.setattr(window, 'save_config', lambda: None)
+        news, sport = Channel(uuid='u1', name='News'), Channel(uuid='u2', name='Sport')
+        window._channels = [news, sport]
+        window._channels_server = 'builtin'
+        window._remember_channel(sport)
+        assert window.config['last_channel'] == {'server': 'builtin', 'key': 'u2', 'name': 'Sport'}
+
+        monkeypatch.setattr(window, 'play_channel_by_data', played.append)
+        window._playback_channel = None
+        window._play_last_channel('http://other')
+        assert played == []
+        window._play_last_channel('builtin')
+        assert played == [sport]
+
+        window.set_plays_on_start(True)
+        assert window.plays_on_start()
+    finally:
+        window.close()
+
+
 def _channel_list_window(monkeypatch, tmp_path, backend):
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
     window.get_backend = lambda: backend

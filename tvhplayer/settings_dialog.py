@@ -1,4 +1,4 @@
-"""The Settings window. For now it holds what to do with imported channels that do not work."""
+"""The Settings window: playback at startup, and what to do with imported channels that do not work."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
     'Channels that fail are hidden and come back once a later test finds them working.'
 )
+PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 
 
@@ -37,6 +38,18 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(480)
         self.setAccessibleName('Settings')
         layout = QVBoxLayout(self)
+
+        playback = QGroupBox('Playback')
+        playback_layout = QVBoxLayout(playback)
+        self.play_check = QCheckBox('&Play the last channel when TVHplayer starts')
+        self.play_check.setChecked(host.plays_on_start())
+        describe(self.play_check, description=PLAY_HELP)
+        playback_layout.addWidget(self.play_check)
+        play_help = QLabel(PLAY_HELP)
+        play_help.setWordWrap(True)
+        play_help.setContentsMargins(24, 0, 0, 0)
+        playback_layout.addWidget(play_help)
+        layout.addWidget(playback)
 
         group = QGroupBox('Imported channels')
         group_layout = QVBoxLayout(group)
@@ -66,6 +79,7 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+        self.play_check.toggled.connect(host.set_plays_on_start)
         self.hide_check.toggled.connect(self._toggled)
         self.check_btn.clicked.connect(self._check)
         self._sync()

@@ -2812,6 +2812,8 @@ class TVHeadendClient(QMainWindow):
         self._last_channel_reload = 0.0
         # Extras shown beside each channel, keyed by channel_key().
         self._channels = []
+        # Play the last channel once the first channel list arrives.
+        self._play_on_start = self.plays_on_start()
         # server_key() of the server _channels came from, and the fetch still running.
         self._channels_server = None
         self._channel_fetch = None
@@ -4063,6 +4065,18 @@ class TVHeadendClient(QMainWindow):
         else:
             self._show_channel_state("This server has no channels yet.")
         self.statusbar.showMessage("Channels loaded successfully")
+        if self._play_on_start:
+            self._play_on_start = False
+            self._play_last_channel(fetch.key)
+
+    def _play_last_channel(self, server):
+        last = self.config.get('last_channel') or {}
+        if last.get('server') != server or self._playback_channel is not None:
+            return
+        for channel in self._channels:
+            if channel_key(channel) == last.get('key'):
+                self.play_channel_by_data(channel)
+                return
 
     def _on_channels_failed(self, fetch, message):
         fetch.deleteLater()
@@ -5395,6 +5409,19 @@ class TVHeadendClient(QMainWindow):
     def show_settings(self):
         SettingsDialog(self, self).exec()
 
+    def plays_on_start(self):
+        return self.config.get('play_on_start', False)
+
+    def set_plays_on_start(self, on):
+        self.config['play_on_start'] = bool(on)
+        self.save_config()
+
+    def _remember_channel(self, channel):
+        last = {'server': self._channels_server, 'key': channel_key(channel), 'name': channel.name}
+        if self._channels_server and self.config.get('last_channel') != last:
+            self.config['last_channel'] = last
+            self.save_config()
+
     def hides_dead_channels(self):
         return self.config.get('hide_dead_channels', True)
 
@@ -5633,6 +5660,7 @@ class TVHeadendClient(QMainWindow):
             else:
                 channel = Channel.from_raw(channel_data)
             self._playback_channel = channel
+            self._remember_channel(channel)
             stream_url = self.get_backend().stream_url(channel)
             print(f"Debug: Stream URL: {stream_url}")
             self._show_playback_wait()
