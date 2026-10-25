@@ -122,16 +122,17 @@ One **IPTV Network** (`iptv_network`, not the automatic one) per playlist source
 
 The network's bouquet is enabled with *Map to channels* and the options *Map zero-numbered channels*, *Map radio channels*, and *Map encrypted services*. Without zero-numbered mapping, entries with no channel number are skipped. A test confirmed renames, renumbers, and removals carry through to channels.
 
-### Only working channels are shown
+### Channels that do not work are hidden
 
-Free playlists carry many dead entries: on iptv-org's Persian list, 147 of 202 streams failed Tvheadend's scan. The app uses that scan as the test of whether a channel works, so a dead stream never becomes a channel.
+Free playlists carry many dead entries: on iptv-org's Persian list, 147 of 202 streams failed Tvheadend's scan. The app uses that scan as the test of whether a channel works. Settings → *Hide channels that do not work* (on by default, `hide_dead_channels` in the config) turns this off.
 
-- Before the bouquet maps anything, the app disables the service of every mux still waiting for its first scan. Disabling a service makes the bouquet delete its channel; enabling it maps the channel again (`bouquet_notify_service_enabled`).
-- The import then polls the muxes and applies each verdict as it lands: scan result *OK* or *OK (partial)* enables the service, *FAIL* disables it. The dialog shows "Checking channels… n of total".
+- Every channel is shown as soon as it is imported; the check runs afterwards. Disabling a service makes the bouquet delete its channel; enabling it maps the channel again (`bouquet_notify_service_enabled`).
+- The import then polls the muxes and applies each verdict as it lands: scan result *OK* or *OK (partial)* keeps the service enabled, *FAIL* disables it. The dialog shows "Checking channels… n of total" and can be closed; the check goes on and the status bar reports the result.
 - A refresh calls `api/mpegts/network/scan`, so every stream is tested again. A mux being rescanned follows its last verdict until the new one arrives, so a channel already known to be dead is hidden as soon as the refresh starts. A dead entry keeps its mux, so it comes back on a later refresh once it works.
-- Stopping the import during the check leaves unchecked channels hidden.
+- Stopping the import during the check leaves unchecked channels shown.
+- With hiding off, imports and refreshes test nothing and leave visibility alone, and switching it off shows every hidden channel again. Settings → *Check Channels Now* tests every imported playlist and hides failures either way.
 - The guide is loaded before the check. At startup, the next playlist starts as soon as the previous one reaches its check, so one playlist's test never delays another's.
-- Scans share the network's connection limit, and a dead stream takes up to `max_timeout` to fail, so a large playlist takes a while to check.
+- Scans share the network's connection limit (six streams), and a dead stream takes up to `max_timeout` to fail, so a large playlist takes a while to check.
 
 - A refresh switches the playlist's network back on if it was switched off. Tvheadend never scans the muxes of a disabled network, and their channels do not play.
 - A refresh adopts muxes in the network that the saved map lost, one per entry with the same stream address, and deletes the rest. Before `hidemode=none`, every refresh of a disabled network imported the whole playlist again.

@@ -28,13 +28,17 @@ try:
     from .a11y import announce_label, buddy_label, describe
     from .core.playlist import load_playlist, plan_channels, playlist_commands, playlist_name
     from .core.playlist_sync import (
+        NETWORK_GONE,
         PlaylistSource,
+        SyncResult,
+        check_message,
         error_message,
         ffmpeg_for_server,
         find_source,
         remove_playlist,
         result_message,
         server_key,
+        show_all_channels,
         sync_playlist,
         unique_name,
         wait_for_checks,
@@ -46,13 +50,17 @@ except ImportError:
     from a11y import announce_label, buddy_label, describe
     from core.playlist import load_playlist, plan_channels, playlist_commands, playlist_name
     from core.playlist_sync import (
+        NETWORK_GONE,
         PlaylistSource,
+        SyncResult,
+        check_message,
         error_message,
         ffmpeg_for_server,
         find_source,
         remove_playlist,
         result_message,
         server_key,
+        show_all_channels,
         sync_playlist,
         unique_name,
         wait_for_checks,
@@ -95,9 +103,15 @@ class PlaylistJob(QObject):
     ``ask_commands(count, server_name)`` decides whether programs named in the
     playlist may run; without it the saved choice is used.
 
+    ``action`` is SYNC (import or refresh), REMOVE, CHECK (test every
+    stream now and hide those that fail), or SHOW (show every channel again).
+    A sync tests the streams only when the host hides channels that fail.
+
     ``checking`` is emitted once the channels and guide are written and only
     the server's stream test is left, which can take hours.
     """
+
+    SYNC, REMOVE, CHECK, SHOW = 'add', 'remove', 'check', 'show'
 
     status = pyqtSignal(str)
     progress = pyqtSignal(int, int)
@@ -105,14 +119,15 @@ class PlaylistJob(QObject):
     finished = pyqtSignal(str, object)
     failed = pyqtSignal(str)
 
-    def __init__(self, host, source, server, first_import=False, ask_commands=None, remove=False, parent=None):
+    def __init__(self, host, source, server, first_import=False, ask_commands=None, action=SYNC, parent=None):
         super().__init__(parent)
         self._host = host
         self.source = source
         self.server = server
         self._first_import = first_import
         self._ask_commands = ask_commands
-        self._remove = remove
+        self.action = action
+        self._hide_failed = host.hides_dead_channels()
         self._task = None
         self._playlist = None
         self._busy = False
@@ -169,9 +184,17 @@ class PlaylistJob(QObject):
         if self._cancelled:
             self._stop_with('Import stopped.')
             return
-        if self._remove:
+        if self.action == self.REMOVE:
             self.status.emit('Removing channels…')
             self._run(self._delete, self._deleted)
+            return
+        if self.action == self.CHECK:
+            self.status.emit('Starting the check…')
+            self._run(self._start_check, self._synced)
+            return
+        if self.action == self.SHOW:
+            self.status.emit('Showing channels…')
+            self._run(self._show_all, self._shown)
             return
         self.status.emit('Reading the playlist…')
         location = self.source.location
@@ -201,6 +224,7 @@ class PlaylistJob(QObject):
                 progress=task.progress.emit,
                 cancelled=lambda: self._cancelled,
                 checkpoint=lambda: task.checkpoint.emit(source.to_dict()),
+                check=self._hide_failed,
             )
             # Removed duplicates and newly hidden channels are already gone from the server.
             task.channels_changed.emit()
@@ -215,7 +239,7 @@ class PlaylistJob(QObject):
 
     def _synced(self, result):
         self._host.store_playlist_source(self.source.to_dict())
-        if result.cancelled:
+        if result.cancelled or not (self._hide_failed or self.action == self.CHECK):
             self._checked(result)
             return
         self._checking = True
@@ -237,7 +261,31 @@ class PlaylistJob(QObject):
 
     def _checked(self, result):
         self._release()
-        self.finished.emit(result_message(self.source.name, result, self._first_import), result.skipped)
+        if self.action == self.CHECK:
+            message = check_message(self.source.name, result)
+        else:
+            message = result_message(self.source.name, result, self._first_import)
+        self.finished.emit(message, result.skipped)
+
+    def _start_check(self, _task):
+        with TvhAdmin(self.server) as admin:
+            admin.check_admin()
+            if not admin.network_exists(self.source.network_uuid):
+                raise PlaylistError(NETWORK_GONE)
+            admin.scan_network(self.source.network_uuid)
+        return SyncResult()
+
+    def _show_all(self, task):
+        with TvhAdmin(self.server) as admin:
+            admin.check_admin()
+            shown = show_all_channels(admin, self.source)
+        if shown:
+            task.channels_changed.emit()
+        return shown
+
+    def _shown(self, _shown):
+        self._release()
+        self.finished.emit(f'Every channel from {self.source.name} is shown.', [])
 
     def _delete(self, _task):
         with TvhAdmin(self.server) as admin:
@@ -264,7 +312,7 @@ class PlaylistJob(QObject):
         task.start()
 
     def _failed(self, exc):
-        self._stop_with(error_message(exc, self.server.get('name', 'the server'), self._remove))
+        self._stop_with(error_message(exc, self.server.get('name', 'the server'), self.action))
 
 
 def ask_to_run_commands(parent, count, server_name):
@@ -290,7 +338,7 @@ def show_skipped(parent, skipped):
     box.exec()
 
 
-CHECK_HINT = 'Working channels appear in the list as they pass. You can close this window; checking goes on.'
+CHECK_HINT = 'The channels are in the list. Those that do not work are hidden as the check finds them. You can close this window; checking goes on.'
 
 
 class ImportPlaylistDialog(QDialog):
@@ -563,7 +611,8 @@ class PlaylistsDialog(QDialog):
         server = self._host.server_for_playlist(source) if source is not None else None
         if server is None:
             return
-        self._job = PlaylistJob(self._host, source, server, remove=remove, parent=self)
+        action = PlaylistJob.REMOVE if remove else PlaylistJob.SYNC
+        self._job = PlaylistJob(self._host, source, server, action=action, parent=self)
         self._job.status.connect(lambda message: announce_label(self.status_label, message))
         self._job.progress.connect(self._progress)
         self._job.checking.connect(self.hint_label.show)

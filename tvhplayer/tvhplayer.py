@@ -62,6 +62,7 @@ try:
         svg_icon,
     )
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
+    from .settings_dialog import SettingsDialog
     from .core.channel_info import (
         channel_icon_reference,
         channel_key,
@@ -127,6 +128,7 @@ except ImportError:
         svg_icon,
     )
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
+    from settings_dialog import SettingsDialog
     from core.channel_info import (
         channel_icon_reference,
         channel_key,
@@ -2988,10 +2990,6 @@ class TVHeadendClient(QMainWindow):
         self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(self.fullscreen_action)
 
-        # Add Settings action to View menu
-        #settings_action = QAction("Settings", self)
-        ##view_menu.addAction(settings_action)
-        
         import_playlist_action = QAction("&Import Playlist…", self)
         import_playlist_action.setShortcut("Ctrl+I")
         import_playlist_action.triggered.connect(self.import_playlist)
@@ -2999,6 +2997,11 @@ class TVHeadendClient(QMainWindow):
         playlists_action = QAction("&Playlists…", self)
         playlists_action.triggered.connect(self.show_playlists)
         file_menu.addAction(playlists_action)
+        file_menu.addSeparator()
+        settings_action = QAction("&Settings…", self)
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self.show_settings)
+        file_menu.addAction(settings_action)
         file_menu.addSeparator()
 
         # Create actions
@@ -5373,6 +5376,39 @@ class TVHeadendClient(QMainWindow):
             self._playlist_jobs.append(job)
         job.finished.connect(lambda message, _skipped: self._playlist_refreshed(message, job.server))
         job.failed.connect(self.statusbar.showMessage)
+
+    def show_settings(self):
+        SettingsDialog(self, self).exec()
+
+    def hides_dead_channels(self):
+        return self.config.get('hide_dead_channels', True)
+
+    def set_hides_dead_channels(self, on):
+        self.config['hide_dead_channels'] = bool(on)
+        self.save_config()
+        if not on:
+            self._start_playlist_jobs(PlaylistJob.SHOW)
+
+    def check_playlist_channels(self):
+        """Test every imported playlist's streams now and hide those that fail."""
+        return self._start_playlist_jobs(PlaylistJob.CHECK)
+
+    def playlist_checks(self):
+        return [job for job in self._playlist_jobs if job.action == PlaylistJob.CHECK]
+
+    def _start_playlist_jobs(self, action):
+        jobs = []
+        for source in self.playlist_sources():
+            server = self.server_for_playlist(source)
+            if server is None:
+                continue
+            job = PlaylistJob(self, source, server, action=action, parent=self)
+            self.keep_playlist_job(job)
+            jobs.append(job)
+        # Started after all are listed, so a job that fails at once is still counted.
+        for job in jobs:
+            job.start()
+        return jobs
 
     def _playlist_refresh_failed(self, source, message):
         # An import the user started is already updating this playlist.

@@ -20,6 +20,7 @@ from tvhplayer.core.playlist_sync import (
     NOT_WORKING,
     PlaylistSource,
     SyncResult,
+    check_message,
     error_message,
     ffmpeg_for_server,
     find_source,
@@ -27,6 +28,7 @@ from tvhplayer.core.playlist_sync import (
     remove_playlist,
     result_message,
     server_key,
+    show_all_channels,
     sync_playlist,
     unique_name,
     wait_for_checks,
@@ -186,11 +188,12 @@ def test_unchanged_refresh_writes_nothing():
     assert admin.saved == []
 
 
-def test_only_channels_that_pass_the_scan_are_shown():
+def test_channels_that_fail_the_scan_are_hidden():
     admin = FakeAdmin(dead={'B'})
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
     result = sync_playlist(admin, source, _plans(FIRST))
-    assert admin.visible() == []
+    # Not tested yet, so shown.
+    assert admin.visible() == ['A', 'B']
     seen = []
     wait_for_checks(admin, source, result, progress=lambda *args: seen.append(args), sleep=lambda _s: admin.finish_scans())
     assert admin.visible() == ['A']
@@ -220,13 +223,27 @@ def test_a_refresh_hides_channels_already_known_to_be_dead():
     assert admin.visible() == ['A']
 
 
-def test_stopping_the_check_keeps_unchecked_channels_hidden():
+def test_stopping_the_check_keeps_unchecked_channels_shown():
     admin = FakeAdmin()
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
     result = sync_playlist(admin, source, _plans(FIRST))
     wait_for_checks(admin, source, result, cancelled=lambda: True, sleep=lambda _s: None)
     assert result.check_stopped
-    assert admin.visible() == []
+    assert admin.visible() == ['A', 'B']
+
+
+def test_without_checks_a_refresh_tests_nothing_and_hides_nothing():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST))
+    wait_for_checks(admin, source, result, sleep=lambda _s: admin.finish_scans())
+    assert admin.visible() == ['A']
+    sync_playlist(admin, source, _plans(FIRST), check=False)
+    assert admin.scanned == []
+    assert admin.visible() == ['A']
+    assert show_all_channels(admin, source) == 1
+    assert admin.visible() == ['A', 'B']
+    assert show_all_channels(admin, PlaylistSource('Gone', 'http://x/gone.m3u', 'builtin')) == 0
 
 
 def test_lost_muxes_are_adopted_by_address_and_duplicates_deleted():
@@ -438,7 +455,6 @@ def test_import_plays_refreshes_and_removes(tvheadend, media):
     with TvhAdmin({'url': f'http://127.0.0.1:{port}'}) as admin:
         result = sync_playlist(admin, source, plans)
         assert result.added == 3
-        assert _channels(port) == {}
         wait_for_checks(admin, source, result, sleep=time.sleep)
         assert (result.working, result.not_working, result.check_stopped) == (2, ['Gone'], False)
 
@@ -498,16 +514,26 @@ def test_sources_are_found_and_named_per_server():
     assert unique_name(sources, 'ir', 'http://tv.lan') == 'ir'
 
 
+def test_check_messages_read_naturally():
+    assert check_message('ir', SyncResult(working=3)) == 'Checked the channels from ir: all 3 are working.'
+    assert check_message('ir', SyncResult(working=3, not_working=['b'])) == (
+        'Checked the channels from ir: 3 working. 1 is hidden because it is not working.'
+    )
+    assert check_message('ir', SyncResult(working=1, not_working=['b', 'c'], check_stopped=True)) == (
+        'Stopped checking the channels from ir. 2 are hidden because they are not working.'
+    )
+
+
 def test_result_messages_read_naturally():
     assert result_message('ir', SyncResult(added=1, working=1), True) == 'Added 1 channel from ir.'
     assert result_message('ir', SyncResult(added=3, working=1, not_working=['b', 'c']), True) == (
-        'Added 1 channel from ir. 2 were left out because they are not working.'
+        'Added 3 channels from ir. 2 are hidden because they are not working.'
     )
     assert result_message('ir', SyncResult(not_working=['b']), False) == (
         'The channels from ir are up to date. 1 channel is not working right now and is hidden.'
     )
     assert result_message('ir', SyncResult(added=2, check_stopped=True), True) == (
-        'Added 0 channels from ir. Channels that were not checked yet stay hidden.'
+        'Added 2 channels from ir. Channels that were not checked yet stay in the list.'
     )
     assert result_message('ir', SyncResult(added=3, removed=2), False) == (
         'Updated the channels from ir: 3 added, 2 removed.'

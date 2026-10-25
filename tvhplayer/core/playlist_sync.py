@@ -30,6 +30,7 @@ MAX_STREAMS = 6
 CHECKPOINT_EVERY = 50
 CHECK_POLL_SECONDS = 2
 NOT_WORKING = 'It is not working right now.'
+NETWORK_GONE = 'The channels from this playlist are no longer on the server. Import it again.'
 
 # mpegts_mux_t scan_state and scan_result values.
 SCAN_IDLE = 0
@@ -146,11 +147,11 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
         return f'Import stopped. {_channels(result.added)} from {name} were added.'
     failed = len(result.not_working)
     if first_import:
-        message = f'Added {_channels(result.working)} from {name}.'
+        message = f'Added {_channels(result.added)} from {name}.'
         if failed:
             message += (
-                ' 1 was left out because it is not working.' if failed == 1
-                else f' {failed} were left out because they are not working.'
+                ' 1 is hidden because it is not working.' if failed == 1
+                else f' {failed} are hidden because they are not working.'
             )
     elif result.added or result.removed:
         parts = []
@@ -167,7 +168,7 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
             else f' {failed} channels are not working right now and are hidden.'
         )
     if result.check_stopped:
-        message += ' Channels that were not checked yet stay hidden.'
+        message += ' Channels that were not checked yet stay in the list.'
     count = sum(1 for entry in result.skipped if entry.reason != NOT_WORKING)
     if count:
         message += ' 1 entry could not be added.' if count == 1 else f' {count} entries could not be added.'
@@ -176,8 +177,32 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
     return message
 
 
-def error_message(exc: Exception, server_name: str, removing: bool = False) -> str:
-    """Plain words for a failed import or removal."""
+def check_message(name: str, result: SyncResult) -> str:
+    """What a check of every channel, started from Settings, found."""
+    failed = len(result.not_working)
+    if result.check_stopped:
+        message = f'Stopped checking the channels from {name}.'
+    elif failed:
+        message = f'Checked the channels from {name}: {result.working} working.'
+    else:
+        return f'Checked the channels from {name}: all {result.working} are working.'
+    if failed:
+        message += (
+            ' 1 is hidden because it is not working.' if failed == 1
+            else f' {failed} are hidden because they are not working.'
+        )
+    return message
+
+
+def show_all_channels(admin, source: PlaylistSource) -> int:
+    """Show every channel of the playlist again. Returns how many were hidden."""
+    if not admin.network_exists(source.network_uuid):
+        return 0
+    return apply_checks(admin, source, hide_failed=False)[3]
+
+
+def error_message(exc: Exception, server_name: str, verb: str = 'add') -> str:
+    """Plain words for a failed import, removal, check, or show (``verb``)."""
     if isinstance(exc, PlaylistError):
         return str(exc)
     if isinstance(exc, TvhAuthError):
@@ -187,8 +212,7 @@ def error_message(exc: Exception, server_name: str, removing: bool = False) -> s
         )
     if isinstance(exc, TvhConnectionError):
         return f'Could not reach {server_name}. Check that it is running and that its address is right.'
-    action = 'remove' if removing else 'add'
-    return f'{server_name} could not {action} the channels: {exc}'
+    return f'{server_name} could not {verb} the channels: {exc}'
 
 
 def mux_conf(plan: ChannelPlan) -> dict:
@@ -214,9 +238,12 @@ def sync_playlist(
     progress: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
     checkpoint: Optional[Callable[[], None]] = None,
+    check: bool = True,
 ) -> SyncResult:
     """Create, update, and remove muxes so the network matches ``plans``.
 
+    With ``check`` a refresh tests every stream again and channels known not
+    to work are hidden; without it visibility is left alone.
     ``source`` is updated in place. ``checkpoint`` is called whenever its
     mux map changed, so a cancelled or failed import leaves the saved map
     matching the server.
@@ -313,22 +340,24 @@ def sync_playlist(
         tags.update(plan.groups)
     source.tags = sorted(tags)
     checkpoint()
-    if refresh and not result.cancelled:
+    if check and refresh and not result.cancelled:
         admin.scan_network(source.network_uuid)
-    # Hide the new channels before the bouquet maps them.
-    apply_checks(admin, source)
+    if check:
+        # Hide channels already known not to work before the bouquet maps them.
+        apply_checks(admin, source)
     admin.map_network_bouquet(source.network_uuid)
     if refresh:
         admin.delete_orphan_channels(source.network_uuid)
     return result
 
 
-def apply_checks(admin, source: PlaylistSource):
-    """Show channels whose stream passed the server's scan and hide those that failed.
+def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
+    """Hide channels whose stream failed the server's scan and show the rest.
 
-    A mux waiting for its first scan stays hidden; one being scanned again
-    follows its last verdict until the new one arrives. Returns (checked,
-    total, names that failed, number of channels shown or hidden).
+    A mux not scanned yet is shown; one being scanned again follows its last
+    verdict until the new one arrives. Without ``hide_failed`` every channel
+    is shown. Returns (checked, total, names that failed, number of channels
+    shown or hidden).
     """
     ours = set(source.muxes.values())
     rows = [row for row in admin.list_muxes(source.network_uuid) if row.get('uuid') in ours]
@@ -337,14 +366,12 @@ def apply_checks(admin, source: PlaylistSource):
     failed = []
     for row in rows:
         result = row.get('scan_result', SCAN_NONE)
+        dead = result not in SCAN_PASSED and result != SCAN_NONE
+        wanted[row['uuid']] = not (dead and hide_failed)
         if row.get('scan_state', SCAN_IDLE) != SCAN_IDLE:
-            wanted[row['uuid']] = result in SCAN_PASSED
             continue
         checked += 1
-        if result == SCAN_NONE:
-            continue
-        wanted[row['uuid']] = result in SCAN_PASSED
-        if not wanted[row['uuid']]:
+        if dead:
             failed.append(row.get('name') or row.get('iptv_sname') or '')
     changes = []
     for service in admin.list_services(wanted):

@@ -93,6 +93,7 @@ class FakeHost:
         self.changed = []
         self.shown = []
         self.kept = []
+        self.hide_dead = True
 
     def import_targets(self):
         return list(self.targets)
@@ -120,6 +121,9 @@ class FakeHost:
 
     def keep_playlist_job(self, job):
         self.kept.append(job)
+
+    def hides_dead_channels(self):
+        return self.hide_dead
 
 
     def claim_playlist(self, source):
@@ -354,3 +358,75 @@ def test_closing_while_checking_hands_the_job_to_the_host(app, tmp_path, monkeyp
         time.sleep(0.02)
     app.processEvents()
     assert finished == ['Added 2 channels from news.']
+
+
+def _finish(app, job, timeout=10):
+    events = []
+    job.checking.connect(lambda: events.append('checking'))
+    job.finished.connect(lambda message, _skipped: events.append(message))
+    job.failed.connect(lambda message: events.append(('failed', message)))
+    job.start()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and job.is_running():
+        app.processEvents()
+        time.sleep(0.02)
+    app.processEvents()
+    return events
+
+
+def test_import_without_hiding_skips_the_check(app, tmp_path):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    host.hide_dead = False
+    source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
+    events = _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True))
+    assert events == ['Added 2 channels from news.']
+
+
+def test_check_and_show_every_channel_of_an_imported_playlist(app, tmp_path):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    host.hide_dead = False
+    source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
+    _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True))
+    source = PlaylistSource.from_dict(host.stored[-1])
+
+    check = dialogs.PlaylistJob(host, source, BUILTIN, action=dialogs.PlaylistJob.CHECK)
+    assert _finish(app, check) == ['checking', 'Checked the channels from news: all 2 are working.']
+    show = dialogs.PlaylistJob(host, source, BUILTIN, action=dialogs.PlaylistJob.SHOW)
+    assert _finish(app, show) == ['Every channel from news is shown.']
+
+    gone = PlaylistSource('old', source.location, 'builtin', network_uuid='nope')
+    check = dialogs.PlaylistJob(host, gone, BUILTIN, action=dialogs.PlaylistJob.CHECK)
+    assert _finish(app, check) == [('failed', dialogs.NETWORK_GONE)]
+
+
+def test_settings_toggle_hiding_and_check_now(app):
+    from tvhplayer.settings_dialog import SettingsDialog
+
+    class Host:
+        def __init__(self):
+            self.hide = True
+            self.jobs = []
+            self.checks = 0
+
+        def hides_dead_channels(self):
+            return self.hide
+
+        def set_hides_dead_channels(self, on):
+            self.hide = on
+
+        def check_playlist_channels(self):
+            self.checks += 1
+            return list(self.jobs)
+
+        def playlist_checks(self):
+            return self.jobs
+
+    host = Host()
+    dialog = SettingsDialog(host)
+    assert dialog.hide_check.isChecked()
+    dialog.hide_check.click()
+    assert host.hide is False
+    assert 'shown again' in dialog.status_label.text()
+    dialog.check_btn.click()
+    assert host.checks == 1
+    assert dialog.status_label.text() == 'There are no imported playlists to check.'
