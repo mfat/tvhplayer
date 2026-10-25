@@ -34,6 +34,7 @@ try:
         platform_supports_builtin,
         quit_confirmation,
         recording_titles,
+        upcoming_recordings,
     )
     from .core.config import ConfigStore
     from .core.logs import SERVER_LOG, configure_logging, log_dir
@@ -89,6 +90,7 @@ except ImportError:
         platform_supports_builtin,
         quit_confirmation,
         recording_titles,
+        upcoming_recordings,
     )
     from core.config import ConfigStore
     from core.logs import SERVER_LOG, configure_logging, log_dir
@@ -4433,7 +4435,7 @@ class TVHeadendClient(QMainWindow):
 
     def closeEvent(self, event):
         """Save configuration when closing the application"""
-        if not self._confirm_builtin_quit():
+        if not self._confirm_quit():
             event.ignore()
             return
         self._closing = True
@@ -4460,34 +4462,46 @@ class TVHeadendClient(QMainWindow):
             return '', ''
         return supervisor.username, supervisor.password
 
-    def _confirm_builtin_quit(self):
-        supervisor = getattr(self, 'builtin', None)
-        if supervisor is None or not supervisor.is_running():
-            return True
+    def _confirm_quit(self):
+        """Ask before quitting would lose a recording."""
+        local_recording = ''
+        recorder = getattr(self, 'local_recorder', None)
+        if recorder is not None and recorder.is_running:
+            channel = getattr(self, '_recording_channel', None)
+            name = getattr(channel, 'name', '') or 'Unknown channel'
+            local_recording = f'{name} ({os.path.basename(recorder.file_path or "")})'
         titles = []
+        upcoming = []
         lookup_failed = False
-        # Ask the built-in server itself, whichever server is selected.
-        backend = None
-        try:
-            server = find_builtin_server(self.servers)
-            if server is None:
-                raise TvhError('Built-in server entry is missing')
-            backend = create_backend(server)
-            titles = recording_titles(backend.list_dvr_entries())
-        except Exception:
-            lookup_failed = True
-        finally:
-            if backend is not None:
-                try:
-                    backend.close()
-                except Exception:
-                    pass
-        message = quit_confirmation(titles, lookup_failed)
+        supervisor = getattr(self, 'builtin', None)
+        if supervisor is not None and supervisor.is_running():
+            # Ask the built-in server itself, whichever server is selected.
+            backend = None
+            try:
+                server = find_builtin_server(self.servers)
+                if server is None:
+                    raise TvhError('Built-in server entry is missing')
+                backend = create_backend(server)
+                entries = backend.list_dvr_entries()
+                titles = recording_titles(entries)
+                upcoming = upcoming_recordings(entries)
+            except Exception:
+                lookup_failed = True
+            finally:
+                if backend is not None:
+                    try:
+                        backend.close()
+                    except Exception:
+                        pass
+        playlist_updates = [
+            job.source.name for job in getattr(self, '_playlist_jobs', []) if job.is_writing()
+        ]
+        message = quit_confirmation(titles, lookup_failed, upcoming, local_recording, playlist_updates)
         if not message:
             return True
         answer = QMessageBox.question(
             self,
-            "Recording in progress",
+            "Quit TVHplayer?",
             message,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,

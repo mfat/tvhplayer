@@ -1247,6 +1247,23 @@ def test_stalled_local_recording_is_left_running(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def test_quit_asks_while_recording_to_this_computer(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    window.builtin = None
+    window.local_recorder = types.SimpleNamespace(is_running=True, file_path='/tmp/rec_One.ts', stop=lambda: None)
+    window._recording_channel = types.SimpleNamespace(name='One')
+    messages = []
+    monkeypatch.setattr(
+        ui.QMessageBox, 'question',
+        lambda _parent, _title, text, *a: messages.append(text) or ui.QMessageBox.StandardButton.No,
+    )
+    assert window._confirm_quit() is False
+    assert 'One (rec_One.ts)' in messages[0]
+    window.local_recorder.is_running = False
+    assert window._confirm_quit() is True
+    app.processEvents()
+
+
 def test_quit_asks_the_builtin_server_even_when_another_is_selected(monkeypatch, tmp_path):
     app, ui, window, _player = _make_player(monkeypatch, tmp_path)
     from tvhplayer.core.models import DvrEntry
@@ -1289,7 +1306,7 @@ def test_quit_asks_the_builtin_server_even_when_another_is_selected(monkeypatch,
         ui.QMessageBox, 'question',
         lambda _parent, _title, text, *a: messages.append(text) or ui.QMessageBox.StandardButton.No,
     )
-    assert window._confirm_builtin_quit() is False
+    assert window._confirm_quit() is False
     assert [server['name'] for server in asked] == ['Built-in Server']
     assert 'News Hour' in messages[0]
     app.processEvents()

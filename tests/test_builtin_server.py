@@ -7,6 +7,8 @@ import sys
 import threading
 import time
 
+from datetime import datetime
+
 from pathlib import Path
 
 import pytest
@@ -25,6 +27,8 @@ from tvhplayer.core.builtin_server import (
     pick_port_pair,
     quit_confirmation,
     recording_titles,
+    upcoming_recordings,
+    when_text,
     serverinfo_ok,
     startup_result,
     builtin_requests_ready,
@@ -135,6 +139,51 @@ def test_quit_warning_names_the_active_recording():
     assert 'Later' not in message
     assert quit_confirmation([], False) is None
     assert 'could not be read' in quit_confirmation([], True)
+
+
+def _entry(uuid, title, start, sched_status='scheduled', status='Scheduled', raw=None):
+    return DvrEntry(
+        uuid=uuid, title=title, channel_name='One', start=start, duration=600,
+        status=status, sched_status=sched_status, raw=raw or {},
+    )
+
+
+def test_upcoming_recordings_skip_past_disabled_and_running_rows():
+    now = 1_000_000
+    later = _entry('1', 'Later', now + 7200)
+    soon = _entry('2', 'Soon', now + 60)
+    past = _entry('3', 'Past', now - 3600)
+    off = _entry('4', 'Off', now + 60, raw={'enabled': False})
+    running = _entry('5', 'Now', now - 60, 'recording', 'Running')
+    found = upcoming_recordings([later, past, off, running, soon], now)
+    assert [entry.title for entry in found] == ['Soon', 'Later']
+
+
+def test_when_text_names_the_day():
+    now = datetime(2026, 10, 25, 12, 0).timestamp()
+    assert when_text(datetime(2026, 10, 25, 21, 0).timestamp(), now) == 'today at 21:00'
+    assert when_text(datetime(2026, 10, 26, 6, 30).timestamp(), now) == 'tomorrow at 06:30'
+    assert when_text(datetime(2026, 10, 31, 20, 15).timestamp(), now) == 'Sat 31 Oct at 20:15'
+
+
+def test_quit_warning_names_the_next_scheduled_recording():
+    now = datetime(2026, 10, 25, 12, 0).timestamp()
+    first = _entry('1', 'News', datetime(2026, 10, 25, 21, 0).timestamp())
+    second = _entry('2', 'Film', datetime(2026, 10, 26, 21, 0).timestamp())
+    message = quit_confirmation([], False, [first, second], now=now)
+    assert 'Next: News today at 21:00 (and 1 more)' in message
+    assert 'could not be read' not in quit_confirmation([], True, [first], now=now)
+
+
+def test_quit_warning_covers_local_recording_on_any_server():
+    message = quit_confirmation([], False, local_recording='One (rec.ts)')
+    assert 'One (rec.ts)' in message
+
+
+def test_playlist_update_alone_does_not_ask():
+    assert quit_confirmation([], False, playlist_updates=['IPTV']) is None
+    message = quit_confirmation([], False, local_recording='One (rec.ts)', playlist_updates=['IPTV'])
+    assert 'IPTV' in message
 
 
 def test_builtin_requests_wait_until_the_child_has_a_url():

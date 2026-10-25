@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 BUILTIN_NAME = 'Built-in Server'
@@ -486,17 +487,88 @@ def recording_titles(entries) -> list[str]:
     return titles
 
 
-def quit_confirmation(titles, lookup_failed: bool) -> str | None:
-    """Text for the quit dialog, or None when quit can proceed."""
+def upcoming_recordings(entries, now=None) -> list:
+    """Enabled DVR rows still waiting to record, soonest first."""
+    now = time.time() if now is None else now
+    upcoming = []
+    for entry in entries or []:
+        category = entry.category() if hasattr(entry, 'category') else ''
+        if category != 'upcoming':
+            continue
+        raw = getattr(entry, 'raw', None) or {}
+        enabled = raw.get('enabled', True)
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() not in ('0', 'false', 'no', 'off', '')
+        if not enabled:
+            continue
+        start = int(getattr(entry, 'start', 0) or 0)
+        stop = start + int(getattr(entry, 'duration', 0) or 0)
+        if max(start, stop) <= now:
+            continue
+        upcoming.append(entry)
+    return sorted(upcoming, key=lambda entry: entry.start or 0)
+
+
+def when_text(start, now=None) -> str:
+    """``today at 21:00``, ``tomorrow at 06:30`` or ``Sat 31 Oct at 20:15``."""
+    now = time.time() if now is None else now
+    moment = datetime.fromtimestamp(start)
+    days = (moment.date() - datetime.fromtimestamp(now).date()).days
+    clock = moment.strftime('%H:%M')
+    if days <= 0:
+        return f'today at {clock}'
+    if days == 1:
+        return f'tomorrow at {clock}'
+    return f"{moment.strftime('%a %d %b')} at {clock}"
+
+
+def quit_confirmation(
+    titles,
+    lookup_failed: bool,
+    upcoming=(),
+    local_recording: str = '',
+    playlist_updates=(),
+    now=None,
+) -> str | None:
+    """Text for the quit dialog, or None when quit can proceed.
+
+    ``titles`` and ``upcoming`` come from the built-in server; ``lookup_failed``
+    says its recording list could not be read. ``local_recording`` names what is
+    being recorded to this computer. ``playlist_updates`` only adds a note when
+    there is already a reason to ask.
+    """
+    reasons = []
+    if local_recording:
+        reasons.append(
+            f'A recording to this computer is in progress: {local_recording}. '
+            'Quitting stops it and the file ends there.'
+        )
     if titles:
         names = ', '.join(titles)
-        return (
-            f'A recording is currently in progress on the built-in server: {names}. '
-            'Exiting TVHplayer will stop this recording. Are you sure you want to quit?'
+        reasons.append(
+            f'A recording is in progress on the built-in server: {names}. '
+            'Quitting stops this recording.'
         )
-    if lookup_failed:
-        return (
+    if upcoming:
+        first = upcoming[0]
+        title = getattr(first, 'title', '') or 'Untitled'
+        text = f'{title} {when_text(first.start, now)}'
+        if len(upcoming) > 1:
+            text += f' (and {len(upcoming) - 1} more)'
+        reasons.append(
+            f'Recordings are scheduled on the built-in server. Next: {text}. '
+            'They will not be recorded while TVHplayer is closed.'
+        )
+    if lookup_failed and not titles and not upcoming:
+        reasons.append(
             'The built-in server is running and its recording list could not be read. '
-            'Exiting TVHplayer will stop the built-in server. Are you sure you want to quit?'
+            'Quitting stops the built-in server.'
         )
-    return None
+    if not reasons:
+        return None
+    if playlist_updates:
+        reasons.append(
+            f'A playlist update is still running ({", ".join(playlist_updates)}). '
+            'It runs again the next time the built-in server starts.'
+        )
+    return '\n\n'.join(reasons + ['Are you sure you want to quit?'])

@@ -116,6 +116,7 @@ class PlaylistJob(QObject):
         self._task = None
         self._playlist = None
         self._busy = False
+        self._checking = False
         self._cancelled = False
 
     def start(self):
@@ -138,6 +139,10 @@ class PlaylistJob(QObject):
 
     def is_running(self):
         return self._busy
+
+    def is_writing(self):
+        """Busy with more than the server's stream test."""
+        return self._busy and not self._checking
 
     def _release(self):
         self._busy = False
@@ -201,6 +206,7 @@ class PlaylistJob(QObject):
         if result.cancelled:
             self._checked(result)
             return
+        self._checking = True
         self.checking.emit()
         self.status.emit('Checking channels…')
         self._run(lambda task: self._check(task, result), self._checked)
