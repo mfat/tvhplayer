@@ -12,7 +12,7 @@ from typing import Iterable, Optional, Tuple
 from .models import SubscriptionStatus
 
 STARTING = 'Starting…'
-WAITING = 'Waiting for the channel to send a picture…'
+WAITING = 'Waiting for channel'
 SLOW = 'This channel is slow to start. Still waiting…'
 RECEIVING = 'Receiving the channel…'
 RETRYING = 'The channel is not answering. Trying again…'
