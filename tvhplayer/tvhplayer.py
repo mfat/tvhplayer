@@ -1123,18 +1123,19 @@ class ServerDialog(QDialog):
         # Buttons
         btn_layout = QHBoxLayout()
         add_btn = QPushButton("&Add Server")
-        edit_btn = QPushButton("&Edit Server")
-        remove_btn = QPushButton("&Remove Server")
+        self.edit_btn = QPushButton("&Edit Server")
+        self.remove_btn = QPushButton("&Remove Server")
         
         add_btn.clicked.connect(self.add_server)
-        edit_btn.clicked.connect(self.edit_server)
-        remove_btn.clicked.connect(self.remove_server)
+        self.edit_btn.clicked.connect(self.edit_server)
+        self.remove_btn.clicked.connect(self.remove_server)
         
         btn_layout.addWidget(add_btn)
-        btn_layout.addWidget(edit_btn)
-        btn_layout.addWidget(remove_btn)
+        btn_layout.addWidget(self.edit_btn)
+        btn_layout.addWidget(self.remove_btn)
         layout.addLayout(btn_layout)
-        self._setup_builtin_group(layout)
+        self._setup_server_group(layout)
+        self._sync_server_group()
         
         # Close button
         close_btn = QPushButton("&Close")
@@ -1174,6 +1175,7 @@ class ServerDialog(QDialog):
                 self.servers[current_row] = dialog.get_server_config()
                 print(f"Debug: Updated server: {self.servers[current_row]['name']}")
                 self.server_list.item(current_row).setText(self.servers[current_row]['name'])
+                self._sync_server_group()
                 
     def remove_server(self):
         current_row = self.server_list.currentRow()
@@ -1192,54 +1194,72 @@ class ServerDialog(QDialog):
         else:
             print("Debug: No server selected for removal")
 
-    def _setup_builtin_group(self, layout):
+    def _setup_server_group(self, layout):
         parent = self.parent()
-        supervisor = getattr(parent, 'builtin', None)
-        if supervisor is None:
-            return
-        group = QGroupBox("Built-in server")
-        group_layout = QVBoxLayout(group)
+        self._supervisor = getattr(parent, 'builtin', None)
+        # Options for the selected row; built-in-only ones hide for other servers.
+        self.server_group = QGroupBox()
+        group_layout = QVBoxLayout(self.server_group)
         row = QHBoxLayout()
         self.open_web_btn = QPushButton("Open &Web Interface")
-        self.open_web_btn.clicked.connect(parent.open_builtin_web)
+        self.open_web_btn.clicked.connect(self._open_web)
         describe(
             self.open_web_btn,
             "Open Web Interface",
-            "Open the built-in server web interface in the default browser",
+            "Open the selected server's web interface in the default browser",
         )
-        log_btn = QPushButton("Server &log")
-        log_btn.clicked.connect(parent.show_builtin_log)
-        describe(log_btn, "Server log", "Show the built-in server log")
+        self.log_btn = QPushButton("Server &log")
+        describe(self.log_btn, "Server log", "Show the built-in server log")
         row.addWidget(self.open_web_btn)
-        row.addWidget(log_btn)
+        row.addWidget(self.log_btn)
         row.addStretch()
         group_layout.addLayout(row)
-        autostart = QCheckBox("&Start with TVHplayer")
-        autostart.setChecked(bool(parent.config.get('builtin_autostart')))
-        autostart.toggled.connect(parent._set_builtin_autostart)
+        self.autostart = QCheckBox("&Start with TVHplayer")
         describe(
-            autostart,
+            self.autostart,
             "Start with TVHplayer",
             "Start the built-in server when TVHplayer opens",
         )
-        group_layout.addWidget(autostart)
-        layout.addWidget(group)
-        # Only shown while the built-in server is the selected row.
-        self.builtin_group = group
-        group.setVisible(False)
-        self.server_list.currentRowChanged.connect(self._sync_builtin_group)
-        self._supervisor = supervisor
-        supervisor.status_changed.connect(self._sync_open_web)
-        self._sync_open_web()
+        group_layout.addWidget(self.autostart)
+        if self._supervisor is not None:
+            self.log_btn.clicked.connect(parent.show_builtin_log)
+            self.autostart.setChecked(bool(parent.config.get('builtin_autostart')))
+            self.autostart.toggled.connect(parent._set_builtin_autostart)
+            self._supervisor.status_changed.connect(lambda _status: self._sync_server_group())
+        layout.addWidget(self.server_group)
+        self.server_list.currentRowChanged.connect(lambda _row: self._sync_server_group())
 
-    def _sync_builtin_group(self, row):
-        group = getattr(self, 'builtin_group', None)
-        if group is not None:
-            group.setVisible(0 <= row < len(self.servers) and bool(self.servers[row].get('builtin')))
+    def _selected_server(self):
+        row = self.server_list.currentRow()
+        servers = getattr(self, 'servers', [])
+        return servers[row] if 0 <= row < len(servers) else None
 
-    def _sync_open_web(self, *_args):
-        self.open_web_btn.setEnabled(self._supervisor.is_running())
-            
+    def _sync_server_group(self):
+        server = self._selected_server()
+        builtin = bool(server and server.get('builtin'))
+        self.edit_btn.setEnabled(server is not None and not builtin)
+        self.remove_btn.setEnabled(server is not None and not builtin)
+        self.server_group.setVisible(server is not None)
+        if server is None:
+            return
+        self.server_group.setTitle(server.get('name') or "Server")
+        show_builtin = builtin and self._supervisor is not None
+        self.log_btn.setVisible(show_builtin)
+        self.autostart.setVisible(show_builtin)
+        if builtin:
+            self.open_web_btn.setEnabled(show_builtin and self._supervisor.is_running())
+        else:
+            self.open_web_btn.setEnabled(bool(server.get('url')))
+
+    def _open_web(self):
+        server = self._selected_server()
+        if server is None:
+            return
+        if server.get('builtin'):
+            self.parent().open_builtin_web()
+        else:
+            QDesktopServices.openUrl(QUrl(server['url']))
+
 class ServerConfigDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3062,6 +3082,7 @@ class TVHeadendClient(QMainWindow):
         print("Debug: Opening server management dialog")
         dialog = ServerDialog(self)
         dialog.load_servers(self.servers)
+        dialog.server_list.setCurrentRow(self.server_combo.currentIndex())
         print(f"Debug: Loaded {len(self.servers)} servers into dialog")
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.servers = ensure_builtin_server(
