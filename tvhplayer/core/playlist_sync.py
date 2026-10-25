@@ -41,7 +41,8 @@ NETWORK_CONF = {
     'skipinitscan': True,
     'idlescan': False,
     'max_streams': MAX_STREAMS,
-    'max_timeout': 15,
+    # Seconds a source may stay silent. Some streams need 20 s to send their first data.
+    'max_timeout': 30,
     'bouquet': True,
     'epgauto_default': True,
 }
@@ -234,7 +235,8 @@ def sync_playlist(
         source.muxes = {}
         checkpoint()
     else:
-        admin.enable_network(source.network_uuid)
+        # A switched-off network is never scanned and its channels do not play.
+        admin.update_network(source.network_uuid, {'enabled': True, 'max_timeout': NETWORK_CONF['max_timeout']})
 
     rows = {row['uuid']: row for row in admin.list_muxes(source.network_uuid) if row.get('uuid')}
     known = {key: uuid for key, uuid in source.muxes.items() if uuid in rows}

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox,
 )
-from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices
 import json
 # Replace this line:
@@ -43,6 +43,7 @@ try:
     from .core.recorder import STALL_LIMIT, LocalRecorder
     from .core.vlc_player import VlcPlayer
     from .core.playlist_sync import PlaylistSource, server_key
+    from .core.playback_status import STARTING, find_subscription, starting_caption
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
@@ -69,6 +70,7 @@ except ImportError:
     from core.recorder import STALL_LIMIT, LocalRecorder
     from core.vlc_player import VlcPlayer
     from core.playlist_sync import PlaylistSource, server_key
+    from core.playback_status import STARTING, find_subscription, starting_caption
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
@@ -106,6 +108,7 @@ except ImportError:
 #from tvhplayer import resources_rc  # Use absolute import
 import time
 import subprocess
+import threading
 import traceback
 from pathlib import Path
 import logging
@@ -1698,11 +1701,20 @@ class PlaybackSpinner(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._advance)
+        self._caption = STARTING
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # The video surface is a native window; a plain widget would be drawn underneath it.
+        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setStyleSheet("background-color: black;")
         self.hide()
+
+    def set_caption(self, text):
+        self._caption = text or STARTING
+        self.setAccessibleName(self._caption)
+        self.update()
 
     def set_running(self, running):
         if running:
@@ -1743,9 +1755,68 @@ class PlaybackSpinner(QWidget):
         font = painter.font()
         font.setPointSize(11)
         painter.setFont(font)
-        caption = QRectF(0, rect.bottom() + 12, self.width(), 24)
-        painter.drawText(caption, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, "Starting…")
+        caption = QRectF(16, rect.bottom() + 12, max(0, self.width() - 32), 48)
+        painter.drawText(
+            caption,
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+            self._caption,
+        )
         painter.end()
+
+
+class StartWatch(QObject):
+    """Follow the server's status for a channel that is starting, off the UI thread.
+
+    It uses its own backend connection, so it never shares one with the window.
+    """
+
+    caption = pyqtSignal(str)
+    give_up = pyqtSignal()
+
+    def __init__(self, server, channel_name, parent=None):
+        super().__init__(parent)
+        self._server = dict(server)
+        self._name = channel_name
+        self._stopped = threading.Event()
+        self._thread = threading.Thread(target=self._run, name='start-watch', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stopped.set()
+
+    def _run(self):
+        backend = None
+        started = time.monotonic()
+        retried = False
+        last = None
+        try:
+            backend = create_backend(self._server)
+            while not self._stopped.is_set():
+                try:
+                    subscription = find_subscription(backend.get_subscriptions(), self._name)
+                except Exception:
+                    subscription = None
+                retried = retried or (subscription is not None and subscription.state == 'Bad')
+                text, done = starting_caption(subscription, time.monotonic() - started, retried)
+                if self._stopped.is_set():
+                    break
+                if text != last:
+                    last = text
+                    self.caption.emit(text)
+                if done:
+                    self.give_up.emit()
+                    break
+                self._stopped.wait(1.0)
+        except Exception as exc:
+            print(f"Debug: Start status unavailable: {exc}")
+        finally:
+            if backend is not None:
+                try:
+                    backend.close()
+                except Exception:
+                    pass
 
 
 class TVHeadendClient(QMainWindow):
@@ -2717,6 +2788,7 @@ class TVHeadendClient(QMainWindow):
     def stop_playback(self):
         """Stop current playback"""
         print("Debug: Stopping playback")
+        self._stop_start_watch()
         self._awaiting_playback = False
         self._playback_active = False
         self._playback_channel = None
@@ -2763,9 +2835,50 @@ class TVHeadendClient(QMainWindow):
         if hasattr(self, '_splash_idle_timer'):
             self._splash_idle_timer.stop()
         self._set_idle_splash(True)
+        spinner = getattr(self, 'playback_spinner', None)
+        if spinner is not None:
+            spinner.set_caption(STARTING)
         self._set_playback_spinner(True)
+        self._watch_start()
         if hasattr(self, 'video_frame'):
             self.video_frame.setUpdatesEnabled(False)
+
+    def _watch_start(self):
+        """Show what the server says about the channel while it starts."""
+        self._stop_start_watch()
+        channel = getattr(self, '_playback_channel', None)
+        server = self.current_server()
+        if channel is None or not server:
+            return
+        watch = StartWatch(server, channel.name, self)
+        watch.caption.connect(lambda text, watch=watch: self._on_start_caption(watch, text))
+        watch.give_up.connect(lambda watch=watch: self._on_start_given_up(watch))
+        self._start_watch = watch
+        watch.start()
+
+    def _stop_start_watch(self):
+        watch = getattr(self, '_start_watch', None)
+        if watch is not None:
+            watch.stop()
+        self._start_watch = None
+
+    def _on_start_caption(self, watch, text):
+        if watch is not getattr(self, '_start_watch', None) or not self._awaiting_playback:
+            return
+        spinner = getattr(self, 'playback_spinner', None)
+        if spinner is not None:
+            spinner.set_caption(text)
+        channel = getattr(self, '_playback_channel', None)
+        if channel is not None:
+            self.statusbar.showMessage(f"{channel.name}: {text}")
+
+    def _on_start_given_up(self, watch):
+        if watch is not getattr(self, '_start_watch', None) or not self._awaiting_playback:
+            return
+        channel = getattr(self, '_playback_channel', None)
+        name = channel.name if channel is not None else 'This channel'
+        self.stop_playback()
+        self.statusbar.showMessage(f"{name} is not working right now. Try another channel.")
 
     def _protect_video_surface(self, playing):
         """While a channel is on, do not let Qt paint or flash the splash."""
@@ -2788,6 +2901,7 @@ class TVHeadendClient(QMainWindow):
             self.player.show_message(text)
 
     def _on_playback_started(self):
+        self._stop_start_watch()
         self._awaiting_playback = False
         self._set_playback_spinner(False)
         self._protect_video_surface(True)
@@ -2798,6 +2912,7 @@ class TVHeadendClient(QMainWindow):
             self._show_on_picture(f"{channel.number}  {channel.name}" if channel.number else channel.name)
 
     def _on_playback_failed(self):
+        self._stop_start_watch()
         self._awaiting_playback = False
         self._playback_active = False
         self._playback_channel = None

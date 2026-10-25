@@ -116,7 +116,7 @@ One **IPTV Network** (`iptv_network`, not the automatic one) per playlist source
 | `service_sid` | 1 | Creates the service without scanning. |
 | `scan_create`, `skipinitscan`, `idlescan` | off, on, off | No idle scans. Tvheadend still scans each new mux once (`mpegts_mux_post_create` queues a mux whose scan result is NONE). |
 | `max_streams` | connection limit | Provider limit. |
-| `max_timeout` | 15 | The web UI default; the API default is 0. |
+| `max_timeout` | 30 | Seconds a source may stay silent. Some streams take about 20 s to send their first data; at the web UI default of 15, Tvheadend gives up and retries them forever. The API default is 0. |
 | `bouquet` | on | Channels are created and kept in sync by a bouquet. |
 | `epgauto_default` | on | New channels auto-map guide data by `tvg-id`. |
 

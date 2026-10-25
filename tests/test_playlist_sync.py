@@ -64,8 +64,8 @@ class FakeAdmin:
         self.networks[uuid] = conf
         return uuid
 
-    def enable_network(self, uuid):
-        self.networks[uuid]['enabled'] = True
+    def update_network(self, uuid, conf):
+        self.networks[uuid].update(conf)
 
     def list_muxes(self, network_uuid):
         return [dict(row, uuid=uuid) for uuid, row in self.muxes.items() if row['network_uuid'] == network_uuid]
@@ -240,6 +240,7 @@ def test_refresh_switches_the_network_back_on():
     admin.networks[source.network_uuid]['enabled'] = False
     sync_playlist(admin, source, _plans(FIRST))
     assert admin.networks[source.network_uuid]['enabled'] is True
+    assert admin.networks[source.network_uuid]['max_timeout'] == 30
     assert admin.orphans_cleared == [source.network_uuid]
 
 

@@ -43,7 +43,7 @@ class FakeAdmin:
         self.networks['net'] = conf
         return 'net'
 
-    def enable_network(self, _uuid):
+    def update_network(self, _uuid, _conf):
         pass
 
     def list_muxes(self, _network_uuid):

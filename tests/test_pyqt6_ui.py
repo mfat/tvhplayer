@@ -1331,3 +1331,46 @@ def test_channel_list_reloads_at_most_every_30_seconds_during_a_playlist_check(m
         assert reloads == [server]
     finally:
         window.close()
+
+
+def test_spinner_sits_above_the_video_and_shows_the_server_status(monkeypatch, tmp_path):
+    import time
+
+    from tvhplayer.core.models import Channel, SubscriptionStatus
+    from tvhplayer.core.playback_status import RETRYING, STARTING, WAITING
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        spinner = window.playback_spinner
+        assert spinner.testAttribute(ui.Qt.WidgetAttribute.WA_NativeWindow)
+        assert not window.player_container.testAttribute(ui.Qt.WidgetAttribute.WA_NativeWindow)
+
+        states = iter(['Testing', 'Bad', 'Testing'])
+
+        class FakeBackend:
+            def get_subscriptions(self):
+                state = next(states, 'Testing')
+                return [SubscriptionStatus(channel='TBN', title='HTTP', state=state, start=1, raw={'in': 0})]
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(ui, 'create_backend', lambda _server: FakeBackend())
+        monkeypatch.setattr(window, 'current_server', lambda: {'url': 'http://127.0.0.1:1'})
+        window._playback_channel = Channel.from_raw({'name': 'TBN', 'uuid': 'u1'})
+        window._show_playback_wait()
+        assert spinner._caption == STARTING
+        captions = []
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and RETRYING not in captions:
+            app.processEvents()
+            if not captions or captions[-1] != spinner._caption:
+                captions.append(spinner._caption)
+            time.sleep(0.02)
+        assert [text for text in captions if text != STARTING][:2] == [WAITING, RETRYING]
+        assert window.status_label.text() == f'TBN: {RETRYING}'
+
+        window._on_playback_started()
+        assert window._start_watch is None
+    finally:
+        window.close()
