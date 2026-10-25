@@ -48,8 +48,15 @@ class FakeAdmin:
 
     def create_mux(self, _network_uuid, conf):
         uuid = f'm{len(self.muxes) + 1}'
-        self.muxes[uuid] = conf
+        # The server's scan of these streams has already passed.
+        self.muxes[uuid] = dict(conf, scan_state=0, scan_result=1)
         return uuid
+
+    def list_services(self, _mux_uuids):
+        return []
+
+    def scan_network(self, _network_uuid):
+        pass
 
     def save(self, nodes):
         pass

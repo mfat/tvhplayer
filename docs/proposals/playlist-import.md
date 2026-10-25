@@ -114,13 +114,25 @@ One **IPTV Network** (`iptv_network`, not the automatic one) per playlist source
 | :--- | :--- | :--- |
 | `networkname` | source name | Shown in Tvheadend's UI. |
 | `service_sid` | 1 | Creates the service without scanning. |
-| `scan_create`, `skipinitscan`, `idlescan` | off, on, off | No tuning until someone watches. |
+| `scan_create`, `skipinitscan`, `idlescan` | off, on, off | No idle scans. Tvheadend still scans each new mux once (`mpegts_mux_post_create` queues a mux whose scan result is NONE). |
 | `max_streams` | connection limit | Provider limit. |
 | `max_timeout` | 15 | The web UI default; the API default is 0. |
 | `bouquet` | on | Channels are created and kept in sync by a bouquet. |
 | `epgauto_default` | on | New channels auto-map guide data by `tvg-id`. |
 
 The network's bouquet is enabled with *Map to channels* and the options *Map zero-numbered channels*, *Map radio channels*, and *Map encrypted services*. Without zero-numbered mapping, entries with no channel number are skipped. A test confirmed renames, renumbers, and removals carry through to channels.
+
+### Only working channels are shown
+
+Free playlists carry many dead entries: on iptv-org's Persian list, 147 of 202 streams failed Tvheadend's scan. The app uses that scan as the test of whether a channel works, so a dead stream never becomes a channel.
+
+- Before the bouquet maps anything, the app disables the service of every mux still waiting for its first scan. Disabling a service makes the bouquet delete its channel; enabling it maps the channel again (`bouquet_notify_service_enabled`).
+- The import then polls the muxes and applies each verdict as it lands: scan result *OK* or *OK (partial)* enables the service, *FAIL* disables it. The dialog shows "Checking channels… n of total".
+- A refresh calls `api/mpegts/network/scan`, so every stream is tested again. A mux being rescanned keeps its last verdict until the new one arrives. A dead entry keeps its mux, so it comes back on a later refresh once it works.
+- Stopping the import during the check leaves unchecked channels hidden.
+- Scans share the network's connection limit, and a dead stream takes up to `max_timeout` to fail, so a large playlist takes a while to check.
+
+The app lists muxes and services with `hidemode=none`. The default leaves out every mux of a disabled network, and services that are unverified or on a disabled mux.
 
 One **mux** per included entry:
 

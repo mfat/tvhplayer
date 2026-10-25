@@ -4,11 +4,16 @@ Each imported playlist is one IPTV network. Its muxes get their service
 without a scan (Service ID 1), and the network's bouquet maps them to
 channels. An entry keeps its mux across refreshes through its key, so a
 changed stream address or name edits the channel instead of replacing it.
+
+Tvheadend still scans each new mux once, and a refresh scans them all
+again. Only a mux whose scan passed keeps its service enabled; disabling a
+service makes the bouquet delete its channel, so dead streams never show.
 """
 
 from __future__ import annotations
 
 import shutil
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
@@ -22,6 +27,13 @@ REMOTE_FFMPEG = '/usr/bin/ffmpeg'
 NO_FFMPEG = 'TVHplayer could not find ffmpeg, which it needs to play imported channels.'
 MAX_STREAMS = 2
 CHECKPOINT_EVERY = 50
+CHECK_POLL_SECONDS = 2
+NOT_WORKING = 'It is not working right now.'
+
+# mpegts_mux_t scan_state and scan_result values.
+SCAN_IDLE = 0
+SCAN_NONE = 0
+SCAN_PASSED = (1, 3)  # OK, OK (partial)
 
 NETWORK_CONF = {
     'service_sid': 1,
@@ -82,6 +94,10 @@ class SyncResult:
     skipped: List[SkippedEntry] = field(default_factory=list)
     cancelled: bool = False
     guide_failed: bool = False
+    # Channels whose stream passed the server's scan, and names of those that failed.
+    working: int = 0
+    not_working: List[str] = field(default_factory=list)
+    check_stopped: bool = False
 
 
 def server_key(server) -> str:
@@ -126,8 +142,14 @@ def _channels(count: int) -> str:
 def result_message(name: str, result: SyncResult, first_import: bool) -> str:
     if result.cancelled:
         return f'Import stopped. {_channels(result.added)} from {name} were added.'
+    failed = len(result.not_working)
     if first_import:
-        message = f'Added {_channels(result.added)} from {name}.'
+        message = f'Added {_channels(result.working)} from {name}.'
+        if failed:
+            message += (
+                ' 1 was left out because it is not working.' if failed == 1
+                else f' {failed} were left out because they are not working.'
+            )
     elif result.added or result.removed:
         parts = []
         if result.added:
@@ -137,8 +159,15 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
         message = f'Updated the channels from {name}: {", ".join(parts)}.'
     else:
         message = f'The channels from {name} are up to date.'
-    if result.skipped:
-        count = len(result.skipped)
+    if failed and not first_import:
+        message += (
+            ' 1 channel is not working right now and is hidden.' if failed == 1
+            else f' {failed} channels are not working right now and are hidden.'
+        )
+    if result.check_stopped:
+        message += ' Channels that were not checked yet stay hidden.'
+    count = sum(1 for entry in result.skipped if entry.reason != NOT_WORKING)
+    if count:
         message += ' 1 entry could not be added.' if count == 1 else f' {count} entries could not be added.'
     if result.guide_failed:
         message += ' The program guide could not be loaded.'
@@ -198,7 +227,8 @@ def sync_playlist(
     result = SyncResult(skipped=list(skipped))
 
     admin.check_admin()
-    if not admin.network_exists(source.network_uuid):
+    refresh = admin.network_exists(source.network_uuid)
+    if not refresh:
         conf = dict(NETWORK_CONF, networkname=source.name)
         source.network_uuid = admin.create_network(conf)
         source.muxes = {}
@@ -254,8 +284,68 @@ def sync_playlist(
         tags.update(plan.groups)
     source.tags = sorted(tags)
     checkpoint()
+    if refresh and not result.cancelled:
+        admin.scan_network(source.network_uuid)
+    # Hide the new channels before the bouquet maps them.
+    apply_checks(admin, source)
     admin.map_network_bouquet(source.network_uuid)
     return result
+
+
+def apply_checks(admin, source: PlaylistSource):
+    """Show channels whose stream passed the server's scan and hide those that failed.
+
+    A mux waiting for its first scan stays hidden; one being scanned again
+    keeps its last verdict. Returns (checked, total, names that failed).
+    """
+    ours = set(source.muxes.values())
+    rows = [row for row in admin.list_muxes(source.network_uuid) if row.get('uuid') in ours]
+    wanted = {}
+    checked = 0
+    failed = []
+    for row in rows:
+        result = row.get('scan_result', SCAN_NONE)
+        if row.get('scan_state', SCAN_IDLE) != SCAN_IDLE:
+            if result == SCAN_NONE:
+                wanted[row['uuid']] = False
+            continue
+        checked += 1
+        if result == SCAN_NONE:
+            continue
+        wanted[row['uuid']] = result in SCAN_PASSED
+        if not wanted[row['uuid']]:
+            failed.append(row.get('name') or row.get('iptv_sname') or '')
+    changes = []
+    for service in admin.list_services(wanted):
+        want = wanted.get(service.get('multiplex_uuid'))
+        if want is not None and bool(service.get('enabled')) != want:
+            changes.append({'uuid': service['uuid'], 'enabled': want})
+    if changes:
+        admin.save(changes)
+    return checked, len(rows), failed
+
+
+def wait_for_checks(
+    admin,
+    source: PlaylistSource,
+    result: SyncResult,
+    progress: Optional[Callable[[int, int], None]] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
+    sleep=time.sleep,
+) -> None:
+    """Apply scan verdicts as the server finishes them, until every mux is checked."""
+    progress = progress or (lambda _done, _total: None)
+    cancelled = cancelled or (lambda: False)
+    while True:
+        checked, total, failed = apply_checks(admin, source)
+        progress(checked, total)
+        if checked >= total or cancelled():
+            break
+        sleep(CHECK_POLL_SECONDS)
+    result.check_stopped = checked < total
+    result.working = checked - len(failed)
+    result.not_working = failed
+    result.skipped.extend(SkippedEntry(name, NOT_WORKING) for name in failed)
 
 
 def remove_playlist(admin, source: PlaylistSource) -> None:

@@ -66,8 +66,8 @@ class TvhAdmin:
         except ValueError as exc:
             raise TvhError(f'Invalid JSON from {path}') from exc
 
-    def _grid(self, path) -> List[dict]:
-        data = self._request(path, params={'limit': ADMIN_GRID_LIMIT})
+    def _grid(self, path, **params) -> List[dict]:
+        data = self._request(path, params=dict(params, limit=ADMIN_GRID_LIMIT))
         return [row for row in data.get('entries') or [] if isinstance(row, dict)]
 
     def check_admin(self) -> None:
@@ -88,7 +88,19 @@ class TvhAdmin:
         return _uuid(data, 'network')
 
     def list_muxes(self, network_uuid: str) -> List[dict]:
-        return [row for row in self._grid('api/mpegts/mux/grid') if row.get('network_uuid') == network_uuid]
+        # The default hidemode leaves out every mux of a disabled network.
+        rows = self._grid('api/mpegts/mux/grid', hidemode='none')
+        return [row for row in rows if row.get('network_uuid') == network_uuid]
+
+    def list_services(self, mux_uuids) -> List[dict]:
+        """Services of these muxes, including unverified and disabled ones."""
+        mux_uuids = set(mux_uuids)
+        rows = self._grid('api/mpegts/service/grid', hidemode='none')
+        return [row for row in rows if row.get('multiplex_uuid') in mux_uuids]
+
+    def scan_network(self, network_uuid: str) -> None:
+        """Queue a scan of every mux in the network."""
+        self._request('api/mpegts/network/scan', data={'uuid': network_uuid})
 
     def create_mux(self, network_uuid: str, conf: dict) -> str:
         data = self._request(

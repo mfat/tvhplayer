@@ -16,6 +16,7 @@ from tvhplayer.core.errors import PlaylistError, TvhAuthError, TvhConnectionErro
 from tvhplayer.core.playlist import SkippedEntry, parse_playlist, plan_channels
 from tvhplayer.core.playlist_sync import (
     NETWORK_CONF,
+    NOT_WORKING,
     PlaylistSource,
     SyncResult,
     error_message,
@@ -27,18 +28,24 @@ from tvhplayer.core.playlist_sync import (
     server_key,
     sync_playlist,
     unique_name,
+    wait_for_checks,
 )
 from tvhplayer.core.tvh_admin import TvhAdmin
 from tvhplayer.core.xmltv import load_guide
 
 
 class FakeAdmin:
-    def __init__(self):
+    """New and rescanned muxes stay pending until ``finish_scans``."""
+
+    def __init__(self, dead=()):
         self.networks = {}
         self.muxes = {}
+        self.services = {}
         self.saved = []
         self.deleted = []
         self.mapped = []
+        self.scanned = []
+        self.dead = set(dead)
         self._next = 0
 
     def _uuid(self):
@@ -61,13 +68,37 @@ class FakeAdmin:
 
     def create_mux(self, network_uuid, conf):
         uuid = self._uuid()
-        self.muxes[uuid] = dict(conf, network_uuid=network_uuid)
+        self.muxes[uuid] = dict(conf, network_uuid=network_uuid, name=conf['iptv_sname'], scan_state=1, scan_result=0)
+        self.services[f's{uuid}'] = {'multiplex_uuid': uuid, 'enabled': True}
         return uuid
+
+    def list_services(self, mux_uuids):
+        return [dict(row, uuid=uuid) for uuid, row in self.services.items() if row['multiplex_uuid'] in mux_uuids]
+
+    def scan_network(self, network_uuid):
+        self.scanned.append(network_uuid)
+        for row in self.muxes.values():
+            if row['network_uuid'] == network_uuid:
+                row['scan_state'] = 1
+
+    def finish_scans(self):
+        for row in self.muxes.values():
+            if row['scan_state']:
+                row['scan_state'] = 0
+                row['scan_result'] = 2 if row['name'] in self.dead else 1
+
+    def visible(self):
+        """Names whose channel the bouquet would show."""
+        return sorted(
+            self.muxes[row['multiplex_uuid']]['name'] for row in self.services.values()
+            if row['enabled'] and row['multiplex_uuid'] in self.muxes
+        )
 
     def save(self, nodes):
         self.saved.extend(nodes)
         for node in nodes:
-            self.muxes[node['uuid']].update({k: v for k, v in node.items() if k != 'uuid'})
+            target = self.services if node['uuid'] in self.services else self.muxes
+            target[node['uuid']].update({k: v for k, v in node.items() if k != 'uuid'})
 
     def delete(self, uuids):
         self.deleted.extend(uuids)
@@ -138,9 +169,43 @@ def test_unchanged_refresh_writes_nothing():
     admin = FakeAdmin()
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
     sync_playlist(admin, source, _plans(FIRST))
+    admin.finish_scans()
+    wait_for_checks(admin, source, SyncResult())
+    admin.saved.clear()
     result = sync_playlist(admin, source, _plans(FIRST))
     assert (result.added, result.updated, result.removed) == (0, 0, 0)
     assert admin.saved == []
+
+
+def test_only_channels_that_pass_the_scan_are_shown():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST))
+    assert admin.visible() == []
+    seen = []
+    wait_for_checks(admin, source, result, progress=lambda *args: seen.append(args), sleep=lambda _s: admin.finish_scans())
+    assert admin.visible() == ['A']
+    assert seen == [(0, 2), (2, 2)]
+    assert (result.working, result.not_working) == (1, ['B'])
+    assert result.skipped[-1] == SkippedEntry('B', NOT_WORKING)
+
+    # A refresh tests every stream again; B keeps its mux and comes back once it works.
+    admin.dead = {'A'}
+    result = sync_playlist(admin, source, _plans(FIRST))
+    assert admin.scanned == [source.network_uuid]
+    assert admin.visible() == ['A']
+    wait_for_checks(admin, source, result, sleep=lambda _s: admin.finish_scans())
+    assert admin.visible() == ['B']
+    assert len(admin.muxes) == 2
+
+
+def test_stopping_the_check_keeps_unchecked_channels_hidden():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST))
+    wait_for_checks(admin, source, result, cancelled=lambda: True, sleep=lambda _s: None)
+    assert result.check_stopped
+    assert admin.visible() == []
 
 
 def test_server_values_compare_equal_to_planned_values():
@@ -314,13 +379,17 @@ def test_import_plays_refreshes_and_removes(tvheadend, media):
         f'#EXTINF:-1 tvg-id="a" tvg-chno="7" group-title="News",Pattern\n{media}/a.ts\n'
         '#EXTINF:-1 tvg-chno="8",Tone\n'
         f'pipe://{FFMPEG} -re -f lavfi -i sine -f lavfi -i testsrc -c:v mpeg2video -c:a mp2 -f mpegts pipe:1\n'
+        f'#EXTINF:-1 tvg-chno="9",Gone\n{media}/missing.ts\n'
     )
     plans, skipped = plan_channels(parse_playlist(text), FFMPEG, 'Test', allow_commands=True)
     assert skipped == []
     source = PlaylistSource('Test', 'test.m3u', 'builtin')
     with TvhAdmin({'url': f'http://127.0.0.1:{port}'}) as admin:
         result = sync_playlist(admin, source, plans)
-        assert result.added == 2
+        assert result.added == 3
+        assert _channels(port) == {}
+        wait_for_checks(admin, source, result, sleep=time.sleep)
+        assert (result.working, result.not_working, result.check_stopped) == (2, ['Gone'], False)
 
         channels = _wait(lambda: len(_channels(port)) == 2 and _channels(port))
         server = {'url': f'http://127.0.0.1:{port}', 'builtin': True}
@@ -340,7 +409,9 @@ def test_import_plays_refreshes_and_removes(tvheadend, media):
         )
         plans, _skipped = plan_channels(parse_playlist(text), FFMPEG, 'Test')
         result = sync_playlist(admin, source, plans)
-        assert (result.added, result.updated, result.removed) == (0, 1, 1)
+        assert (result.added, result.updated, result.removed) == (0, 1, 2)
+        wait_for_checks(admin, source, result)
+        assert (result.working, result.not_working) == (1, [])
         channels = _wait(lambda: list(_channels(port)) == ['Pattern renamed'] and _channels(port))
         assert channels['Pattern renamed']['uuid'] == pattern_uuid
 
@@ -367,13 +438,22 @@ def test_sources_are_found_and_named_per_server():
 
 
 def test_result_messages_read_naturally():
-    assert result_message('ir', SyncResult(added=1), True) == 'Added 1 channel from ir.'
+    assert result_message('ir', SyncResult(added=1, working=1), True) == 'Added 1 channel from ir.'
+    assert result_message('ir', SyncResult(added=3, working=1, not_working=['b', 'c']), True) == (
+        'Added 1 channel from ir. 2 were left out because they are not working.'
+    )
+    assert result_message('ir', SyncResult(not_working=['b']), False) == (
+        'The channels from ir are up to date. 1 channel is not working right now and is hidden.'
+    )
+    assert result_message('ir', SyncResult(added=2, check_stopped=True), True) == (
+        'Added 0 channels from ir. Channels that were not checked yet stay hidden.'
+    )
     assert result_message('ir', SyncResult(added=3, removed=2), False) == (
         'Updated the channels from ir: 3 added, 2 removed.'
     )
     assert result_message('ir', SyncResult(updated=4), False) == 'The channels from ir are up to date.'
     skipped = [SkippedEntry('a', 'x'), SkippedEntry('b', 'y')]
-    assert result_message('ir', SyncResult(added=5, skipped=skipped), True) == (
+    assert result_message('ir', SyncResult(added=5, working=5, skipped=skipped), True) == (
         'Added 5 channels from ir. 2 entries could not be added.'
     )
     assert result_message('ir', SyncResult(added=2, cancelled=True), True) == (

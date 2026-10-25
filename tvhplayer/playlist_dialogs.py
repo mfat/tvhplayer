@@ -37,6 +37,7 @@ try:
         server_key,
         sync_playlist,
         unique_name,
+        wait_for_checks,
     )
     from .core.errors import PlaylistError, TvhError
     from .core.tvh_admin import TvhAdmin
@@ -54,6 +55,7 @@ except ImportError:
         server_key,
         sync_playlist,
         unique_name,
+        wait_for_checks,
     )
     from core.errors import PlaylistError, TvhError
     from core.tvh_admin import TvhAdmin
@@ -169,6 +171,11 @@ class PlaylistJob(QObject):
                 cancelled=lambda: self._cancelled,
                 checkpoint=lambda: task.checkpoint.emit(source.to_dict()),
             )
+            if not result.cancelled:
+                task.status.emit('Checking channels…')
+                wait_for_checks(
+                    admin, source, result, progress=task.progress.emit, cancelled=lambda: self._cancelled
+                )
             if self._playlist.guide_url and not result.cancelled:
                 task.status.emit('Loading the program guide…')
                 try:
@@ -224,8 +231,8 @@ def ask_to_run_commands(parent, count, server_name):
 def show_skipped(parent, skipped):
     lines = '\n'.join(f'{entry.name or "(no name)"}: {entry.reason}' for entry in skipped)
     box = QMessageBox(parent)
-    box.setWindowTitle('Entries not added')
-    box.setText('These playlist entries could not be added.')
+    box.setWindowTitle('Channels not added')
+    box.setText('These playlist entries could not be added or are not working right now.')
     box.setDetailedText(lines)
     box.exec()
 
@@ -238,6 +245,7 @@ class ImportPlaylistDialog(QDialog):
         self._host = host
         self._job = None
         self._skipped = []
+        self._step_text = ''
         self._done_server = None
         self.setWindowTitle('Import Playlist')
         self.setModal(True)
@@ -352,13 +360,14 @@ class ImportPlaylistDialog(QDialog):
         self._job.start()
 
     def _step(self, message):
+        self._step_text = message
         self.progress_bar.setRange(0, 0)
         self._set_status(message)
 
     def _progress(self, done, total):
         self.progress_bar.setRange(0, max(total, 1))
         self.progress_bar.setValue(done)
-        self.status_label.setText(f'Adding channels… {done} of {total}')
+        self.status_label.setText(f'{self._step_text} {done} of {total}')
 
     def _finished(self, message, skipped):
         self._set_running(False)
