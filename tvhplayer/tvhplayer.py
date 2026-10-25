@@ -1224,9 +1224,18 @@ class ServerDialog(QDialog):
         )
         group_layout.addWidget(autostart)
         layout.addWidget(group)
+        # Only shown while the built-in server is the selected row.
+        self.builtin_group = group
+        group.setVisible(False)
+        self.server_list.currentRowChanged.connect(self._sync_builtin_group)
         self._supervisor = supervisor
         supervisor.status_changed.connect(self._sync_open_web)
         self._sync_open_web()
+
+    def _sync_builtin_group(self, row):
+        group = getattr(self, 'builtin_group', None)
+        if group is not None:
+            group.setVisible(0 <= row < len(self.servers) and bool(self.servers[row].get('builtin')))
 
     def _sync_open_web(self, *_args):
         self.open_web_btn.setEnabled(self._supervisor.is_running())
