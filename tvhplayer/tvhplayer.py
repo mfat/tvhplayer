@@ -3763,7 +3763,7 @@ class TVHeadendClient(QMainWindow):
         for job in self._playlist_jobs:
             job.cancel()
         if self.builtin is not None:
-            self.builtin.stop()
+            self.builtin.shut_down()
         # With the server gone, a running stream test notices within seconds.
         for job in self._playlist_jobs:
             if not job.shutdown(10000):

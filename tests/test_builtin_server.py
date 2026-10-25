@@ -379,3 +379,22 @@ def _free_port_for_test():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+
+
+def test_server_cannot_start_again_once_the_app_quits(tmp_path):
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtCore import QCoreApplication
+
+    from tvhplayer.builtin_supervisor import BuiltinSupervisor
+
+    app = QCoreApplication.instance() or QCoreApplication([])
+    binary = tmp_path / 'tvheadend'
+    binary.write_text('#!/bin/sh\nexec sleep 30\n')
+    binary.chmod(0o755)
+    supervisor = BuiltinSupervisor(binary, tmp_path / 'config', 24113, 24114)
+    supervisor.shut_down()
+    # A playlist refresh that finishes during quit reloads channels, which asks for the server.
+    supervisor.start()
+    assert supervisor.status == 'stopped'
+    assert not supervisor._child_alive()
+    assert app is not None

@@ -73,6 +73,7 @@ class BuiltinSupervisor(QObject):
         self._partial_line = ''
         self._stop_requested = False
         self._handling_exit = False
+        self._shut_down = False
         self.process = QProcess(self)
         self.process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         self.process.readyReadStandardOutput.connect(self._on_output)
@@ -92,7 +93,7 @@ class BuiltinSupervisor(QObject):
         return ''.join(self._log)
 
     def start(self) -> None:
-        if self._status in ('starting', 'running'):
+        if self._shut_down or self._status in ('starting', 'running'):
             return
         if self.binary is None:
             self._set_status('failed')
@@ -127,6 +128,11 @@ class BuiltinSupervisor(QObject):
                 self.process.waitForFinished(2000)
             self._handling_exit = False
         self._set_status('stopped')
+
+    def shut_down(self) -> None:
+        """Stop for good. Work still finishing as the app quits cannot start it again."""
+        self._shut_down = True
+        self.stop()
 
     def _start_attempt(self) -> None:
         self._attempts += 1
