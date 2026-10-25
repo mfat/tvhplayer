@@ -1304,3 +1304,30 @@ def test_status_is_repeated_on_the_picture_only_while_a_channel_shows(monkeypatc
     window.toggle_mute()
     assert shown[1:] == ['Volume 40', 'Muted', 'Sound on']
     app.processEvents()
+
+
+def test_channel_list_reloads_at_most_every_30_seconds_during_a_playlist_check(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        reloads = []
+        server = {'name': 'Built-in Server', 'url': 'http://127.0.0.1:1', 'builtin': True}
+        monkeypatch.setattr(window, 'is_current_server', lambda candidate: candidate is server)
+        monkeypatch.setattr(window, 'current_server', lambda: server)
+        monkeypatch.setattr(window, 'playlist_imported', lambda candidate: reloads.append(candidate))
+        clock = [1000.0]
+        monkeypatch.setattr(ui.time, 'monotonic', lambda: clock[0])
+
+        window.playlist_channels_changed(server)
+        window._channel_reload_timer.timeout.emit()
+        window._channel_reload_timer.stop()
+        assert reloads == [server]
+
+        clock[0] += 10
+        window.playlist_channels_changed(server)
+        assert window._channel_reload_timer.remainingTime() > 19000
+        window.playlist_channels_changed(server)
+        window.playlist_channels_changed({'url': 'http://other'})
+        window._channel_reload_timer.stop()
+        assert reloads == [server]
+    finally:
+        window.close()

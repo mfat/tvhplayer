@@ -318,7 +318,8 @@ def apply_checks(admin, source: PlaylistSource):
     """Show channels whose stream passed the server's scan and hide those that failed.
 
     A mux waiting for its first scan stays hidden; one being scanned again
-    keeps its last verdict. Returns (checked, total, names that failed).
+    keeps its last verdict. Returns (checked, total, names that failed,
+    number of channels shown or hidden).
     """
     ours = set(source.muxes.values())
     rows = [row for row in admin.list_muxes(source.network_uuid) if row.get('uuid') in ours]
@@ -344,7 +345,7 @@ def apply_checks(admin, source: PlaylistSource):
             changes.append({'uuid': service['uuid'], 'enabled': want})
     if changes:
         admin.save(changes)
-    return checked, len(rows), failed
+    return checked, len(rows), failed, len(changes)
 
 
 def wait_for_checks(
@@ -353,13 +354,20 @@ def wait_for_checks(
     result: SyncResult,
     progress: Optional[Callable[[int, int], None]] = None,
     cancelled: Optional[Callable[[], bool]] = None,
+    changed: Optional[Callable[[], None]] = None,
     sleep=time.sleep,
 ) -> None:
-    """Apply scan verdicts as the server finishes them, until every mux is checked."""
+    """Apply scan verdicts as the server finishes them, until every mux is checked.
+
+    ``changed`` is called whenever channels were shown or hidden.
+    """
     progress = progress or (lambda _done, _total: None)
     cancelled = cancelled or (lambda: False)
+    changed = changed or (lambda: None)
     while True:
-        checked, total, failed = apply_checks(admin, source)
+        checked, total, failed, shown_or_hidden = apply_checks(admin, source)
+        if shown_or_hidden:
+            changed()
         progress(checked, total)
         if checked >= total or cancelled():
             break

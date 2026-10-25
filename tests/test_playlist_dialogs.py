@@ -87,6 +87,7 @@ class FakeHost:
         self.current = current
         self.stored = []
         self.imported = []
+        self.changed = []
         self.shown = []
 
     def import_targets(self):
@@ -106,6 +107,9 @@ class FakeHost:
 
     def playlist_imported(self, server):
         self.imported.append(server)
+
+    def playlist_channels_changed(self, server):
+        self.changed.append(server)
 
     def show_server(self, server):
         self.shown.append(server)
@@ -171,6 +175,7 @@ def test_import_to_builtin_server_in_one_step(app, tmp_path):
     assert host.stored[-1]['server'] == 'builtin'
     assert set(host.stored[-1]['muxes']) == {'name:A', 'name:B'}
     assert host.imported == [BUILTIN]
+    assert host.changed and host.changed[0] == BUILTIN
     assert dialog.show_btn.isHidden()
     assert dialog.details_btn.isHidden()
     assert dialog.import_btn.isEnabled()

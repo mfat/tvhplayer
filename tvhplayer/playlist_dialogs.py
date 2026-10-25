@@ -68,6 +68,7 @@ class _Task(QThread):
     progress = pyqtSignal(int, int)
     status = pyqtSignal(str)
     checkpoint = pyqtSignal(object)
+    channels_changed = pyqtSignal()
     succeeded = pyqtSignal(object)
     failed = pyqtSignal(object)
 
@@ -89,8 +90,8 @@ class PlaylistJob(QObject):
     """Read a playlist and write its channels to one server, or remove them.
 
     ``host`` is the main window. It starts the built-in server when needed,
-    saves the playlist source, and makes sure one playlist is updated by one
-    job at a time. ``ask_commands(count, server_name)`` decides whether
+    saves the playlist source, reloads its channel list while channels change,
+    and makes sure one playlist is updated by one job at a time. ``ask_commands(count, server_name)`` decides whether
     programs named in the playlist may run; without it the saved choice is used.
     """
 
@@ -171,10 +172,17 @@ class PlaylistJob(QObject):
                 cancelled=lambda: self._cancelled,
                 checkpoint=lambda: task.checkpoint.emit(source.to_dict()),
             )
+            # Removed duplicates and newly hidden channels are already gone from the server.
+            task.channels_changed.emit()
             if not result.cancelled:
                 task.status.emit('Checking channels…')
                 wait_for_checks(
-                    admin, source, result, progress=task.progress.emit, cancelled=lambda: self._cancelled
+                    admin,
+                    source,
+                    result,
+                    progress=task.progress.emit,
+                    cancelled=lambda: self._cancelled,
+                    changed=task.channels_changed.emit,
                 )
             if self._playlist.guide_url and not result.cancelled:
                 task.status.emit('Loading the program guide…')
@@ -205,6 +213,7 @@ class PlaylistJob(QObject):
         task.progress.connect(self.progress.emit)
         task.status.connect(self.status.emit)
         task.checkpoint.connect(self._host.store_playlist_source)
+        task.channels_changed.connect(lambda: self._host.playlist_channels_changed(self.server))
         task.succeeded.connect(on_success)
         task.failed.connect(self._failed)
         self._task = task

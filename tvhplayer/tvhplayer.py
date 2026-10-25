@@ -111,6 +111,7 @@ from pathlib import Path
 import logging
 import platform
 
+CHANNEL_RELOAD_SECONDS = 30
 
 
 
@@ -1792,6 +1793,11 @@ class TVHeadendClient(QMainWindow):
         self._backend_key = None
         self._busy_playlists = set()
         self._builtin_playlists_refreshed = False
+        # A playlist check shows and hides channels for hours; reload the list at most this often.
+        self._channel_reload_timer = QTimer(self)
+        self._channel_reload_timer.setSingleShot(True)
+        self._channel_reload_timer.timeout.connect(self._reload_changed_channels)
+        self._last_channel_reload = 0.0
         self.local_recorder = LocalRecorder()
         self.builtin = None
         if platform_supports_builtin():
@@ -3845,6 +3851,26 @@ class TVHeadendClient(QMainWindow):
         if self.is_current_server(server):
             self.close_backend()
             self.fetch_channels()
+
+    def playlist_channels_changed(self, server):
+        """A running import showed or hid channels on ``server``."""
+        if not self.is_current_server(server) or self._channel_reload_timer.isActive():
+            return
+        wait = self._last_channel_reload + CHANNEL_RELOAD_SECONDS - time.monotonic()
+        self._channel_reload_timer.start(max(0, int(wait * 1000)))
+
+    def _reload_changed_channels(self):
+        self._last_channel_reload = time.monotonic()
+        table = self.channel_list
+        selected = self.channel_from_row(table.currentRow())
+        scroll = table.verticalScrollBar().value()
+        self.playlist_imported(self.current_server())
+        if selected is not None:
+            for row in range(table.rowCount()):
+                if self._channels_match(self.channel_from_row(row), selected):
+                    table.setCurrentCell(row, 1)
+                    break
+        table.verticalScrollBar().setValue(scroll)
 
     def show_server(self, server):
         for index, candidate in enumerate(self.servers):
