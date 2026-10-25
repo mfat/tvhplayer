@@ -322,8 +322,8 @@ def apply_checks(admin, source: PlaylistSource):
     """Show channels whose stream passed the server's scan and hide those that failed.
 
     A mux waiting for its first scan stays hidden; one being scanned again
-    keeps its last verdict. Returns (checked, total, names that failed,
-    number of channels shown or hidden).
+    follows its last verdict until the new one arrives. Returns (checked,
+    total, names that failed, number of channels shown or hidden).
     """
     ours = set(source.muxes.values())
     rows = [row for row in admin.list_muxes(source.network_uuid) if row.get('uuid') in ours]
@@ -333,8 +333,7 @@ def apply_checks(admin, source: PlaylistSource):
     for row in rows:
         result = row.get('scan_result', SCAN_NONE)
         if row.get('scan_state', SCAN_IDLE) != SCAN_IDLE:
-            if result == SCAN_NONE:
-                wanted[row['uuid']] = False
+            wanted[row['uuid']] = result in SCAN_PASSED
             continue
         checked += 1
         if result == SCAN_NONE:

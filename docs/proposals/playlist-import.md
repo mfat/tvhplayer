@@ -128,8 +128,9 @@ Free playlists carry many dead entries: on iptv-org's Persian list, 147 of 202 s
 
 - Before the bouquet maps anything, the app disables the service of every mux still waiting for its first scan. Disabling a service makes the bouquet delete its channel; enabling it maps the channel again (`bouquet_notify_service_enabled`).
 - The import then polls the muxes and applies each verdict as it lands: scan result *OK* or *OK (partial)* enables the service, *FAIL* disables it. The dialog shows "Checking channels… n of total".
-- A refresh calls `api/mpegts/network/scan`, so every stream is tested again. A mux being rescanned keeps its last verdict until the new one arrives. A dead entry keeps its mux, so it comes back on a later refresh once it works.
+- A refresh calls `api/mpegts/network/scan`, so every stream is tested again. A mux being rescanned follows its last verdict until the new one arrives, so a channel already known to be dead is hidden as soon as the refresh starts. A dead entry keeps its mux, so it comes back on a later refresh once it works.
 - Stopping the import during the check leaves unchecked channels hidden.
+- The guide is loaded before the check. At startup, the next playlist starts as soon as the previous one reaches its check, so one playlist's test never delays another's.
 - Scans share the network's connection limit, and a dead stream takes up to `max_timeout` to fail, so a large playlist takes a while to check.
 
 - A refresh switches the playlist's network back on if it was switched off. Tvheadend never scans the muxes of a disabled network, and their channels do not play.

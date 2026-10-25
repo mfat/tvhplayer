@@ -1374,3 +1374,42 @@ def test_spinner_sits_above_the_video_and_shows_the_server_status(monkeypatch, t
         assert window._start_watch is None
     finally:
         window.close()
+
+
+def test_startup_refresh_moves_on_when_a_playlist_reaches_its_stream_test(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QObject, pyqtSignal
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        started = []
+
+        class FakeJob(QObject):
+            checking = pyqtSignal()
+            finished = pyqtSignal(str, object)
+            failed = pyqtSignal(str)
+
+            def __init__(self, _host, source, server, parent=None):
+                super().__init__(parent)
+                self.source = source
+                self.server = server
+
+            def start(self):
+                started.append(self)
+
+        server = {'name': 'Built-in Server', 'url': 'http://127.0.0.1:1', 'builtin': True}
+        monkeypatch.setattr(ui, 'PlaylistJob', FakeJob)
+        monkeypatch.setattr(ui, 'find_builtin_server', lambda _servers: server)
+        monkeypatch.setattr(window, '_playlist_refreshed', lambda *_args: None)
+        sources = [ui.PlaylistSource(name, f'http://x/{name}.m3u', 'builtin') for name in ('eng', 'fas', 'ar')]
+        monkeypatch.setattr(window, 'playlist_sources', lambda: sources)
+
+        window._refresh_builtin_playlists()
+        assert [job.source.name for job in started] == ['eng']
+        started[0].checking.emit()
+        assert [job.source.name for job in started] == ['eng', 'fas']
+        started[0].finished.emit('done', [])
+        assert len(started) == 2
+        started[1].failed.emit('Could not reach it.')
+        assert [job.source.name for job in started] == ['eng', 'fas', 'ar']
+    finally:
+        window.close()

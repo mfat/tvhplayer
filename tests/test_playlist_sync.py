@@ -207,6 +207,18 @@ def test_only_channels_that_pass_the_scan_are_shown():
     assert len(admin.muxes) == 2
 
 
+def test_a_refresh_hides_channels_already_known_to_be_dead():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    sync_playlist(admin, source, _plans(FIRST))
+    admin.finish_scans()
+    # An older version left every service on, whatever the scan said.
+    for row in admin.services.values():
+        row['enabled'] = True
+    sync_playlist(admin, source, _plans(FIRST))
+    assert admin.visible() == ['A']
+
+
 def test_stopping_the_check_keeps_unchecked_channels_hidden():
     admin = FakeAdmin()
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')

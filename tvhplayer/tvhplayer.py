@@ -3867,22 +3867,34 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
 
     def _refresh_builtin_playlists(self):
-        """Refresh playlists on the built-in server once per session, one at a time."""
+        """Refresh playlists on the built-in server once per session.
+
+        Playlists are written one at a time. Each one's stream test can take
+        hours, so the next playlist starts as soon as only its test is left.
+        """
         if self._builtin_playlists_refreshed:
             return
         self._builtin_playlists_refreshed = True
         server = find_builtin_server(self.servers)
         queue = [source for source in self.playlist_sources() if source.server == server_key(server or {})]
 
-        def next_job(*_args):
+        def next_job():
             if not queue:
                 return
             source = queue.pop(0)
             job = PlaylistJob(self, source, server, parent=self)
+            moved_on = []
+
+            def move_on(*_args):
+                if not moved_on:
+                    moved_on.append(True)
+                    next_job()
+
             job.finished.connect(lambda message, _skipped: self._playlist_refreshed(message, job.server))
             job.failed.connect(lambda message: self._playlist_refresh_failed(source, message))
-            job.finished.connect(next_job)
-            job.failed.connect(next_job)
+            job.checking.connect(move_on)
+            job.finished.connect(move_on)
+            job.failed.connect(move_on)
             job.start()
 
         next_job()

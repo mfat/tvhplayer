@@ -298,3 +298,19 @@ def test_missing_guide_does_not_fail_the_import(app, tmp_path, monkeypatch):
     dialog.location_input.setText(_playlist(tmp_path, text))
     _run(app, dialog)
     assert dialog.status_label.text() == 'Added 2 channels from news. The program guide could not be loaded.'
+
+
+def test_job_says_when_only_the_stream_test_is_left(app, tmp_path):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
+    job = dialogs.PlaylistJob(host, source, BUILTIN)
+    events = []
+    job.checking.connect(lambda: events.append('checking'))
+    job.finished.connect(lambda message, _skipped: events.append(message))
+    job.start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and job.is_running():
+        app.processEvents()
+        time.sleep(0.02)
+    app.processEvents()
+    assert events == ['checking', 'Updated the channels from news: 2 added.']

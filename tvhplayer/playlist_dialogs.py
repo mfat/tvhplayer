@@ -91,12 +91,17 @@ class PlaylistJob(QObject):
 
     ``host`` is the main window. It starts the built-in server when needed,
     saves the playlist source, reloads its channel list while channels change,
-    and makes sure one playlist is updated by one job at a time. ``ask_commands(count, server_name)`` decides whether
-    programs named in the playlist may run; without it the saved choice is used.
+    and makes sure one playlist is updated by one job at a time.
+    ``ask_commands(count, server_name)`` decides whether programs named in the
+    playlist may run; without it the saved choice is used.
+
+    ``checking`` is emitted once the channels and guide are written and only
+    the server's stream test is left, which can take hours.
     """
 
     status = pyqtSignal(str)
     progress = pyqtSignal(int, int)
+    checking = pyqtSignal()
     finished = pyqtSignal(str, object)
     failed = pyqtSignal(str)
 
@@ -174,16 +179,6 @@ class PlaylistJob(QObject):
             )
             # Removed duplicates and newly hidden channels are already gone from the server.
             task.channels_changed.emit()
-            if not result.cancelled:
-                task.status.emit('Checking channels…')
-                wait_for_checks(
-                    admin,
-                    source,
-                    result,
-                    progress=task.progress.emit,
-                    cancelled=lambda: self._cancelled,
-                    changed=task.channels_changed.emit,
-                )
             if self._playlist.guide_url and not result.cancelled:
                 task.status.emit('Loading the program guide…')
                 try:
@@ -195,6 +190,26 @@ class PlaylistJob(QObject):
 
     def _synced(self, result):
         self._host.store_playlist_source(self.source.to_dict())
+        if result.cancelled:
+            self._checked(result)
+            return
+        self.checking.emit()
+        self.status.emit('Checking channels…')
+        self._run(lambda task: self._check(task, result), self._checked)
+
+    def _check(self, task, result):
+        with TvhAdmin(self.server) as admin:
+            wait_for_checks(
+                admin,
+                self.source,
+                result,
+                progress=task.progress.emit,
+                cancelled=lambda: self._cancelled,
+                changed=task.channels_changed.emit,
+            )
+        return result
+
+    def _checked(self, result):
         self._release()
         self.finished.emit(result_message(self.source.name, result, self._first_import), result.skipped)
 
