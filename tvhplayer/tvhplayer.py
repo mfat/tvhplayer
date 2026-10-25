@@ -3327,13 +3327,17 @@ class TVHeadendClient(QMainWindow):
             and obj is player_container
             and event.type() == QEvent.Type.Resize
         ):
+            # Resize the overlays even while the window is not shown yet:
+            # isVisible() is False then, and skipping them left the logo
+            # sized to the container's first, smaller rect (off-centre).
             idle_splash = getattr(self, 'idle_splash', None)
-            if idle_splash is not None and idle_splash.isVisible():
+            if idle_splash is not None:
                 idle_splash.setGeometry(player_container.rect())
             spinner = getattr(self, 'playback_spinner', None)
-            if spinner is not None and spinner.isVisible():
+            if spinner is not None:
                 spinner.setGeometry(player_container.rect())
-                spinner.raise_()
+                if spinner.isVisible():
+                    spinner.raise_()
             return False
         video_frame = getattr(self, 'video_frame', None)
         if video_frame is not None and obj is video_frame:
