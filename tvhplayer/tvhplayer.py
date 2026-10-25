@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QDialog, QFormLayout, QLineEdit,
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
-    QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QSizePolicy, QToolButton,
+    QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
@@ -38,7 +38,8 @@ try:
     from .core.config import ConfigStore
     from .core.logs import SERVER_LOG, configure_logging, log_dir
     from .core.dvr import instant_recording_title
-    from .core.errors import TvhError
+    from .core.errors import TvhAuthError, TvhError
+    from .core.server_log import ServerLogFeed
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import STALL_LIMIT, LocalRecorder
     from .core.vlc_player import VlcPlayer
@@ -92,7 +93,8 @@ except ImportError:
     from core.config import ConfigStore
     from core.logs import SERVER_LOG, configure_logging, log_dir
     from core.dvr import instant_recording_title
-    from core.errors import TvhError
+    from core.errors import TvhAuthError, TvhError
+    from core.server_log import ServerLogFeed
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import STALL_LIMIT, LocalRecorder
     from core.vlc_player import VlcPlayer
@@ -1273,7 +1275,8 @@ class ServerDialog(QDialog):
             "Open the selected server's web interface in the default browser",
         )
         self.log_btn = QPushButton("Server &log")
-        describe(self.log_btn, "Server log", "Show the built-in server log")
+        describe(self.log_btn, "Server log", "Show the selected server's log")
+        self.log_btn.clicked.connect(self._show_log)
         row.addWidget(self.open_web_btn)
         row.addWidget(self.log_btn)
         layout.addLayout(row)
@@ -1285,7 +1288,6 @@ class ServerDialog(QDialog):
         )
         layout.addWidget(self.autostart)
         if self._supervisor is not None:
-            self.log_btn.clicked.connect(parent.show_builtin_log)
             self.autostart.setChecked(bool(parent.config.get('builtin_autostart')))
             self.autostart.toggled.connect(parent._set_builtin_autostart)
             self._supervisor.status_changed.connect(lambda _status: self._sync_server_options())
@@ -1304,12 +1306,21 @@ class ServerDialog(QDialog):
         self.edit_btn.setEnabled(server is not None)
         self.remove_btn.setEnabled(server is not None)
         show_builtin = builtin and self._supervisor is not None
-        self.log_btn.setVisible(show_builtin)
+        self.log_btn.setVisible(show_builtin or bool(server and not builtin and server.get('url')))
         self.autostart.setVisible(show_builtin)
         if builtin:
             self.open_web_btn.setEnabled(show_builtin and self._supervisor.is_running())
         else:
             self.open_web_btn.setEnabled(bool(server and server.get('url')))
+
+    def _show_log(self):
+        server = self._selected_server()
+        if server is None:
+            return
+        if server.get('builtin'):
+            self.parent().show_builtin_log()
+        else:
+            self.parent().show_server_log(server)
 
     def _open_web(self):
         server = self._selected_server()
@@ -1881,6 +1892,120 @@ class StartWatch(QObject):
                     backend.close()
                 except Exception:
                     pass
+
+
+class ServerLogWatch(QObject):
+    """Read a remote server's live log off the UI thread."""
+
+    lines = pyqtSignal(list)
+    # Text for the note above the log; empty when there is nothing to say.
+    note = pyqtSignal(str)
+
+    RETRY_SECONDS = 5
+
+    def __init__(self, server):
+        super().__init__()
+        self._server = dict(server)
+        self._stopped = threading.Event()
+        self._thread = threading.Thread(target=self._run, name='server-log', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def stop(self):
+        self._stopped.set()
+
+    def _run(self):
+        feed = None
+        try:
+            feed = ServerLogFeed(self._server)
+            failing = False
+            while not self._stopped.is_set():
+                try:
+                    poll = feed.poll()
+                except TvhAuthError:
+                    self.note.emit(
+                        "The server did not accept this sign-in. "
+                        "Check the username and password in the server settings."
+                    )
+                    break
+                except Exception as exc:
+                    if not failing:
+                        print(f"Debug: Server log unavailable: {exc}")
+                    failing = True
+                    self.note.emit("Cannot reach the server. Trying again every few seconds.")
+                    self._stopped.wait(self.RETRY_SECONDS)
+                    continue
+                if self._stopped.is_set():
+                    break
+                if poll.admin is False:
+                    self.note.emit(
+                        "This account is not an administrator on the server, and "
+                        "Tvheadend only sends its log to administrators. "
+                        "Sign in with an admin account in the server settings to see it."
+                    )
+                    break
+                if poll.admin or failing:
+                    failing = False
+                    self.note.emit("")
+                if poll.lines:
+                    self.lines.emit(poll.lines)
+        except Exception as exc:
+            self.note.emit(f"Cannot show this server's log: {exc}")
+        finally:
+            if feed is not None:
+                feed.close()
+
+
+class ServerLogDialog(QDialog):
+    """A remote server's live log, from when the window opens until it closes."""
+
+    def __init__(self, server, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Server log: {server.get('name') or server.get('url')}")
+        layout = QVBoxLayout(self)
+        about = QLabel(
+            "Messages appear here as the server logs them, starting when this window opened."
+        )
+        about.setWordWrap(True)
+        layout.addWidget(about)
+        self.note = QLabel("Connecting…")
+        self.note.setWordWrap(True)
+        self.note.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.note)
+        self.view = QPlainTextEdit()
+        self.view.setReadOnly(True)
+        self.view.setMaximumBlockCount(5000)
+        self.view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        describe(self.view, "Server log", "Log messages from the server, newest at the bottom")
+        layout.addWidget(self.view)
+        close_btn = QPushButton("&Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+        self.resize(760, 420)
+
+        self._watch = ServerLogWatch(server)
+        self._watch.note.connect(self.show_note)
+        self._watch.lines.connect(self.add_lines)
+        self.finished.connect(self._stop_watch)
+        self._watch.start()
+
+    def show_note(self, text):
+        self.note.setText(text)
+        self.note.setVisible(bool(text))
+
+    def add_lines(self, lines):
+        bar = self.view.verticalScrollBar()
+        at_end = bar.value() == bar.maximum()
+        for line in lines:
+            self.view.appendPlainText(line)
+        if at_end:
+            bar.setValue(bar.maximum())
+
+    def _stop_watch(self):
+        self._watch.stop()
+        self._watch.note.disconnect(self.show_note)
+        self._watch.lines.disconnect(self.add_lines)
 
 
 class TVHeadendClient(QMainWindow):
@@ -4581,6 +4706,11 @@ class TVHeadendClient(QMainWindow):
         layout.addWidget(close_btn)
         dialog.resize(640, 360)
         dialog.exec()
+
+    def show_server_log(self, server):
+        dialog = ServerLogDialog(server, self)
+        dialog.exec()
+        dialog.deleteLater()
 
     def show_channel_context_menu(self, position):
         """Show context menu for channel list items"""
