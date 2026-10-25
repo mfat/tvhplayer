@@ -600,12 +600,24 @@ class TasksPanel(QFrame):
     """Ongoing, scheduled, and completed recordings, with search and a status filter."""
 
     close_requested = pyqtSignal()
+    # Generation, entries or None, error or None; sent from the fetch thread.
+    _server_fetched = pyqtSignal(int, object, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         # The splitter reparents this pane, so keep the window that owns the backend.
         self._host = parent
         self._server_tasks = []
+        # Server recordings are read off the UI thread over a connection of the
+        # pane's own, which only the fetch thread touches. One fetch runs at a time.
+        self.open_backend = create_backend
+        self._backend = None
+        self._backend_key = None
+        self._fetching = False
+        self._fetch_again = False
+        # Bumped when the server changes, so an answer from the old one is dropped.
+        self._generation = 0
+        self._server_fetched.connect(self._on_server_fetched)
         self._tasks = []
         self._error_text = ""
         self._table_description = None
@@ -735,22 +747,19 @@ class TasksPanel(QFrame):
     def clear_server_tasks(self):
         """Drop cached server rows, for example after the server changes."""
         self._server_tasks = []
+        self._generation += 1
 
     def refresh(self, server=True):
-        """Reload tasks. A failed server fetch keeps the rows already shown."""
+        """Redraw the tasks and, with server, start reading the server's recordings.
+
+        The server's answer redraws the rows when it arrives. A failed server
+        fetch keeps the rows already shown.
+        """
         if server:
-            fetched, error = self._fetch_server_tasks()
-            if error is None:
-                self._server_tasks = fetched
-                self._set_error("")
-                host = self._host
-                if host is not None and hasattr(host, 'channel_recordings_changed'):
-                    host.channel_recordings_changed(
-                        [task['entry'] for task in fetched if task.get('entry') is not None]
-                    )
-            else:
-                print(f"Debug: Error refreshing tasks: {error}")
-                self._set_error("Couldn't refresh server recordings")
+            self._fetch_server_tasks()
+        self._redraw()
+
+    def _redraw(self):
         tasks = list(self._server_tasks)
         local = self._local_task()
         if local is not None:
@@ -828,17 +837,77 @@ class TasksPanel(QFrame):
 
     def _fetch_server_tasks(self):
         host = self._host
-        if host is None or not hasattr(host, 'get_backend'):
-            return [], None
+        server = host.current_server() if host is not None and hasattr(host, 'current_server') else None
+        if not server or (hasattr(host, '_server_requests_ready') and not host._server_requests_ready()):
+            self._apply_server_entries([])
+            return
+        if self._fetching:
+            # Ask again once the running fetch is done, so a change just made shows.
+            self._fetch_again = True
+            return
+        self._fetching = True
+        self._fetch_again = False
+        thread = threading.Thread(
+            target=self._read_server_entries,
+            args=(self._generation, dict(server)),
+            name='tasks-fetch',
+            daemon=True,
+        )
+        thread.start()
+
+    def _read_server_entries(self, generation, server):
+        """Runs on the fetch thread."""
+        entries = error = None
         try:
-            if hasattr(host, 'current_server') and not host.current_server():
-                return [], None
-            if hasattr(host, '_server_requests_ready') and not host._server_requests_ready():
-                return [], None
-            entries = host.get_backend().list_dvr_entries()
+            key = sorted((name, str(value)) for name, value in server.items())
+            if self._backend is not None and self._backend_key != key:
+                self._close_backend()
+            if self._backend is None:
+                self._backend = self.open_backend(server)
+                self._backend_key = key
+            entries = self._backend.list_dvr_entries()
         except Exception as exc:
-            return None, exc
-        return self._tasks_from_entries(entries), None
+            error = exc
+            # Connect again next time; the connection may be broken.
+            self._close_backend()
+        try:
+            self._server_fetched.emit(generation, entries, error)
+        except RuntimeError:
+            # The window closed while the server was answering.
+            self._close_backend()
+
+    def _close_backend(self):
+        backend, self._backend, self._backend_key = self._backend, None, None
+        if backend is not None:
+            try:
+                backend.close()
+            except Exception:
+                pass
+
+    def _on_server_fetched(self, generation, entries, error):
+        self._fetching = False
+        if generation != self._generation:
+            # The server changed while this one was answering.
+            self._fetch_server_tasks()
+            return
+        if error is None:
+            self._apply_server_entries(entries)
+        else:
+            print(f"Debug: Error refreshing tasks: {error}")
+            self._set_error("Couldn't refresh server recordings")
+        self._redraw()
+        if self._fetch_again:
+            self._fetch_server_tasks()
+
+    def _apply_server_entries(self, entries):
+        fetched = self._tasks_from_entries(entries)
+        self._server_tasks = fetched
+        self._set_error("")
+        host = self._host
+        if host is not None and hasattr(host, 'channel_recordings_changed'):
+            host.channel_recordings_changed(
+                [task['entry'] for task in fetched if task.get('entry') is not None]
+            )
 
     def _tasks_from_entries(self, entries):
         tasks = []

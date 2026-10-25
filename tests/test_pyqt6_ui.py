@@ -1039,6 +1039,69 @@ def _select_task(panel, needle):
     raise AssertionError(needle)
 
 
+def _wait_for_tasks(app, panel, timeout=5.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while panel._fetching:
+        assert time.monotonic() < deadline, "task fetch did not finish"
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+
+def test_tasks_panel_reads_the_server_without_blocking(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+    gate = threading.Event()
+
+    class SlowBackend:
+        def __init__(self, title):
+            self.title = title
+
+        def list_dvr_entries(self):
+            gate.wait(5)
+            return [DvrEntry(
+                uuid=self.title, title=self.title, channel_name='BBC', start=int(time.time()) + 600,
+                duration=60, status='Scheduled', sched_status='scheduled',
+            )]
+
+        def close(self):
+            pass
+
+    servers = {'name': 'old', 'url': 'http://old'}
+    window.current_server = lambda: servers
+    window._server_requests_ready = lambda: True
+    panel = window.tasks_pane
+    panel.open_backend = lambda server: SlowBackend(server['name'])
+    try:
+        started = time.monotonic()
+        panel.refresh()
+        assert time.monotonic() - started < 1
+        assert panel._fetching
+        assert panel.task_table.rowCount() == 0
+
+        # The server changes while the old one is still answering.
+        servers = {'name': 'new', 'url': 'http://new'}
+        panel.clear_server_tasks()
+        gate.set()
+        deadline = time.monotonic() + 5
+        while not any('new' in text for text in _task_texts(panel)):
+            assert time.monotonic() < deadline, "the new server's recordings never showed"
+            app.processEvents()
+            time.sleep(0.01)
+        assert all('old' not in text for text in _task_texts(panel))
+        _wait_for_tasks(app, panel)
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
     from tvhplayer.core.models import Channel, DvrEntry
 
@@ -1049,6 +1112,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         def __init__(self):
             self.stopped = []
             self.cancelled = []
+            self.offline = False
             self.entries = [
                 DvrEntry(
                     uuid='soon', title='Later', channel_name='BBC', start=300, duration=60,
@@ -1074,6 +1138,8 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
             ]
 
         def list_dvr_entries(self):
+            if self.offline:
+                raise RuntimeError('offline')
             return list(self.entries)
 
         def stop_dvr_entry(self, entry):
@@ -1103,6 +1169,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
     backend = FakeBackend()
     recorder = FakeRecorder()
     window.get_backend = lambda: backend
+    window.tasks_pane.open_backend = lambda server: backend
     window.current_server = lambda: {'name': 'tv', 'url': 'http://tv'}
     window.local_recorder = recorder
     window._recording_channel = Channel(uuid='c', name='IRINN')
@@ -1111,6 +1178,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         app.processEvents()
         panel = window.tasks_pane
         panel.refresh()
+        _wait_for_tasks(app, panel)
 
         texts = _task_texts(panel)
         assert panel.status_combo.currentText() == 'Active'
@@ -1190,17 +1258,19 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         panel.status_combo.setCurrentText('All')
         assert panel.task_table.rowCount() == 5
 
-        class Down:
-            def list_dvr_entries(self):
-                raise RuntimeError('offline')
-
-        window.get_backend = lambda: Down()
+        opened = []
+        panel.open_backend = lambda server: opened.append(server) or backend
+        backend.offline = True
         panel.refresh()
+        _wait_for_tasks(app, panel)
         assert panel.error_label.text() == "Couldn't refresh server recordings"
         assert panel.task_table.rowCount() == 5
         assert any('Old' in text for text in _task_texts(panel))
-        window.get_backend = lambda: backend
+        backend.offline = False
         panel.refresh()
+        _wait_for_tasks(app, panel)
+        # A failed read drops the connection, and the next one connects again.
+        assert len(opened) == 1
         assert panel.error_label.text() == ''
         assert panel.task_table.rowCount() == 5
 
@@ -1209,6 +1279,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.action_btn.isEnabled() is True
         assert panel.reveal_btn.isEnabled() is False
         panel.run_action()
+        _wait_for_tasks(app, panel)
         assert backend.stopped == ['run']
         assert recorder.running is True
         assert window.is_recording is True
@@ -1221,6 +1292,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         recording.write_bytes(b'ts')
         recorder.file_path = str(recording)
         panel.refresh()
+        _wait_for_tasks(app, panel)
         _select_task(panel, 'Local')
         revealed = []
 
@@ -1241,6 +1313,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         monkeypatch.setattr(ui, 'show_in_file_manager', show_folder)
         recorder.file_path = str(tmp_path / 'not-written.ts')
         panel.refresh()
+        _wait_for_tasks(app, panel)
         _select_task(panel, 'Local')
         panel.reveal_selected()
         assert revealed == [
@@ -1262,6 +1335,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert labels == ['Reveal in File Manager']
         recorder.file_path = str(recording)
         panel.refresh()
+        _wait_for_tasks(app, panel)
         _select_task(panel, 'Local')
         panel.run_action()
         assert recorder.stopped is True
@@ -1306,6 +1380,8 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert not panel.isVisible()
         assert window.tasks_action.isChecked() is False
     finally:
+        # A failed check can leave the recording running; do not wait on the quit question.
+        window._confirm_quit = lambda: True
         window.close()
         app.processEvents()
 
