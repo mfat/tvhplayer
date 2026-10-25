@@ -43,6 +43,9 @@ class FakeAdmin:
         self.networks['net'] = conf
         return 'net'
 
+    def enable_network(self, _uuid):
+        pass
+
     def list_muxes(self, _network_uuid):
         return [dict(conf, uuid=uuid) for uuid, conf in self.muxes.items()]
 

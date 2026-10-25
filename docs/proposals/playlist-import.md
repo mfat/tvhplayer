@@ -132,6 +132,9 @@ Free playlists carry many dead entries: on iptv-org's Persian list, 147 of 202 s
 - Stopping the import during the check leaves unchecked channels hidden.
 - Scans share the network's connection limit, and a dead stream takes up to `max_timeout` to fail, so a large playlist takes a while to check.
 
+- A refresh switches the playlist's network back on if it was switched off. Tvheadend never scans the muxes of a disabled network, and their channels do not play.
+- A refresh adopts muxes in the network that the saved map lost, one per entry with the same stream address, and deletes the rest. Before `hidemode=none`, every refresh of a disabled network imported the whole playlist again.
+
 The app lists muxes and services with `hidemode=none`. The default leaves out every mux of a disabled network, and services that are unverified or on a disabled mux.
 
 One **mux** per included entry:

@@ -63,6 +63,9 @@ class FakeAdmin:
         self.networks[uuid] = conf
         return uuid
 
+    def enable_network(self, uuid):
+        self.networks[uuid]['enabled'] = True
+
     def list_muxes(self, network_uuid):
         return [dict(row, uuid=uuid) for uuid, row in self.muxes.items() if row['network_uuid'] == network_uuid]
 
@@ -206,6 +209,32 @@ def test_stopping_the_check_keeps_unchecked_channels_hidden():
     wait_for_checks(admin, source, result, cancelled=lambda: True, sleep=lambda _s: None)
     assert result.check_stopped
     assert admin.visible() == []
+
+
+def test_lost_muxes_are_adopted_by_address_and_duplicates_deleted():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    plans = _plans(FIRST)
+    sync_playlist(admin, source, plans)
+    # An older version lost the map and imported the playlist a second time.
+    for plan in plans:
+        admin.create_mux(source.network_uuid, mux_conf(plan))
+    a_uuid = source.muxes['id:a']
+    source.muxes = {'id:b': source.muxes['id:b']}
+    result = sync_playlist(admin, source, plans)
+    assert len(admin.muxes) == 2
+    assert (result.added, result.removed) == (0, 2)
+    assert source.muxes['id:a'] == a_uuid
+    assert set(source.muxes.values()) == set(admin.muxes)
+
+
+def test_refresh_switches_the_network_back_on():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    sync_playlist(admin, source, _plans(FIRST))
+    admin.networks[source.network_uuid]['enabled'] = False
+    sync_playlist(admin, source, _plans(FIRST))
+    assert admin.networks[source.network_uuid]['enabled'] is True
 
 
 def test_server_values_compare_equal_to_planned_values():
@@ -402,6 +431,16 @@ def test_import_plays_refreshes_and_removes(tvheadend, media):
         assert len(data) == 188 * 200 and data[0] == 0x47
         data = _first_bytes(port, channels['Tone']['uuid'])
         assert len(data) == 188 * 200 and data[0] == 0x47
+
+        # A switched-off network hides its muxes from the default grid and is never scanned.
+        admin.save([{'uuid': source.network_uuid, 'enabled': False}])
+        source.muxes = {}
+        result = sync_playlist(admin, source, plans)
+        assert (result.added, result.removed) == (0, 0)
+        assert _api(port, 'mpegts/mux/grid?limit=100')['total'] == 3
+        wait_for_checks(admin, source, result)
+        assert (result.working, result.not_working) == (2, ['Gone'])
+        assert sorted(_channels(port)) == ['Pattern', 'Tone']
 
         text = (
             '#EXTM3U\n'

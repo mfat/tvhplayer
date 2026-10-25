@@ -80,6 +80,11 @@ class TvhAdmin:
         data = self._request('api/idnode/load', params={'uuid': uuid})
         return bool(data.get('entries'))
 
+    def enable_network(self, uuid: str) -> None:
+        """Turn the network on if it was switched off; its muxes are not scanned while off."""
+        if not self._node(uuid).get('enabled'):
+            self.save([{'uuid': uuid, 'enabled': True}])
+
     def create_network(self, conf: dict) -> str:
         data = self._request(
             'api/mpegts/network/create',

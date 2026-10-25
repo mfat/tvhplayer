@@ -233,11 +233,33 @@ def sync_playlist(
         source.network_uuid = admin.create_network(conf)
         source.muxes = {}
         checkpoint()
+    else:
+        admin.enable_network(source.network_uuid)
 
     rows = {row['uuid']: row for row in admin.list_muxes(source.network_uuid) if row.get('uuid')}
     known = {key: uuid for key, uuid in source.muxes.items() if uuid in rows}
     if known != source.muxes:
         source.muxes = known
+        checkpoint()
+
+    # Muxes in this network the saved map lost: an import that stopped before
+    # its checkpoint, or an older version that duplicated the playlist. Adopt
+    # one per entry by stream address and delete the rest.
+    tracked = set(source.muxes.values())
+    untracked = {}
+    for uuid, row in rows.items():
+        if uuid not in tracked:
+            untracked.setdefault(row.get('iptv_url') or '', []).append(uuid)
+    if untracked:
+        for plan in plans:
+            if plan.key not in source.muxes:
+                spare = untracked.get(mux_conf(plan)['iptv_url'])
+                if spare:
+                    source.muxes[plan.key] = spare.pop(0)
+        leftover = [uuid for uuids in untracked.values() for uuid in uuids]
+        if leftover:
+            admin.delete(leftover)
+            result.removed += len(leftover)
         checkpoint()
 
     wanted = {plan.key for plan in plans}
@@ -275,7 +297,7 @@ def sync_playlist(
         admin.delete([source.muxes[key] for key in stale])
         for key in stale:
             del source.muxes[key]
-        result.removed = len(stale)
+        result.removed += len(stale)
         checkpoint()
         progress(total, total)
 
