@@ -734,7 +734,9 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         list_at = focus_chain.index(window.tasks_pane.task_table)
         action_at = focus_chain.index(window.tasks_pane.action_btn)
         reveal_at = focus_chain.index(window.tasks_pane.reveal_btn)
-        assert search_at < status_at < list_at < action_at < reveal_at
+        close_at = focus_chain.index(window.tasks_pane.close_btn)
+        assert search_at < status_at < list_at < action_at < reveal_at < close_at
+        assert window.tasks_pane.close_btn.accessibleName() == "Close Tasks"
         assert "focus" in window.play_btn.styleSheet()
         assert window.fullscreen_action.shortcut().toString() == "F11"
         assert any(label.buddy() is window.search_box for label in window.findChildren(ui.QLabel))
@@ -1184,6 +1186,14 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.reveal_btn.isEnabled() is False
         _select_task(panel, 'Local')
         assert panel.reveal_btn.isEnabled() is True
+
+        panel.close_btn.click()
+        app.processEvents()
+        assert not panel.isVisible()
+        assert window.tasks_action.isChecked() is False
+        window.tasks_action.trigger()
+        app.processEvents()
+        assert panel.isVisible()
 
         window.tasks_action.setChecked(False)
         window._toggle_tasks_pane(False)

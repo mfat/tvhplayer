@@ -594,6 +594,8 @@ class _StatusIconDelegate(QStyledItemDelegate):
 class TasksPanel(QFrame):
     """Ongoing, scheduled, and completed recordings, with search and a status filter."""
 
+    close_requested = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         # The splitter reparents this pane, so keep the window that owns the backend.
@@ -623,7 +625,16 @@ class TasksPanel(QFrame):
         heading.setFont(font)
         heading.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         heading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        layout.addWidget(heading)
+        self.close_btn = QToolButton()
+        self.close_btn.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TitleBarCloseButton))
+        self.close_btn.setAutoRaise(True)
+        describe(self.close_btn, "Close Tasks", "Hide the Tasks panel. View > Tasks shows it again.")
+        self.close_btn.setToolTip("Close Tasks")
+        self.close_btn.clicked.connect(self.close_requested.emit)
+        heading_row = QHBoxLayout()
+        heading_row.addWidget(heading, 1)
+        heading_row.addWidget(self.close_btn)
+        layout.addLayout(heading_row)
 
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Channel or title")
@@ -2607,6 +2618,7 @@ class TVHeadendClient(QMainWindow):
         self.tasks_action.setStatusTip("Show or hide ongoing and scheduled recordings")
         self.tasks_action.triggered.connect(self._toggle_tasks_pane)
         view_menu.addAction(self.tasks_action)
+        self.tasks_pane.close_requested.connect(self._close_tasks_pane)
         
         # Set initial sizes (optional)
         self.splitter.setSizes([300, 640, 260])
@@ -2726,6 +2738,7 @@ class TVHeadendClient(QMainWindow):
             self.tasks_pane.task_table,
             self.tasks_pane.action_btn,
             self.tasks_pane.reveal_btn,
+            self.tasks_pane.close_btn,
         ]
         for first, second in zip(order, order[1:]):
             self.setTabOrder(first, second)
@@ -3654,6 +3667,10 @@ class TVHeadendClient(QMainWindow):
 
     def _toggle_tasks_pane(self, checked):
         self.tasks_pane.setVisible(bool(checked))
+
+    def _close_tasks_pane(self):
+        self.tasks_action.setChecked(False)
+        self.tasks_pane.hide()
 
     def _refresh_tasks(self, server=True):
         pane = getattr(self, 'tasks_pane', None)
