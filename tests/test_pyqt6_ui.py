@@ -2803,10 +2803,10 @@ def test_mpv_engine_uses_plain_widgets_qt_keeps_painting(monkeypatch, tmp_path):
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
     window.close()
     attached = []
-    vlc_engine = ui.TVHeadendClient._new_player
 
     def fake_mpv_player(self):
-        player = vlc_engine(self)
+        # The stub libvlc player, attached to the OpenGL widget instead of a window id.
+        player = ui.VlcPlayer()
         player.attach = attached.append
         return player
 
@@ -2820,6 +2820,10 @@ def test_mpv_engine_uses_plain_widgets_qt_keeps_painting(monkeypatch, tmp_path):
         assert not window.video_frame.testAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         assert not window.playback_spinner.testAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         assert not window.floating_bar.isWindow()
+        # A child shows with its window unless hidden on purpose. (The OpenGL
+        # widget cannot be shown on the offscreen platform, so check the flag.)
+        assert window.floating_bar.testAttribute(Qt.WidgetAttribute.WA_WState_ExplicitShowHide)
+        assert window.floating_bar.isHidden()
         window._show_playback_wait()
         assert window.video_frame.updatesEnabled()
         window._on_playback_started()

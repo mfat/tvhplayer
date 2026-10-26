@@ -433,6 +433,8 @@ class FloatingBar(QWidget):
         # separate window choose its own position.
         if overlay:
             super().__init__(window)
+            # A child shows with its window; the bar waits for fullscreen.
+            self.hide()
         else:
             super().__init__(
                 window,
