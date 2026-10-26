@@ -152,15 +152,17 @@ class TvhAdmin:
         """Muxes received with a tuner. IPTV muxes, which carry a URL, are left out."""
         return [row for row in self._grid('api/mpegts/mux/grid', hidemode='none') if 'iptv_url' not in row]
 
-    def list_services_all(self) -> List[dict]:
-        """Every service, including unverified and disabled ones."""
-        return self._grid('api/mpegts/service/grid', hidemode='none')
+    def list_services_all(self, fields=None) -> List[dict]:
+        """Every service, including unverified and disabled ones; with ``fields``, only those fields of each."""
+        return self._grid('api/mpegts/service/grid', hidemode='none', **_only(fields))
 
-    def list_channels(self) -> List[dict]:
-        return self._grid('api/channel/grid')
+    def list_channels(self, fields=None) -> List[dict]:
+        """Every channel; with ``fields``, only those fields of each."""
+        return self._grid('api/channel/grid', **_only(fields))
 
-    def list_all_muxes(self) -> List[dict]:
-        return self._grid('api/mpegts/mux/grid', hidemode='none')
+    def list_all_muxes(self, fields=None) -> List[dict]:
+        """Every mux; with ``fields``, only those fields of each."""
+        return self._grid('api/mpegts/mux/grid', hidemode='none', **_only(fields))
 
     def list_guide_channels(self) -> List[dict]:
         """The channels every EPG grabber has seen, with the TV channels each feeds."""
@@ -314,3 +316,8 @@ def _uuid(data, what) -> str:
     if not uuid:
         raise TvhError(f'The server did not return the new {what}')
     return uuid
+
+
+def _only(fields) -> dict:
+    """Grid parameters that ask for just ``fields`` and the uuid; all of them without."""
+    return {'list': ','.join(sorted({'uuid', *fields}))} if fields else {}

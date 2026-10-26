@@ -68,15 +68,15 @@ class FakeAdmin:
             {'uuid': 'c4', 'name': 'Radio', 'services': [], 'epggrab': ['old', 'test', 'eit']},
         ]
 
-    def list_all_muxes(self):
+    def list_all_muxes(self, fields=None):
         return [{'uuid': 'm1', 'iptv_epgid': 'BBCOne.uk'}, {'uuid': 'm2', 'iptv_epgid': 'BBCOne.uk@HD'},
                 {'uuid': 'm3', 'iptv_epgid': ''}]
 
-    def list_services_all(self):
+    def list_services_all(self, fields=None):
         return [{'uuid': 's1', 'multiplex_uuid': 'm1'}, {'uuid': 's2', 'multiplex_uuid': 'm2'},
                 {'uuid': 's3', 'multiplex_uuid': 'm3'}]
 
-    def list_channels(self):
+    def list_channels(self, fields=None):
         return [dict(row) for row in self.channels]
 
     def list_guide_channels(self):
@@ -135,6 +135,27 @@ def test_channels_carry_their_services_guide_ids(xmltv_socket):
     assert channels['c2'].epg_ids == ('BBCOne.uk@HD',)
     assert channels['c3'].epg_ids == ()
     assert channels['c1'].epggrab == ('eit',)
+
+
+def test_channels_ask_only_for_the_fields_matching_needs():
+    from tvhplayer.core.tvh_admin import TvhAdmin
+
+    asked = []
+
+    class Grids(TvhAdmin):
+        def __init__(self):
+            pass
+
+        def _grid(self, path, **params):
+            asked.append((path, params.get('list')))
+            return []
+
+    server_channels(Grids())
+    assert asked == [
+        ('api/mpegts/mux/grid', 'iptv_epgid,uuid'),
+        ('api/mpegts/service/grid', 'multiplex_uuid,uuid'),
+        ('api/channel/grid', 'enabled,epggrab,name,number,services,uuid'),
+    ]
 
 
 def test_guide_is_sent_linked_and_sent_again(xmltv_socket, tmp_path):

@@ -27,13 +27,13 @@ class FakeAdmin:
     def __exit__(self, *_exc):
         pass
 
-    def list_all_muxes(self):
+    def list_all_muxes(self, fields=None):
         return [{'uuid': f'm-{row["uuid"]}', 'iptv_epgid': row.get('epg', '')} for row in self.channels]
 
-    def list_services_all(self):
+    def list_services_all(self, fields=None):
         return [{'uuid': f's-{row["uuid"]}', 'multiplex_uuid': f'm-{row["uuid"]}'} for row in self.channels]
 
-    def list_channels(self):
+    def list_channels(self, fields=None):
         return [{'uuid': row['uuid'], 'name': row['name'], 'services': [f's-{row["uuid"]}']} for row in self.channels]
 
 

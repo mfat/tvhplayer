@@ -56,17 +56,24 @@ class GuideReport:
         return text
 
 
+# Only what matching needs: the whole rows of tens of thousands of channels
+# were tens of megabytes, read again each time the server started.
+MUX_FIELDS = ('iptv_epgid',)
+SERVICE_FIELDS = ('multiplex_uuid',)
+CHANNEL_FIELDS = ('name', 'number', 'services', 'enabled', 'epggrab')
+
+
 def server_channels(admin) -> List[ServerChannel]:
     """The server's channels with the guide IDs of their services."""
-    muxes = {row.get('uuid'): row for row in admin.list_all_muxes()}
+    muxes = {row.get('uuid'): row for row in admin.list_all_muxes(fields=MUX_FIELDS)}
     service_ids = {}
-    for service in admin.list_services_all():
+    for service in admin.list_services_all(fields=SERVICE_FIELDS):
         mux = muxes.get(service.get('multiplex_uuid')) or {}
         epg_id = (mux.get('iptv_epgid') or '').strip()
         if epg_id:
             service_ids[service.get('uuid')] = epg_id
     channels = []
-    for row in admin.list_channels():
+    for row in admin.list_channels(fields=CHANNEL_FIELDS):
         uuid = row.get('uuid')
         if not uuid:
             continue
