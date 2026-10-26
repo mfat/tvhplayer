@@ -11,7 +11,7 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import List, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .proxy import child_env
 
@@ -78,7 +78,7 @@ def build_ffmpeg_command(stream_url, file_path, username='', password='', extra_
         '-y',
     ]
     parsed = urlparse(stream_url)
-    if (username or password) and not parsed.username:
+    if (username or password) and not parsed.username and 'ticket' not in parse_qs(parsed.query):
         token = base64.b64encode(f'{username}:{password}'.encode('utf-8')).decode('ascii')
         cmd.extend(['-headers', f'Authorization: Basic {token}\r\n'])
     cmd.extend([

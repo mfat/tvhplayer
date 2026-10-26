@@ -387,7 +387,7 @@ def test_htsp_native_and_proxied_dvr_calls():
     assert args['startExtra'] == 2
 
     conn.replies['getTicket'] = {'path': '/dvrfile/7', 'ticket': 'tok en'}
-    assert backend.recording_url(entry) == 'http://u:p@127.0.0.1:9981/dvrfile/7?ticket=tok%20en'
+    assert backend.recording_url(entry) == 'http://127.0.0.1:9981/dvrfile/7?ticket=tok%20en'
 
     conn.replies['fileOpen'] = {'id': 3, 'size': 9, 'mtime': 5}
     conn.replies['fileRead'] = {'data': b'xyz'}

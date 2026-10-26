@@ -43,6 +43,10 @@ def test_auth_header_only_when_url_has_no_userinfo():
         'http://user:secret@127.0.0.1:9981/stream/channel/x', '/tmp/a.ts', 'user', 'secret'
     )
     assert '-headers' not in already_embedded
+    ticket = build_ffmpeg_command(
+        'http://127.0.0.1:9981/stream/channelid/4?ticket=tk', '/tmp/a.ts', 'user', 'secret'
+    )
+    assert '-headers' not in ticket
 
 
 def test_redact_hides_basic_auth():

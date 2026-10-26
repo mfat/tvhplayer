@@ -409,7 +409,7 @@ class HtspBackend(TvhBackend):
             str(reply.get('path') or ''),
             str(reply.get('ticket') or ''),
         )
-        return insert_basic_auth(url, self.server.username, self.server.password)
+        return self._ticket_auth(url, reply)
 
     def open_recording(self, entry: DvrEntry) -> HtspRecordingFile:
         htsp_id = entry_htsp_id(entry)
@@ -574,10 +574,23 @@ class HtspBackend(TvhBackend):
             raise TvhError('Channel has no HTSP id')
         self._connect()
         base = http_base_url(self.server.url)
-        webroot = getattr(self._conn, 'webroot', '') or ''
-        url = resolve_reference(base, f'stream/channelid/{int(channel.htsp_id)}', webroot)
-        url = insert_basic_auth(url, self.server.username, self.server.password)
+        try:
+            reply = self._rpc('getTicket', {'channelId': int(channel.htsp_id)})
+            url = self._ticket_auth(ticket_url(base, str(reply.get('path') or ''),
+                                               str(reply.get('ticket') or '')), reply)
+        except TvhError as exc:
+            log.debug('getTicket for channel %s failed: %s', channel.htsp_id, exc)
+            webroot = getattr(self._conn, 'webroot', '') or ''
+            url = resolve_reference(base, f'stream/channelid/{int(channel.htsp_id)}', webroot)
+            url = insert_basic_auth(url, self.server.username, self.server.password)
         return append_profile(url, profile)
+
+    def _ticket_auth(self, url, reply):
+        # A ticket stands in for the login. Basic auth beside it gets a 401
+        # from a digest-only server, and VLC cannot answer digest.
+        if reply.get('ticket'):
+            return url
+        return insert_basic_auth(url, self.server.username, self.server.password)
 
     def image_url(self, reference: str) -> str:
         reference = (reference or '').strip()

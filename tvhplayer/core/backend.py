@@ -245,8 +245,8 @@ class TvhBackend(ABC):
 
         HTTP uses the entry ``url`` (``dvrfile/<uuid>``) and embeds basic
         auth when credentials are configured. HTSP calls ``getTicket`` with
-        ``dvrId`` and appends ``ticket`` to that path. The ticket path is
-        used as returned; it already includes any webroot.
+        ``dvrId`` and appends ``ticket`` to that path, without basic auth.
+        The ticket path is used as returned; it already includes any webroot.
         """
 
     @abstractmethod
@@ -414,9 +414,10 @@ class TvhBackend(ABC):
     def stream_url(self, channel: Channel, profile: Optional[str] = None) -> str:
         """HTTP URL VLC/ffmpeg can play (HTSP muxpkt is not used).
 
-        HTTP uses ``/stream/channel/{uuid}``. HTSP uses
-        ``/stream/channelid/{id}``. ``profile`` is added as ``?profile=``
-        when set.
+        HTTP uses ``/stream/channel/{uuid}``. HTSP uses the
+        ``/stream/channelid/{id}`` path and ticket from ``getTicket``, so
+        digest-only servers work; without a ticket it embeds basic auth.
+        ``profile`` is added as ``?profile=`` when set.
         """
 
     @abstractmethod
