@@ -182,7 +182,7 @@ It ignores `#KODIPROP`, catch-up attributes, and `tvg-shift`.
 
 - **Encoding:** UTF-8, with an optional BOM, falling back to Latin-1.
 - **Line endings:** CRLF accepted.
-- **Downloads:** go through `proxy.configure_session`, follow redirects, and stop at 50 MB.
+- **Downloads:** go through `proxy.configure_session`, follow redirects, and stop at 256 MB. Films and series episodes on Xtream Codes servers (`/movie/` and `/series/` addresses) are not channels and are skipped.
 - **Errors:** a file that does not start with `#EXTM3U`, or that has no entries, is reported as *"This file is not an M3U playlist."*
 
 ## Guide data

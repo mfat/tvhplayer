@@ -26,7 +26,7 @@ DOWNLOAD_FAILED = 'Could not download the playlist. Check the address and your i
 FILE_FAILED = 'Could not open the playlist file.'
 TOO_LARGE = 'This playlist is too large to import.'
 
-MAX_PLAYLIST_BYTES = 50 * 1024 * 1024
+MAX_PLAYLIST_BYTES = 256 * 1024 * 1024
 DOWNLOAD_TIMEOUT = 30
 # File and path stems that say nothing about the playlist; the host names it instead.
 _GENERIC_STEMS = {'', 'playlist', 'index', 'get', 'channels', 'list', 'tv', 'iptv', 'live', 'm3u', 'm3u8', 'playlist_m3u'}
@@ -36,6 +36,9 @@ MAX_PIPE_ARGS = 63
 
 _ATTRIBUTE = re.compile(r'''([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"',]+))''')
 _CHANNEL_NUMBER = re.compile(r'^\d+(\.\d+)?$')
+# Xtream Codes servers list films and series episodes as /movie/<user>/<pass>/<id>.<ext>;
+# they are not TV channels, and a large server lists hundreds of thousands of them.
+_VOD_PATH = re.compile(r'^/(movie|series)/[^/]+/[^/]+/[^/]+$')
 _HEADER_NAMES = {
     'user-agent': 'User-Agent',
     'referer': 'Referer',
@@ -178,6 +181,8 @@ def parse_playlist(text: str) -> Playlist:
             info = pending or {'attrs': {}, 'name': '', 'headers': {}}
             pending = None
             url, url_headers = _split_url(line)
+            if _is_vod(url):
+                continue
             headers = dict(info['headers'])
             headers.update(url_headers)
             attrs = info['attrs']
@@ -190,6 +195,13 @@ def parse_playlist(text: str) -> Playlist:
             name = info['name'] or attrs.get('tvg-name', '').strip() or _name_from_url(url)
             entries.append(PlaylistEntry(name=name, url=url, headers=headers, groups=groups, attrs=attrs))
     return Playlist(entries=entries, guide_url=guide_url)
+
+
+def _is_vod(url: str) -> bool:
+    try:
+        return bool(_VOD_PATH.match(urlsplit(url).path))
+    except ValueError:
+        return False
 
 
 def playlist_commands(playlist: Playlist) -> List[PlaylistEntry]:

@@ -57,6 +57,21 @@ def test_parse_rejects_other_files():
         assert str(info.value) == NOT_A_PLAYLIST
 
 
+def test_parse_skips_xtream_films_and_series():
+    playlist = parse_playlist(
+        '#EXTM3U\n'
+        '#EXTINF:-1 group-title="News",News\n'
+        'http://xtream.example:80/user/pass/1371\n'
+        '#EXTINF:-1 group-title="Films",A Film\n'
+        'http://xtream.example:80/movie/user/pass/835957.mkv\n'
+        '#EXTINF:-1 group-title="Series",A Show S01E01\n'
+        'http://xtream.example:80/series/user/pass/832464.mp4\n'
+        '#EXTINF:-1,Movie Channel\n'
+        'http://example.com/movie/live.m3u8\n'
+    )
+    assert [entry.name for entry in playlist.entries] == ['News', 'Movie Channel']
+
+
 def test_decode_falls_back_to_latin1():
     assert decode_playlist('#EXTM3U\n#EXTINF:0,Café\n'.encode('latin-1')).endswith('Café\n')
 
