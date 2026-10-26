@@ -1489,6 +1489,28 @@ def test_local_recordings_default_to_the_videos_folder(monkeypatch, tmp_path):
     app.processEvents()
 
 
+def test_flatpak_records_only_where_it_can_write(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.close()
+    videos = tmp_path / 'Videos'
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
+    monkeypatch.setattr(ui.QStandardPaths, 'writableLocation', lambda _kind: str(videos))
+    monkeypatch.setattr(ui, 'in_flatpak', lambda: True)
+
+    # Without the xdg-videos permission the Videos folder is not there: use the app's own folder.
+    own = str(tmp_path / 'data' / 'Recordings')
+    assert ui.default_recording_dir() == own
+    assert ui.ensure_recording_dir(own) and os.path.isdir(own)
+    # Never make a folder the sandbox would throw away.
+    assert not ui.ensure_recording_dir(str(videos))
+    assert not videos.exists()
+
+    videos.mkdir()
+    assert ui.default_recording_dir() == str(videos)
+    assert ui.ensure_recording_dir(str(videos))
+    app.processEvents()
+
+
 def test_quit_asks_while_recording_to_this_computer(monkeypatch, tmp_path):
     app, ui, window, _player = _make_player(monkeypatch, tmp_path)
     window.builtin = None

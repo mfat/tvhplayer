@@ -1450,9 +1450,39 @@ class RecordingDurationDialog(QDialog):
             return max(event.stop - int(time.time()), 0)
         return self._minutes() * 60
 
+def in_flatpak():
+    return os.path.exists('/.flatpak-info')
+
+
+def own_recording_dir():
+    """TVHplayer's own Recordings folder. In the Flatpak it is inside the app's sandbox folder."""
+    data = os.environ.get('XDG_DATA_HOME') or os.path.join(str(Path.home()), '.local', 'share')
+    return os.path.join(data, 'Recordings')
+
+
 def default_recording_dir():
-    """The user's Videos folder, or their home folder when there is none."""
-    return QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MoviesLocation) or str(Path.home())
+    """The user's Videos folder when TVHplayer can write there, else its own Recordings folder.
+
+    The Flatpak sees the Videos folder only with the xdg-videos permission. Without it,
+    the home folder inside the sandbox is thrown away on exit, so nothing is made there.
+    """
+    videos = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MoviesLocation)
+    if videos and (not in_flatpak() or os.access(videos, os.W_OK)):
+        return videos
+    return own_recording_dir()
+
+
+def ensure_recording_dir(folder):
+    """Make ``folder`` if needed; True when recordings can be written there."""
+    if not os.path.isdir(folder):
+        # A folder made inside the Flatpak sandbox's home would vanish on exit.
+        if in_flatpak() and folder != own_recording_dir():
+            return False
+        try:
+            os.makedirs(folder, exist_ok=True)
+        except OSError:
+            return False
+    return os.access(folder, os.W_OK)
 
 
 def local_recording_name(channel_name, when):
@@ -5152,13 +5182,22 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Starting local recording for channel: {channel_name}")
 
             folder = self.local_recording_dir()
+            if not ensure_recording_dir(folder):
+                fallback = default_recording_dir()
+                if fallback == folder or not ensure_recording_dir(fallback):
+                    QMessageBox.warning(
+                        self, "Record to This Computer",
+                        f"TVHplayer cannot save recordings in {folder}. Choose another folder in Settings.",
+                    )
+                    return
+                self.statusbar.showMessage(f"Cannot save recordings in {folder}; saving in {fallback} instead")
+                folder = fallback
             dialog = RecordingDurationDialog(self, channel, self._programme_on_now(channel), save_dir=folder)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 print("Debug: Recording cancelled by user")
                 return
             duration = dialog.get_duration()
             event = dialog.programme_event()
-            os.makedirs(folder, exist_ok=True)
             file_path = os.path.join(folder, local_recording_name(channel_name, datetime.now()))
 
             stream_url = self.get_backend().stream_url(channel)

@@ -18,6 +18,8 @@ finish-args:
   - --socket=fallback-x11
   - --device=all
   - --socket=pulseaudio
+  # Recordings to this computer go to the Videos folder by default. Other folders come through the file chooser portal.
+  - --filesystem=xdg-videos
   - --talk-name=org.freedesktop.Notifications
   - --env=PYTHONPATH=/app/lib/python3.12/site-packages:/app/share/tvhplayer
 
