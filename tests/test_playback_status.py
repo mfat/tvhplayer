@@ -71,53 +71,34 @@ def test_the_tuner_of_a_subscription_and_its_signal():
     assert signal_report(None) is None
 
 
+
 def test_the_log_says_why_this_stream_did_not_start():
-    from tvhplayer.core.playback_status import STREAM_REASONS, stream_path, stream_problem
+    from tvhplayer.core.playback_status import stream_path, stream_reason
 
     path = stream_path('http://user:pw@tv.local:9981/tvh/stream/channel/abc123?profile=pass')
     assert path == '/tvh/stream/channel/abc123'
     line = "2026-10-26 12:00:01.123 webui: Couldn't start streaming /tvh/stream/channel/abc123?profile=pass, No free adapter"
-    assert stream_problem(line, path) == STREAM_REASONS['No free adapter']
-    assert stream_problem(line, '/tvh/stream/channel/other') is None
-    assert stream_problem('2026-10-26 12:00:01 subscription: 0001: something else', path) is None
+    assert stream_reason(line, path) == 'No free adapter'
+    assert stream_reason(line, '/tvh/stream/channel/other') is None
+    assert stream_reason('2026-10-26 12:00:01 subscription: 0001: something else', path) is None
 
 
 def test_the_log_says_why_a_stream_stopped():
-    from tvhplayer.core.playback_status import STREAM_REASONS, stream_problem
-
-    path = '/stream/channelid/42'
-    assert stream_problem('t webui: Stop streaming /stream/channelid/42, Subscription overridden', path) == \
-        STREAM_REASONS['Subscription overridden']
-    assert 'no picture or sound' in stream_problem(
-        't webui: Stop streaming /stream/channelid/42, timeout (20 secs) waiting for data packets to start', path)
-    assert stream_problem('t webui: Stop streaming /stream/channelid/42, User request', path) is None
-    assert stream_problem('t webui: Stop streaming /stream/channelid/42, client hung up', path) is None
-    assert stream_problem('t webui: Stop streaming /stream/channelid/42, Something new', path) == \
-        'The server said: Something new.'
-
-
-def test_an_undecodable_service_named_like_the_channel_is_scrambled():
-    from tvhplayer.core.playback_status import is_scrambled_notice
-
-    line = 't descrambler: cannot decode packets for service "BBC One HD"'
-    assert is_scrambled_notice(line, 'bbc one hd')
-    assert not is_scrambled_notice(line, 'BBC Two HD')
-
-
-def test_a_scrambled_channel_explains_why_nothing_came():
-    from tvhplayer.core.playback_status import SCRAMBLED, STREAM_REASONS, stream_problem
-
-    path = '/stream/channel/x'
-    assert stream_problem('t webui: Stop streaming /stream/channel/x, No A/V data received', path, True) == SCRAMBLED
-    assert stream_problem("t webui: Couldn't start streaming /stream/channel/x, No free adapter", path, True) == \
-        STREAM_REASONS['No free adapter']
-
-
-def test_the_servers_own_reason_is_kept_for_the_log():
     from tvhplayer.core.playback_status import stream_reason
 
-    path = '/stream/channel/x'
-    assert stream_reason("t webui: Couldn't start streaming /stream/channel/x?profile=pass, No free adapter", path) == \
-        'No free adapter'
-    assert stream_reason('t webui: Stop streaming /stream/channel/x, User request', path) is None
-    assert stream_reason('t webui: Stop streaming /stream/channel/y, No access', path) is None
+    path = '/stream/channelid/42'
+    assert stream_reason('t webui: Stop streaming /stream/channelid/42, Subscription overridden', path) == \
+        'Subscription overridden'
+    assert stream_reason(
+        't webui: Stop streaming /stream/channelid/42, timeout (20 secs) waiting for data packets to start', path
+    ) == 'timeout (20 secs) waiting for data packets to start'
+    assert stream_reason('t webui: Stop streaming /stream/channelid/42, User request', path) is None
+    assert stream_reason('t webui: Stop streaming /stream/channelid/42, client hung up', path) is None
+
+
+def test_an_undecodable_service_named_like_the_channel_is_reported():
+    from tvhplayer.core.playback_status import scrambled_notice
+
+    line = 't descrambler: cannot decode packets for service "BBC One HD"'
+    assert scrambled_notice(line, 'bbc one hd') == 'cannot decode packets for service "BBC One HD"'
+    assert scrambled_notice(line, 'BBC Two HD') is None

@@ -58,8 +58,8 @@ try:
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from .core.playlist_sync import PlaylistSource, server_key
     from .core.playback_status import (
-        SCRAMBLED, SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, is_scrambled_notice, receiving,
-        signal_report, starting_caption, stream_path, stream_problem, stream_reason,
+        SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
+        starting_caption, stream_path, stream_reason,
     )
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
@@ -141,8 +141,8 @@ except ImportError:
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, server_key
     from core.playback_status import (
-        SCRAMBLED, SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, is_scrambled_notice, receiving,
-        signal_report, starting_caption, stream_path, stream_problem, stream_reason,
+        SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
+        starting_caption, stream_path, stream_reason,
     )
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
@@ -5076,7 +5076,7 @@ class TVHeadendClient(QMainWindow):
         stream = getattr(self, '_stream', None)
         self.stop_playback()
         if stream is not None and stream['scrambled']:
-            self.statusbar.showMessage(f"{name} could not start. {SCRAMBLED}")
+            self.statusbar.showMessage(f"{name} could not start: {stream['scrambled']}")
         elif level and level != SIGNAL_GOOD:
             self.statusbar.showMessage(f"{name} is not working right now. {words}.")
         else:
@@ -5134,7 +5134,7 @@ class TVHeadendClient(QMainWindow):
             # The server's reason may still be on its way; it replaces this message when it comes.
             stream['failed_at'] = time.monotonic()
             if stream['scrambled']:
-                self.statusbar.showMessage(f"{stream['name']} could not start. {SCRAMBLED}")
+                self.statusbar.showMessage(f"{stream['name']} could not start: {stream['scrambled']}")
                 return
         self.statusbar.showMessage("Playback failed")
 
@@ -5172,22 +5172,23 @@ class TVHeadendClient(QMainWindow):
         if watch is not getattr(self, '_stream_log', None) or stream is None:
             return
         for line in lines:
-            if is_scrambled_notice(line, stream['name']):
-                print(f"Debug: Server says it cannot decode {stream['name']}")
-                stream['scrambled'] = True
+            notice = scrambled_notice(line, stream['name'])
+            if notice:
+                print(f"Debug: Server says: {notice}")
+                stream['scrambled'] = notice
                 continue
-            words = stream_problem(line, stream['path'], stream['scrambled'])
-            if words is None:
+            reason = stream_reason(line, stream['path'])
+            if reason is None:
                 continue
             outcome = 'stopped' if stream['started'] else 'could not start'
-            print(f"Debug: Server says {stream['name']} {outcome}: {stream_reason(line, stream['path'])}")
+            print(f"Debug: Server says {stream['name']} {outcome}: {reason}")
             failed_at = stream['failed_at']
             if failed_at is not None and time.monotonic() - failed_at > self.STREAM_REASON_SECONDS:
                 return
             if failed_at is None:
                 self.stop_playback()
             self._stream = None
-            self.statusbar.showMessage(f"{stream['name']} {outcome}. {words}")
+            self.statusbar.showMessage(f"{stream['name']} {outcome}: {reason}")
             return
 
     def _on_playback_stopped(self):
@@ -7040,7 +7041,7 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Stream URL: {stream_url}")
             self._watch_stream_log()
             self._stream = {'path': stream_path(stream_url), 'name': channel.name, 'started': False,
-                            'scrambled': False, 'failed_at': None}
+                            'scrambled': '', 'failed_at': None}
             self._show_playback_wait()
             self._mark_playing_channel(scroll=True)
             self.player.play(stream_url)
