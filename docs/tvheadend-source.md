@@ -20,6 +20,9 @@ The deb and rpm builds download `<repo>/archive/<commit>.tar.gz`, and the deb bu
 |---|---|---|
 | `ca801fa96` | iptv: start quickly with tens of thousands of muxes | [#2366](https://github.com/tvheadend/tvheadend/pull/2366) |
 | `cc1b558b5` | iptv, notify: keep working when an allocation fails (review on #2366) | [#2366](https://github.com/tvheadend/tvheadend/pull/2366) |
+| `e507a3ca2` | idnode: map a large bouquet to channels quickly | not yet |
+| `afa7ce08d` | idnode: save pending changes before services are torn down | not yet |
+| `40e88d4ce` | htsp: send a tag's members once after many channels join it | not yet |
 
 Base: upstream `51ec612fa`.
 
