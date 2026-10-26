@@ -731,13 +731,13 @@ def _grouped_plans():
     return plans
 
 
-def test_choose_window_ticks_groups_and_searches(app):
+def test_choose_window_selects_groups_and_searches(app):
     plans = _grouped_plans()
     source = PlaylistSource('news', '/tmp/news.m3u', 'builtin', left_out=['name:B'])
     dialog = dialogs.ChooseChannelsDialog(plans, source)
     assert [dialog.tree.topLevelItem(i).text(0) for i in range(2)] == ['News (2)', 'Sport (1)']
     assert dialog.chosen_keys() == ['name:A', 'name:C']
-    assert dialog.count_label.text() == '2 of 3 ticked'
+    assert dialog.count_label.text() == '2 of 3 selected'
 
     dialog.search_input.setText('sport')
     assert dialog.tree.topLevelItem(0).isHidden()
@@ -752,7 +752,7 @@ def test_choose_window_ticks_groups_and_searches(app):
     dialog.tree.topLevelItem(1).setCheckState(0, dialogs.Qt.CheckState.Unchecked)
     app.processEvents()
     assert dialog.chosen_keys() == ['name:A', 'name:B']
-    assert dialog.count_label.text() == '2 of 3 ticked'
+    assert dialog.count_label.text() == '2 of 3 selected'
 
 
 def test_job_adds_only_the_chosen_channels(app, tmp_path):

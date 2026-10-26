@@ -3,8 +3,8 @@
 libvlc 3.0 sends every http:// stream through ``http_proxy`` and ignores
 ``no_proxy``, and it reads the variable from this process. The player hides
 ``http_proxy`` before VLC runs. requests and ffmpeg get the saved value back
-and keep honoring ``no_proxy``. A server on this machine is always reached
-directly.
+and keep honoring ``no_proxy``. libmpv gets the proxy for each stream. A
+server on this machine is always reached directly.
 """
 
 from __future__ import annotations
@@ -50,6 +50,16 @@ def configure_session(session, base_url) -> None:
     proxy = http_proxy()
     if proxy and not requests.utils.should_bypass_proxies(base_url, no_proxy=None):
         session.proxies.setdefault('http', proxy)
+
+
+def stream_proxy(url) -> str:
+    """The proxy for one stream, or an empty string to connect directly."""
+    if is_loopback_url(url):
+        return ''
+    proxy = http_proxy()
+    if not proxy or requests.utils.should_bypass_proxies(url, no_proxy=None):
+        return ''
+    return proxy
 
 
 def child_env(url, base=None) -> dict:

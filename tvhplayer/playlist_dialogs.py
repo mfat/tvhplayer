@@ -382,7 +382,7 @@ def ask_to_run_commands(parent, count, server_name):
 
 
 def ask_to_choose(parent, plans, source, accept_text='A&dd Channels'):
-    """Let the user tick the channels of ``source`` to add. False when cancelled."""
+    """Let the user select the channels of ``source`` to add. False when cancelled."""
     dialog = ChooseChannelsDialog(plans, source, parent, accept_text)
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return False
@@ -404,10 +404,7 @@ class ChooseChannelsDialog(QDialog):
         self.setAccessibleDescription(f'Choose the channels to add from {source.name}.')
         chosen = {plan.key for plan in chosen_plans(source, plans)}
         layout = QVBoxLayout(self)
-        intro = QLabel(
-            f'Untick the channels you do not want from {source.name}. While every group is ticked, '
-            'groups the playlist adds later are added too.'
-        )
+        intro = QLabel('Select the groups and channels to import.')
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
@@ -422,7 +419,7 @@ class ChooseChannelsDialog(QDialog):
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setUniformRowHeights(True)
-        describe(self.tree, 'Channels', 'Channels of the playlist by group. Ticked channels are added.')
+        describe(self.tree, 'Channels', 'Channels of the playlist by group. Selected channels are imported.')
         layout.addWidget(buddy_label('&Channels:', self.tree))
         layout.addWidget(self.tree, 1)
         self._leaves = []
@@ -430,12 +427,12 @@ class ChooseChannelsDialog(QDialog):
         self._fill(plans, chosen)
 
         row = QHBoxLayout()
-        self.all_btn = QPushButton('Tick &All')
-        self.none_btn = QPushButton('Tick &None')
-        describe(self.all_btn, 'Tick all', 'Tick every channel shown.')
-        describe(self.none_btn, 'Tick none', 'Untick every channel shown.')
-        self.all_btn.clicked.connect(lambda: self._tick_shown(Qt.CheckState.Checked))
-        self.none_btn.clicked.connect(lambda: self._tick_shown(Qt.CheckState.Unchecked))
+        self.all_btn = QPushButton('Select &All')
+        self.none_btn = QPushButton('Select &None')
+        describe(self.all_btn, 'Select all', 'Select every channel shown.')
+        describe(self.none_btn, 'Select none', 'Clear every channel shown.')
+        self.all_btn.clicked.connect(lambda: self._select_shown(Qt.CheckState.Checked))
+        self.none_btn.clicked.connect(lambda: self._select_shown(Qt.CheckState.Unchecked))
         row.addWidget(self.all_btn)
         row.addWidget(self.none_btn)
         row.addStretch(1)
@@ -451,7 +448,7 @@ class ChooseChannelsDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
 
-        # A group tick changes all its channels; count once they have changed.
+        # Selecting a group changes all its channels; count once they have changed.
         self._count_timer = QTimer(self)
         self._count_timer.setSingleShot(True)
         self._count_timer.timeout.connect(self._count)
@@ -498,7 +495,7 @@ class ChooseChannelsDialog(QDialog):
                 group.setHidden(shown == 0)
                 group.setExpanded(bool(needle) and shown > 0)
 
-    def _tick_shown(self, state):
+    def _select_shown(self, state):
         self.tree.blockSignals(True)
         if self.search_input.text().strip():
             for item in self._leaves:
@@ -514,10 +511,10 @@ class ChooseChannelsDialog(QDialog):
         self._count()
 
     def _count(self):
-        ticked = len(self.chosen_keys())
+        selected = len(self.chosen_keys())
         total = len(self._leaves)
-        self.count_label.setText(f'{ticked} of {total} ticked')
-        self.ok_btn.setEnabled(ticked > 0)
+        self.count_label.setText(f'{selected} of {total} selected')
+        self.ok_btn.setEnabled(selected > 0)
 
     def chosen_keys(self):
         return [
