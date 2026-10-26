@@ -43,6 +43,11 @@ CONVERT_HELP = (
     'the options choose the encoder and quality. Any recording can also be converted from '
     'File > Convert Recording for Editing… or by right-clicking it in Tasks.'
 )
+AWAKE_HELP = (
+    'The computer never sleeps while it is recording. With this on, it also stays awake while a '
+    'recording is scheduled on the built-in server or another server on this computer, so the '
+    'recording is not missed. TVHplayer has to be open for the built-in server to record.'
+)
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 
 
@@ -128,6 +133,18 @@ class SettingsDialog(QDialog):
         recordings_layout.addWidget(self.options_status)
         recording_tab.addWidget(recordings)
 
+        power = QGroupBox('Sleep')
+        power_layout = QVBoxLayout(power)
+        self.awake_check = QCheckBox('&Keep the computer awake for scheduled recordings')
+        self.awake_check.setChecked(host.stays_awake_for_scheduled())
+        describe(self.awake_check, description=AWAKE_HELP)
+        power_layout.addWidget(self.awake_check)
+        awake_help = QLabel(AWAKE_HELP)
+        awake_help.setWordWrap(True)
+        awake_help.setContentsMargins(24, 0, 0, 0)
+        power_layout.addWidget(awake_help)
+        recording_tab.addWidget(power)
+
         editing = QGroupBox('Converting for editing')
         editing_layout = QVBoxLayout(editing)
         self.convert_check = QCheckBox('Con&vert recordings for editing when they finish')
@@ -196,6 +213,7 @@ class SettingsDialog(QDialog):
         self.convert_check.toggled.connect(self._convert_toggled)
         self.convert_edit.editingFinished.connect(self._convert_edited)
         self.delete_check.toggled.connect(host.set_deletes_converted_original)
+        self.awake_check.toggled.connect(host.set_stays_awake_for_scheduled)
         self.delete_check.setEnabled(self.convert_check.isChecked())
         self._show_convert_problem(self.convert_edit.text())
         self.hide_check.toggled.connect(self._toggled)

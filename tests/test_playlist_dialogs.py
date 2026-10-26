@@ -468,6 +468,12 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_deletes_converted_original(self, on):
             self.delete = on
 
+        def stays_awake_for_scheduled(self):
+            return True
+
+        def set_stays_awake_for_scheduled(self, on):
+            self.awake = on
+
         def conversion_problem(self, text):
             return 'This ffmpeg has no nope encoder.' if 'nope' in text else ''
 
@@ -492,6 +498,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert dialog.format_combo.currentData() == 'ts'
     dialog.format_combo.setCurrentIndex(dialog.format_combo.findData('mp4'))
     assert host.format == 'mp4'
+    assert dialog.awake_check.isChecked()
+    dialog.awake_check.click()
+    assert host.awake is False
     dialog.options_edit.setText('-metadata "title=unclosed')
     dialog._options_edited()
     assert not hasattr(host, 'options')

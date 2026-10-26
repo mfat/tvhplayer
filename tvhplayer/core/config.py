@@ -67,6 +67,8 @@ def default_config():
         # Empty while it is the default, so a better default reaches everyone.
         'convert_options': '',
         'delete_converted_original': False,
+        # Block sleep until scheduled recordings on this computer are done, not only while recording.
+        'stay_awake_for_scheduled': True,
     }
 
 
@@ -99,7 +101,10 @@ def _normalize(data):
         cfg['volume'] = 50
     cfg['channel_list'] = channel_list_options(data.get('channel_list'))
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
-    for key in ('play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original'):
+    for key in (
+        'play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original',
+        'stay_awake_for_scheduled',
+    ):
         cfg[key] = bool(cfg.get(key))
     for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options'):
         if not isinstance(cfg.get(key), str):

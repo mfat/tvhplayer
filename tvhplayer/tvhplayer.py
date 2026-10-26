@@ -65,6 +65,8 @@ try:
     )
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from .settings_dialog import SettingsDialog
+    from .sleep_inhibit import SleepInhibitor
+    from .core.sleep_guard import awake_reason, server_on_this_computer
     from .guide_view import GuideWindow
     from .core.channel_info import (
         channel_icon_reference,
@@ -133,6 +135,8 @@ except ImportError:
     )
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from settings_dialog import SettingsDialog
+    from sleep_inhibit import SleepInhibitor
+    from core.sleep_guard import awake_reason, server_on_this_computer
     from guide_view import GuideWindow
     from core.channel_info import (
         channel_icon_reference,
@@ -205,6 +209,8 @@ CHANNEL_RELOAD_SECONDS = 30
 # Now/next is asked for again this often, and sooner when a programme ends.
 NOW_NEXT_REFRESH_SECONDS = 600
 NOW_NEXT_TICK_MS = 30000
+# How often to check whether a recording needs the computer awake.
+AWAKE_CHECK_MS = 30000
 LOGO_ROLE = Qt.ItemDataRole.UserRole + 2
 CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
 
@@ -2902,6 +2908,9 @@ class ServerLogDialog(QDialog):
 
 
 class TVHeadendClient(QMainWindow):
+    # DVR entries of the built-in server, read in the background while another server is selected.
+    _builtin_entries_read = pyqtSignal(object)
+
     def __init__(self):
         super().__init__()
         self.setup_paths()
@@ -2992,6 +3001,14 @@ class TVHeadendClient(QMainWindow):
                 self.builtin.recordings_dir = folder
             self.builtin.ready.connect(self._on_builtin_ready)
             self.builtin.failed.connect(self._on_builtin_failed)
+        # Keep the computer awake while a recording on it is running or waiting.
+        self.sleep_inhibitor = SleepInhibitor()
+        self._builtin_entries = []
+        self._builtin_entries_fetching = False
+        self._builtin_entries_read.connect(self._on_builtin_entries_read)
+        self._awake_timer = QTimer(self)
+        self._awake_timer.timeout.connect(self._check_awake)
+        self._awake_timer.start(AWAKE_CHECK_MS)
         print(f"Debug: Loaded {len(self.servers)} servers")
         
         # Initialize channels list
@@ -3967,6 +3984,66 @@ class TVHeadendClient(QMainWindow):
             self._recording_keys = keys
             self._mark_playing_channel()
         self._sync_record_controls()
+        self._sync_awake()
+
+    def _check_awake(self):
+        """Read the built-in server's recordings when it is not the selected server, then decide."""
+        supervisor = getattr(self, 'builtin', None)
+        running = supervisor is not None and supervisor.is_running()
+        if not running or is_builtin_server(self.current_server()):
+            self._builtin_entries = []
+        elif not self._builtin_entries_fetching:
+            server = find_builtin_server(self.servers)
+            if server is not None:
+                self._builtin_entries_fetching = True
+                threading.Thread(
+                    target=self._read_builtin_entries, args=(dict(server),), name='awake-fetch', daemon=True,
+                ).start()
+        self._sync_awake()
+
+    def _read_builtin_entries(self, server):
+        """Runs on the fetch thread."""
+        backend = None
+        entries = None
+        try:
+            backend = create_backend(server)
+            entries = backend.list_dvr_entries()
+        except Exception as exc:
+            print(f"Debug: Could not read the built-in server's recordings: {exc}")
+        finally:
+            if backend is not None:
+                try:
+                    backend.close()
+                except Exception:
+                    pass
+        try:
+            self._builtin_entries_read.emit(entries)
+        except RuntimeError:
+            pass
+
+    def _on_builtin_entries_read(self, entries):
+        self._builtin_entries_fetching = False
+        if entries is not None:
+            self._builtin_entries = list(entries)
+        self._sync_awake()
+
+    def _sync_awake(self):
+        if self._closing:
+            return
+        entries = []
+        server = self.current_server()
+        if server_on_this_computer(server):
+            entries.extend(getattr(self, '_dvr_entries', []))
+        if not is_builtin_server(server):
+            entries.extend(self._builtin_entries)
+        recorder = getattr(self, 'local_recorder', None)
+        reason = awake_reason(
+            entries,
+            int(datetime.now().timestamp()),
+            local_recording=bool(recorder is not None and recorder.is_running),
+            keep_for_scheduled=self.stays_awake_for_scheduled(),
+        )
+        self.sleep_inhibitor.hold(reason)
 
     def _selected_channel_tag(self):
         if not self.channel_options['tag_filter']:
@@ -5446,6 +5523,8 @@ class TVHeadendClient(QMainWindow):
             if not job.shutdown(10000):
                 print("Debug: A playlist refresh did not stop in time")
         self.local_recorder.stop()
+        self._awake_timer.stop()
+        self.sleep_inhibitor.release()
         for conversion in self.conversions:
             conversion.cancel()
         self._now_next_timer.stop()
@@ -5643,6 +5722,14 @@ class TVHeadendClient(QMainWindow):
     def set_plays_on_start(self, on):
         self.config['play_on_start'] = bool(on)
         self.save_config()
+
+    def stays_awake_for_scheduled(self):
+        return self.config['stay_awake_for_scheduled']
+
+    def set_stays_awake_for_scheduled(self, on):
+        self.config['stay_awake_for_scheduled'] = bool(on)
+        self.save_config()
+        self._sync_awake()
 
     def local_recording_dir(self):
         return self.config.get('local_recording_dir') or default_recording_dir()
