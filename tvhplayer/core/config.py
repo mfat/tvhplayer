@@ -11,6 +11,8 @@ from pathlib import Path
 
 from .builtin_server import without_builtin_secrets
 from .channel_info import channel_list_options
+from .guide_feeds import GuideSource
+from .guide_match import Choice
 from .models import ServerConfig
 from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES
 from .playlist_sync import PlaylistSource
@@ -78,6 +80,10 @@ def default_config():
         'low_space_gb': 5,
         # Set Up Channels opens by itself once, when the built-in server first has no channels.
         'setup_offered': False,
+        # Programme guides for servers on this computer, and each channel's guide
+        # chosen by hand: {server key: {channel uuid: choice}}.
+        'guide_sources': [],
+        'guide_choices': {},
     }
 
 
@@ -100,6 +106,12 @@ def _normalize(data):
         for raw in data.get('playlists') or []
         if isinstance(raw, dict)
     ]
+    cfg['guide_sources'] = [
+        GuideSource.from_dict(raw).to_dict()
+        for raw in data.get('guide_sources') or []
+        if isinstance(raw, dict) and raw.get('location')
+    ]
+    cfg['guide_choices'] = _guide_choices(data.get('guide_choices'))
     try:
         cfg['last_server'] = int(cfg.get('last_server') or 0)
     except (TypeError, ValueError):
@@ -135,6 +147,23 @@ def _normalize(data):
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             cfg[key] = defaults[key]
     return cfg
+
+
+def _guide_choices(data):
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for server, channels in data.items():
+        if not isinstance(channels, dict):
+            continue
+        kept = {}
+        for uuid, raw in channels.items():
+            choice = Choice.from_dict(raw)
+            if choice is not None:
+                kept[str(uuid)] = choice.to_dict()
+        if kept:
+            result[str(server)] = kept
+    return result
 
 
 class ConfigStore:

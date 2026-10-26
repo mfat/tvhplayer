@@ -136,6 +136,20 @@ class TvhAdmin:
     def list_channels(self) -> List[dict]:
         return self._grid('api/channel/grid')
 
+    def list_all_muxes(self) -> List[dict]:
+        return self._grid('api/mpegts/mux/grid', hidemode='none')
+
+    def list_guide_channels(self) -> List[dict]:
+        """The channels every EPG grabber has seen, with the TV channels each feeds."""
+        return self._grid('api/epggrab/channel/grid')
+
+    def keep_guide_after_import(self) -> None:
+        """Have the server save its EPG after each XMLTV import, so a crash keeps it."""
+        entries = self._request('api/epggrab/config/load').get('entries') or []
+        params = {param.get('id'): param.get('value') for param in (entries[0].get('params') or [])} if entries else {}
+        if not params.get('epgdb_saveafterimport'):
+            self._request('api/epggrab/config/save', data={'node': json.dumps({'epgdb_saveafterimport': True})})
+
     def list_channel_tags(self) -> List[dict]:
         return self._grid('api/channeltag/grid')
 

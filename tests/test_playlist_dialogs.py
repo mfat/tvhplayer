@@ -94,6 +94,7 @@ class FakeHost:
         self.shown = []
         self.kept = []
         self.hide_dead = True
+        self.synced = []
 
     def import_targets(self):
         return list(self.targets)
@@ -124,6 +125,9 @@ class FakeHost:
 
     def hides_dead_channels(self):
         return self.hide_dead
+
+    def after_playlist_sync(self, server, source, guide_url, result):
+        self.synced.append((server.get('url'), source.name, guide_url, result.added))
 
 
     def claim_playlist(self, source):
@@ -310,12 +314,25 @@ def test_missing_guide_does_not_fail_the_import(app, tmp_path, monkeypatch):
         raise dialogs.PlaylistError('The program guide could not be loaded.')
 
     monkeypatch.setattr(dialogs, 'load_guide', broken)
-    host = FakeHost([BUILTIN], current=BUILTIN)
+    host = FakeHost([OTHER], current=OTHER)
     dialog = dialogs.ImportPlaylistDialog(host)
     text = TWO.replace('#EXTM3U', '#EXTM3U x-tvg-url="http://127.0.0.1:1/guide.xml"')
     dialog.location_input.setText(_playlist(tmp_path, text))
     _run(app, dialog)
     assert dialog.status_label.text() == 'Added 2 channels from news. The program guide could not be loaded.'
+
+
+def test_a_server_on_this_computer_gets_the_guide_as_a_guide_source(app, tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr(dialogs, 'load_guide', lambda *args: sent.append(args))
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    dialog = dialogs.ImportPlaylistDialog(host)
+    text = TWO.replace('#EXTM3U', '#EXTM3U x-tvg-url="http://127.0.0.1:1/guide.xml"')
+    dialog.location_input.setText(_playlist(tmp_path, text))
+    _run(app, dialog)
+    assert dialog.status_label.text() == 'Added 2 channels from news.'
+    assert sent == []
+    assert host.synced == [(BUILTIN['url'], 'news', 'http://127.0.0.1:1/guide.xml', 2)]
 
 
 def test_job_says_when_only_the_stream_test_is_left(app, tmp_path):

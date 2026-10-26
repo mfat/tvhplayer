@@ -90,6 +90,21 @@ Playlists on the built-in server are checked again each time TVHplayer starts, s
 - **Refresh** reads the playlist again now.
 - **Remove** removes the playlist and its channels.
 
+### TV guide for internet channels
+
+Internet channels get their TV guide from XMLTV guide files. For the built-in server, and any server running on this computer, choose **File → Guide Sources…**:
+
+- **Find Guides…** compares your channels' guide IDs (the `tvg-id` in the playlist) with the free guides of epgshare01 and iptv-epg.org, and ticks the ones that cover the most channels. A country's guide can be tens of MB, so the first search takes a few minutes.
+- **Add…** takes the web address of any XMLTV guide, packed or not, or a guide file on this computer, for example one made by WebGrab+Plus.
+- A playlist that names its own guide adds it here by itself.
+- **Update** sets how often each guide is downloaded again while TVHplayer runs; **Update Now** downloads them all at once.
+
+A guide that fails to download, has no programmes, or has far fewer than last time is not used; the last good copy stays.
+
+A channel takes the guide whose channel has the same ID. **Match Channels…** shows where each channel's programmes come from. Channels without an ID, or whose ID no guide has, get suggestions by name; tick them and choose **Use Ticked Suggestions**, or pick a guide channel yourself (**Search the guides** finds one by name or ID). Names are never used without asking, because many networks share a name across regions. **Shift times by** moves a channel's programmes, for example 60 minutes for a "+1" channel. Each channel, the SD and HD versions included, gets its own copy of the programmes.
+
+A server on another computer cannot take a guide from TVHplayer. Its own guide grabbers are set up in its web interface.
+
 ### Schedule recordings
 
 1. To record a live program using Tvheaden's DVR function, click the record button below the player. Recordings will be stored on the server.

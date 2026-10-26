@@ -43,7 +43,10 @@ try:
         recording_titles,
         upcoming_recordings,
     )
-    from .core.config import ConfigStore
+    from .core.config import ConfigStore, default_cache_dir
+    from .core.guide_feeds import GuideCache, GuideSource
+    from .core.guide_match import Choice
+    from .core.xmltv import is_local_server
     from .core.logs import SERVER_LOG, configure_logging, log_dir
     from .core.dvr import instant_recording_title
     from .core.errors import TvhAuthError, TvhError
@@ -69,6 +72,7 @@ try:
         svg_icon,
     )
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
+    from .guide_dialogs import GuideJob, GuideSourcesDialog
     from .settings_dialog import SettingsDialog
     from .setup_wizard import SetupWizard
     from .sleep_inhibit import SleepInhibitor
@@ -122,7 +126,10 @@ except ImportError:
         recording_titles,
         upcoming_recordings,
     )
-    from core.config import ConfigStore
+    from core.config import ConfigStore, default_cache_dir
+    from core.guide_feeds import GuideCache, GuideSource
+    from core.guide_match import Choice
+    from core.xmltv import is_local_server
     from core.logs import SERVER_LOG, configure_logging, log_dir
     from core.dvr import instant_recording_title
     from core.errors import TvhAuthError, TvhError
@@ -148,6 +155,7 @@ except ImportError:
         svg_icon,
     )
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
+    from guide_dialogs import GuideJob, GuideSourcesDialog
     from settings_dialog import SettingsDialog
     from setup_wizard import SetupWizard
     from sleep_inhibit import SleepInhibitor
@@ -231,6 +239,8 @@ NOW_NEXT_REFRESH_SECONDS = 600
 NOW_NEXT_TICK_MS = 30000
 # How often to check whether a recording needs the computer awake.
 AWAKE_CHECK_MS = 30000
+# How often to check whether a guide for a server on this computer is due for download.
+GUIDE_CHECK_MS = 30 * 60 * 1000
 # How long a server's tuner count and channel muxes are trusted before reading them again.
 TUNER_USE_REFRESH_SECONDS = 600
 DEINTERLACE_CHOICES = (
@@ -3205,6 +3215,11 @@ class TVHeadendClient(QMainWindow):
         self._busy_playlists = set()
         self._builtin_playlists_refreshed = False
         self._playlist_jobs = []
+        # Guide updates for servers on this computer, one per server.
+        self._guide_jobs = {}
+        self._guide_timer = QTimer(self)
+        self._guide_timer.timeout.connect(self._update_due_guides)
+        self._guide_timer.start(GUIDE_CHECK_MS)
         self._closing = False
         # A playlist check shows and hides channels for hours; reload the list at most this often.
         self._channel_reload_timer = QTimer(self)
@@ -3440,6 +3455,10 @@ class TVHeadendClient(QMainWindow):
         playlists_action = QAction("&Playlists…", self)
         playlists_action.triggered.connect(self.show_playlists)
         file_menu.addAction(playlists_action)
+        guide_sources_action = QAction("&Guide Sources…", self)
+        guide_sources_action.setStatusTip("Choose where the TV guide of a server on this computer comes from")
+        guide_sources_action.triggered.connect(self.show_guide_sources)
+        file_menu.addAction(guide_sources_action)
         file_menu.addSeparator()
         convert_action = QAction("&Convert Recording for Editing…", self)
         convert_action.setStatusTip("Make an edit-friendly MP4 of a recording on this computer")
@@ -5984,12 +6003,18 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
         for job in self._playlist_jobs:
             job.cancel()
+        self._guide_timer.stop()
+        for job in self._guide_jobs.values():
+            job.cancel()
         if self.builtin is not None:
             self.builtin.shut_down()
         # With the server gone, a running stream test notices within seconds.
         for job in self._playlist_jobs:
             if not job.shutdown(10000):
                 print("Debug: A playlist refresh did not stop in time")
+        for job in self._guide_jobs.values():
+            if not job.shutdown(10000):
+                print("Debug: A guide update did not stop in time")
         for job in self.local_jobs:
             job.recorder.stop()
         self._awake_timer.stop()
@@ -6071,6 +6096,7 @@ class TVHeadendClient(QMainWindow):
         if is_builtin_server(self.current_server()):
             self.fetch_channels()
         self._refresh_builtin_playlists()
+        self._update_due_guides()
 
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
@@ -6198,6 +6224,9 @@ class TVHeadendClient(QMainWindow):
             source.to_dict() for source in self.playlist_sources()
             if (source.server, source.location) != (gone.server, gone.location)
         ]
+        for guide in self.all_guide_sources():
+            if guide.server == gone.server and guide.playlist == gone.location:
+                self.remove_guide_source(guide)
         self.save_config()
 
     def _refresh_builtin_playlists(self):
@@ -6248,6 +6277,148 @@ class TVHeadendClient(QMainWindow):
 
     def show_settings(self):
         SettingsDialog(self, self).exec()
+
+    # Programme guides for servers on this computer -----------------------
+
+    def show_guide_sources(self):
+        server = self.current_server()
+        GuideSourcesDialog(self, self, server=server if server and is_local_server(server) else None).exec()
+
+    def guide_servers(self):
+        """Servers on this computer, which take a guide through their XMLTV socket."""
+        return [server for server in self.import_targets() if is_local_server(server)]
+
+    def guide_cache(self):
+        return GuideCache(default_cache_dir() / 'guides')
+
+    def all_guide_sources(self):
+        return [GuideSource.from_dict(raw) for raw in self.config.get('guide_sources') or []]
+
+    def guide_sources(self, server):
+        key = server_key(server)
+        return [source for source in self.all_guide_sources() if source.server == key]
+
+    def _save_guide_sources(self, sources):
+        self.config['guide_sources'] = [source.to_dict() for source in sources]
+        self.save_config()
+
+    def add_guide_sources(self, server, entries, playlist=''):
+        """Add ``(location, name)`` guides for ``server``. Returns whether any was new."""
+        key = server_key(server)
+        sources = self.all_guide_sources()
+        cache = self.guide_cache()
+        added = False
+        for location, name in entries:
+            if any(source.server == key and source.location == location for source in sources):
+                continue
+            source = GuideSource(location, key, name=name, playlist=playlist)
+            if cache.summary(location) is not None:
+                # Find Guides downloaded it already.
+                try:
+                    source.updated = source.tried = os.path.getmtime(cache.file(location))
+                except OSError:
+                    pass
+            sources.append(source)
+            added = True
+        self._save_guide_sources(sources)
+        return added
+
+    def store_guide_source(self, changed):
+        sources = self.all_guide_sources()
+        for index, source in enumerate(sources):
+            if (source.server, source.location) == (changed.server, changed.location):
+                sources[index] = changed
+        self._save_guide_sources(sources)
+
+    def store_guide_states(self, updated):
+        """Keep what an update learned about each source, without undoing changes made meanwhile."""
+        states = {(source.server, source.location): source for source in updated}
+        sources = self.all_guide_sources()
+        for source in sources:
+            state = states.get((source.server, source.location))
+            if state is not None:
+                source.updated, source.tried, source.error = state.updated, state.tried, state.error
+        self._save_guide_sources(sources)
+
+    def remove_guide_source(self, gone):
+        remaining = [
+            source for source in self.all_guide_sources()
+            if (source.server, source.location) != (gone.server, gone.location)
+        ]
+        self._save_guide_sources(remaining)
+        if not any(source.location == gone.location for source in remaining):
+            self.guide_cache().forget(gone.location)
+
+    def guide_choices(self, server):
+        raw = (self.config.get('guide_choices') or {}).get(server_key(server)) or {}
+        return {uuid: Choice.from_dict(data) for uuid, data in raw.items() if Choice.from_dict(data) is not None}
+
+    def set_guide_choices(self, server, changes):
+        """Channels' guides chosen by hand, saved at once: ``{uuid: Choice}``, or None to match by ID again."""
+        key = server_key(server)
+        choices = self.config.setdefault('guide_choices', {})
+        channels = dict(choices.get(key) or {})
+        for uuid, choice in changes.items():
+            if choice is None:
+                channels.pop(uuid, None)
+            else:
+                channels[uuid] = choice.to_dict()
+        if channels:
+            choices[key] = channels
+        else:
+            choices.pop(key, None)
+        self.save_config()
+
+    def guide_job(self, server):
+        job = self._guide_jobs.get(server_key(server))
+        return job if job is not None and job.is_running() else None
+
+    def update_guide(self, server, force=False, automatic=False):
+        """Update the server's guides and load them into it. Returns the running job."""
+        running = self.guide_job(server)
+        if running is not None:
+            return running
+        job = GuideJob(self, server, force, parent=self)
+        self._guide_jobs[server_key(server)] = job
+        job.finished.connect(lambda _report, job=job: self._guide_done(job, automatic))
+        job.failed.connect(lambda _message, job=job: self._guide_done(job, automatic))
+        job.start()
+        return job
+
+    def _guide_done(self, job, automatic):
+        if self._closing:
+            return
+        if automatic and not job.ok:
+            # A server that is not running now should not fill the status bar every half hour.
+            print(f"Debug: Guide update for {job.server.get('name', '')}: {job.message}")
+            return
+        self.statusbar.showMessage(job.message)
+
+    def _update_due_guides(self):
+        """Load the guides of servers on this computer when one of them is due."""
+        if self._closing:
+            return
+        for server in self.guide_servers():
+            sources = self.guide_sources(server)
+            if not sources or not any(source.is_due() for source in sources):
+                continue
+            if is_builtin_server(server) and not (self.builtin is not None and self.builtin.is_running()):
+                continue
+            self.update_guide(server, automatic=True)
+
+    def after_playlist_sync(self, server, source, guide_url, result):
+        """Use the playlist's own guide, and match the guide to channels it added or changed."""
+        if self._closing or not is_local_server(server):
+            return
+        added = False
+        if guide_url:
+            key = server_key(server)
+            for guide in self.all_guide_sources():
+                if guide.server == key and guide.playlist == source.location and guide.location != guide_url:
+                    self.remove_guide_source(guide)
+            added = self.add_guide_sources(server, [(guide_url, f'{source.name} guide')], playlist=source.location)
+        if self.guide_sources(server) and (added or result.added or result.updated or result.removed):
+            self.update_guide(server, automatic=not added)
 
     def plays_on_start(self):
         return self.config['play_on_start']

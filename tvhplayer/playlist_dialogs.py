@@ -48,7 +48,7 @@ try:
     )
     from .core.errors import PlaylistError, TvhError
     from .core.tvh_admin import TvhAdmin
-    from .core.xmltv import load_guide
+    from .core.xmltv import is_local_server, load_guide
 except ImportError:
     from a11y import announce_label, buddy_label, describe, set_item_access
     from core.playlist import load_playlist, plan_channels, playlist_commands, playlist_name
@@ -70,7 +70,7 @@ except ImportError:
     )
     from core.errors import PlaylistError, TvhError
     from core.tvh_admin import TvhAdmin
-    from core.xmltv import load_guide
+    from core.xmltv import is_local_server, load_guide
 
 
 class _Task(QThread):
@@ -139,6 +139,7 @@ class PlaylistJob(QObject):
         self._hide_failed = host.hides_dead_channels()
         self._task = None
         self._playlist = None
+        self.result = None
         self._busy = False
         self._checking = False
         self._cancelled = False
@@ -237,7 +238,8 @@ class PlaylistJob(QObject):
             )
             # Removed duplicates and newly hidden channels are already gone from the server.
             task.channels_changed.emit()
-            if self._playlist.guide_url and not result.cancelled:
+            # A server on this computer takes the guide with the other guide sources.
+            if self._playlist.guide_url and not result.cancelled and not is_local_server(self.server):
                 task.status.emit('Loading the program guide…')
                 try:
                     load_guide(admin, self.server, self._playlist.guide_url, result.added > 0)
@@ -247,7 +249,11 @@ class PlaylistJob(QObject):
             return result
 
     def _synced(self, result):
+        self.result = result
         self._host.store_playlist_source(self.source.to_dict())
+        if self.action == self.SYNC and not result.cancelled:
+            guide_url = self._playlist.guide_url if self._playlist is not None else ''
+            self._host.after_playlist_sync(self.server, self.source, guide_url, result)
         if result.cancelled or not (self._hide_failed or self.action == self.CHECK):
             self._checked(result)
             return
