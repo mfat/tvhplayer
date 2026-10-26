@@ -110,6 +110,37 @@ def _http():
     return backend
 
 
+def test_http_grid_reads_every_page(monkeypatch):
+    import tvhplayer.core.dvr as dvr
+
+    monkeypatch.setattr(dvr, 'GRID_LIMIT', 2)
+    backend = _http()
+    rows = [{'uuid': str(n), 'name': f'C{n}', 'number': n + 1} for n in range(5)]
+    backend._session.queue = [
+        {'total': 5, 'entries': rows[0:2]},
+        {'total': 5, 'entries': rows[2:4]},
+        {'total': 5, 'entries': rows[4:5]},
+    ]
+    assert [channel.name for channel in backend.get_channels()] == ['C0', 'C1', 'C2', 'C3', 'C4']
+    pages = [(call[2]['params']['start'], call[2]['params']['limit']) for call in backend._session.calls]
+    assert pages == [(0, 2), (2, 2), (4, 2)]
+
+
+def test_grid_stops_without_total_or_with_own_limit(monkeypatch):
+    import tvhplayer.core.dvr as dvr
+
+    monkeypatch.setattr(dvr, 'GRID_LIMIT', 2)
+    calls = []
+
+    def fetch(params):
+        calls.append(params)
+        return {'entries': [{}, {}]}
+
+    assert len(dvr.grid_rows(fetch)) == 2
+    assert len(dvr.grid_rows(fetch, {'limit': 7})) == 2
+    assert calls == [{'start': 0, 'limit': 2}, {'limit': 7}]
+
+
 def _entry():
     return DvrEntry(
         uuid='abc',

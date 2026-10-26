@@ -27,6 +27,35 @@ from .models import (
 GRID_LIMIT = 10000
 
 
+def grid_rows(fetch, params=None) -> list:
+    """Every row of a grid call, GRID_LIMIT rows a request.
+
+    ``fetch(params)`` returns the call's reply. A caller's own ``limit`` asks
+    once. Otherwise pages follow while the reply's ``total`` says more remain.
+    """
+    params = dict(params or {})
+    if 'limit' in params:
+        return _grid_entries(fetch(params))
+    rows = []
+    start = int(params.pop('start', 0) or 0)
+    while True:
+        data = fetch(dict(params, start=start, limit=GRID_LIMIT))
+        batch = _grid_entries(data)
+        rows.extend(batch)
+        start += len(batch)
+        total = data.get('total') if isinstance(data, dict) else None
+        if len(batch) < GRID_LIMIT or not isinstance(total, int) or start >= total:
+            return rows
+
+
+def _grid_entries(data) -> list:
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    return data.get('entries') or []
+
+
 def instant_recording_title(channel_name: str, when: datetime) -> str:
     """Title Tvheadend uses as ``$t`` when naming an instant recording.
 

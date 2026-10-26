@@ -10,13 +10,13 @@ import requests
 
 from .backend import TvhBackend, channel_sort_key
 from .dvr import (
-    GRID_LIMIT,
     HttpRecordingFile,
     autorec_http_conf,
     check_choice,
     dvr_update_http_node,
     entry_uuid,
     file_move_args,
+    grid_rows,
     parse_autorec_entry,
     parse_dvr_config,
     parse_dvr_entry,
@@ -104,11 +104,7 @@ class HttpBackend(TvhBackend):
             raise TvhError(f'Invalid JSON from {path}') from exc
 
     def _grid(self, path, params=None):
-        query = {'limit': GRID_LIMIT}
-        if params:
-            query.update(params)
-        data = self._request('GET', path, params=query)
-        return data.get('entries') or []
+        return grid_rows(lambda query: self._request('GET', path, params=query), params)
 
     def get_channels(self) -> List[Channel]:
         entries = self._grid('api/channel/grid')

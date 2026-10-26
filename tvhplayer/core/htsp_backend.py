@@ -13,7 +13,6 @@ from typing import List, Optional
 
 from .backend import TvhBackend, channel_sort_key
 from .dvr import (
-    GRID_LIMIT,
     HtspRecordingFile,
     MOVE_CATEGORIES,
     PREVREC_ACTIONS,
@@ -25,6 +24,7 @@ from .dvr import (
     entry_htsp_id,
     entry_uuid,
     file_move_args,
+    grid_rows,
     parse_autorec_entry,
     parse_cutpoints,
     parse_dvr_config,
@@ -509,15 +509,7 @@ class HtspBackend(TvhBackend):
         return response
 
     def _grid(self, path, params=None):
-        args = {'limit': GRID_LIMIT}
-        if params:
-            args.update(params)
-        data = self._proxy(path, args)
-        if isinstance(data, list):
-            return data
-        if not isinstance(data, dict):
-            return []
-        return data.get('entries') or []
+        return grid_rows(lambda args: self._proxy(path, args), params)
 
     def _save_http_node(self, uuid, fields):
         node = {'uuid': uuid}
