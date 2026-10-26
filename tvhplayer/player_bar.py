@@ -360,8 +360,13 @@ class PlayerBar(QWidget):
             self.play_btn.setIcon(svg_icon(PLAY_SVG, dark, 24))
             describe(self.play_btn, "Play", "Play the selected channel. Keyboard: P, or Enter on the channel list.")
 
-    def set_recording(self, server, local, channel_name=''):
-        """Swap Record for Stop recording while either kind runs."""
+    def set_recording(self, server, local, channel_name='', local_here=None):
+        """Swap Record for Stop recording while either kind runs.
+
+        ``local_here`` says this channel records to this computer; another
+        channel can still start one. It defaults to ``local``.
+        """
+        local_here = bool(local) if local_here is None else bool(local_here)
         self._server, self._local = bool(server), bool(local)
         recording = self._server or self._local
         self.record_btn.setVisible(not recording)
@@ -391,11 +396,11 @@ class PlayerBar(QWidget):
         else:
             self.record_server_action.setText("Record on server…\tCtrl+R")
         self.record_server_action.setEnabled(not self._server)
-        if self._local:
+        if local_here:
             self.record_local_action.setText("Record on this computer\tRecording")
         else:
             self.record_local_action.setText("Record on this computer\tCtrl+Shift+R")
-        self.record_local_action.setEnabled(not self._local)
+        self.record_local_action.setEnabled(not local_here)
 
     def set_muted(self, muted):
         self.mute_btn.setChecked(bool(muted))

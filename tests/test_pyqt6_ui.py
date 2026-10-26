@@ -662,7 +662,7 @@ def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
             super().__init__()
             self.is_recording = True
             self.cleared = False
-            self.local_recorder = types.SimpleNamespace(is_running=False)
+            self.local_recording_running = lambda: False
             self.messages = []
             self.statusbar = types.SimpleNamespace(showMessage=self.messages.append)
 
@@ -1201,8 +1201,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
     window.get_backend = lambda: backend
     window.tasks_pane.open_backend = lambda server: backend
     window.current_server = lambda: {'name': 'tv', 'url': 'http://tv'}
-    window.local_recorder = recorder
-    window._recording_channel = Channel(uuid='c', name='IRINN')
+    window.local_jobs = [ui.LocalJob(recorder, Channel(uuid='c', name='IRINN'))]
     try:
         window.show()
         app.processEvents()
@@ -1431,6 +1430,8 @@ def test_stalled_local_recording_is_left_running(monkeypatch, tmp_path):
     stopped = []
 
     class Recorder:
+        is_running = True
+
         def status(self):
             return RecorderStatus(
                 file_path='/tmp/a.ts',
@@ -1451,13 +1452,14 @@ def test_stalled_local_recording_is_left_running(monkeypatch, tmp_path):
     monkeypatch.setattr(ui.QMessageBox, 'warning', dialog)
     monkeypatch.setattr(ui.QMessageBox, 'critical', dialog)
     monkeypatch.setattr(ui.QFileDialog, 'getSaveFileName', dialog)
-    window.local_recorder = Recorder()
+    window.local_jobs = [ui.LocalJob(Recorder(), None)]
     try:
         window.check_recording_status()
         window.check_recording_status()
         assert stopped == []
         assert window.status_label.text() == 'Local recording stalled'
     finally:
+        window._confirm_quit = lambda: True
         window.close()
         app.processEvents()
 
@@ -1498,7 +1500,7 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
     monkeypatch.setattr(ui.QFileDialog, 'getSaveFileName', lambda *_a, **_k: pytest.fail('asked for a file'))
     window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c: 'http://tv/stream')
     window._programme_on_now = lambda _c: None
-    window.local_recorder = Recorder()
+    window.new_local_recorder = Recorder
     window.set_local_recording_dir(str(tmp_path / 'videos'))
     try:
         window.start_local_recording(Channel(uuid='c', name='BBC/News'))
@@ -1506,10 +1508,11 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
         path = Path(started[0])
         assert path.parent == tmp_path / 'videos' and path.parent.is_dir()
         assert path.name.startswith('recording_BBC_News_') and path.suffix == '.ts'
-        assert window._local_recording_timer.interval() == 1800 * 1000
-        window._local_recording_timer.timeout.emit()
-        assert window.local_recorder.is_running is False
-        assert window._local_recording_timer is None
+        job = window.local_jobs[0]
+        assert job.timer.interval() == 1800 * 1000
+        job.timer.timeout.emit()
+        assert job.recorder.is_running is False
+        assert job.timer is None
         assert options == [[]]
 
         window.set_recording_format('mp4')
@@ -1526,6 +1529,71 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
         window.start_local_recording(Channel(uuid='c', name='BBC/News'))
         assert len(started) == 2 and 'cannot be read' in warnings[0]
     finally:
+        window.close()
+        app.processEvents()
+
+
+def test_several_channels_record_to_this_computer_at_once(monkeypatch, tmp_path):
+    from tvhplayer.core.models import Channel
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    started = []
+
+    class Recorder:
+        is_running = False
+        file_path = None
+
+        def start(self, url, path, *_rest):
+            started.append(url)
+            self.is_running = True
+            self.file_path = path
+
+        def stop(self):
+            self.is_running = False
+
+    class Dialog:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def exec(self):
+            return ui.QDialog.DialogCode.Accepted
+
+        def get_duration(self):
+            return 600
+
+        def programme_event(self):
+            return None
+
+    monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
+    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda c: f'http://tv/{c.uuid}')
+    window._programme_on_now = lambda _c: None
+    window.new_local_recorder = Recorder
+    window.set_local_recording_dir(str(tmp_path / 'videos'))
+    one, two = Channel(uuid='a', name='One'), Channel(uuid='b', name='Two')
+    try:
+        window.start_local_recording(one)
+        window.active_channel = lambda: two
+        window._sync_record_controls()
+        assert window.controls_bar.record_local_action.isEnabled() is True
+        window.start_local_recording(two)
+        assert started == ['http://tv/a', 'http://tv/b']
+        assert [job.is_running for job in window.local_jobs] == [True, True]
+        assert window.controls_bar.record_local_action.isEnabled() is False
+
+        # The same channel twice would only make a second copy.
+        window.start_local_recording(one)
+        assert len(started) == 2
+        assert 'already recording' in window.status_label.text()
+
+        # Stop ends the active channel's recording; the other keeps going.
+        window.stop_local_recording()
+        assert [job.is_running for job in window.local_jobs] == [True, False]
+        assert window.recording_monitor is not None
+        window.local_jobs[0].timer.timeout.emit()
+        assert window.local_recording_running() is False
+        assert window.recording_monitor is None
+    finally:
+        window._confirm_quit = lambda: True
         window.close()
         app.processEvents()
 
@@ -1590,7 +1658,7 @@ def test_flatpak_asks_for_the_recordings_folder_once(monkeypatch, tmp_path):
     monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
     window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c: 'http://tv/stream')
     window._programme_on_now = lambda _c: None
-    window.local_recorder = Recorder()
+    window.new_local_recorder = Recorder
     window.config.pop('local_recording_dir', None)
     try:
         assert window.local_recording_dir() == ''
@@ -1627,7 +1695,7 @@ def test_conversions_show_in_tasks_and_follow_a_recording(monkeypatch, tmp_path)
         def stop(self):
             self.is_running = False
 
-    window.local_recorder = Recorder()
+    window.local_jobs = [ui.LocalJob(Recorder(), None)]
     window.set_converts_after_recording(True)
     window.set_deletes_converted_original(True)
     window.current_server = lambda: None
@@ -1701,8 +1769,8 @@ def test_conversion_is_refused_when_ffmpeg_cannot_encode(monkeypatch, tmp_path):
 def test_quit_asks_while_recording_to_this_computer(monkeypatch, tmp_path):
     app, ui, window, _player = _make_player(monkeypatch, tmp_path)
     window.builtin = None
-    window.local_recorder = types.SimpleNamespace(is_running=True, file_path='/tmp/rec_One.ts', stop=lambda: None)
-    window._recording_channel = types.SimpleNamespace(name='One')
+    recorder = types.SimpleNamespace(is_running=True, file_path='/tmp/rec_One.ts', stop=lambda: None)
+    window.local_jobs = [ui.LocalJob(recorder, types.SimpleNamespace(name='One'))]
     messages = []
     monkeypatch.setattr(
         ui.QMessageBox, 'question',
@@ -1710,7 +1778,7 @@ def test_quit_asks_while_recording_to_this_computer(monkeypatch, tmp_path):
     )
     assert window._confirm_quit() is False
     assert 'One (rec_One.ts)' in messages[0]
-    window.local_recorder.is_running = False
+    recorder.is_running = False
     assert window._confirm_quit() is True
     app.processEvents()
 
@@ -2177,8 +2245,8 @@ def test_player_bar_play_stop_and_record_controls(monkeypatch, tmp_path):
         assert window.play_btn.accessibleName() == "Play"
 
         recorder = FakeRecorder()
-        window.local_recorder = recorder
         channel = Channel(uuid='c', name='BBC News')
+        window.local_jobs = [ui.LocalJob(recorder, channel)]
         window.active_channel = lambda: channel
         recording = DvrEntry(
             uuid='r', title='Newsday', channel_name='BBC News', raw={'channel': 'c'},

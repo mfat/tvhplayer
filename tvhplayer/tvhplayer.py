@@ -242,6 +242,25 @@ LOGO_ROLE = Qt.ItemDataRole.UserRole + 2
 CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
 
 
+class LocalJob:
+    """One recording to this computer: its own ffmpeg, channel and stop timer."""
+
+    def __init__(self, recorder, channel):
+        self.recorder = recorder
+        self.channel = channel
+        self.end = None
+        self.timer = None
+        self.stall_noted = False
+
+    @property
+    def is_running(self):
+        return bool(getattr(self.recorder, 'is_running', False))
+
+    def describe(self):
+        name = getattr(self.channel, 'name', '') or 'Unknown channel'
+        return f'{name} ({os.path.basename(getattr(self.recorder, "file_path", None) or "")})'
+
+
 
 def fit_table_columns(table, stretch_columns):
     """Size short columns to their text and give the leftover window width to stretch_columns."""
@@ -388,8 +407,8 @@ class DVRStatusDialog(QDialog):
         parent = self.parent()
         if parent is None or not hasattr(parent, 'stop_recording_indicator'):
             return
-        recorder = getattr(parent, 'local_recorder', None)
-        if recorder is not None and recorder.is_running:
+        local_running = getattr(parent, 'local_recording_running', None)
+        if local_running is not None and local_running():
             return
         try:
             running = [
@@ -836,9 +855,7 @@ class TasksPanel(QFrame):
 
     def _redraw(self):
         tasks = list(self._server_tasks)
-        local = self._local_task()
-        if local is not None:
-            tasks.append(local)
+        tasks.extend(self._local_tasks())
         tasks.extend(self._conversion_tasks())
         self._tasks = sorted(tasks, key=self._sort_key)
         self._apply_filter()
@@ -864,7 +881,7 @@ class TasksPanel(QFrame):
             if task['kind'] == 'Convert':
                 host.cancel_conversion(task['conversion'])
             elif task['kind'] == 'Local':
-                host.stop_local_recording()
+                host.stop_local_recording(task['job'])
             elif task['bucket'] == 'recording':
                 host.get_backend().stop_dvr_entry(task['entry'])
                 self._tell(host, f"Stopped {title} on {channel}. The recorded file is kept.")
@@ -1053,12 +1070,14 @@ class TasksPanel(QFrame):
             })
         return tasks
 
-    def _local_task(self):
+    def _local_tasks(self):
         host = self._host
-        recorder = getattr(host, 'local_recorder', None) if host is not None else None
-        if recorder is None:
-            return None
-        running = bool(getattr(recorder, 'is_running', False))
+        jobs = getattr(host, 'local_jobs', None) if host is not None else None
+        return [task for task in map(self._local_task, jobs or []) if task is not None]
+
+    def _local_task(self, job):
+        recorder = job.recorder
+        running = job.is_running
         # Read the file here. LocalRecorder.status() is what counts stalls,
         # and the recording monitor is the only caller of that.
         path = getattr(recorder, 'file_path', None) or ''
@@ -1068,16 +1087,14 @@ class TasksPanel(QFrame):
             size = os.path.getsize(path) if path and os.path.exists(path) else 0
         except OSError:
             size = 0
-        channel = getattr(host, '_recording_channel', None)
-        channel_name = getattr(channel, 'name', '') or 'Local'
+        channel_name = getattr(job.channel, 'name', '') or 'Local'
         title = Path(path).name or 'Local recording'
         started = getattr(recorder, 'started_at', None) or 0
         elapsed = time.time() - started if started else 0
         if running:
             detail = f"{path}, {_clock(elapsed)}"
-            end = getattr(host, '_local_recording_end', None)
-            if end:
-                detail += f", {_clock(max(end - time.time(), 0))} left"
+            if job.end:
+                detail += f", {_clock(max(job.end - time.time(), 0))} left"
             if getattr(recorder, 'stall_count', 0) > STALL_LIMIT:
                 detail += ", stalled"
             bucket = 'recording'
@@ -1089,8 +1106,9 @@ class TasksPanel(QFrame):
         return {
             'kind': 'Local',
             'bucket': bucket,
-            'key': ('local',),
+            'key': ('local', id(job)),
             'entry': None,
+            'job': job,
             'channel': channel_name,
             'title': title,
             'status': status,
@@ -3216,7 +3234,10 @@ class TVHeadendClient(QMainWindow):
         self._now_next_timer = QTimer(self)
         self._now_next_timer.timeout.connect(self._tick_now_next)
         self._now_next_timer.start(NOW_NEXT_TICK_MS)
-        self.local_recorder = LocalRecorder()
+        # Recordings to this computer, finished ones too so Tasks can list them.
+        self.local_jobs = []
+        self.new_local_recorder = LocalRecorder
+        self.recording_monitor = None
         # Conversions for editing run one at a time, in the order asked.
         self.conversions = []
         self._conversion_timer = QTimer(self)
@@ -4371,11 +4392,10 @@ class TVHeadendClient(QMainWindow):
             entries.extend(getattr(self, '_dvr_entries', []))
         if not is_builtin_server(server):
             entries.extend(self._builtin_entries)
-        recorder = getattr(self, 'local_recorder', None)
         reason = awake_reason(
             entries,
             int(datetime.now().timestamp()),
-            local_recording=bool(recorder is not None and recorder.is_running),
+            local_recording=self.local_recording_running(),
             keep_for_scheduled=self.stays_awake_for_scheduled(),
         )
         self.sleep_inhibitor.hold(reason)
@@ -4815,16 +4835,30 @@ class TVHeadendClient(QMainWindow):
         if bar is None:
             return
         server = bool(self._server_recordings_to_stop())
-        recorder = getattr(self, 'local_recorder', None)
-        local = bool(recorder is not None and recorder.is_running)
+        local = self.local_recording_running()
         channel = self.active_channel()
-        bar.set_recording(server, local, channel.name if channel is not None else '')
+        bar.set_recording(
+            server, local, channel.name if channel is not None else '',
+            local_here=bool(self._local_jobs_for(channel)),
+        )
+
+    def local_recording_running(self):
+        return any(job.is_running for job in getattr(self, 'local_jobs', None) or [])
+
+    def _local_jobs_for(self, channel):
+        """Running local recordings of channel."""
+        if channel is None:
+            return []
+        key = channel_key(channel)
+        return [
+            job for job in getattr(self, 'local_jobs', None) or []
+            if job.is_running and job.channel is not None and channel_key(job.channel) == key
+        ]
 
     def stop_any_recording(self):
         """Stop recording ends whichever recording runs, and asks only when both do."""
         server = bool(self._server_recordings_to_stop())
-        recorder = getattr(self, 'local_recorder', None)
-        local = bool(recorder is not None and recorder.is_running)
+        local = self.local_recording_running()
         if server and local:
             bar = self.controls_bar
             bar.popup_above(bar.stop_menu, bar.recording_group)
@@ -5082,8 +5116,7 @@ class TVHeadendClient(QMainWindow):
 
     def _recording_in_progress(self):
         """True while a server recording or the local job is running."""
-        recorder = getattr(self, 'local_recorder', None)
-        if recorder is not None and getattr(recorder, 'is_running', False):
+        if self.local_recording_running():
             return True
         try:
             if not self.current_server() or not self._server_requests_ready():
@@ -5804,6 +5837,9 @@ class TVHeadendClient(QMainWindow):
                 return
 
             channel_name = channel.name
+            if self._local_jobs_for(channel):
+                self.statusbar.showMessage(f"{channel_name} is already recording to this computer")
+                return
             print(f"Debug: Starting local recording for channel: {channel_name}")
 
             try:
@@ -5831,23 +5867,24 @@ class TVHeadendClient(QMainWindow):
 
             stream_url = self.get_backend().stream_url(channel)
             server = self.current_server() or {}
-            self.local_recorder.start(
+            job = LocalJob(self.new_local_recorder(), channel)
+            job.recorder.start(
                 stream_url,
                 file_path,
                 server.get('username') or '',
                 server.get('password') or '',
                 extra_options,
             )
-            self._recording_channel = channel
-            self._recording_stall_noted = False
-            self.recording_monitor = QTimer()
-            self.recording_monitor.timeout.connect(self.check_recording_status)
-            self.recording_monitor.start(2000)
-            self._local_recording_end = time.time() + duration
-            self._local_recording_timer = QTimer(self)
-            self._local_recording_timer.setSingleShot(True)
-            self._local_recording_timer.timeout.connect(self.stop_local_recording)
-            self._local_recording_timer.start(duration * 1000)
+            self.local_jobs.append(job)
+            if self.recording_monitor is None:
+                self.recording_monitor = QTimer(self)
+                self.recording_monitor.timeout.connect(self.check_recording_status)
+                self.recording_monitor.start(2000)
+            job.end = time.time() + duration
+            job.timer = QTimer(self)
+            job.timer.setSingleShot(True)
+            job.timer.timeout.connect(lambda: self.stop_local_recording(job))
+            job.timer.start(duration * 1000)
             if event is not None:
                 until = f"{event.title}, until {datetime.fromtimestamp(event.stop).strftime('%H:%M')}"
             else:
@@ -5865,51 +5902,56 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage(f"Local recording error: {str(e)}")
 
     def check_recording_status(self):
-        """Check if the recording is actually working"""
+        """Check that each local recording is actually working"""
+        for job in list(self.local_jobs):
+            if job.is_running:
+                self._check_local_job(job)
+        self._refresh_tasks(server=False)
+
+    def _check_local_job(self, job):
+        name = getattr(job.channel, 'name', '') or 'Unknown channel'
         try:
-            status = self.local_recorder.status()
+            status = job.recorder.status()
             if not status.exists:
                 if status.elapsed > 10:
-                    self.stop_local_recording()
-                    QMessageBox.warning(self, "Local Recording Status", "Recording file does not exist")
-                else:
-                    self._refresh_tasks(server=False)
+                    self.stop_local_recording(job)
+                    QMessageBox.warning(
+                        self, "Local Recording Status", f"The recording file for {name} does not exist"
+                    )
                 return
-            self._refresh_tasks(server=False)
             if status.return_code is not None:
                 if status.size == 0 or status.return_code != 0:
-                    self.stop_local_recording()
-                    QMessageBox.critical(self, "Recording Error", "Recording failed - check console for errors")
+                    self.stop_local_recording(job)
+                    QMessageBox.critical(
+                        self, "Recording Error", f"Recording {name} failed - check console for errors"
+                    )
                 return
             if status.stalled:
                 # Keep the ffmpeg process. Restarting would discard the file
                 # already being written.
-                if not getattr(self, '_recording_stall_noted', False):
-                    self._recording_stall_noted = True
+                if not job.stall_noted:
+                    job.stall_noted = True
                     self.statusbar.showMessage("Local recording stalled")
                 return
-            self._recording_stall_noted = False
+            job.stall_noted = False
         except Exception as e:
             print(f"Debug: Error checking recording status: {str(e)}")
             QMessageBox.critical(self, "Recording Error", str(e))
 
-    def stop_local_recording(self):
-        """Stop local recording"""
+    def stop_local_recording(self, job=None):
+        """Stop job; without one, the active channel's local recordings, or else all of them."""
+        if isinstance(job, LocalJob):
+            jobs = [job]
+        else:
+            jobs = self._local_jobs_for(self.active_channel()) or [
+                item for item in self.local_jobs if item.is_running
+            ]
         try:
-            if hasattr(self, 'recording_monitor') and self.recording_monitor is not None:
+            for item in jobs:
+                self._stop_local_job(item)
+            if self.recording_monitor is not None and not self.local_recording_running():
                 self.recording_monitor.stop()
                 self.recording_monitor = None
-            timer = getattr(self, '_local_recording_timer', None)
-            if timer is not None:
-                timer.stop()
-                self._local_recording_timer = None
-            self._local_recording_end = None
-            was_running = self.local_recorder.is_running
-            path = self.local_recorder.file_path
-            self.local_recorder.stop()
-            if was_running and self.converts_after_recording() and not getattr(self, '_closing', False):
-                if path and os.path.exists(path) and os.path.getsize(path) > 0:
-                    self.convert_for_editing(path, automatic=True)
             self.statusbar.showMessage("Local recording stopped")
             self._show_on_picture("Recording to this computer stopped")
             self.sync_recording_indicator()
@@ -5919,6 +5961,18 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage(f"Error stopping local recording: {str(e)}")
             self.sync_recording_indicator()
         self._refresh_tasks()
+
+    def _stop_local_job(self, job):
+        if job.timer is not None:
+            job.timer.stop()
+            job.timer = None
+        job.end = None
+        was_running = job.is_running
+        path = job.recorder.file_path
+        job.recorder.stop()
+        if was_running and self.converts_after_recording() and not getattr(self, '_closing', False):
+            if path and os.path.exists(path) and os.path.getsize(path) > 0:
+                self.convert_for_editing(path, automatic=True)
 
     def closeEvent(self, event):
         """Save configuration when closing the application"""
@@ -5935,7 +5989,8 @@ class TVHeadendClient(QMainWindow):
         for job in self._playlist_jobs:
             if not job.shutdown(10000):
                 print("Debug: A playlist refresh did not stop in time")
-        self.local_recorder.stop()
+        for job in self.local_jobs:
+            job.recorder.stop()
         self._awake_timer.stop()
         self.sleep_inhibitor.release()
         for conversion in self.conversions:
@@ -5961,12 +6016,9 @@ class TVHeadendClient(QMainWindow):
 
     def _confirm_quit(self):
         """Ask before quitting would lose a recording."""
-        local_recording = ''
-        recorder = getattr(self, 'local_recorder', None)
-        if recorder is not None and recorder.is_running:
-            channel = getattr(self, '_recording_channel', None)
-            name = getattr(channel, 'name', '') or 'Unknown channel'
-            local_recording = f'{name} ({os.path.basename(recorder.file_path or "")})'
+        local_recording = ', '.join(
+            job.describe() for job in getattr(self, 'local_jobs', None) or [] if job.is_running
+        )
         titles = []
         upcoming = []
         lookup_failed = False
