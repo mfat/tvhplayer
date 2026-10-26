@@ -707,6 +707,8 @@ class TasksPanel(QFrame):
     """Ongoing, scheduled, and completed recordings, with search and a status filter."""
 
     close_requested = pyqtSignal()
+    # A task appeared that was not there before.
+    task_added = pyqtSignal()
     # Generation, entries or None, error or None; sent from the fetch thread.
     _server_fetched = pyqtSignal(int, object, object)
 
@@ -726,6 +728,10 @@ class TasksPanel(QFrame):
         self._generation = 0
         self._server_fetched.connect(self._on_server_fetched)
         self._tasks = []
+        # Keys of the tasks shown last, to tell when a new one appears. The first
+        # answer from a server only fills this: its recordings are not new.
+        self._known_keys = set()
+        self._server_seen = False
         self._error_text = ""
         self._table_description = None
         self.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
@@ -855,6 +861,7 @@ class TasksPanel(QFrame):
         """Drop cached server rows, for example after the server changes."""
         self._server_tasks = []
         self._generation += 1
+        self._server_seen = False
 
     def refresh(self, server=True):
         """Redraw the tasks and, with server, start reading the server's recordings.
@@ -872,6 +879,11 @@ class TasksPanel(QFrame):
         tasks.extend(self._conversion_tasks())
         self._tasks = sorted(tasks, key=self._sort_key)
         self._apply_filter()
+        keys = {task['key'] for task in tasks}
+        added = keys - self._known_keys
+        self._known_keys = keys
+        if added:
+            self.task_added.emit()
 
     def selected_task(self):
         row = self.task_table.currentRow()
@@ -1044,6 +1056,9 @@ class TasksPanel(QFrame):
     def _apply_server_entries(self, entries):
         fetched = self._tasks_from_entries(entries)
         self._server_tasks = fetched
+        if not self._server_seen:
+            self._server_seen = True
+            self._known_keys |= {task['key'] for task in fetched}
         self._set_error("")
         host = self._host
         if host is not None and hasattr(host, 'channel_recordings_changed'):
@@ -3865,11 +3880,14 @@ class TVHeadendClient(QMainWindow):
 
         self.tasks_action = QAction("&Tasks", self)
         self.tasks_action.setCheckable(True)
-        self.tasks_action.setChecked(True)
+        self.tasks_action.setChecked(False)
         self.tasks_action.setStatusTip("Show or hide ongoing and scheduled recordings")
         self.tasks_action.triggered.connect(self._toggle_tasks_pane)
         view_menu.addAction(self.tasks_action)
         self.tasks_pane.close_requested.connect(self._close_tasks_pane)
+        self.tasks_pane.task_added.connect(self._open_tasks_pane)
+        # Hidden until there is something to show; a new task opens it.
+        self.tasks_pane.hide()
 
         guide_action = QAction("TV &Guide", self)
         guide_action.setShortcut("Ctrl+G")
@@ -5323,6 +5341,16 @@ class TVHeadendClient(QMainWindow):
 
     def _toggle_tasks_pane(self, checked):
         self.tasks_pane.setVisible(bool(checked))
+
+    def _open_tasks_pane(self):
+        if self.is_fullscreen:
+            # Leaving fullscreen brings the panel back.
+            if self._pre_fullscreen_state is not None:
+                self._pre_fullscreen_state['tasks_visible'] = True
+            self.tasks_action.setChecked(True)
+            return
+        self.tasks_action.setChecked(True)
+        self.tasks_pane.show()
 
     def _close_tasks_pane(self):
         self.tasks_action.setChecked(False)

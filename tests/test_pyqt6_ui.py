@@ -210,6 +210,10 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert 'background-image' not in window.video_frame.styleSheet()
         assert window.idle_splash.isVisible()
         assert window.left_pane.isVisible()
+        # Hidden until a task is added.
+        assert not window.tasks_pane.isVisible()
+        window.tasks_action.trigger()
+        app.processEvents()
         assert window.tasks_pane.isVisible()
         assert window.controls_bar.isVisible()
         assert not window.is_fullscreen
@@ -1019,7 +1023,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
             for index in range(window.tasks_pane.status_combo.count())
         ] == ["Active", "All", "Recording", "Scheduled", "Completed"]
         assert window.tasks_pane.task_table.accessibleName() == "Tasks"
-        assert window.tasks_pane.task_table.isVisible()
+        assert not window.tasks_pane.isVisible()
+        assert window.tasks_pane.task_table.isVisibleTo(window.tasks_pane)
         assert window.tasks_pane.task_table.rowCount() == 0
         assert window.tasks_pane.task_table.columnCount() == 7
         assert window.tasks_pane.task_table.horizontalHeaderItem(0).text() == ""
@@ -1035,7 +1040,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.tasks_pane.action_btn.isEnabled() is False
         assert window.tasks_pane.reveal_btn.accessibleName() == "Reveal in File Manager"
         assert window.tasks_pane.reveal_btn.isEnabled() is False
-        assert window.tasks_action.isChecked() is True
+        assert window.tasks_action.isChecked() is False
         assert any(label.buddy() is window.tasks_pane.search_box for label in window.findChildren(ui.QLabel))
         assert any(label.buddy() is window.tasks_pane.status_combo for label in window.findChildren(ui.QLabel))
         focus_chain = []
@@ -1307,6 +1312,70 @@ def test_tasks_panel_reads_the_server_without_blocking(monkeypatch, tmp_path):
             time.sleep(0.01)
         assert all('old' not in text for text in _task_texts(panel))
         _wait_for_tasks(app, panel)
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_tasks_panel_opens_when_a_task_is_added(monkeypatch, tmp_path):
+    import time
+
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    panel = window.tasks_pane
+    panel.update_timer.stop()
+
+    def entry(name):
+        return DvrEntry(
+            uuid=name, title=name, channel_name='BBC', start=int(time.time()) + 600,
+            duration=60, status='Scheduled', sched_status='scheduled',
+        )
+
+    try:
+        window.show()
+        app.processEvents()
+        assert not panel.isVisible()
+        assert window.tasks_action.isChecked() is False
+
+        # Recordings already on the server when it first answers are not new.
+        panel.clear_server_tasks()
+        panel._apply_server_entries([entry('Old')])
+        panel._redraw()
+        app.processEvents()
+        assert not panel.isVisible()
+
+        panel._apply_server_entries([entry('Old'), entry('New')])
+        panel._redraw()
+        app.processEvents()
+        assert panel.isVisible()
+        assert window.tasks_action.isChecked() is True
+
+        # Closed by the user, it stays closed until another task is added.
+        panel.close_btn.click()
+        panel._redraw()
+        app.processEvents()
+        assert not panel.isVisible()
+
+        # A task added in fullscreen shows the panel on leaving fullscreen.
+        window.toggle_fullscreen()
+        app.processEvents()
+        panel._apply_server_entries([entry('Old'), entry('New'), entry('Later')])
+        panel._redraw()
+        app.processEvents()
+        assert not panel.isVisible()
+        window.toggle_fullscreen()
+        app.processEvents()
+        assert panel.isVisible()
+        assert window.tasks_action.isChecked() is True
+
+        # A new server's recordings are not new either.
+        panel.close_btn.click()
+        panel.clear_server_tasks()
+        panel._apply_server_entries([entry('Other')])
+        panel._redraw()
+        app.processEvents()
+        assert not panel.isVisible()
     finally:
         window.close()
         app.processEvents()
