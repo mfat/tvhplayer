@@ -604,6 +604,61 @@ def test_channel_list_shows_loading_empty_and_error_states(monkeypatch, tmp_path
         app.processEvents()
 
 
+def test_channel_fetch_hands_its_connection_to_the_window(monkeypatch, tmp_path):
+    import threading
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        gate = threading.Event()
+        opened = []
+
+        class Backend:
+            def __init__(self):
+                self.closed = False
+                opened.append(self)
+
+            def get_channels(self):
+                gate.wait(5)
+                return [ui.Channel(uuid='news', name='News', number=1)]
+
+            def close(self):
+                self.closed = True
+
+        window._open_channel_backend = lambda server: Backend()
+        window.servers = [{'name': 'Home', 'url': 'http://127.0.0.1:9981', 'protocol': 'http'}]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('Home')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+        monkeypatch.undo()
+
+        # The finished fetch's connection becomes the window's, still open.
+        gate.set()
+        window.fetch_channels()
+        _wait_for_channels(app, window)
+        first = opened[0]
+        assert window.get_backend() is first
+        assert not first.closed
+
+        # A reload replaces it; a fetch overtaken by a newer one closes its own.
+        gate.clear()
+        window.fetch_channels()
+        window.fetch_channels()
+        gate.set()
+        _wait_for_channels(app, window)
+        deadline = time.monotonic() + 5
+        while not opened[1].closed and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert first.closed
+        assert opened[1].closed
+        assert window.get_backend() is opened[2]
+        assert not opened[2].closed
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
     from PyQt6.QtCore import Qt
 

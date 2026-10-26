@@ -2795,8 +2795,10 @@ class ChannelListState(QWidget):
 class ChannelFetch(QObject):
     """Fetch a server's channels and what is shown beside them, off the UI thread.
 
-    It uses its own backend connection, so it never shares one with the window.
-    Exactly one of loaded or failed is emitted.
+    It uses its own backend connection, so it never shares one with the window
+    while it runs. After loaded, ``backend`` holds that connection, already in
+    sync with the server; the window takes it over or closes it. Exactly one of
+    loaded or failed is emitted.
     """
 
     loaded = pyqtSignal(dict)
@@ -2809,6 +2811,7 @@ class ChannelFetch(QObject):
         self._kinds = kinds
         self._now_next = now_next
         self._open_backend = open_backend
+        self.backend = None
         self._thread = threading.Thread(target=self._run, name='channel-fetch', daemon=True)
 
     def start(self):
@@ -2840,14 +2843,14 @@ class ChannelFetch(QObject):
                     print(f"Debug: Could not load now and next: {e}")
         except Exception as e:
             print(f"Debug: Could not fetch channels: {e}")
-            self.failed.emit(str(e) or type(e).__name__)
-            return
-        finally:
             if backend is not None:
                 try:
                     backend.close()
                 except Exception:
                     pass
+            self.failed.emit(str(e) or type(e).__name__)
+            return
+        self.backend = backend
         self.loaded.emit(result)
 
 
@@ -4027,18 +4030,46 @@ class TVHeadendClient(QMainWindow):
             raise TvhError('No server selected')
         if is_builtin_server(server) and not self._server_requests_ready():
             raise TvhError('Built-in server is not running yet')
-        key = (
+        key = self._backend_key_for(server)
+        if self._backend is None or self._backend_key != key:
+            self.close_backend()
+            self._backend = create_backend(server)
+            self._backend_key = key
+        return self._backend
+
+    @staticmethod
+    def _backend_key_for(server):
+        return (
             server.get('url'),
             (server.get('protocol') or PROTOCOL_HTTP).lower(),
             server.get('username') or '',
             server.get('password') or '',
             int(server.get('htsp_port') or 9982),
         )
-        if self._backend is None or self._backend_key != key:
+
+    def _adopt_backend(self, fetch):
+        """Keep a finished fetch's connection as the window's, else close it.
+
+        It already holds the server's channels, tags, and recordings, so the
+        window does not read them all again over a second connection.
+        """
+        backend, fetch.backend = fetch.backend, None
+        if backend is None:
+            return
+        server = self.current_server()
+        if (
+            fetch is self._channel_fetch
+            and server
+            and self._backend_key_for(server) == self._backend_key_for(fetch.server)
+        ):
             self.close_backend()
-            self._backend = create_backend(server)
-            self._backend_key = key
-        return self._backend
+            self._backend = backend
+            self._backend_key = self._backend_key_for(server)
+            return
+        try:
+            backend.close()
+        except Exception:
+            pass
 
     def channel_from_row(self, row):
         if row is None:
@@ -4704,6 +4735,7 @@ class TVHeadendClient(QMainWindow):
 
     def _on_channels_loaded(self, fetch, result):
         fetch.deleteLater()
+        self._adopt_backend(fetch)
         if fetch is not self._channel_fetch:
             return
         self._channel_fetch = None
