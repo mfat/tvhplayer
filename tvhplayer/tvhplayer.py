@@ -89,7 +89,6 @@ try:
         channel_kinds,
         channel_list_options,
         channels_in_tag,
-        progress,
         recording_channel_keys,
         tag_channel_counts,
     )
@@ -103,9 +102,9 @@ try:
         COLUMN_INDEX,
         COLUMN_KEYS,
         COLUMN_MENU,
-        COLUMN_TITLES,
         LOGO_SIZE,
-        PROGRESS_ROLE,
+        ChannelTableModel,
+        ChannelTableView,
         LogoLoader,
         ProgressDelegate,
         padded_pixmap,
@@ -172,7 +171,6 @@ except ImportError:
         channel_kinds,
         channel_list_options,
         channels_in_tag,
-        progress,
         recording_channel_keys,
         tag_channel_counts,
     )
@@ -186,9 +184,9 @@ except ImportError:
         COLUMN_INDEX,
         COLUMN_KEYS,
         COLUMN_MENU,
-        COLUMN_TITLES,
         LOGO_SIZE,
-        PROGRESS_ROLE,
+        ChannelTableModel,
+        ChannelTableView,
         LogoLoader,
         ProgressDelegate,
         padded_pixmap,
@@ -253,15 +251,6 @@ DEINTERLACE_CHOICES = (
     (DEINTERLACE_ON, "Al&ways", "Deinterlace every stream, for channels that are interlaced but not marked as such"),
     (DEINTERLACE_OFF, "&Off", "Show the picture as it is sent"),
 )
-LOGO_ROLE = Qt.ItemDataRole.UserRole + 2
-CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
-
-
-def _set_cell_data(item, role, value):
-    """Write a cell value only when it differs: every write notifies the view."""
-    current = item.data(role)
-    if current != value and not (current in (None, '') and value in (None, '')):
-        item.setData(role, value)
 
 
 class LocalJob:
@@ -3317,17 +3306,6 @@ class TVHeadendClient(QMainWindow):
         self.logo_loader = LogoLoader(self)
         self.logo_loader.loaded.connect(self._on_logo_loaded)
         self._logos_arrived = set()
-        # Channels shown in the list by key. A row keeps only the key: a copy of
-        # the channel in every row took seconds to write and read for a big list.
-        self._row_channels = {}
-        # Highlight last written to each row, by channel key; rows not in it are plain.
-        self._row_marks = {}
-        # Name cells by logo reference, so an arrived logo goes straight to its rows.
-        self._logo_items = {}
-        # Now and next cells by channel key, and the keys whose cells show a programme:
-        # the half-minute update visits only those, not every row of a big list.
-        self._programme_items = {}
-        self._programme_keys = set()
         self._logo_timer = QTimer(self)
         self._logo_timer.setSingleShot(True)
         self._logo_timer.setInterval(100)
@@ -3640,11 +3618,12 @@ class TVHeadendClient(QMainWindow):
         # Channel list. Which columns show, their order, logos, and the group
         # filter are user settings kept under channel_list in the config.
         self.channel_options = channel_list_options(self.config.get('channel_list'))
-        self.channel_list = QTableWidget()
-        self.channel_list.setColumnCount(len(COLUMN_TITLES))
-        self.channel_list.setHorizontalHeaderLabels(
-            [COLUMN_TITLES[column] for column in range(len(COLUMN_TITLES))]
-        )
+        # The model works cells out as they are drawn: an item per cell took
+        # seconds to make, sort, and search for a list of tens of thousands.
+        self.channel_model = ChannelTableModel(self)
+        self.channel_model.describe = self._channel_description
+        self.channel_list = ChannelTableView()
+        self.channel_list.setModel(self.channel_model)
         describe(
             self.channel_list,
             "Channels",
@@ -3669,8 +3648,10 @@ class TVHeadendClient(QMainWindow):
         self.channel_list.verticalHeader().setVisible(False)
         self.channel_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         # Stop recording follows the highlighted channel.
-        self.channel_list.currentCellChanged.connect(lambda *_: self._sync_record_controls())
+        self.channel_list.selectionModel().currentRowChanged.connect(lambda *_: self._sync_record_controls())
         self.channel_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Channels come sorted by number; a column click sorts by that column.
+        self.channel_list.horizontalHeader().setSortIndicator(-1, Qt.SortOrder.AscendingOrder)
         self.channel_list.setSortingEnabled(True)
         self.channel_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         # Scrolling, resizing, filtering, and sorting bring other rows on screen.
@@ -3680,7 +3661,7 @@ class TVHeadendClient(QMainWindow):
         self.channel_list.horizontalHeader().sortIndicatorChanged.connect(lambda *_: self._visible_logo_timer.start())
         
         # Connect double-click to play
-        self.channel_list.itemDoubleClicked.connect(self.play_channel_from_table)
+        self.channel_list.doubleClicked.connect(self.play_channel_from_table)
         
         # Connect context menu
         self.channel_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -4056,20 +4037,9 @@ class TVHeadendClient(QMainWindow):
         return self._backend
 
     def channel_from_row(self, row):
-        if row is None or row < 0:
+        if row is None:
             return None
-        item = self.channel_list.item(row, 1)
-        if not item:
-            return None
-        channel = self._row_channels.get(item.data(CHANNEL_KEY_ROLE))
-        if channel is not None:
-            return channel
-        data = item.data(Qt.ItemDataRole.UserRole)
-        if not data:
-            return None
-        if isinstance(data, Channel):
-            return data
-        return Channel.from_raw(data)
+        return self.channel_model.channel_at(row)
 
     def selected_channel(self):
         channel = self.channel_from_row(self.channel_list.currentRow())
@@ -4119,48 +4089,6 @@ class TVHeadendClient(QMainWindow):
         description += " Press Enter to play."
         return description
 
-    def _set_channel_row_playing(self, row, channel, is_playing, colors, is_recording=False):
-        table = self.channel_list
-        status_item = table.item(row, COL_STATUS)
-        if status_item is None:
-            status_item = QTableWidgetItem()
-            table.setItem(row, COL_STATUS, status_item)
-        parts = []
-        if is_playing:
-            parts.append("Playing")
-        if is_recording:
-            parts.append("Recording")
-        status = ", ".join(parts)
-        if status_item.text() != status:
-            status_item.setText(status)
-        if status and channel is not None:
-            set_item_access(status_item, status, f"{channel.name}: {status.lower()}")
-        else:
-            status_item.setData(Qt.ItemDataRole.AccessibleTextRole, None)
-            status_item.setData(Qt.ItemDataRole.AccessibleDescriptionRole, None)
-            status_item.setToolTip("")
-        if not is_playing and is_recording:
-            colors = row_emphasis('recording')
-        emphasize = (is_playing or is_recording) and colors is not None
-        for col in range(table.columnCount()):
-            item = table.item(row, col)
-            if item is None:
-                continue
-            if emphasize:
-                item.setBackground(colors[0])
-                item.setForeground(colors[1])
-            else:
-                item.setData(Qt.ItemDataRole.BackgroundRole, None)
-                item.setData(Qt.ItemDataRole.ForegroundRole, None)
-        name_item = table.item(row, COL_NAME)
-        if name_item is None or channel is None:
-            return
-        set_item_access(
-            name_item,
-            channel.name,
-            self._channel_description(channel, is_playing, is_recording),
-        )
-
     def _mark_playing_channel(self, scroll=False):
         """Highlight the channel that is on, and write Playing in its status cell.
 
@@ -4175,33 +4103,15 @@ class TVHeadendClient(QMainWindow):
         if table is None:
             return
         playing = self._playing_channel()
-        colors = row_emphasis('playing' if playing is not None else None)
         recording = self._recording_keys if self.channel_options['recording_status'] else set()
-        sorting = table.isSortingEnabled()
-        table.setSortingEnabled(False)
-        playing_item = None
-        try:
-            shade = tuple(color.name() for color in colors) if colors is not None else None
-            for row in range(table.rowCount()):
-                channel = self.channel_from_row(row)
-                is_playing = playing is not None and self._channels_match(channel, playing)
-                key = channel_key(channel) if channel is not None else ''
-                is_recording = bool(key) and key in recording
-                mark = (is_playing, is_recording, shade) if is_playing or is_recording else None
-                # Writing every cell of every row took seconds for a big list.
-                if not key or self._row_marks.get(key) != mark:
-                    self._set_channel_row_playing(row, channel, is_playing, colors, is_recording)
-                    if key and mark is not None:
-                        self._row_marks[key] = mark
-                    elif key:
-                        self._row_marks.pop(key, None)
-                if is_playing:
-                    playing_item = table.item(row, COL_NAME)
-        finally:
-            table.setSortingEnabled(sorting)
-        if scroll and playing_item is not None:
-            table.scrollToItem(playing_item)
-            table.setCurrentItem(playing_item)
+        colors = {kind: row_emphasis(kind) for kind in ('playing', 'recording')}
+        self.channel_model.set_marks(playing, recording, colors)
+        if scroll and playing is not None:
+            row = self.channel_model.find_row(lambda listed: self._channels_match(listed, playing))
+            if row >= 0:
+                index = self.channel_model.index(row, COL_NAME)
+                table.scrollTo(index)
+                table.setCurrentIndex(index)
         self._sync_window_title(playing)
 
     def _sync_window_title(self, playing):
@@ -4228,28 +4138,27 @@ class TVHeadendClient(QMainWindow):
         if matches is None:
             matches = lambda listed: self._channels_match(listed, channel)
         table = self.channel_list
-        row = next(
-            (row for row in range(table.rowCount()) if matches(self.channel_from_row(row))),
-            -1,
-        )
-        if row < 0:
+        model = self.channel_model
+        if not model.is_listed(matches):
             name = getattr(channel, 'name', None) or 'That channel'
             self.statusbar.showMessage(f"{name} is not in the channel list")
             return False
-        if table.isRowHidden(row):
+        row = model.find_row(matches)
+        if row < 0:
+            # A search or group leaves it out.
             if self.search_box.text():
                 self.search_box.clear()
-            if table.isRowHidden(row) and self.tag_combo.currentIndex() != 0:
+            row = model.find_row(matches)
+            if row < 0 and self.tag_combo.currentIndex() != 0:
                 self.tag_combo.setCurrentIndex(0)
-            row = next(
-                (row for row in range(table.rowCount()) if matches(self.channel_from_row(row))),
-                row,
-            )
+                row = model.find_row(matches)
+        if row < 0:
+            return False
         if self.is_fullscreen:
             self.toggle_fullscreen()
-        item = table.item(row, COL_NAME)
-        table.setCurrentItem(item)
-        table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+        index = model.index(row, COL_NAME)
+        table.setCurrentIndex(index)
+        table.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
         table.setFocus(Qt.FocusReason.OtherFocusReason)
         found = self.channel_from_row(row)
         self.statusbar.showMessage(f"Showing {found.name if found else 'the channel'} in the channel list")
@@ -4317,95 +4226,23 @@ class TVHeadendClient(QMainWindow):
             self._update_programme_cells()
 
     def _update_programme_cells(self):
-        """Write now and next for the channels that have a programme or had one."""
-        keys = set(self._now_next) | self._programme_keys
-        if not keys:
-            return
-        table = self.channel_list
-        now = int(time.time())
-        show_progress = self.channel_options['now_progress']
-        sorting = table.isSortingEnabled()
-        table.setSortingEnabled(False)
-        shown = set()
-        try:
-            for key in keys:
-                items = self._programme_items.get(key)
-                if items is None:
-                    continue
-                current, following = self._programmes_for(key, now)
-                self._set_programme_cell(items[0], current, now, show_progress)
-                self._set_programme_cell(items[1], following, now, False, with_start=True)
-                if current is not None or following is not None:
-                    shown.add(key)
-        finally:
-            table.setSortingEnabled(sorting)
-        self._programme_keys = shown
-        table.viewport().update()
-
-    def _programmes_for(self, key, now):
-        """The programme on now, unless it ended, and the next one, from the last fetch."""
-        now_next = self._now_next.get(key)
-        if now_next is None:
-            return None, None
-        current = now_next.now
-        if current is not None and current.stop and current.stop <= now:
-            current = None
-        return current, now_next.next
-
-    def _row_key(self, row):
-        item = self.channel_list.item(row, COL_NAME)
-        return item.data(CHANNEL_KEY_ROLE) if item is not None else None
+        """Redraw now and next, and the progress bars, from the last fetch."""
+        self.channel_model.set_programmes(self._now_next, self.channel_options['now_progress'])
 
     def _fill_channel_rows(self):
         """Rebuild the table from the fetched channels and the current settings."""
-        table = self.channel_list
         options = self.channel_options
         shown = self._channels
         if options['hide_disabled']:
             shown = [channel for channel in shown if channel.enabled]
-        backend = None
+        model = self.channel_model
         # Blank space keeps names lined up, but only when some channel has a logo.
         logos = options['logos'] and any(channel_icon_reference(channel) for channel in shown)
-        table.setSortingEnabled(False)
-        table.setRowCount(0)
-        self._logo_items = {}
-        self._row_channels = {}
-        self._row_marks = {}
-        self._programme_items = {}
-        self._programme_keys = set()
-        # Rows added one at a time each move every later row: slow for a big list.
-        table.setRowCount(len(shown))
-        for row, channel in enumerate(shown):
-            number_item = QTableWidgetItem()
-            number_item.setData(Qt.ItemDataRole.DisplayRole, channel.number)
-            set_item_access(number_item, f"Channel {channel.number}", "Channel number")
-            table.setItem(row, COL_NUMBER, number_item)
-            name_item = QTableWidgetItem(channel.name)
-            key = channel_key(channel)
-            if key and key not in self._row_channels:
-                self._row_channels[key] = channel
-            else:
-                name_item.setData(Qt.ItemDataRole.UserRole, channel.to_raw())
-            name_item.setData(CHANNEL_KEY_ROLE, key)
-            set_item_access(name_item, channel.name, self._channel_description(channel))
-            if logos:
-                reference = self.channel_logo_reference(channel)
-                name_item.setData(LOGO_ROLE, reference)
-                if reference:
-                    self._logo_items.setdefault(reference, []).append(name_item)
-                pixmap = self._logo_pixmaps.get(reference) if reference else None
-                name_item.setIcon(QIcon(pixmap) if pixmap is not None else self._logo_placeholder())
-            table.setItem(row, COL_NAME, name_item)
-            for column in (COL_STATUS, COL_NOW, COL_NEXT, COL_TYPE):
-                table.setItem(row, column, QTableWidgetItem(""))
-            if key and self._row_channels.get(key) is channel:
-                self._programme_items[key] = (table.item(row, COL_NOW), table.item(row, COL_NEXT))
-        if self._channel_kinds:
-            self._update_channel_extras(sort=False)
-        else:
-            # The new cells are blank; only channels with a programme need writing.
-            self._update_programme_cells()
-        table.setSortingEnabled(True)
+        references = [self.channel_logo_reference(channel) for channel in shown] if logos else None
+        model.set_logos(logos, self._logo_pixmaps, self._logo_placeholder() if logos else None)
+        model.set_kinds(self._channel_kinds)
+        model.set_programmes(self._now_next, options['now_progress'])
+        model.set_channels(shown, references)
         self._apply_channel_filter()
         self._visible_logo_timer.start()
 
@@ -4431,79 +4268,17 @@ class TVHeadendClient(QMainWindow):
         page = max(bottom - top, 20)
         backend = None
         for row in range(max(0, top - page), min(rows, bottom + page + 1)):
-            if table.isRowHidden(row):
-                continue
-            item = table.item(row, COL_NAME)
-            reference = item.data(LOGO_ROLE) if item is not None else None
+            reference = self.channel_model.logo_reference_at(row)
             if not reference or reference in self._logo_pixmaps:
                 continue
             if backend is None and not reference.startswith(PICON_PREFIX):
                 backend = self._logo_backend()
             self._logo_for(reference, backend)
 
-    def _update_channel_extras(self, sort=True):
-        """Write now, next, and type into each row from what was last fetched."""
-        table = self.channel_list
-        now = int(time.time())
-        show_progress = self.channel_options['now_progress']
-        sorting = table.isSortingEnabled()
-        table.setSortingEnabled(False)
-        shown = set()
-        try:
-            for row in range(table.rowCount()):
-                key = self._row_key(row)
-                current, following = self._programmes_for(key, now)
-                if key and (current is not None or following is not None):
-                    shown.add(key)
-                now_item = table.item(row, COL_NOW)
-                if now_item is not None:
-                    self._set_programme_cell(now_item, current, now, show_progress)
-                next_item = table.item(row, COL_NEXT)
-                if next_item is not None:
-                    self._set_programme_cell(next_item, following, now, False, with_start=True)
-                type_item = table.item(row, COL_TYPE)
-                if type_item is not None:
-                    kind = self._channel_kinds.get(key)
-                    label = kind.label() if kind is not None else ""
-                    if type_item.text() != label:
-                        type_item.setText(label)
-                    _set_cell_data(
-                        type_item,
-                        Qt.ItemDataRole.ToolTipRole,
-                        f"Provider: {kind.provider}" if kind is not None and kind.provider else "",
-                    )
-        finally:
-            table.setSortingEnabled(sorting and sort)
-        self._programme_keys = shown
-        table.viewport().update()
-
-    def _set_programme_cell(self, item, event, now, show_progress, with_start=False):
-        if event is None:
-            # Most rows of a big list have no guide; reading is cheaper than writing.
-            _set_cell_data(item, Qt.ItemDataRole.DisplayRole, "")
-            _set_cell_data(item, Qt.ItemDataRole.ToolTipRole, "")
-            _set_cell_data(item, PROGRESS_ROLE, None)
-            _set_cell_data(item, Qt.ItemDataRole.AccessibleTextRole, None)
-            return
-        start = datetime.fromtimestamp(event.start).strftime('%H:%M') if event.start else ""
-        stop = datetime.fromtimestamp(event.stop).strftime('%H:%M') if event.stop else ""
-        text = f"{start} {event.title}" if with_start and start else event.title
-        if item.text() != text:
-            item.setText(text)
-        lines = [event.title]
-        if event.subtitle:
-            lines.append(event.subtitle)
-        when = f"{start}–{stop}" if start and stop else start
-        if not with_start and event.stop and event.stop > now:
-            minutes = max(1, (event.stop - now + 59) // 60)
-            when = f"{when}, {minutes} min left" if when else f"{minutes} min left"
-        if when:
-            lines.append(when)
-        if event.summary and event.summary != event.subtitle:
-            lines.append(event.summary)
-        _set_cell_data(item, Qt.ItemDataRole.ToolTipRole, "\n".join(lines))
-        _set_cell_data(item, Qt.ItemDataRole.AccessibleTextRole, ", ".join(lines[:3]))
-        _set_cell_data(item, PROGRESS_ROLE, progress(event, now) if show_progress else None)
+    def _update_channel_extras(self):
+        """Redraw now, next, and type from what was last fetched."""
+        self.channel_model.set_kinds(self._channel_kinds)
+        self._update_programme_cells()
 
     def _logo_backend(self):
         try:
@@ -4551,14 +4326,9 @@ class TVHeadendClient(QMainWindow):
         arrived, self._logos_arrived = self._logos_arrived, set()
         if not self.channel_options['logos']:
             return
-        for reference in arrived:
-            # A server change in the meantime drops what had arrived.
-            pixmap = self._logo_pixmaps.get(reference)
-            if pixmap is None:
-                continue
-            icon = QIcon(pixmap)
-            for item in self._logo_items.get(reference, ()):
-                item.setIcon(icon)
+        # A server change in the meantime drops what had arrived.
+        if any(reference in self._logo_pixmaps for reference in arrived):
+            self.channel_model.logos_arrived()
 
     def channel_recordings_changed(self, entries):
         """The tasks pane read the server's recordings; mark channels being recorded."""
@@ -4730,23 +4500,13 @@ class TVHeadendClient(QMainWindow):
 
     def _apply_channel_filter(self):
         """Hide rows that miss the search text or the selected group."""
-        table = self.channel_list
-        search_text = self.search_box.text().lower() if hasattr(self, 'search_box') else ""
+        search_text = self.search_box.text() if hasattr(self, 'search_box') else ""
         tag = self._selected_channel_tag()
         members = None
         if tag is not None:
             members = {channel_key(channel) for channel in channels_in_tag(self._channels, tag)}
-        for row in range(table.rowCount()):
-            item = table.item(row, COL_NAME)
-            number_item = table.item(row, COL_NUMBER)
-            if item is None:
-                continue
-            channel_name = item.text().lower()
-            number = number_item.text().lower() if number_item else ""
-            hidden = search_text not in channel_name and search_text not in number
-            if members is not None and item.data(CHANNEL_KEY_ROLE) not in members:
-                hidden = True
-            table.setRowHidden(row, hidden)
+        self.channel_model.set_filter(search_text, members)
+        self._visible_logo_timer.start()
 
     def _build_channel_list_menu(self, view_menu):
         """View > Channel List: columns, logos, progress, recording marks, groups."""
@@ -4854,10 +4614,9 @@ class TVHeadendClient(QMainWindow):
         self._fill_channel_rows()
         self._mark_playing_channel()
         if selected is not None:
-            for row in range(table.rowCount()):
-                if self._channels_match(self.channel_from_row(row), selected):
-                    table.setCurrentCell(row, COL_NAME)
-                    break
+            row = self.channel_model.find_row(lambda listed: self._channels_match(listed, selected))
+            if row >= 0:
+                table.setCurrentCell(row, COL_NAME)
         table.verticalScrollBar().setValue(scroll)
 
     def _reset_channel_list_layout(self):
@@ -5018,12 +4777,7 @@ class TVHeadendClient(QMainWindow):
         self._channel_tags = []
         self._channel_kinds = {}
         self._now_next = {}
-        self.channel_list.setRowCount(0)
-        self._logo_items = {}
-        self._row_channels = {}
-        self._row_marks = {}
-        self._programme_items = {}
-        self._programme_keys = set()
+        self.channel_model.set_channels([])
         self._refresh_tag_combo()
         self._guide_channels_changed()
 
@@ -7137,9 +6891,9 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Error fetching EPG: {str(e)}")
             self.statusbar.showMessage(f"Error fetching EPG: {str(e)}")
 
-    def play_channel_from_table(self, item):
-        """Play channel from table selection"""
-        self.play_channel_by_data(self.channel_from_row(item.row()))
+    def play_channel_from_table(self, index):
+        """Play the channel of a double-clicked row."""
+        self.play_channel_by_data(self.channel_from_row(index.row()))
 
     def play_channel_by_data(self, channel_data):
         """Play channel using channel data"""

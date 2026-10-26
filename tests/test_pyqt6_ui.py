@@ -424,10 +424,55 @@ def test_spinner_shows_until_playback_starts(monkeypatch, tmp_path):
         app.processEvents()
 
 
+class _Cell:
+    """One channel list cell, read through the model as the view would."""
+
+    def __init__(self, table, row, column):
+        self._index = table.model().index(row, column)
+
+    def data(self, role):
+        return self._index.data(role)
+
+    def text(self):
+        from PyQt6.QtCore import Qt
+
+        value = self.data(Qt.ItemDataRole.DisplayRole)
+        return '' if value is None else str(value)
+
+    def toolTip(self):
+        from PyQt6.QtCore import Qt
+
+        return self.data(Qt.ItemDataRole.ToolTipRole) or ''
+
+    def background(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QBrush
+
+        value = self.data(Qt.ItemDataRole.BackgroundRole)
+        return QBrush(value) if value is not None else QBrush()
+
+    def foreground(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QBrush
+
+        value = self.data(Qt.ItemDataRole.ForegroundRole)
+        return QBrush(value) if value is not None else QBrush()
+
+    def icon(self):
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QIcon
+
+        value = self.data(Qt.ItemDataRole.DecorationRole)
+        return QIcon(value) if value is not None else QIcon()
+
+
+def _cell(table, row, column):
+    return _Cell(table, row, column)
+
+
 def _channel_row(table, name):
     for row in range(table.rowCount()):
-        item = table.item(row, 1)
-        if item is not None and item.text() == name:
+        if _cell(table, row, 1).text() == name:
             return row
     return -1
 
@@ -578,40 +623,40 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         news_row = _channel_row(window.channel_list, 'News')
         sport_row = _channel_row(window.channel_list, 'Sport')
         assert news_row >= 0 and sport_row >= 0
-        assert window.channel_list.item(news_row, 2).text() == ""
-        assert window.channel_list.item(sport_row, 2).text() == ""
+        assert _cell(window.channel_list, news_row, 2).text() == ""
+        assert _cell(window.channel_list, sport_row, 2).text() == ""
 
         window.play_channel_by_data(sport)
         app.processEvents()
 
         assert window.channel_list.currentRow() == sport_row
         assert window.windowTitle() == "Sport – TVHplayer"
-        assert window.channel_list.item(sport_row, 2).text() == "Playing"
-        assert window.channel_list.item(sport_row, 2).data(
+        assert _cell(window.channel_list, sport_row, 2).text() == "Playing"
+        assert _cell(window.channel_list, sport_row, 2).data(
             Qt.ItemDataRole.AccessibleTextRole
         ) == "Playing"
-        assert "Playing." in window.channel_list.item(sport_row, 1).data(
+        assert "Playing." in _cell(window.channel_list, sport_row, 1).data(
             Qt.ItemDataRole.AccessibleDescriptionRole
         )
-        assert window.channel_list.item(news_row, 2).text() == ""
+        assert _cell(window.channel_list, news_row, 2).text() == ""
         colors = ui.row_emphasis('playing')
         if colors is not None:
-            assert window.channel_list.item(sport_row, 1).background().color().name() == colors[0].name()
-            assert window.channel_list.item(sport_row, 0).foreground().color().name() == colors[1].name()
+            assert _cell(window.channel_list, sport_row, 1).background().color().name() == colors[0].name()
+            assert _cell(window.channel_list, sport_row, 0).foreground().color().name() == colors[1].name()
 
         window.channel_list.setCurrentCell(news_row, 1)
         app.processEvents()
-        assert window.channel_list.item(sport_row, 2).text() == "Playing"
-        assert window.channel_list.item(news_row, 2).text() == ""
+        assert _cell(window.channel_list, sport_row, 2).text() == "Playing"
+        assert _cell(window.channel_list, news_row, 2).text() == ""
 
         # Go to Playing Channel clears a search that hides the row and selects it.
         window.search_box.setText("News")
         app.processEvents()
-        assert window.channel_list.isRowHidden(sport_row)
+        assert _channel_row(window.channel_list, 'Sport') < 0
         window.go_to_playing_action.trigger()
         app.processEvents()
         assert window.search_box.text() == ""
-        assert not window.channel_list.isRowHidden(sport_row)
+        assert _channel_row(window.channel_list, 'Sport') == sport_row
         assert window.channel_list.currentRow() == sport_row
         window.channel_list.setCurrentCell(news_row, 1)
 
@@ -619,7 +664,7 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         _wait_for_channels(app, window)
         sport_row = _channel_row(window.channel_list, 'Sport')
         news_row = _channel_row(window.channel_list, 'News')
-        assert window.channel_list.item(sport_row, 2).text() == "Playing"
+        assert _cell(window.channel_list, sport_row, 2).text() == "Playing"
         assert window.channel_list.currentRow() == sport_row
 
         window.stop_playback()
@@ -627,19 +672,19 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         assert window.windowTitle() == "TVHplayer"
         window.show_playing_channel()
         assert window.status_label.text() == "Nothing is playing"
-        assert window.channel_list.item(sport_row, 2).text() == ""
-        assert window.channel_list.item(sport_row, 1).background().style() == Qt.BrushStyle.NoBrush
-        assert "Playing." not in window.channel_list.item(sport_row, 1).data(
+        assert _cell(window.channel_list, sport_row, 2).text() == ""
+        assert _cell(window.channel_list, sport_row, 1).background().style() == Qt.BrushStyle.NoBrush
+        assert "Playing." not in _cell(window.channel_list, sport_row, 1).data(
             Qt.ItemDataRole.AccessibleDescriptionRole
         )
 
         window.play_channel_by_data(news)
         app.processEvents()
         news_row = _channel_row(window.channel_list, 'News')
-        assert window.channel_list.item(news_row, 2).text() == "Playing"
+        assert _cell(window.channel_list, news_row, 2).text() == "Playing"
         fake_player._events.handlers['error'](None)
         app.processEvents()
-        assert window.channel_list.item(news_row, 2).text() == ""
+        assert _cell(window.channel_list, news_row, 2).text() == ""
     finally:
         window.close()
         app.processEvents()
@@ -848,8 +893,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.volume_slider.accessibleName() == "Volume"
         assert window.video_frame.accessibleName() == "Video player"
         assert window.channel_list.accessibleName() == "Channels"
-        assert window.channel_list.horizontalHeaderItem(0).text() == "Number"
-        assert window.channel_list.horizontalHeaderItem(2).text() == "Status"
+        assert window.channel_model.headerData(0, Qt.Orientation.Horizontal) == "Number"
+        assert window.channel_model.headerData(2, Qt.Orientation.Horizontal) == "Status"
         assert window.splitter.accessibleName() == "Channels, player, and tasks"
         assert window.splitter.handle(2).accessibleName() == "Resize player and tasks"
         assert window.tasks_pane.accessibleName() == "Tasks"
@@ -962,14 +1007,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.volume_slider.value() == 55
         assert window.status_label.text() == "Volume 55"
 
-        window.channel_list.setSortingEnabled(False)
-        window.channel_list.insertRow(0)
-        number = ui.QTableWidgetItem()
-        number.setData(Qt.ItemDataRole.DisplayRole, 4)
-        name = ui.QTableWidgetItem("News")
-        name.setData(Qt.ItemDataRole.UserRole, {"uuid": "abc", "name": "News", "number": 4})
-        window.channel_list.setItem(0, 0, number)
-        window.channel_list.setItem(0, 1, name)
+        window.channel_model.set_channels([ui.Channel(uuid="abc", name="News", number=4)])
         window.channel_list.setCurrentCell(0, 1)
         window.servers = []
         enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
@@ -2115,7 +2153,7 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
     from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, Qt
     from PyQt6.QtGui import QColor, QPixmap
 
-    from tvhplayer.channel_view import logo_image
+    from tvhplayer.channel_view import PROGRESS_ROLE, logo_image
     from tvhplayer.core.models import DvrEntry
 
     now = int(time.time())
@@ -2130,16 +2168,16 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         _wait_for_channels(app, window)
 
         # Defaults: number, name, now, and status show; disabled channels are left out.
-        assert [table.item(row, ui.COL_NAME).text() for row in range(table.rowCount())] == ['News', 'Sport']
+        assert [_cell(table, row, ui.COL_NAME).text() for row in range(table.rowCount())] == ['News', 'Sport']
         assert not header.isSectionHidden(ui.COL_NOW)
         assert header.isSectionHidden(ui.COL_NEXT) and header.isSectionHidden(ui.COL_TYPE)
         news_row = _channel_row(table, 'News')
-        now_item = table.item(news_row, ui.COL_NOW)
+        now_item = _cell(table, news_row, ui.COL_NOW)
         assert now_item.text() == 'Headlines'
         assert 'min left' in now_item.toolTip()
-        assert abs(now_item.data(ui.PROGRESS_ROLE) - 0.5) < 0.01
-        assert table.item(news_row, ui.COL_NEXT).text().endswith('Weather')
-        assert 'Now: Headlines.' in table.item(news_row, ui.COL_NAME).data(Qt.ItemDataRole.AccessibleDescriptionRole)
+        assert abs(now_item.data(PROGRESS_ROLE) - 0.5) < 0.01
+        assert _cell(table, news_row, ui.COL_NEXT).text().endswith('Weather')
+        assert 'Now: Headlines.' in _cell(table, news_row, ui.COL_NAME).data(Qt.ItemDataRole.AccessibleDescriptionRole)
         assert backend.service_calls == 0
         # Logos are asked for once the rows are on screen, not while the list fills.
         assert requested == []
@@ -2155,15 +2193,15 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         image.save(buffer, 'PNG')
         window._on_logo_loaded('imagecache/1', logo_image(bytes(data)))
         window._logo_timer.timeout.emit()
-        icon = table.item(news_row, ui.COL_NAME).icon().pixmap(80, 40).toImage()
+        icon = _cell(table, news_row, ui.COL_NAME).icon().pixmap(80, 40).toImage()
         assert icon.pixelColor(icon.width() // 2, icon.height() // 2) == QColor(Qt.GlobalColor.red)
 
         # Columns: the menu shows and hides them, and the choice is saved.
         window._channel_column_actions['type'].setChecked(True)
         assert not header.isSectionHidden(ui.COL_TYPE)
         assert backend.service_calls == 1
-        assert table.item(_channel_row(table, 'News'), ui.COL_TYPE).text() == 'Radio, Encrypted'
-        assert table.item(_channel_row(table, 'Sport'), ui.COL_TYPE).text() == 'HD'
+        assert _cell(table, _channel_row(table, 'News'), ui.COL_TYPE).text() == 'Radio, Encrypted'
+        assert _cell(table, _channel_row(table, 'Sport'), ui.COL_TYPE).text() == 'HD'
         window._channel_column_actions['now'].setChecked(False)
         assert header.isSectionHidden(ui.COL_NOW)
         saved = window.config_store.load()['channel_list']
@@ -2175,28 +2213,28 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
 
         # Options: progress bar, disabled channels, and the group filter.
         window._channel_option_actions['now_progress'].setChecked(False)
-        assert table.item(_channel_row(table, 'News'), ui.COL_NOW).data(ui.PROGRESS_ROLE) is None
+        assert _cell(table, _channel_row(table, 'News'), ui.COL_NOW).data(PROGRESS_ROLE) is None
         window._channel_option_actions['hide_disabled'].setChecked(False)
         assert _channel_row(table, 'Off') >= 0
         assert window.tag_row.isVisibleTo(window)
         window.tag_combo.setCurrentIndex(window.tag_combo.findData('t-hd'))
-        visible = [table.item(row, ui.COL_NAME).text() for row in range(table.rowCount()) if not table.isRowHidden(row)]
+        visible = [_cell(table, row, ui.COL_NAME).text() for row in range(table.rowCount())]
         assert visible == ['Sport']
         assert window.config_store.load()['channel_list']['tag'] == 't-hd'
         window._channel_option_actions['tag_filter'].setChecked(False)
         assert not window.tag_row.isVisibleTo(window)
-        assert all(not table.isRowHidden(row) for row in range(table.rowCount()))
+        assert table.rowCount() == 3
 
         # Recording marks come from the tasks pane's DVR read.
         entry = DvrEntry(uuid='r', title='T', channel_name='Sport', start=now, duration=60,
                          sched_status='recording', raw={'channel': 'sport'})
         window.channel_recordings_changed([entry])
         sport_row = _channel_row(table, 'Sport')
-        assert table.item(sport_row, ui.COL_STATUS).text() == 'Recording'
+        assert _cell(table, sport_row, ui.COL_STATUS).text() == 'Recording'
         window.play_channel_by_data(backend.sport)
-        assert table.item(_channel_row(table, 'Sport'), ui.COL_STATUS).text() == 'Playing, Recording'
+        assert _cell(table, _channel_row(table, 'Sport'), ui.COL_STATUS).text() == 'Playing, Recording'
         window._channel_option_actions['recording_status'].setChecked(False)
-        assert table.item(_channel_row(table, 'Sport'), ui.COL_STATUS).text() == 'Playing'
+        assert _cell(table, _channel_row(table, 'Sport'), ui.COL_STATUS).text() == 'Playing'
 
         # Reset brings the defaults back.
         window._reset_channel_list_layout()
@@ -2228,8 +2266,8 @@ def test_now_next_is_fetched_again_when_a_programme_ends(monkeypatch, tmp_path):
         _wait_for_now_next(app, window)
         assert backend.now_next_calls == 2
         news_row = _channel_row(window.channel_list, 'News')
-        assert window.channel_list.item(news_row, ui.COL_NOW).text() == ''
-        assert window.channel_list.item(news_row, ui.COL_NEXT).text().endswith('Weather')
+        assert _cell(window.channel_list, news_row, ui.COL_NOW).text() == ''
+        assert _cell(window.channel_list, news_row, ui.COL_NEXT).text().endswith('Weather')
 
         # A channel that had no programme gets one, and one that drops out of the guide is cleared.
         from tvhplayer.core.channel_info import NowNext
@@ -2241,10 +2279,10 @@ def test_now_next_is_fetched_again_when_a_programme_ends(monkeypatch, tmp_path):
         _wait_for_now_next(app, window)
         assert backend.now_next_calls == 3
         table = window.channel_list
-        assert table.item(_channel_row(table, 'Sport'), ui.COL_NOW).text() == 'Match'
+        assert _cell(table, _channel_row(table, 'Sport'), ui.COL_NOW).text() == 'Match'
         news_row = _channel_row(table, 'News')
-        assert table.item(news_row, ui.COL_NEXT).text() == ''
-        assert table.item(news_row, ui.COL_NEXT).toolTip() == ''
+        assert _cell(table, news_row, ui.COL_NEXT).text() == ''
+        assert _cell(table, news_row, ui.COL_NEXT).toolTip() == ''
     finally:
         window.close()
         app.processEvents()
