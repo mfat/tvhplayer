@@ -71,6 +71,11 @@ def default_config():
         # Block sleep until scheduled recordings on this computer are done, not only while recording.
         'stay_awake_for_scheduled': True,
         'deinterlace': DEINTERLACE_AUTO,
+        # Minutes the built-in server starts recordings early and ends them late.
+        'builtin_padding_early': 2,
+        'builtin_padding_late': 5,
+        # Warn when the recordings folder has less than this many GB free; 0 never warns.
+        'low_space_gb': 5,
     }
 
 
@@ -122,6 +127,11 @@ def _normalize(data):
             cfg[key] = int(cfg.get(key) or 0)
         except (TypeError, ValueError):
             cfg[key] = 0
+    defaults = default_config()
+    for key in ('builtin_padding_early', 'builtin_padding_late', 'low_space_gb'):
+        value = cfg.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            cfg[key] = defaults[key]
     return cfg
 
 

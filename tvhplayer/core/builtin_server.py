@@ -384,21 +384,40 @@ def _post_json(http_port: int, path: str, form: dict, username='', password='', 
         return None
 
 
-def set_recordings_dir(http_port: int, folder: str, username='', password='') -> bool:
-    """Point the default recording profile at ``folder``. Other profiles keep their own."""
+def set_recording_profile(http_port: int, changes: dict, username='', password='') -> bool:
+    """Change fields of the default recording profile. Other profiles keep their own."""
     grid = _post_json(http_port, 'api/dvr/config/grid', {'limit': '100'}, username, password)
     if not isinstance(grid, dict):
         return False
     default = next((row for row in grid.get('entries') or [] if not row.get('name')), None)
     if default is None or not default.get('uuid'):
         return False
-    if default.get('storage') == folder:
+    changed = {key: value for key, value in changes.items() if default.get(key) != value}
+    if not changed:
         return True
-    node = json.dumps({'uuid': default['uuid'], 'storage': folder})
+    node = json.dumps(dict(changed, uuid=default['uuid']))
     return _post(http_port, 'api/idnode/save', {'node': node}, username, password)
 
 
-def apply_builtin_defaults(http_port: int, username='', password='', recordings_dir='') -> list[str]:
+def set_recordings_dir(http_port: int, folder: str, username='', password='') -> bool:
+    """Point the default recording profile at ``folder``."""
+    return set_recording_profile(http_port, {'storage': folder}, username, password)
+
+
+def padding_changes(padding) -> dict:
+    """Profile fields for ``(minutes early, minutes late)``."""
+    early, late = padding
+    return {'pre-extra-time': max(0, int(early)), 'post-extra-time': max(0, int(late))}
+
+
+def set_padding(http_port: int, padding, username='', password='') -> bool:
+    """Start recordings ``padding[0]`` minutes early and end them ``padding[1]`` minutes late."""
+    return set_recording_profile(http_port, padding_changes(padding), username, password)
+
+
+def apply_builtin_defaults(
+    http_port: int, username='', password='', recordings_dir='', padding=None,
+) -> list[str]:
     """Settings that make the built-in server ready to use; returns those that failed.
 
     * Accept a plain login as well as digest. Tvheadend defaults to digest
@@ -410,6 +429,7 @@ def apply_builtin_defaults(http_port: int, username='', password='', recordings_
     * Record into the app's recordings folder, when there is one. Left alone,
       Tvheadend falls back to the folder it was started from when there is no
       Videos folder, which in the Flatpak is the read-only app folder.
+    * Start and end recordings with the margins from Settings, when given.
 
     Applied on every start, so an older built-in config gets them too.
     """
@@ -424,6 +444,8 @@ def apply_builtin_defaults(http_port: int, username='', password='', recordings_
     ]
     if recordings_dir and not set_recordings_dir(http_port, recordings_dir, username, password):
         failed.append('recordings folder')
+    if padding is not None and not set_padding(http_port, padding, username, password):
+        failed.append('recording margins')
     return failed
 
 

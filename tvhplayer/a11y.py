@@ -57,6 +57,7 @@ TV guide
 Menus
   Alt+F            File menu
   Alt+V            View menu
+  Alt+P            Playback menu: sound track, subtitles, deinterlace
   Alt+H            Help menu
   Ctrl+I           Import a playlist
   Ctrl+Q           Quit (Cmd+Q on macOS)

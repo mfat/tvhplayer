@@ -449,11 +449,19 @@ def test_builtin_server_records_into_the_app_folder():
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        assert apply_builtin_defaults(server.server_address[1], recordings_dir='/home/me/Videos') == []
+        assert apply_builtin_defaults(
+            server.server_address[1], recordings_dir='/home/me/Videos', padding=(2, 5),
+        ) == []
+        # Margins the profile already has are not saved again.
+        grid['entries'][1].update({'pre-extra-time': 2, 'post-extra-time': 5, 'storage': '/home/me/Videos'})
+        assert apply_builtin_defaults(server.server_address[1], recordings_dir='/home/me/Videos', padding=(2, 5)) == []
     finally:
         server.shutdown()
     saved = [form for path, form in received if path == '/api/idnode/save']
-    assert [json.loads(form['node'][0]) for form in saved] == [{'uuid': 'default', 'storage': '/home/me/Videos'}]
+    assert [json.loads(form['node'][0]) for form in saved] == [
+        {'uuid': 'default', 'storage': '/home/me/Videos'},
+        {'uuid': 'default', 'pre-extra-time': 2, 'post-extra-time': 5},
+    ]
     assert apply_builtin_defaults(_free_port_for_test(), recordings_dir='/x')[-1] == 'recordings folder'
 
 

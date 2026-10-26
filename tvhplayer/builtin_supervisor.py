@@ -20,6 +20,7 @@ try:
         launch_command,
         pick_port_pair,
         serverinfo_ok,
+        set_padding,
         set_recordings_dir,
         startup_result,
         stop_leftover_servers,
@@ -39,6 +40,7 @@ except ImportError:
         launch_command,
         pick_port_pair,
         serverinfo_ok,
+        set_padding,
         set_recordings_dir,
         startup_result,
         stop_leftover_servers,
@@ -68,6 +70,8 @@ class BuiltinSupervisor(QObject):
         self.password = ''
         # The app's recordings folder, given to the server on every start; '' leaves its own.
         self.recordings_dir = ''
+        # Minutes early and late for recordings, given on every start; None leaves the server's own.
+        self.padding = None
         self.startup_timeout = STARTUP_TIMEOUT_SECONDS
         self._deadline = 0.0
         self._status = 'stopped'
@@ -190,7 +194,7 @@ class BuiltinSupervisor(QObject):
         result = startup_result(True, self._lines.watch, True)
         if result == 'ready':
             failed = apply_builtin_defaults(
-                self.http_port, self.username, self.password, self.recordings_dir
+                self.http_port, self.username, self.password, self.recordings_dir, self.padding
             )
             if failed:
                 log.warning('Could not apply built-in server defaults: %s', ', '.join(failed))
@@ -245,6 +249,13 @@ class BuiltinSupervisor(QObject):
         if not self.recordings_dir or not self.is_running():
             return True
         return set_recordings_dir(self.http_port, self.recordings_dir, self.username, self.password)
+
+    def set_padding(self, padding) -> bool:
+        """Use ``(minutes early, minutes late)`` from the next start, and now when running."""
+        self.padding = tuple(padding)
+        if not self.is_running():
+            return True
+        return set_padding(self.http_port, self.padding, self.username, self.password)
 
     def _child_alive(self) -> bool:
         return self.process.state() != QProcess.ProcessState.NotRunning

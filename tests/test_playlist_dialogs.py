@@ -468,6 +468,22 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_deletes_converted_original(self, on):
             self.delete = on
 
+        builtin = object()
+        padding = (2, 5)
+        space = 5
+
+        def recording_padding(self):
+            return self.padding
+
+        def set_recording_padding(self, early, late):
+            self.padding = (early, late)
+
+        def low_space_gb(self):
+            return self.space
+
+        def set_low_space_gb(self, gb):
+            self.space = gb
+
         def stays_awake_for_scheduled(self):
             return True
 
@@ -499,6 +515,14 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog.format_combo.setCurrentIndex(dialog.format_combo.findData('mp4'))
     assert host.format == 'mp4'
     assert dialog.awake_check.isChecked()
+    assert (dialog.early_spin.value(), dialog.late_spin.value(), dialog.space_spin.value()) == (2, 5, 5)
+    dialog.late_spin.setValue(10)
+    dialog.space_spin.setValue(0)
+    assert dialog.space_spin.text() == 'Never'
+    dialog._padding_edited()
+    dialog._space_edited()
+    assert host.padding == (2, 10)
+    assert host.space == 0
     dialog.awake_check.click()
     assert host.awake is False
     dialog.options_edit.setText('-metadata "title=unclosed')

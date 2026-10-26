@@ -68,6 +68,7 @@ try:
     from .settings_dialog import SettingsDialog
     from .sleep_inhibit import SleepInhibitor
     from .core.sleep_guard import awake_reason, server_on_this_computer
+    from .core.storage import free_bytes, low_space_message
     from .guide_view import GuideWindow
     from .core.channel_info import (
         channel_icon_reference,
@@ -139,6 +140,7 @@ except ImportError:
     from settings_dialog import SettingsDialog
     from sleep_inhibit import SleepInhibitor
     from core.sleep_guard import awake_reason, server_on_this_computer
+    from core.storage import free_bytes, low_space_message
     from guide_view import GuideWindow
     from core.channel_info import (
         channel_icon_reference,
@@ -3006,6 +3008,7 @@ class TVHeadendClient(QMainWindow):
             folder = self.local_recording_dir()
             if ensure_recording_dir(folder):
                 self.builtin.recordings_dir = folder
+            self.builtin.padding = self.recording_padding()
             self.builtin.ready.connect(self._on_builtin_ready)
             self.builtin.failed.connect(self._on_builtin_failed)
         # Keep the computer awake while a recording on it is running or waiting.
@@ -3048,6 +3051,7 @@ class TVHeadendClient(QMainWindow):
         # Then setup UI
         self.setup_ui()
         self._bind_playback_splash()
+        self._check_disk_space()
 
         # Update to use config for last server
         last_server = self.config.get('last_server', 0)
@@ -3490,12 +3494,21 @@ class TVHeadendClient(QMainWindow):
             )
         describe(self.recording_indicator, "Not recording", "Shown only while a recording is in progress")
         
+        # Shown while the recordings folder runs low on space.
+        self.space_warning = QLabel("")
+        self.space_warning.setVisible(False)
+        if not prefers_high_contrast():
+            self.space_warning.setStyleSheet(
+                "QLabel { background-color: #78350f; color: #ffffff; padding: 1px 6px; border-radius: 8px; }"
+            )
+
         # Create status message label
         self.status_label = QLabel("Ready")
         describe(self.status_label, "Ready", "Application status")
         
         # Add widgets to horizontal layout
         status_layout.addWidget(self.recording_indicator)
+        status_layout.addWidget(self.space_warning)
         status_layout.addWidget(self.status_label)
         status_layout.addStretch()  # This pushes everything to the left
         
@@ -4012,6 +4025,21 @@ class TVHeadendClient(QMainWindow):
                     target=self._read_builtin_entries, args=(dict(server),), name='awake-fetch', daemon=True,
                 ).start()
         self._sync_awake()
+        self._check_disk_space()
+
+    def _check_disk_space(self):
+        """Show a warning in the status bar while the recordings folder is nearly full."""
+        folder = self.config.get('local_recording_dir') or default_recording_dir()
+        message = low_space_message(free_bytes(folder), self.low_space_gb())
+        label = getattr(self, 'space_warning', None)
+        if label is None:
+            return
+        if message and message != label.text():
+            announce_label(label, message)
+            label.setToolTip(f"{message} in {folder}. Recordings stop when the disk is full.")
+        label.setVisible(bool(message))
+        if not message:
+            label.setText("")
 
     def _read_builtin_entries(self, server):
         """Runs on the fetch thread."""
@@ -5799,6 +5827,25 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
         self._sync_awake()
 
+    def recording_padding(self):
+        """Minutes the built-in server starts recordings early and ends them late."""
+        return self.config['builtin_padding_early'], self.config['builtin_padding_late']
+
+    def set_recording_padding(self, early, late):
+        self.config['builtin_padding_early'] = int(early)
+        self.config['builtin_padding_late'] = int(late)
+        self.save_config()
+        if self.builtin is not None and not self.builtin.set_padding(self.recording_padding()):
+            self.statusbar.showMessage("The built-in server keeps its old margins until it starts again.")
+
+    def low_space_gb(self):
+        return self.config['low_space_gb']
+
+    def set_low_space_gb(self, gb):
+        self.config['low_space_gb'] = int(gb)
+        self.save_config()
+        self._check_disk_space()
+
     def local_recording_dir(self):
         return self.config.get('local_recording_dir') or default_recording_dir()
 
@@ -5807,6 +5854,7 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
         if self.builtin is not None and not self.builtin.set_recordings_dir(folder):
             self.statusbar.showMessage("The built-in server keeps its old recordings folder until it starts again.")
+        self._check_disk_space()
 
     def server_recordings_ready(self):
         """Before recording on the built-in server: a folder it can save in, asked for if needed."""

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -48,6 +49,11 @@ AWAKE_HELP = (
     'recording is scheduled on the built-in server or another server on this computer, so the '
     'recording is not missed. TVHplayer has to be open for the built-in server to record.'
 )
+PADDING_HELP = (
+    'The built-in server starts each recording this many minutes before the programme and '
+    'keeps recording this long after it, in case the broadcast runs early or late.'
+)
+SPACE_HELP = 'The status bar warns when the recordings folder has less space than this. 0 turns the warning off.'
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 
 
@@ -128,6 +134,37 @@ class SettingsDialog(QDialog):
         options_help = QLabel(OPTIONS_HELP)
         options_help.setWordWrap(True)
         recordings_layout.addWidget(options_help)
+
+        space_row = QHBoxLayout()
+        space_label = QLabel('&Warn when free space is below:')
+        self.space_spin = QSpinBox()
+        self.space_spin.setRange(0, 10000)
+        self.space_spin.setSuffix(' GB')
+        self.space_spin.setSpecialValueText('Never')
+        self.space_spin.setValue(host.low_space_gb())
+        describe(self.space_spin, 'Warn when free space is below', SPACE_HELP)
+        self.space_spin.setToolTip(SPACE_HELP)
+        space_label.setBuddy(self.space_spin)
+        space_row.addWidget(space_label)
+        space_row.addWidget(self.space_spin)
+        space_row.addStretch(1)
+        recordings_layout.addLayout(space_row)
+
+        self.early_spin = self.late_spin = None
+        if getattr(host, 'builtin', None) is not None:
+            early, late = host.recording_padding()
+            padding_row = QHBoxLayout()
+            early_label = QLabel('Built-in server: start &early by')
+            self.early_spin = self._minutes_spin(early, 'Start recordings early by', early_label)
+            late_label = QLabel('and end &late by')
+            self.late_spin = self._minutes_spin(late, 'End recordings late by', late_label)
+            for widget in (early_label, self.early_spin, late_label, self.late_spin):
+                padding_row.addWidget(widget)
+            padding_row.addStretch(1)
+            recordings_layout.addLayout(padding_row)
+            padding_help = QLabel(PADDING_HELP)
+            padding_help.setWordWrap(True)
+            recordings_layout.addWidget(padding_help)
         self.options_status = QLabel('')
         self.options_status.setWordWrap(True)
         recordings_layout.addWidget(self.options_status)
@@ -214,6 +251,7 @@ class SettingsDialog(QDialog):
         self.convert_edit.editingFinished.connect(self._convert_edited)
         self.delete_check.toggled.connect(host.set_deletes_converted_original)
         self.awake_check.toggled.connect(host.set_stays_awake_for_scheduled)
+        self.space_spin.editingFinished.connect(self._space_edited)
         self.delete_check.setEnabled(self.convert_check.isChecked())
         self._show_convert_problem(self.convert_edit.text())
         self.hide_check.toggled.connect(self._toggled)
@@ -225,6 +263,26 @@ class SettingsDialog(QDialog):
         height = layout.totalHeightForWidth(width)
         self.setMinimumHeight(height)
         self.resize(width, height)
+
+    def _minutes_spin(self, value, name, label):
+        spin = QSpinBox()
+        spin.setRange(0, 240)
+        spin.setSuffix(' min')
+        spin.setValue(value)
+        describe(spin, name, PADDING_HELP)
+        spin.setToolTip(PADDING_HELP)
+        label.setBuddy(spin)
+        spin.editingFinished.connect(self._padding_edited)
+        return spin
+
+    def _padding_edited(self):
+        padding = (self.early_spin.value(), self.late_spin.value())
+        if padding != tuple(self._host.recording_padding()):
+            self._host.set_recording_padding(*padding)
+
+    def _space_edited(self):
+        if self.space_spin.value() != self._host.low_space_gb():
+            self._host.set_low_space_gb(self.space_spin.value())
 
     def _choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, 'Recordings Folder', self.folder_edit.text())
@@ -286,6 +344,9 @@ class SettingsDialog(QDialog):
         # Closing with an options field focused does not finish editing first.
         self._options_edited()
         self._convert_edited()
+        self._space_edited()
+        if self.early_spin is not None:
+            self._padding_edited()
         super().done(result)
 
     def _toggled(self, on):

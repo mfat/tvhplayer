@@ -74,6 +74,8 @@ Playlists on the built-in server are checked again each time TVHplayer starts, s
 2. To schedule recording a show, right-click on the channel name and select "Show EPG". From the EPG window you can schedule recordings
 3. To record live TV locally on your computer press the local record button (the downward arrow)
 
+The built-in server starts each recording 2 minutes early and ends it 5 minutes late, in case the broadcast runs early or late; change the margins under **Settings → Recordings**. The status bar warns when the recordings folder has less than 5 GB free; the amount is set there too.
+
 While this computer is recording, TVHplayer keeps it from going to sleep. It also stays awake while a recording is scheduled on the built-in server or another server on this computer; turn that off under **Settings → Recordings → Sleep**. TVHplayer has to stay open for the built-in server to record.
 
 ## Troubleshooting
