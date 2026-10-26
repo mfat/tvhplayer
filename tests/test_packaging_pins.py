@@ -49,6 +49,13 @@ def test_flatpak_builds_the_pinned_libdvbcsa():
     assert archive['sha256'] == pins['LIBDVBCSA_SHA256']
 
 
+def test_flatpak_builds_the_pinned_libhdhomerun():
+    pins = load_pins()
+    archive = manifest_module('libhdhomerun')['sources'][0]
+    assert archive['url'].endswith(f"/libhdhomerun_{pins['LIBHDHOMERUN_VERSION']}.tgz")
+    assert archive['sha256'] == pins['LIBHDHOMERUN_SHA256']
+
+
 SPEC = ROOT / 'rpm.spec'
 PYPI_DEPENDENCIES = ROOT / 'pypi-dependencies.yaml'
 
@@ -68,6 +75,7 @@ def test_rpm_builds_the_pinned_tvheadend():
     assert spec['tvh_commit'] == pins['TVHEADEND_COMMIT']
     assert spec['scan_commit'] == pins['DTV_SCAN_TABLES_COMMIT']
     assert spec['dvbcsa_version'] == pins['LIBDVBCSA_VERSION']
+    assert spec['hdhomerun_version'] == pins['LIBHDHOMERUN_VERSION']
     # rpm spells 4.3-2899~g51ec612fa as 4.3^2899.g51ec612fa.
     assert spec['tvh_version'] == pins['TVHEADEND_VERSION'].replace('-', '^').replace('~', '.')
 

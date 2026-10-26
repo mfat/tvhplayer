@@ -6,7 +6,9 @@ Comment: The binary package also carries the built-in server, built from the
  archives pinned in packaging/tvheadend/pins.env: Tvheadend
  (https://github.com/tvheadend/tvheadend, GPL-3.0+) in /usr/libexec/tvhplayer,
  and the dtv-scan-tables data (https://github.com/tvheadend/dtv-scan-tables,
- GPL-2.0 and LGPL-2.1+) in /usr/share/tvhplayer/tvheadend.
+ GPL-2.0 and LGPL-2.1+) in /usr/share/tvhplayer/tvheadend. Tvheadend
+ includes libhdhomerun (https://www.silicondust.com/support/linux/,
+ LGPL-2.1+), linked statically for HDHomeRun tuners.
 
 Files: *
 Copyright: 2024 mFat <newmfat@gmail.com>

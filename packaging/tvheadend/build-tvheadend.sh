@@ -18,6 +18,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 TVH_ARCHIVE="tvheadend-$TVHEADEND_COMMIT.tar.gz"
 SCAN_ARCHIVE="dtv-scan-tables-$DTV_SCAN_TABLES_COMMIT.tar.gz"
 DVBCSA_ARCHIVE="libdvbcsa-$LIBDVBCSA_VERSION.tar.gz"
+HDHOMERUN_ARCHIVE="libhdhomerun_$LIBHDHOMERUN_VERSION.tgz"
 
 die() {
     echo "build-tvheadend.sh: $*" >&2
@@ -51,6 +52,8 @@ cmd_fetch() {
         "$sources/$SCAN_ARCHIVE" "$DTV_SCAN_TABLES_SHA256"
     fetch_one "https://download.videolan.org/pub/videolan/libdvbcsa/$LIBDVBCSA_VERSION/$DVBCSA_ARCHIVE" \
         "$sources/$DVBCSA_ARCHIVE" "$LIBDVBCSA_SHA256"
+    fetch_one "https://download.silicondust.com/hdhomerun/$HDHOMERUN_ARCHIVE" \
+        "$sources/$HDHOMERUN_ARCHIVE" "$LIBHDHOMERUN_SHA256"
 }
 
 cmd_build() {
@@ -59,6 +62,7 @@ cmd_build() {
     bundle_dvbcsa=$3
     verify "$sources/$TVH_ARCHIVE" "$TVHEADEND_SHA256"
     verify "$sources/$SCAN_ARCHIVE" "$DTV_SCAN_TABLES_SHA256"
+    verify "$sources/$HDHOMERUN_ARCHIVE" "$LIBHDHOMERUN_SHA256"
     rm -rf "$work"
     mkdir -p "$work/tvheadend"
     work=$(cd "$work" && pwd)
@@ -87,6 +91,14 @@ cmd_build() {
         export CFLAGS LDFLAGS
     fi
 
+    # HDHomeRun tuners: Tvheadend links the static library built here.
+    mkdir -p "$work/libhdhomerun-src"
+    tar -xzf "$sources/$HDHOMERUN_ARCHIVE" -C "$work/libhdhomerun-src" --strip-components=1
+    "$HERE/build-libhdhomerun.sh" "$work/libhdhomerun-src" "$work/hdhomerun"
+    CFLAGS="${CFLAGS:-} -I$work/hdhomerun/include"
+    LDFLAGS="${LDFLAGS:-} -L$work/hdhomerun/lib"
+    export CFLAGS LDFLAGS
+
     cd "$work/tvheadend"
     # configure defaults to "python", which Debian and Fedora do not provide.
     PYTHON=${PYTHON:-python3}
@@ -97,6 +109,8 @@ cmd_build() {
         --bindir=/usr/libexec/tvhplayer \
         --datadir=/usr/share/tvhplayer \
         $TVHEADEND_CONFIGURE_FLAGS
+    # configure quietly leaves a feature out when its library is missing.
+    grep -q '^CONFIG_HDHOMERUN_CLIENT = yes' .config.mk || die "Tvheadend was configured without HDHomeRun"
     # Distro build flags define _FORTIFY_SOURCE too; Tvheadend's own copy would fail under -Werror.
     make -j"$jobs" CFLAGS_NO_WERROR=yes
 }

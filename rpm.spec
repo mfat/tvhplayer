@@ -4,6 +4,7 @@
 %global tvh_version 4.3^2899.g51ec612fa
 %global scan_commit 31d6fb8f8b86e204518ada99bfb8cf6807c717e5
 %global dvbcsa_version 1.1.0
+%global hdhomerun_version 20250815
 # Fedora does not package python-vlc. The Flatpak pins the same wheel.
 %global vlc_wheel python_vlc-3.0.21203-py3-none-any.whl
 %global vlc_wheel_sha256 1613451a31b692ec276296ceeae0c0ba82bfc2d094dabf9aceb70f58944a6320
@@ -14,7 +15,7 @@ Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
 # tvhplayer and Tvheadend: GPL-3.0-or-later. Scan tables: GPL-2.0-only and LGPL-2.1-or-later.
-# libdvbcsa: GPL-2.0-or-later. python-vlc: LGPL-2.1-or-later.
+# libdvbcsa: GPL-2.0-or-later. libhdhomerun and python-vlc: LGPL-2.1-or-later.
 License:        GPL-3.0-or-later AND GPL-2.0-only AND GPL-2.0-or-later AND LGPL-2.1-or-later
 URL:            https://github.com/mfat/tvhplayer
 Source0:        %{name}-%{version}.tar.gz
@@ -22,6 +23,7 @@ Source1:        https://github.com/tvheadend/tvheadend/archive/%{tvh_commit}/tvh
 Source2:        https://github.com/tvheadend/dtv-scan-tables/archive/%{scan_commit}/dtv-scan-tables-%{scan_commit}.tar.gz
 Source3:        https://download.videolan.org/pub/videolan/libdvbcsa/%{dvbcsa_version}/libdvbcsa-%{dvbcsa_version}.tar.gz
 Source4:        https://files.pythonhosted.org/packages/5b/ee/7d76eb3b50ccb1397621f32ede0fb4d17aa55a9aa2251bc34e6b9929fdce/%{vlc_wheel}
+Source5:        https://download.silicondust.com/hdhomerun/libhdhomerun_%{hdhomerun_version}.tgz
 
 BuildRequires:  gcc
 BuildRequires:  make
@@ -49,6 +51,7 @@ Requires:       /usr/bin/ffmpeg
 
 Provides:       bundled(tvheadend) = %{tvh_version}
 Provides:       bundled(libdvbcsa) = %{dvbcsa_version}
+Provides:       bundled(libhdhomerun) = %{hdhomerun_version}
 Provides:       bundled(python3dist(python-vlc)) = 3.0.21203
 
 %description
@@ -65,7 +68,7 @@ the system.
 echo "%{vlc_wheel_sha256}  %{SOURCE4}" | sha256sum -c -
 # build-tvheadend.sh reads its archives from one folder.
 mkdir tvheadend-sources
-cp -p %{SOURCE1} %{SOURCE2} %{SOURCE3} tvheadend-sources/
+cp -p %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE5} tvheadend-sources/
 
 %build
 packaging/tvheadend/build-tvheadend.sh build tvheadend-sources tvheadend-build --bundle-dvbcsa

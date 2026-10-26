@@ -69,7 +69,8 @@ SOURCE_IPTV = 'iptv'
 POLL_MS = 2000
 # A scan that finds nothing new for this long has stalled.
 SCAN_STALL_SECONDS = 600
-# SAT>IP servers answer discovery within a few seconds.
+# SAT>IP servers answer discovery within a few seconds. The server looks for HDHomeRun
+# tuners by itself every 15 seconds.
 DISCOVERY_WAIT_SECONDS = 4
 
 
@@ -162,7 +163,7 @@ class SourcePage(QWizardPage):
         row = QHBoxLayout()
         row.setContentsMargins(24, 0, 0, 0)
         self.look_btn = QPushButton('&Look Again')
-        describe(self.look_btn, 'Look Again', 'Look for tuners again, including SAT>IP tuners on the network.')
+        describe(self.look_btn, 'Look Again', 'Look for tuners again, including SAT>IP and HDHomeRun tuners on the network.')
         self.look_btn.clicked.connect(self.look_again)
         row.addWidget(self.look_btn)
         row.addStretch(1)
@@ -180,7 +181,7 @@ class SourcePage(QWizardPage):
             return
         self._looking = True
         self.look_btn.setEnabled(False)
-        announce_label(self.status, 'Looking for tuners, including SAT>IP tuners on the network…')
+        announce_label(self.status, 'Looking for tuners, including SAT>IP and HDHomeRun tuners on the network…')
 
         def discover(admin):
             try:
@@ -216,8 +217,8 @@ class SourcePage(QWizardPage):
             else:
                 announce_label(
                     self.status,
-                    'No tuner found. Plug in a USB tuner, or turn on a SAT>IP tuner on this network, '
-                    'then choose Look Again.',
+                    'No tuner found. Plug in a USB tuner, or turn on a SAT>IP or HDHomeRun tuner on this '
+                    'network, then choose Look Again.',
                 )
         self.tuner_radio.setEnabled(bool(self._wizard.tuners))
         if self.group.checkedButton() is None or not self._wizard.tuners:

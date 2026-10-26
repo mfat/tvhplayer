@@ -87,6 +87,21 @@ modules:
         url: https://download.videolan.org/pub/videolan/libdvbcsa/1.1.0/libdvbcsa-1.1.0.tar.gz
         sha256: 4db78af5cdb2641dfb1136fe3531960a477c9e3e3b6ba19a2754d046af3f456d
 
+  # HDHomeRun network tuners, linked into the built-in server.
+  - name: libhdhomerun
+    buildsystem: simple
+    build-commands:
+      - sh build-libhdhomerun.sh . /app
+    cleanup:
+      - /include
+      - /lib/libhdhomerun.a
+    sources:
+      - type: archive
+        url: https://download.silicondust.com/hdhomerun/libhdhomerun_20250815.tgz
+        sha256: 879b1bc476c9b93e77ee280a84fc1157e7cc47d43ed9c8398d88a8ac5f35c034
+      - type: file
+        path: packaging/tvheadend/build-libhdhomerun.sh
+
   # Built-in server. TVHplayer starts /app/bin/tvheadend on 127.0.0.1 and stops it on quit.
   # No transcoding (VLC decodes), no Vue UI (needs npm; the classic UI is served at /),
   # and nothing the build would download.
@@ -95,7 +110,7 @@ modules:
       - --disable-libav
       - --disable-ffmpeg_static
       - --disable-hdhomerun_static
-      - --disable-hdhomerun_client
+      - --enable-hdhomerun_client
       - --disable-vue_build
       - --disable-pcloud_cache
       - --disable-avahi
