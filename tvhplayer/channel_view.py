@@ -10,10 +10,11 @@ from __future__ import annotations
 import hashlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import requests
 from PyQt6.QtCore import QObject, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate
 
 try:
@@ -113,12 +114,13 @@ class ProgressDelegate(QStyledItemDelegate):
         painter.restore()
 
 
-def logo_pixmap(data, size=LOGO_SIZE):
+def logo_image(data, size=LOGO_SIZE):
     """Fit image bytes inside ``size`` on a clear canvas, so names line up.
 
-    Returns None when the bytes are not an image Qt can read.
+    Returns None when the bytes are not an image Qt can read. Unlike a
+    pixmap, the image can be made off the UI thread.
     """
-    image = QPixmap()
+    image = QImage()
     if not data or not image.loadFromData(data):
         return None
     scaled = image.scaled(
@@ -126,7 +128,18 @@ def logo_pixmap(data, size=LOGO_SIZE):
         Qt.AspectRatioMode.KeepAspectRatio,
         Qt.TransformationMode.SmoothTransformation,
     )
-    return padded_pixmap(scaled, size)
+    canvas = QImage(size, QImage.Format.Format_ARGB32_Premultiplied)
+    canvas.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(canvas)
+    painter.drawImage((size.width() - scaled.width()) // 2, (size.height() - scaled.height()) // 2, scaled)
+    painter.end()
+    return canvas
+
+
+def logo_pixmap(data, size=LOGO_SIZE):
+    """Pixmap of ``logo_image``, or None when the bytes are not an image."""
+    image = logo_image(data, size)
+    return QPixmap.fromImage(image) if image is not None else None
 
 
 def padded_pixmap(image=None, size=LOGO_SIZE):
@@ -144,14 +157,16 @@ def padded_pixmap(image=None, size=LOGO_SIZE):
 
 
 class LogoLoader(QObject):
-    """Fetch channel logos in the background.
+    """Read and fetch channel logos in the background.
 
-    ``loaded`` carries the reference and the image bytes. Bytes are kept
-    on disk under the cache folder, keyed by server and reference, so the
-    next start shows logos without asking the server again.
+    ``loaded`` carries the reference and the logo fitted by ``logo_image``.
+    Bytes are kept on disk under the cache folder, keyed by server and
+    reference, so the next start shows logos without asking the server
+    again. Reading that cache and decoding happen off the UI thread too: a
+    list of thousands of channels would otherwise freeze the window.
     """
 
-    loaded = pyqtSignal(str, bytes)
+    loaded = pyqtSignal(str, QImage)
 
     MAX_BYTES = 2 * 1024 * 1024
     TIMEOUT = 10
@@ -164,6 +179,8 @@ class LogoLoader(QObject):
         self._lock = threading.Lock()
         self._pending = set()
         self._failed = set()
+        # Not cached and asked for without an address; a request with one still fetches.
+        self._uncached = set()
         self._generation = 0
 
     def _cache_path(self, server_url, reference):
@@ -178,14 +195,28 @@ class LogoLoader(QObject):
             return None
 
     def request(self, server, reference, url):
-        """Fetch ``url`` for ``reference`` unless it is cached, queued, or failed before."""
+        """Load ``reference`` from the disk cache, or fetch ``url`` when it is not there.
+
+        Nothing happens while it is queued, or after it failed before. An
+        empty ``url`` only reads the cache.
+        """
         key = (server.get('url') or '', reference)
+        with self._lock:
+            if key in self._pending or key in self._failed or (not url and key in self._uncached):
+                return
+            self._pending.add(key)
+            generation = self._generation
+        self._pool.submit(self._load, dict(server), reference, url, generation)
+
+    def request_file(self, reference, path):
+        """Load a logo from a file on this computer, such as a picon."""
+        key = ('', reference)
         with self._lock:
             if key in self._pending or key in self._failed:
                 return
             self._pending.add(key)
             generation = self._generation
-        self._pool.submit(self._fetch, dict(server), reference, url, generation)
+        self._pool.submit(self._load_file, reference, path, generation)
 
     def forget(self):
         """Drop queued work and remembered failures, for example after a server change."""
@@ -193,6 +224,7 @@ class LogoLoader(QObject):
             self._generation += 1
             self._pending.clear()
             self._failed.clear()
+            self._uncached.clear()
 
     def shutdown(self):
         self.forget()
@@ -208,36 +240,61 @@ class LogoLoader(QObject):
             configure_session(session, base)
         return session
 
-    def _fetch(self, server, reference, url, generation):
+    def _load(self, server, reference, url, generation):
         server_url = server.get('url') or ''
-        key = (server_url, reference)
-        data = None
+        image = logo_image(self.cached(server_url, reference))
+        if image is not None:
+            self._finish((server_url, reference), reference, image, generation)
+            return
+        if not url:
+            with self._lock:
+                if generation == self._generation:
+                    self._pending.discard((server_url, reference))
+                    self._uncached.add((server_url, reference))
+            return
+        data = self._fetch(server, url)
+        image = logo_image(data)
+        if image is not None:
+            try:
+                path = self._cache_path(server_url, reference)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            except OSError:
+                pass
+        self._finish((server_url, reference), reference, image, generation)
+
+    def _load_file(self, reference, path, generation):
         try:
-            response = self._session(server_url).get(
+            image = logo_image(Path(path).read_bytes())
+        except OSError:
+            image = None
+        self._finish(('', reference), reference, image, generation)
+
+    def _fetch(self, server, url):
+        try:
+            response = self._session(server.get('url') or '').get(
                 url, auth=http_auth(server), timeout=self.TIMEOUT, stream=True,
             )
+            data = None
             if response.status_code == 200:
                 data = response.raw.read(self.MAX_BYTES + 1, decode_content=True)
                 if len(data) > self.MAX_BYTES:
                     data = None
             response.close()
+            return data
         except (requests.RequestException, OSError, ValueError):
-            data = None
+            return None
+
+    def _finish(self, key, reference, image, generation):
         with self._lock:
             if generation != self._generation:
                 return
             self._pending.discard(key)
-            if not data:
+            if image is None:
                 self._failed.add(key)
                 return
         try:
-            path = self._cache_path(server_url, reference)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-        except OSError:
-            pass
-        try:
-            self.loaded.emit(reference, data)
+            self.loaded.emit(reference, image)
         except RuntimeError:
             # The window closed while this logo was on its way.
             pass

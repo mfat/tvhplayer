@@ -107,7 +107,6 @@ try:
         PROGRESS_ROLE,
         LogoLoader,
         ProgressDelegate,
-        logo_pixmap,
         padded_pixmap,
     )
 except ImportError:
@@ -190,7 +189,6 @@ except ImportError:
         PROGRESS_ROLE,
         LogoLoader,
         ProgressDelegate,
-        logo_pixmap,
         padded_pixmap,
     )
 try:
@@ -3265,6 +3263,11 @@ class TVHeadendClient(QMainWindow):
         self._logo_server = None
         self.logo_loader = LogoLoader(self)
         self.logo_loader.loaded.connect(self._on_logo_loaded)
+        self._logos_arrived = set()
+        self._logo_timer = QTimer(self)
+        self._logo_timer.setSingleShot(True)
+        self._logo_timer.setInterval(100)
+        self._logo_timer.timeout.connect(self._apply_arrived_logos)
         # Logos for channels the server has none for, once a picon pack is downloaded.
         self.picons = None
         self.picon_job = None
@@ -4334,40 +4337,40 @@ class TVHeadendClient(QMainWindow):
         if pixmap is not None:
             return pixmap
         if reference.startswith(PICON_PREFIX):
-            try:
-                pixmap = logo_pixmap(Path(reference[len(PICON_PREFIX):]).read_bytes())
-            except OSError:
-                pixmap = None
-            if pixmap is not None:
-                self._logo_pixmaps[reference] = pixmap
-            return pixmap
-        server = self.current_server() or {}
-        pixmap = logo_pixmap(self.logo_loader.cached(server.get('url') or '', reference))
-        if pixmap is not None:
-            self._logo_pixmaps[reference] = pixmap
-            return pixmap
+            self.logo_loader.request_file(reference, reference[len(PICON_PREFIX):])
+            return None
+        url = ''
         if backend is not None:
             try:
                 url = backend.image_url(reference)
             except Exception as e:
                 print(f"Debug: No URL for logo {reference}: {e}")
+            if not url.startswith(('http://', 'https://')):
                 url = ''
-            if url.startswith(('http://', 'https://')):
-                self.logo_loader.request(server, reference, url)
+        self.logo_loader.request(self.current_server() or {}, reference, url)
         return None
 
-    def _on_logo_loaded(self, reference, data):
-        pixmap = logo_pixmap(data)
-        if pixmap is None:
-            return
-        self._logo_pixmaps[reference] = pixmap
+    def _on_logo_loaded(self, reference, image):
+        self._logo_pixmaps[reference] = QPixmap.fromImage(image)
+        # Logos arrive one by one, thousands for a large list; set them on the rows together.
+        self._logos_arrived.add(reference)
+        if not self._logo_timer.isActive():
+            self._logo_timer.start()
+
+    def _apply_arrived_logos(self):
+        arrived, self._logos_arrived = self._logos_arrived, set()
         if not self.channel_options['logos']:
             return
-        icon = QIcon(pixmap)
+        icons = {}
         table = self.channel_list
         for row in range(table.rowCount()):
             item = table.item(row, COL_NAME)
-            if item is not None and item.data(LOGO_ROLE) == reference:
+            reference = item.data(LOGO_ROLE) if item is not None else None
+            # A server change in the meantime drops what had arrived.
+            if reference in arrived and reference in self._logo_pixmaps:
+                icon = icons.get(reference)
+                if icon is None:
+                    icon = icons[reference] = QIcon(self._logo_pixmaps[reference])
                 item.setIcon(icon)
 
     def channel_recordings_changed(self, entries):
@@ -6262,6 +6265,8 @@ class TVHeadendClient(QMainWindow):
         self._picons_changed()
 
     def _picons_changed(self):
+        # Picon files that could not be read before may be there now.
+        self.logo_loader.forget()
         self._logo_pixmaps = {
             key: pixmap for key, pixmap in self._logo_pixmaps.items() if not key.startswith(PICON_PREFIX)
         }

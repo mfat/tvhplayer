@@ -57,7 +57,8 @@ def test_logo_loader_fetches_once_caches_on_disk_and_skips_failures(tmp_path):
         while (not got or len(hits) < 2) and time.monotonic() < deadline:
             app.processEvents()
             time.sleep(0.01)
-        assert got == [('imagecache/1', png)]
+        assert [reference for reference, _image in got] == ['imagecache/1']
+        assert got[0][1].size() == LOGO_SIZE
         assert sorted(path for path, _auth in hits) == ['/imagecache/1', '/imagecache/2']
         assert all(auth and auth.startswith('Basic ') for _path, auth in hits)
         assert loader.cached(base, 'imagecache/1') == png
@@ -72,6 +73,17 @@ def test_logo_loader_fetches_once_caches_on_disk_and_skips_failures(tmp_path):
         deadline = time.monotonic() + 5
         while len(hits) < 3 and time.monotonic() < deadline:
             time.sleep(0.01)
+        assert len(hits) == 3
+
+        # The next request is read from the disk cache, not the server.
+        got.clear()
+        loader.forget()
+        loader.request(box, 'imagecache/1', '')
+        deadline = time.monotonic() + 5
+        while not got and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert [reference for reference, _image in got] == ['imagecache/1']
         assert len(hits) == 3
 
         pixmap = logo_pixmap(png)

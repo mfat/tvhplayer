@@ -2094,6 +2094,7 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
     from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, Qt
     from PyQt6.QtGui import QPixmap
 
+    from tvhplayer.channel_view import logo_image
     from tvhplayer.core.models import DvrEntry
 
     now = int(time.time())
@@ -2128,7 +2129,8 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         buffer = QBuffer(data)
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
         image.save(buffer, 'PNG')
-        window._on_logo_loaded('imagecache/1', bytes(data))
+        window._on_logo_loaded('imagecache/1', logo_image(bytes(data)))
+        window._logo_timer.timeout.emit()
         assert not table.item(news_row, ui.COL_NAME).icon().isNull()
 
         # Columns: the menu shows and hides them, and the choice is saved.
@@ -2490,6 +2492,12 @@ def test_channels_without_a_logo_use_a_picon(monkeypatch, tmp_path):
         plain = Channel(uuid='1', name='BBC One HD')
         reference = window.channel_logo_reference(plain)
         assert reference == f"picon:{tmp_path / 'bbcone.png'}"
+        # The file is read off the UI thread; the logo is there once it arrives.
+        assert window._logo_for(reference, None) is None
+        deadline = time.monotonic() + 5
+        while window._logo_for(reference, None) is None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
         assert window._logo_for(reference, None) is not None
         served = Channel(uuid='2', name='BBC One', icon='imagecache/7')
         assert window.channel_logo_reference(served) == 'imagecache/7'

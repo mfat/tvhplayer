@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 from PyQt6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, pyqtSignal
@@ -59,6 +60,8 @@ class BuiltinSupervisor(QObject):
     status_changed = pyqtSignal(str)
     ready = pyqtSignal(int, int)
     failed = pyqtSignal(str)
+    # From the readiness check's thread: attempt, answered, defaults that failed.
+    _checked = pyqtSignal(int, bool, object)
 
     def __init__(self, binary, config_dir, http_port=0, htsp_port=0, parent=None):
         super().__init__(parent)
@@ -89,6 +92,9 @@ class BuiltinSupervisor(QObject):
         self._poll = QTimer(self)
         self._poll.setInterval(200)
         self._poll.timeout.connect(self._poll_ready)
+        self._check_attempt = 0
+        self._checking = False
+        self._checked.connect(self._on_checked)
 
     @property
     def status(self) -> str:
@@ -128,6 +134,7 @@ class BuiltinSupervisor(QObject):
     def stop(self) -> None:
         self._stop_requested = True
         self._poll.stop()
+        self._check_attempt += 1
         if self._child_alive():
             self._handling_exit = True
             self.process.terminate()
@@ -144,6 +151,8 @@ class BuiltinSupervisor(QObject):
 
     def _start_attempt(self) -> None:
         self._attempts += 1
+        self._check_attempt += 1
+        self._checking = False
         self._lines = LineBuffer()
         self.config_dir.mkdir(parents=True, exist_ok=True)
         program, args = launch_command(command_args(self.binary, self.config_dir, self.http_port, self.htsp_port))
@@ -189,13 +198,38 @@ class BuiltinSupervisor(QObject):
             return
         if not (self._lines.watch.http_started and self._lines.watch.htsp_started):
             return
-        if not serverinfo_ok(self.http_port, username=self.username, password=self.password):
+        if self._checking:
             return
-        result = startup_result(True, self._lines.watch, True)
+        # A server still starting can take the whole timeout to answer; the
+        # window must not wait for it.
+        self._checking = True
+        threading.Thread(
+            target=self._check_ready,
+            args=(self._check_attempt, self.http_port, self.username, self.password,
+                  self.recordings_dir, self.padding),
+            name='builtin-ready',
+            daemon=True,
+        ).start()
+
+    def _check_ready(self, attempt, http_port, username, password, recordings_dir, padding) -> None:
+        failed = []
+        answered = serverinfo_ok(http_port, username=username, password=password)
+        if answered:
+            failed = apply_builtin_defaults(http_port, username, password, recordings_dir, padding)
+        try:
+            self._checked.emit(attempt, answered, failed)
+        except RuntimeError:
+            # The app closed while the server was being asked.
+            pass
+
+    def _on_checked(self, attempt, answered, failed) -> None:
+        if attempt != self._check_attempt:
+            return
+        self._checking = False
+        if self._status != 'starting' or not answered:
+            return
+        result = startup_result(self._child_alive(), self._lines.watch, True)
         if result == 'ready':
-            failed = apply_builtin_defaults(
-                self.http_port, self.username, self.password, self.recordings_dir, self.padding
-            )
             if failed:
                 log.warning('Could not apply built-in server defaults: %s', ', '.join(failed))
             self._poll.stop()
