@@ -36,6 +36,10 @@ class MpvVideoWidget(QOpenGLWidget):
             self._create_render_context()
             self.doneCurrent()
 
+    def platform_name(self):
+        """Qt's windowing platform, e.g. "wayland" or "xcb" (X11 or XWayland)."""
+        return QGuiApplication.platformName()
+
     def initializeGL(self):
         self.context().aboutToBeDestroyed.connect(self.release)
         self._create_render_context()

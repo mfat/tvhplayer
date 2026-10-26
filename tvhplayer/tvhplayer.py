@@ -3462,11 +3462,11 @@ class TVHeadendClient(QMainWindow):
                 self.player.attach(self.video_frame)
             else:
                 self.player.attach(self.video_frame.winId().__int__())
-            self.hw_check_timer = QTimer()
+            # Started by each new picture: the stats say little before a stream has run a moment.
+            self.hw_check_timer = QTimer(self)
             self.hw_check_timer.setSingleShot(True)
             self.hw_check_timer.timeout.connect(self.player.log_stats)
-            self.hw_check_timer.start(5000)
-            print("Debug: Hardware acceleration configured for VLC")
+            print(f"Debug: Hardware acceleration configured for {self.engine}")
         except Exception as e:
             print(f"Warning: Could not configure hardware acceleration: {str(e)}")
             print("Continuing without hardware acceleration")
@@ -5186,6 +5186,9 @@ class TVHeadendClient(QMainWindow):
         self._set_playback_spinner(False)
         self._protect_video_surface(True)
         self._mark_playing_channel()
+        timer = getattr(self, 'hw_check_timer', None)
+        if timer is not None:
+            timer.start(3000)
         channel = getattr(self, '_playback_channel', None)
         if channel is not None:
             self.statusbar.showMessage(f"Playing: {channel.name}")
@@ -7312,6 +7315,7 @@ def main():
         if qt_platform:
             os.environ["QT_QPA_PLATFORM"] = qt_platform
         app = QApplication(sys.argv)
+        print(f"Debug: Qt platform: {app.platformName()}")
         app.setApplicationName("TVHplayer")
         app.setApplicationDisplayName("TVHplayer")
         app.setDesktopFileName("io.github.mfat.tvhplayer")

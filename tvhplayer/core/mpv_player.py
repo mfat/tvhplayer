@@ -153,7 +153,10 @@ class MpvPlayer(Player):
         if not self.is_playing():
             return
         mpv = self._mpv
+        surface = self._surface
         print('mpv Playback Statistics:')
+        if surface is not None:
+            print(f'Video output: libmpv render API into a Qt OpenGL widget ({surface.platform_name()})')
         print(f'Video codec: {mpv.video_codec}')
         print(f'Hardware decoding: {mpv.hwdec_current or "no"}')
         print(f'Dropped frames: {mpv.frame_drop_count} (decoder: {mpv.decoder_frame_drop_count})')
