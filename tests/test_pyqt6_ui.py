@@ -2303,3 +2303,30 @@ def test_playback_menu_lists_tracks_and_deinterlace(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_spinner_shows_tuner_signal(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        spinner = ui.PlaybackSpinner()
+        spinner.resize(400, 300)
+        spinner.set_caption('Waiting for channel')
+        spinner.set_signal('poor', 'Signal too weak (SNR 5 dB): check the aerial, dish, or cable')
+        assert spinner.accessibleName() == (
+            'Waiting for channel Signal too weak (SNR 5 dB): check the aerial, dish, or cable'
+        )
+        assert not spinner.grab().isNull()
+        spinner.set_signal('', '')
+        assert spinner.accessibleName() == 'Waiting for channel'
+
+        window._awaiting_playback = True
+        watch = types.SimpleNamespace(stop=lambda: None)
+        window._start_watch = watch
+        window._on_start_signal(watch, 'none', 'No signal: check the aerial, dish, or cable')
+        window._on_start_given_up(watch)
+        assert window.status_label.text() == (
+            'This channel is not working right now. No signal: check the aerial, dish, or cable.'
+        )
+    finally:
+        window.close()
+        app.processEvents()

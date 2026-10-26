@@ -52,7 +52,9 @@ try:
     from .core.vlc_player import VlcPlayer
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from .core.playlist_sync import PlaylistSource, find_source, server_key
-    from .core.playback_status import STARTING, find_subscription, starting_caption
+    from .core.playback_status import (
+        SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, signal_report, starting_caption,
+    )
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
     from .player_bar import (
@@ -124,7 +126,9 @@ except ImportError:
     from core.vlc_player import VlcPlayer
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, find_source, server_key
-    from core.playback_status import STARTING, find_subscription, starting_caption
+    from core.playback_status import (
+        SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, signal_report, starting_caption,
+    )
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
     from player_bar import (
@@ -2545,6 +2549,14 @@ class ServerStatusDialog(QDialog):
         self.update_timer.stop()
         super().closeEvent(event)
 
+# Dot colours for tuner reception; the words beside them say the same.
+SIGNAL_COLORS = {
+    SIGNAL_GOOD: QColor('#22c55e'),
+    SIGNAL_FAIR: QColor('#eab308'),
+    '': QColor('#ef4444'),
+}
+
+
 class PlaybackSpinner(QWidget):
     """Ring drawn over the player until the first picture arrives."""
 
@@ -2555,6 +2567,8 @@ class PlaybackSpinner(QWidget):
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._advance)
         self._caption = STARTING
+        self._signal_level = ''
+        self._signal_words = ''
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # The video surface is a native window; a plain widget would be drawn underneath it.
@@ -2566,8 +2580,21 @@ class PlaybackSpinner(QWidget):
 
     def set_caption(self, text):
         self._caption = text or STARTING
-        self.setAccessibleName(self._caption)
+        self._update_accessible_name()
         self.update()
+
+    def set_signal(self, level, words):
+        """Tuner reception under the caption: a coloured dot and words, or nothing."""
+        self._signal_level = level or ''
+        self._signal_words = words or ''
+        self._update_accessible_name()
+        self.update()
+
+    def _update_accessible_name(self):
+        name = self._caption
+        if self._signal_words:
+            name = f"{name} {self._signal_words}"
+        self.setAccessibleName(name)
 
     def set_running(self, running):
         if running:
@@ -2614,7 +2641,23 @@ class PlaybackSpinner(QWidget):
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
             self._caption,
         )
+        if self._signal_words:
+            self._paint_signal(painter, caption.top() + painter.fontMetrics().lineSpacing() * 2)
         painter.end()
+
+    def _paint_signal(self, painter, top):
+        metrics = painter.fontMetrics()
+        dot = metrics.height() * 0.6
+        gap = dot * 0.6
+        width = min(metrics.horizontalAdvance(self._signal_words), max(0, self.width() - 32 - dot - gap))
+        left = (self.width() - (dot + gap + width)) / 2
+        color = SIGNAL_COLORS.get(self._signal_level, SIGNAL_COLORS[''])
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawEllipse(QRectF(left, top + (metrics.height() - dot) / 2, dot, dot))
+        painter.setPen(QColor(255, 255, 255, 230))
+        text = metrics.elidedText(self._signal_words, Qt.TextElideMode.ElideRight, int(width))
+        painter.drawText(QRectF(left + dot + gap, top, width + 1, metrics.height()), Qt.AlignmentFlag.AlignLeft, text)
 
 
 class BusyRing(QWidget):
@@ -2754,6 +2797,8 @@ class StartWatch(QObject):
     """
 
     caption = pyqtSignal(str)
+    # Tuner reception as (level, words); empty when the source gives no reading, as IPTV does.
+    signal = pyqtSignal(str, str)
     give_up = pyqtSignal()
 
     def __init__(self, server, channel_name, parent=None):
@@ -2774,6 +2819,7 @@ class StartWatch(QObject):
         started = time.monotonic()
         retried = False
         last = None
+        last_signal = None
         try:
             backend = create_backend(self._server)
             while not self._stopped.is_set():
@@ -2781,6 +2827,12 @@ class StartWatch(QObject):
                     subscription = find_subscription(backend.get_subscriptions(), self._name)
                 except Exception:
                     subscription = None
+                report = None
+                if subscription is not None and not receiving(subscription):
+                    try:
+                        report = signal_report(find_tuner(subscription, backend.get_inputs()))
+                    except Exception:
+                        report = None
                 retried = retried or (subscription is not None and subscription.state == 'Bad')
                 text, done = starting_caption(subscription, time.monotonic() - started, retried)
                 if self._stopped.is_set():
@@ -2788,6 +2840,9 @@ class StartWatch(QObject):
                 if text != last:
                     last = text
                     self.caption.emit(text)
+                if report != last_signal:
+                    last_signal = report
+                    self.signal.emit(*(report or ('', '')))
                 if done:
                     self.give_up.emit()
                     break
@@ -4606,6 +4661,11 @@ class TVHeadendClient(QMainWindow):
             return
         watch = StartWatch(server, channel.name, self)
         watch.caption.connect(lambda text, watch=watch: self._on_start_caption(watch, text))
+        watch.signal.connect(lambda level, words, watch=watch: self._on_start_signal(watch, level, words))
+        self._start_signal = ('', '')
+        spinner = getattr(self, 'playback_spinner', None)
+        if spinner is not None:
+            spinner.set_signal('', '')
         watch.give_up.connect(lambda watch=watch: self._on_start_given_up(watch))
         self._start_watch = watch
         watch.start()
@@ -4626,13 +4686,25 @@ class TVHeadendClient(QMainWindow):
         if channel is not None:
             self.statusbar.showMessage(f"{channel.name}: {text}")
 
+    def _on_start_signal(self, watch, level, words):
+        if watch is not getattr(self, '_start_watch', None) or not self._awaiting_playback:
+            return
+        self._start_signal = (level, words)
+        spinner = getattr(self, 'playback_spinner', None)
+        if spinner is not None:
+            spinner.set_signal(level, words)
+
     def _on_start_given_up(self, watch):
         if watch is not getattr(self, '_start_watch', None) or not self._awaiting_playback:
             return
         channel = getattr(self, '_playback_channel', None)
         name = channel.name if channel is not None else 'This channel'
+        level, words = getattr(self, '_start_signal', ('', ''))
         self.stop_playback()
-        self.statusbar.showMessage(f"{name} is not working right now. Try another channel.")
+        if level and level != SIGNAL_GOOD:
+            self.statusbar.showMessage(f"{name} is not working right now. {words}.")
+        else:
+            self.statusbar.showMessage(f"{name} is not working right now. Try another channel.")
 
     def _protect_video_surface(self, playing):
         """While a channel is on, do not let Qt paint or flash the splash."""
