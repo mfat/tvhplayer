@@ -374,7 +374,31 @@ def _post(http_port: int, path: str, form: dict, username='', password='', timeo
         return False
 
 
-def apply_builtin_defaults(http_port: int, username='', password='') -> list[str]:
+def _post_json(http_port: int, path: str, form: dict, username='', password='', timeout: float = 2.0):
+    url = f'http://127.0.0.1:{int(http_port)}/{path}'
+    body = urllib.parse.urlencode(form).encode()
+    try:
+        with _direct_opener(url, username, password).open(url, data=body, timeout=timeout) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except (OSError, urllib.error.URLError, ValueError):
+        return None
+
+
+def set_recordings_dir(http_port: int, folder: str, username='', password='') -> bool:
+    """Point the default recording profile at ``folder``. Other profiles keep their own."""
+    grid = _post_json(http_port, 'api/dvr/config/grid', {'limit': '100'}, username, password)
+    if not isinstance(grid, dict):
+        return False
+    default = next((row for row in grid.get('entries') or [] if not row.get('name')), None)
+    if default is None or not default.get('uuid'):
+        return False
+    if default.get('storage') == folder:
+        return True
+    node = json.dumps({'uuid': default['uuid'], 'storage': folder})
+    return _post(http_port, 'api/idnode/save', {'node': node}, username, password)
+
+
+def apply_builtin_defaults(http_port: int, username='', password='', recordings_dir='') -> list[str]:
     """Settings that make the built-in server ready to use; returns those that failed.
 
     * Accept a plain login as well as digest. Tvheadend defaults to digest
@@ -383,6 +407,9 @@ def apply_builtin_defaults(http_port: int, username='', password='') -> list[str
       its generated password, so this opens it to no one else.
     * Turn off the first-run setup wizard, so the web interface opens on its
       normal pages. The wizard can still be started from Configuration → General.
+    * Record into the app's recordings folder, when there is one. Left alone,
+      Tvheadend falls back to the folder it was started from when there is no
+      Videos folder, which in the Flatpak is the read-only app folder.
 
     Applied on every start, so an older built-in config gets them too.
     """
@@ -391,16 +418,24 @@ def apply_builtin_defaults(http_port: int, username='', password='') -> list[str
         # The handler needs a request body, even an unused one.
         ('setup wizard off', 'api/wizard/cancel', {'cancel': '1'}),
     )
-    return [
+    failed = [
         name for name, path, form in steps
         if not _post(http_port, path, form, username, password)
     ]
+    if recordings_dir and not set_recordings_dir(http_port, recordings_dir, username, password):
+        failed.append('recordings folder')
+    return failed
 
 
-def ensure_builtin_server(servers, http_port=0, htsp_port=0, username='', password=''):
-    """Return a server list that contains one permanent built-in entry."""
+def ensure_builtin_server(servers, http_port=0, htsp_port=0, username='', password='', available=None):
+    """Return a server list that contains one permanent built-in entry.
+
+    ``available`` False drops the entry, as when no Tvheadend is packaged.
+    """
     servers = list(servers or [])
-    if not platform_supports_builtin():
+    if available is None:
+        available = platform_supports_builtin()
+    if not available:
         return [server for server in servers if not is_builtin_server(server)]
     url = ''
     htsp = STANDARD_HTSP_PORT

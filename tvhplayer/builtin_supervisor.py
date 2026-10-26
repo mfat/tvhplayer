@@ -20,6 +20,7 @@ try:
         launch_command,
         pick_port_pair,
         serverinfo_ok,
+        set_recordings_dir,
         startup_result,
         stop_leftover_servers,
     )
@@ -38,6 +39,7 @@ except ImportError:
         launch_command,
         pick_port_pair,
         serverinfo_ok,
+        set_recordings_dir,
         startup_result,
         stop_leftover_servers,
     )
@@ -64,6 +66,8 @@ class BuiltinSupervisor(QObject):
         self.htsp_port = int(htsp_port or 0)
         self.username = ''
         self.password = ''
+        # The app's recordings folder, given to the server on every start; '' leaves its own.
+        self.recordings_dir = ''
         self.startup_timeout = STARTUP_TIMEOUT_SECONDS
         self._deadline = 0.0
         self._status = 'stopped'
@@ -185,7 +189,9 @@ class BuiltinSupervisor(QObject):
             return
         result = startup_result(True, self._lines.watch, True)
         if result == 'ready':
-            failed = apply_builtin_defaults(self.http_port, self.username, self.password)
+            failed = apply_builtin_defaults(
+                self.http_port, self.username, self.password, self.recordings_dir
+            )
             if failed:
                 log.warning('Could not apply built-in server defaults: %s', ', '.join(failed))
             self._poll.stop()
@@ -232,6 +238,13 @@ class BuiltinSupervisor(QObject):
             return
         if self._status == 'running':
             self._fail('Built-in Tvheadend stopped.')
+
+    def set_recordings_dir(self, folder: str) -> bool:
+        """Use ``folder`` from the next start, and now when running. False when the server refused it."""
+        self.recordings_dir = folder or ''
+        if not self.recordings_dir or not self.is_running():
+            return True
+        return set_recordings_dir(self.http_port, self.recordings_dir, self.username, self.password)
 
     def _child_alive(self) -> bool:
         return self.process.state() != QProcess.ProcessState.NotRunning

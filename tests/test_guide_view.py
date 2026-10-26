@@ -69,6 +69,9 @@ class _Host:
     def _server_requests_ready(self):
         return True
 
+    def server_recordings_ready(self):
+        return True
+
     def _logo_for(self, reference, backend):
         return None
 

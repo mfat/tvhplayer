@@ -1,4 +1,4 @@
-"""The Settings window: playback at startup, where recordings to this computer go, and imported channels that do not work."""
+"""The Settings window: playback at startup, where recordings go, and imported channels that do not work."""
 
 from __future__ import annotations
 
@@ -32,6 +32,7 @@ HIDE_HELP = (
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
 FOLDER_HELP = 'Recording to this computer saves here without asking for a file name.'
+BUILTIN_FOLDER_HELP = ' The built-in server saves its recordings here too.'
 OPTIONS_HELP = (
     'Added after the format\'s own ffmpeg output options, so they override them, '
     'for example -c:a aac -b:a 128k. Leave empty for the defaults.'
@@ -77,20 +78,21 @@ class SettingsDialog(QDialog):
 
         recordings = QGroupBox('Recordings')
         recordings_layout = QVBoxLayout(recordings)
-        folder_label = QLabel('&Save recordings to this computer in:')
+        folder_label = QLabel('&Save recordings in:')
         recordings_layout.addWidget(folder_label)
         folder_row = QHBoxLayout()
         self.folder_edit = QLineEdit(host.local_recording_dir())
         self.folder_edit.setReadOnly(True)
         self.folder_edit.setPlaceholderText('Chosen the first time you record')
-        describe(self.folder_edit, 'Recordings folder', FOLDER_HELP)
+        folder_text = FOLDER_HELP + (BUILTIN_FOLDER_HELP if getattr(host, 'builtin', None) is not None else '')
+        describe(self.folder_edit, 'Recordings folder', folder_text)
         folder_label.setBuddy(self.folder_edit)
         folder_row.addWidget(self.folder_edit, 1)
         self.folder_btn = QPushButton('&Browse…')
-        describe(self.folder_btn, 'Browse', 'Choose the folder for recordings to this computer.')
+        describe(self.folder_btn, 'Browse', 'Choose the folder for recordings.')
         folder_row.addWidget(self.folder_btn)
         recordings_layout.addLayout(folder_row)
-        folder_help = QLabel(FOLDER_HELP)
+        folder_help = QLabel(folder_text)
         folder_help.setWordWrap(True)
         recordings_layout.addWidget(folder_help)
 

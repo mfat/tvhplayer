@@ -1261,6 +1261,8 @@ class GuideWindow(QDialog):
             else:
                 if event.stop <= int(time.time()):
                     return
+                if not self.host.server_recordings_ready():
+                    return
                 backend.create_dvr_entry_by_event(event.event_id)
                 self._overrides[event.event_id] = RECORDING if event.start <= int(time.time()) else SCHEDULED
                 message = f"Recording {title} on {channel.name}." if event.start <= int(time.time()) else (
@@ -1281,6 +1283,8 @@ class GuideWindow(QDialog):
         if event is None or event.event_id is None or not event.serieslink_uri:
             return
         title = event.title or "this series"
+        if not self.host.server_recordings_ready():
+            return
         try:
             self.host.get_backend().create_autorec_by_series(event.event_id)
         except Exception as e:

@@ -2936,11 +2936,13 @@ class TVHeadendClient(QMainWindow):
             geometry['height']
         )
         
-        # Initialize servers from config
+        # Initialize servers from config. Without a packaged Tvheadend there is no built-in entry.
+        self._builtin_binary = find_bundled_binary() if platform_supports_builtin() else None
         self.servers = ensure_builtin_server(
             self.config_store.servers,
             self.config['builtin_http_port'],
             self.config['builtin_htsp_port'],
+            available=self._builtin_binary is not None,
         )
         self._backend = None
         self._backend_key = None
@@ -2978,13 +2980,16 @@ class TVHeadendClient(QMainWindow):
         self._conversion_timer = QTimer(self)
         self._conversion_timer.timeout.connect(self._tick_conversions)
         self.builtin = None
-        if platform_supports_builtin():
+        if self._builtin_binary is not None:
             self.builtin = BuiltinSupervisor(
-                find_bundled_binary(),
+                self._builtin_binary,
                 builtin_config_dir(self.config_dir),
-                self.config.get('builtin_http_port') or 0,
-                self.config.get('builtin_htsp_port') or 0,
+                self.config['builtin_http_port'],
+                self.config['builtin_htsp_port'],
             )
+            folder = self.local_recording_dir()
+            if ensure_recording_dir(folder):
+                self.builtin.recordings_dir = folder
             self.builtin.ready.connect(self._on_builtin_ready)
             self.builtin.failed.connect(self._on_builtin_failed)
         print(f"Debug: Loaded {len(self.servers)} servers")
@@ -4239,6 +4244,10 @@ class TVHeadendClient(QMainWindow):
             self._mark_playing_channel(scroll=True)
         if self._channels:
             self._show_channel_list()
+        elif is_builtin_server(fetch.server):
+            self._show_channel_state(
+                "The built-in server has no channels yet. Add some with File > Import Playlist…"
+            )
         else:
             self._show_channel_state("This server has no channels yet.")
         self.statusbar.showMessage("Channels loaded successfully")
@@ -4325,6 +4334,8 @@ class TVHeadendClient(QMainWindow):
                 self.statusbar.showMessage("Please select a channel to record")
                 return
 
+            if not self.server_recordings_ready():
+                return
             duration_dialog = RecordingDurationDialog(self, channel, self._programme_on_now(channel))
             if duration_dialog.exec() != QDialog.DialogCode.Accepted:
                 print("Debug: Recording cancelled by user")
@@ -4842,9 +4853,10 @@ class TVHeadendClient(QMainWindow):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.servers = ensure_builtin_server(
                 dialog.servers,
-                self.config.get('builtin_http_port') or 0,
-                self.config.get('builtin_htsp_port') or 0,
+                self.config['builtin_http_port'],
+                self.config['builtin_htsp_port'],
                 *self._builtin_credentials(),
+                available=self.builtin is not None,
             )
             self.config_store.servers = self.servers
             print(f"Debug: Updated servers list, now has {len(self.servers)} servers")
@@ -5638,6 +5650,19 @@ class TVHeadendClient(QMainWindow):
     def set_local_recording_dir(self, folder):
         self.config['local_recording_dir'] = folder
         self.save_config()
+        if self.builtin is not None and not self.builtin.set_recordings_dir(folder):
+            self.statusbar.showMessage("The built-in server keeps its old recordings folder until it starts again.")
+
+    def server_recordings_ready(self):
+        """Before recording on the built-in server: a folder it can save in, asked for if needed."""
+        if not is_builtin_server(self.current_server()):
+            return True
+        folder = self.local_recording_dir()
+        if ensure_recording_dir(folder):
+            if self.builtin is not None and self.builtin.recordings_dir != folder:
+                self.builtin.set_recordings_dir(folder)
+            return True
+        return bool(self._ask_recording_dir(folder))
 
     def recording_format(self):
         return self.config['local_recording_format']
@@ -5754,7 +5779,7 @@ class TVHeadendClient(QMainWindow):
             text = (f"TVHplayer cannot save recordings in {previous}. "
                     "Choose another folder; recordings go there from now on.")
         else:
-            text = ("Choose a folder for recordings to this computer. "
+            text = ("Choose a folder for recordings. "
                     "Recordings go there from now on; you can change it in Settings.")
         box = QMessageBox(QMessageBox.Icon.Information, "Recordings Folder", text, parent=self)
         choose = box.addButton("&Choose Folder…", QMessageBox.ButtonRole.AcceptRole)
@@ -6131,6 +6156,9 @@ class EPGDialog(QDialog):
         
     def schedule_recording(self, entry):
         """Schedule a recording for the selected EPG entry"""
+        parent = self.parent()
+        if parent is not None and hasattr(parent, 'server_recordings_ready') and not parent.server_recordings_ready():
+            return
         try:
             print(f"Debug: Scheduling recording for: {entry.title}")
             self.backend.create_dvr_entry(

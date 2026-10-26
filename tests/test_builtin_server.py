@@ -423,6 +423,45 @@ def test_builtin_server_gets_its_ready_to_use_defaults():
     assert apply_builtin_defaults(_free_port_for_test()) == ['plain login', 'setup wizard off']
 
 
+def test_builtin_server_records_into_the_app_folder():
+    from urllib.parse import parse_qs
+
+    from tvhplayer.core.builtin_server import apply_builtin_defaults
+
+    received = []
+    grid = {'entries': [
+        {'uuid': 'other', 'name': 'Archive', 'storage': '/srv/archive'},
+        {'uuid': 'default', 'name': '', 'storage': '/app/share/tvhplayer'},
+    ]}
+
+    class Api(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers['Content-Length'])
+            received.append((self.path, parse_qs(self.rfile.read(length).decode())))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps(grid if self.path == '/api/dvr/config/grid' else {}).encode())
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.HTTPServer(('127.0.0.1', 0), Api)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert apply_builtin_defaults(server.server_address[1], recordings_dir='/home/me/Videos') == []
+    finally:
+        server.shutdown()
+    saved = [form for path, form in received if path == '/api/idnode/save']
+    assert [json.loads(form['node'][0]) for form in saved] == [{'uuid': 'default', 'storage': '/home/me/Videos'}]
+    assert apply_builtin_defaults(_free_port_for_test(), recordings_dir='/x')[-1] == 'recordings folder'
+
+
+def test_no_builtin_entry_without_a_packaged_tvheadend():
+    servers = ensure_builtin_server([{'name': 'NAS', 'url': 'http://nas:9981'}], available=False)
+    assert servers == [{'name': 'NAS', 'url': 'http://nas:9981'}]
+
+
 def _free_port_for_test():
     import socket
 
