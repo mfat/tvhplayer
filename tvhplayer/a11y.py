@@ -26,6 +26,7 @@ Channels
   Shift+F10        Open the channel menu
   Ctrl+F           Focus channel search
   S                Focus channel search (not while typing in the list)
+  Ctrl+J           Go to the playing channel in the list
 
 Playback
   P                Play the selected channel, or stop playback

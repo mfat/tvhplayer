@@ -952,7 +952,25 @@ class TasksPanel(QFrame):
         convert_action = menu.addAction("Convert for Editing")
         convert_action.setEnabled(self._can_convert(task))
         convert_action.triggered.connect(lambda: self._host.convert_for_editing(task['path']))
+        menu.addSeparator()
+        go_action = menu.addAction("Go to Channel")
+        go_action.setEnabled(bool(task and task.get('channel') and task['kind'] != 'Convert'))
+        go_action.triggered.connect(self.show_selected_channel)
         menu.exec(self.task_table.viewport().mapToGlobal(position))
+
+    def show_selected_channel(self):
+        """Select the selected task's channel in the channel list."""
+        task = self.selected_task()
+        host = self._host
+        if task is None or host is None or not hasattr(host, 'show_channel_in_list'):
+            return
+        entry, job = task.get('entry'), task.get('job')
+        if entry is not None:
+            host.show_channel_in_list(
+                Channel(uuid='', name=task['channel']), matches=entry.matches_channel,
+            )
+        elif job is not None and getattr(job, 'channel', None) is not None:
+            host.show_channel_in_list(Channel.from_raw(job.channel) if isinstance(job.channel, dict) else job.channel)
 
     def _tell(self, host, message):
         statusbar = getattr(host, 'statusbar', None)
@@ -3448,6 +3466,12 @@ class TVHeadendClient(QMainWindow):
         self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(self.fullscreen_action)
 
+        self.go_to_playing_action = QAction("Go to &Playing Channel", self)
+        self.go_to_playing_action.setShortcut("Ctrl+J")
+        self.go_to_playing_action.setStatusTip("Select the channel that is on in the channel list")
+        self.go_to_playing_action.triggered.connect(self.show_playing_channel)
+        view_menu.addAction(self.go_to_playing_action)
+
         setup_action = QAction("Set &Up Channels…", self)
         setup_action.setStatusTip("Add channels from a TV tuner or an IPTV playlist")
         setup_action.triggered.connect(self.show_setup_wizard)
@@ -4092,6 +4116,58 @@ class TVHeadendClient(QMainWindow):
         if scroll and playing_item is not None:
             table.scrollToItem(playing_item)
             table.setCurrentItem(playing_item)
+        self._sync_window_title(playing)
+
+    def _sync_window_title(self, playing):
+        """Put the channel that is on in the title bar, so the taskbar shows it too."""
+        title = f"{playing.name} – TVHplayer" if playing is not None and playing.name else "TVHplayer"
+        if self.windowTitle() != title:
+            self.setWindowTitle(title)
+
+    def show_playing_channel(self):
+        """Select the channel that is on in the channel list."""
+        playing = self._playing_channel()
+        if playing is None:
+            self.statusbar.showMessage("Nothing is playing")
+            return
+        self.show_channel_in_list(playing)
+
+    def show_channel_in_list(self, channel=None, matches=None):
+        """Select a channel in the list and move focus there.
+
+        matches tells whether a listed channel is the one wanted; without it the
+        channel's UUID or HTSP id decides. A search or group that hides the row
+        is cleared first.
+        """
+        if matches is None:
+            matches = lambda listed: self._channels_match(listed, channel)
+        table = self.channel_list
+        row = next(
+            (row for row in range(table.rowCount()) if matches(self.channel_from_row(row))),
+            -1,
+        )
+        if row < 0:
+            name = getattr(channel, 'name', None) or 'That channel'
+            self.statusbar.showMessage(f"{name} is not in the channel list")
+            return False
+        if table.isRowHidden(row):
+            if self.search_box.text():
+                self.search_box.clear()
+            if table.isRowHidden(row) and self.tag_combo.currentIndex() != 0:
+                self.tag_combo.setCurrentIndex(0)
+            row = next(
+                (row for row in range(table.rowCount()) if matches(self.channel_from_row(row))),
+                row,
+            )
+        if self.is_fullscreen:
+            self.toggle_fullscreen()
+        item = table.item(row, COL_NAME)
+        table.setCurrentItem(item)
+        table.scrollToItem(item, QAbstractItemView.ScrollHint.PositionAtCenter)
+        table.setFocus(Qt.FocusReason.OtherFocusReason)
+        found = self.channel_from_row(row)
+        self.statusbar.showMessage(f"Showing {found.name if found else 'the channel'} in the channel list")
+        return True
 
     def _visible_channel_column(self, key):
         return bool(self.channel_options['columns'].get(key))
@@ -5323,6 +5399,10 @@ class TVHeadendClient(QMainWindow):
         guide_action = menu.addAction("Show in TV Guide")
         guide_action.setEnabled(channel is not None)
         guide_action.triggered.connect(lambda: self.show_guide(channel))
+
+        go_action = menu.addAction("Go to Playing Channel")
+        go_action.setEnabled(self._playing_channel() is not None)
+        go_action.triggered.connect(self.show_playing_channel)
 
         menu.addSeparator()
         self._fill_playback_menu(menu)

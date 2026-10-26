@@ -273,6 +273,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             'Record Locally',
             'Show EPG',
             'Show in TV Guide',
+            'Go to Playing Channel',
             '&Audio Track',
             '&Subtitles',
             '&Deinterlace',
@@ -283,6 +284,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             if not action.isSeparator()
         }
         assert enabled['Play'] is False
+        assert enabled['Go to Playing Channel'] is False
         assert enabled['Stop'] is False
         assert enabled['Mute'] is True
         assert enabled['Fullscreen'] is True
@@ -572,6 +574,7 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         app.processEvents()
 
         assert window.channel_list.currentRow() == sport_row
+        assert window.windowTitle() == "Sport – TVHplayer"
         assert window.channel_list.item(sport_row, 2).text() == "Playing"
         assert window.channel_list.item(sport_row, 2).data(
             Qt.ItemDataRole.AccessibleTextRole
@@ -590,6 +593,17 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         assert window.channel_list.item(sport_row, 2).text() == "Playing"
         assert window.channel_list.item(news_row, 2).text() == ""
 
+        # Go to Playing Channel clears a search that hides the row and selects it.
+        window.search_box.setText("News")
+        app.processEvents()
+        assert window.channel_list.isRowHidden(sport_row)
+        window.go_to_playing_action.trigger()
+        app.processEvents()
+        assert window.search_box.text() == ""
+        assert not window.channel_list.isRowHidden(sport_row)
+        assert window.channel_list.currentRow() == sport_row
+        window.channel_list.setCurrentCell(news_row, 1)
+
         window.fetch_channels()
         _wait_for_channels(app, window)
         sport_row = _channel_row(window.channel_list, 'Sport')
@@ -599,6 +613,9 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
 
         window.stop_playback()
         app.processEvents()
+        assert window.windowTitle() == "TVHplayer"
+        window.show_playing_channel()
+        assert window.status_label.text() == "Nothing is playing"
         assert window.channel_list.item(sport_row, 2).text() == ""
         assert window.channel_list.item(sport_row, 1).background().style() == Qt.BrushStyle.NoBrush
         assert "Playing." not in window.channel_list.item(sport_row, 1).data(
@@ -1132,6 +1149,33 @@ def test_tasks_panel_reads_the_server_without_blocking(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def test_tasks_panel_goes_to_the_task_channel(monkeypatch, tmp_path):
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+    news = ui.Channel(uuid='news', name='News', number=1, htsp_id=7)
+    sport = ui.Channel(uuid='sport', name='Sport', number=2, htsp_id=8)
+    try:
+        panel = window.tasks_pane
+        shown = []
+        window.show_channel_in_list = lambda channel=None, matches=None: shown.append(
+            [name for name in ('News', 'Sport')
+             if (matches or (lambda listed: window._channels_match(listed, channel)))(
+                 news if name == 'News' else sport)]
+        )
+        entry = DvrEntry(uuid='e', title='Match', channel_name='Sport', start=1, duration=1, raw={'channel': 8})
+        panel.selected_task = lambda: {'kind': 'Server', 'entry': entry, 'channel': 'Sport'}
+        panel.show_selected_channel()
+        job = types.SimpleNamespace(channel=news)
+        panel.selected_task = lambda: {'kind': 'Local', 'entry': None, 'job': job, 'channel': 'News'}
+        panel.show_selected_channel()
+        assert shown == [['Sport'], ['News']]
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
     from tvhplayer.core.models import Channel, DvrEntry
 
@@ -1364,6 +1408,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         # A recording still going cannot be converted yet.
         assert labels == [
             ('Stop Recording', True), ('Reveal in File Manager', True), ('Convert for Editing', False),
+            ('Go to Channel', True),
         ]
         labels.clear()
         _select_task(panel, 'Scheduled')
