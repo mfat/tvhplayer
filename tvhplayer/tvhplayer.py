@@ -58,7 +58,8 @@ try:
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from .core.playlist_sync import PlaylistSource, server_key
     from .core.playback_status import (
-        SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, signal_report, starting_caption,
+        SCRAMBLED, SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, is_scrambled_notice, receiving,
+        signal_report, starting_caption, stream_path, stream_problem,
     )
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
@@ -140,7 +141,8 @@ except ImportError:
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, server_key
     from core.playback_status import (
-        SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, signal_report, starting_caption,
+        SCRAMBLED, SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, is_scrambled_notice, receiving,
+        signal_report, starting_caption, stream_path, stream_problem,
     )
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
@@ -4711,6 +4713,7 @@ class TVHeadendClient(QMainWindow):
             supervisor.start()
             return
         print(f"Debug: Fetching channels from server: {server['url']}")
+        self._watch_stream_log()
         fetch = ChannelFetch(
             server,
             kinds=self._visible_channel_column('type'),
@@ -4964,6 +4967,7 @@ class TVHeadendClient(QMainWindow):
     def stop_playback(self):
         """Stop current playback"""
         print("Debug: Stopping playback")
+        self._stream = None
         self._stop_start_watch()
         self._awaiting_playback = False
         self._playback_active = False
@@ -5069,8 +5073,11 @@ class TVHeadendClient(QMainWindow):
         channel = getattr(self, '_playback_channel', None)
         name = channel.name if channel is not None else 'This channel'
         level, words = getattr(self, '_start_signal', ('', ''))
+        stream = getattr(self, '_stream', None)
         self.stop_playback()
-        if level and level != SIGNAL_GOOD:
+        if stream is not None and stream['scrambled']:
+            self.statusbar.showMessage(f"{name} could not start. {SCRAMBLED}")
+        elif level and level != SIGNAL_GOOD:
             self.statusbar.showMessage(f"{name} is not working right now. {words}.")
         else:
             self.statusbar.showMessage(f"{name} is not working right now. Try another channel.")
@@ -5097,6 +5104,9 @@ class TVHeadendClient(QMainWindow):
             self.player.show_message(text)
 
     def _on_playback_started(self):
+        stream = getattr(self, '_stream', None)
+        if stream is not None:
+            stream['started'] = True
         self._stop_start_watch()
         self._awaiting_playback = False
         self._set_playback_spinner(False)
@@ -5108,6 +5118,9 @@ class TVHeadendClient(QMainWindow):
             self._show_on_picture(f"{channel.number}  {channel.name}" if channel.number else channel.name)
 
     def _on_playback_failed(self):
+        if not self._awaiting_playback and not self._playback_active:
+            # Already stopped, for example by the server's reason; keep that message.
+            return
         self._stop_start_watch()
         self._awaiting_playback = False
         self._playback_active = False
@@ -5116,7 +5129,64 @@ class TVHeadendClient(QMainWindow):
         self._mark_playing_channel()
         self._set_playback_spinner(False)
         self._protect_video_surface(False)
+        stream = getattr(self, '_stream', None)
+        if stream is not None:
+            # The server's reason may still be on its way; it replaces this message when it comes.
+            stream['failed_at'] = time.monotonic()
+            if stream['scrambled']:
+                self.statusbar.showMessage(f"{stream['name']} could not start. {SCRAMBLED}")
+                return
         self.statusbar.showMessage("Playback failed")
+
+    def _watch_stream_log(self):
+        """Follow the current server's log for why a stream does not start or stops.
+
+        It stays open while the server is in use, so it hears a reason given the
+        moment a stream opens. Tvheadend sends its log only to admin logins; with
+        another login the window falls back to the subscription status.
+        """
+        server = self.current_server()
+        key = self._backend_key_for(server) if server else None
+        if getattr(self, '_stream_log', None) is not None and key == self._stream_log_key:
+            return
+        self._stop_stream_log()
+        if server is None:
+            return
+        watch = ServerLogWatch(server)
+        watch.lines.connect(lambda lines, watch=watch: self._on_stream_log(watch, lines))
+        self._stream_log = watch
+        self._stream_log_key = key
+        watch.start()
+
+    def _stop_stream_log(self):
+        watch = getattr(self, '_stream_log', None)
+        if watch is not None:
+            watch.stop()
+        self._stream_log = None
+        self._stream_log_key = None
+
+    STREAM_REASON_SECONDS = 10
+
+    def _on_stream_log(self, watch, lines):
+        stream = getattr(self, '_stream', None)
+        if watch is not getattr(self, '_stream_log', None) or stream is None:
+            return
+        for line in lines:
+            if is_scrambled_notice(line, stream['name']):
+                stream['scrambled'] = True
+                continue
+            words = stream_problem(line, stream['path'], stream['scrambled'])
+            if words is None:
+                continue
+            failed_at = stream['failed_at']
+            if failed_at is not None and time.monotonic() - failed_at > self.STREAM_REASON_SECONDS:
+                return
+            if failed_at is None:
+                self.stop_playback()
+            self._stream = None
+            outcome = 'stopped' if stream['started'] else 'could not start'
+            self.statusbar.showMessage(f"{stream['name']} {outcome}. {words}")
+            return
 
     def _on_playback_stopped(self):
         # A menu or resize can make the engine tear down its output for a moment.
@@ -5532,6 +5602,7 @@ class TVHeadendClient(QMainWindow):
             self.save_config()
                 
             self.close_backend()
+            self._stop_stream_log()
             self._dvr_entries = []
             self._recording_keys = set()
             self.fetch_channels()
@@ -5870,6 +5941,7 @@ class TVHeadendClient(QMainWindow):
         """Play media from URL"""
         try:
             self._playback_channel = None
+            self._stream = None
             self._show_playback_wait()
             self.player.play(url)
             self.statusbar.showMessage("Starting playback")
@@ -6043,6 +6115,7 @@ class TVHeadendClient(QMainWindow):
         self.hide()
         QApplication.processEvents()
         self.save_config()
+        self._stop_stream_log()
         for job in self._playlist_jobs:
             job.cancel()
         self._guide_timer.stop()
@@ -6963,6 +7036,9 @@ class TVHeadendClient(QMainWindow):
             self._remember_channel(channel)
             stream_url = self.get_backend().stream_url(channel)
             print(f"Debug: Stream URL: {stream_url}")
+            self._watch_stream_log()
+            self._stream = {'path': stream_path(stream_url), 'name': channel.name, 'started': False,
+                            'scrambled': False, 'failed_at': None}
             self._show_playback_wait()
             self._mark_playing_channel(scroll=True)
             self.player.play(stream_url)

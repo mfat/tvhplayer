@@ -3,11 +3,16 @@
 Tvheadend shows a stream subscription as ``Testing`` until its source sends
 data, ``Running`` once it does, and ``Bad`` when the source stayed silent
 past the network's timeout; it then tries the source again.
+
+Why a stream did not start, or stopped, is only in the server's log, in
+``webui`` lines that name the stream's path.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Iterable, Optional, Tuple
+from urllib.parse import urlsplit
 
 from .models import InputStatus, SubscriptionStatus
 
@@ -136,3 +141,67 @@ def starting_caption(subscription: Optional[SubscriptionStatus], elapsed: float,
     if subscription is None:
         return STARTING, False
     return (SLOW if elapsed >= SLOW_SECONDS else WAITING), False
+
+
+# Tvheadend's words for why a stream did not start or stopped, as its log writes them.
+_TUNERS_BUSY = 'All tuners are busy, for example with a recording or another viewer.'
+_NOTHING_SENT = 'The channel sends no picture or sound.'
+STREAM_REASONS = {
+    'No free adapter': _TUNERS_BUSY,
+    'Adapter in use by another subscription': _TUNERS_BUSY,
+    'Subscription overridden': 'A recording or a viewer with a higher priority took the tuner.',
+    'Tuning failed': 'The tuner could not tune to this channel.',
+    'Signal quality too poor': 'The signal is too weak: check the aerial, dish, or cable.',
+    'Source quality is bad': 'The signal is too poor to play: check the aerial, dish, or cable.',
+    'No input detected': 'No signal reaches the tuner: check the aerial, dish, or cable.',
+    'Weak stream': 'The stream from the source is too weak or broken.',
+    'No A/V data received': _NOTHING_SENT,
+    'Other service without A/V streams': _NOTHING_SENT,
+    'No descrambler': 'This channel is scrambled, and the server has nothing to decode it with.',
+    'No access': "This channel is scrambled, and the server's card or subscription has no access to it.",
+    'User access error': 'Your account on the server is not allowed to watch this channel.',
+    'User limit reached': 'Your account on the server is already watching as many streams as it may.',
+    'No assigned adapters': 'No tuner on the server is set up for this channel.',
+    'No source available': 'The server has no working source for this channel.',
+    'No service assigned to channel': 'The channel has no service on the server. Map one to it in Tvheadend.',
+    'No service enabled': "The channel's service is turned off on the server.",
+    'Mux not enabled': "The channel's mux is turned off on the server.",
+    'No channel enabled': 'The channel is turned off on the server.',
+    'Invalid service': "The channel's service on the server is not valid.",
+    'Source deleted': "The channel's source was removed from the server.",
+    'muxer reported errors': 'The server could not prepare the stream for playback.',
+}
+# Not a problem: the player or a person ended the stream.
+_NOT_A_PROBLEM = {'OK', 'Forced OK', 'User request', 'Aborted by user', 'client hung up', 'Source reconfigured'}
+SCRAMBLED = 'This channel is scrambled, and the server cannot decode it.'
+
+_STREAM_LINE = re.compile(r"webui: (?:Couldn't start|Stop) streaming (\S+), (.+?)\s*$")
+_UNDECODABLE = re.compile(r'descrambler: cannot decode packets for service "(.*)"\s*$')
+
+
+def stream_path(url: str) -> str:
+    """The part of a stream URL that the server's log names the stream by."""
+    return urlsplit(url or '').path
+
+
+def stream_problem(line: str, path: str, scrambled: bool = False) -> Optional[str]:
+    """Plain words for why the stream at ``path`` did not start or stopped, from one log line.
+
+    None when the line is about another stream, or the stream ended on request.
+    ``scrambled`` says the server could not decode the channel, which is why
+    nothing came when the reason given is only that nothing came.
+    """
+    match = _STREAM_LINE.search(line or '')
+    if match is None or not path or urlsplit(match.group(1)).path != path:
+        return None
+    reason = match.group(2)
+    if reason in _NOT_A_PROBLEM:
+        return None
+    words = _NOTHING_SENT if reason.startswith('timeout') else STREAM_REASONS.get(reason, f'The server said: {reason}.')
+    return SCRAMBLED if scrambled and words == _NOTHING_SENT else words
+
+
+def is_scrambled_notice(line: str, channel_name: str) -> bool:
+    """The server could not decode a service named like the channel; Tvheadend names services this way by default."""
+    match = _UNDECODABLE.search(line or '')
+    return match is not None and bool(channel_name) and match.group(1).casefold() == channel_name.casefold()
