@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
-    QInputDialog,
+    QInputDialog, QProxyStyle,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
@@ -3183,6 +3183,7 @@ class TVHeadendClient(QMainWindow):
             app.setApplicationDisplayName("TVHplayer")
             if not app.desktopFileName():
                 app.setDesktopFileName("io.github.mfat.tvhplayer")
+        app.setStyle(NoDialogButtonIconsStyle(app.style().name()))
         geometry = self.config['window_geometry']
         self.setGeometry(
             geometry['x'],
@@ -6896,6 +6897,15 @@ class EPGDialog(QDialog):
                 "Error",
                 f"Failed to schedule recording: {str(e)}"
             )
+
+class NoDialogButtonIconsStyle(QProxyStyle):
+    """The desktop style, without icons on dialog buttons (OK, Cancel, Yes, No...)."""
+
+    def styleHint(self, hint, option=None, widget=None, returnData=None):
+        if hint == QStyle.StyleHint.SH_DialogButtonBox_ButtonsHaveIcons:
+            return 0
+        return super().styleHint(hint, option, widget, returnData)
+
 
 def main():
     """Main entry point for the application"""
