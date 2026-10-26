@@ -31,6 +31,13 @@ def test_missing_file_uses_defaults(tmp_path):
     assert json.loads((tmp_path / 'missing.conf').read_text())['volume'] == 50
 
 
+def test_saved_volume_keeps_silence_and_stays_in_range(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    for saved, loaded in ((0, 0), (73, 73), (250, 100), ('loud', 50)):
+        path.write_text(json.dumps({'volume': saved}), encoding='utf-8')
+        assert ConfigStore(path).data['volume'] == loaded
+
+
 def test_playlists_are_saved_and_cleaned(tmp_path):
     path = tmp_path / 'tvhplayer.conf'
     path.write_text(json.dumps({'playlists': [

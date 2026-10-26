@@ -33,9 +33,10 @@ class VlcPlayer(Player):
         self._events_bound = False
         self._window_id = None
         self._deinterlace = DEINTERLACE_AUTO
-        # libvlc reads -1 and drops mute changes while no sound output is open,
-        # so the wanted state is kept here and applied once the output opens.
+        # libvlc reads -1 and drops mute and volume changes while no sound output
+        # is open, so the wanted state is kept here and applied once the output opens.
         self._muted = False
+        self._volume = None
         _prepare_frozen_plugins()
         # libvlc ignores no_proxy, so a local or LAN server would go through the proxy.
         hide_http_proxy_from_vlc()
@@ -81,7 +82,7 @@ class VlcPlayer(Player):
         # Sent when a new sound output opens. libvlc must not be called on its thread.
         audio_volume = getattr(event, 'MediaPlayerAudioVolume', None)
         if audio_volume is not None:
-            manager.event_attach(audio_volume, lambda _event: self._schedule(self._apply_mute))
+            manager.event_attach(audio_volume, lambda _event: self._schedule(self._apply_audio))
         self._events_bound = True
 
     def audio_tracks(self):
@@ -151,7 +152,9 @@ class VlcPlayer(Player):
 
     def _replace_media_player(self):
         old = self._player
-        volume = old.audio_get_volume() if hasattr(old, 'audio_get_volume') else None
+        volume = self._volume
+        if volume is None and hasattr(old, 'audio_get_volume'):
+            volume = old.audio_get_volume()
         try:
             old.stop()
         except Exception:
@@ -218,19 +221,22 @@ class VlcPlayer(Player):
         return bool(self._player and self._player.is_playing())
 
     def set_volume(self, value: int):
-        self._player.audio_set_volume(int(value))
+        self._volume = int(value)
+        self._apply_audio()
 
     def is_muted(self) -> bool:
         return self._muted
 
     def set_muted(self, muted: bool):
         self._muted = bool(muted)
-        self._apply_mute()
+        self._apply_audio()
 
-    def _apply_mute(self):
+    def _apply_audio(self):
         player = self._player
         if player is None:
             return
+        if self._volume is not None and player.audio_get_volume() != self._volume:
+            player.audio_set_volume(self._volume)
         state = player.audio_get_mute()
         if state is None or state < 0 or bool(state) != self._muted:
             player.audio_set_mute(self._muted)

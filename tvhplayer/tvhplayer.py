@@ -3789,6 +3789,8 @@ class TVHeadendClient(QMainWindow):
         self.mute_btn.setToolTip("Mute (M)")
 
         self.volume_slider = bar.volume_slider
+        self.volume_slider.setValue(self.config['volume'])
+        self.player.set_volume(self.volume_slider.value())
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         describe(self.volume_slider, "Volume", "Playback volume from 0 to 100. Keyboard: Ctrl+Up and Ctrl+Down.")
         self.volume_slider.setToolTip("Volume")
@@ -5509,6 +5511,7 @@ class TVHeadendClient(QMainWindow):
     def on_volume_changed(self, value):
         print(f"Debug: Volume changed to {value}")
         self.player.set_volume(value)
+        self.config['volume'] = value
         self._show_on_picture(f"Volume {value}")
 
     def eventFilter(self, obj, event):

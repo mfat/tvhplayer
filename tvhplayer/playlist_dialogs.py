@@ -7,7 +7,7 @@ UI thread and reports the outcome in plain words.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QObject, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -378,6 +378,27 @@ class ImportPlaylistDialog(QDialog):
         self.setAccessibleName('Import Playlist')
         self.setAccessibleDescription('Add TV channels from an M3U playlist to a server.')
         self._build()
+
+    def event(self, event):
+        # Qt sizes a window without asking wrapped text how tall it gets at the
+        # window's width, so lines were squeezed and cut off. Grow to fit them.
+        if event.type() == QEvent.Type.LayoutRequest:
+            QTimer.singleShot(0, self._fit_text)
+        return super().event(event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            QTimer.singleShot(0, self._fit_text)
+
+    def _fit_text(self):
+        layout = self.layout()
+        needed = layout.totalHeightForWidth(self.width()) if layout.hasHeightForWidth() else -1
+        if needed <= 0:
+            return
+        self.setMinimumHeight(needed)
+        if self.height() < needed:
+            self.resize(self.width(), needed)
 
     def _build(self):
         layout = QVBoxLayout(self)

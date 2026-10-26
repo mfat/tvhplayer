@@ -69,6 +69,7 @@ class _FakeVlcPlayer:
         self.key_input = None
         self.mouse_input = None
         self._muted = 0
+        self._volume = -1
         self._playing = False
         self._events = _FakeEvents()
 
@@ -99,8 +100,11 @@ class _FakeVlcPlayer:
     def audio_set_mute(self, value):
         self._muted = value
 
+    def audio_get_volume(self):
+        return self._volume
+
     def audio_set_volume(self, value):
-        return None
+        self._volume = value
 
     def is_playing(self):
         return self._playing
@@ -178,6 +182,17 @@ def _make_player(monkeypatch, tmp_path):
     app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
     window = ui.TVHeadendClient()
     return app, ui, window, fake_player
+
+
+def test_window_starts_at_the_saved_volume(monkeypatch, tmp_path):
+    (tmp_path / 'tvhplayer.conf').write_text('{"volume": 30}', encoding='utf-8')
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        assert window.volume_slider.value() == 30
+        assert fake_player.audio_get_volume() == 30
+    finally:
+        window.close()
+        app.processEvents()
 
 
 def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
@@ -1006,6 +1021,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         window.keyPressEvent(louder)
         assert window.volume_slider.value() == 55
         assert window.status_label.text() == "Volume 55"
+        assert window.config['volume'] == 55
 
         window.channel_model.set_channels([ui.Channel(uuid="abc", name="News", number=4)])
         window.channel_list.setCurrentCell(0, 1)

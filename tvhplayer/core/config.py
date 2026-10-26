@@ -117,7 +117,7 @@ def _normalize(data):
     except (TypeError, ValueError):
         cfg['last_server'] = 0
     try:
-        cfg['volume'] = int(cfg.get('volume') or 50)
+        cfg['volume'] = max(0, min(100, int(cfg.get('volume', 50))))
     except (TypeError, ValueError):
         cfg['volume'] = 50
     cfg['channel_list'] = channel_list_options(data.get('channel_list'))

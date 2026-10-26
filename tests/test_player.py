@@ -43,6 +43,9 @@ class _MediaPlayer:
     def is_playing(self):
         return self.playing
 
+    def audio_get_volume(self):
+        return -1 if self.volume is None else self.volume
+
     def audio_set_volume(self, value):
         self.volume = value
 
@@ -201,7 +204,14 @@ def test_messages_are_drawn_over_the_picture_and_never_carry_over(monkeypatch):
 
 
 class _QuietMediaPlayer(_MediaPlayer):
-    """Like libvlc: no sound output while stopped, so mute reads -1 and changes are lost."""
+    """Like libvlc: no sound output while stopped, so mute and volume read -1 and changes are lost."""
+
+    def audio_get_volume(self):
+        return self.volume if self.playing else -1
+
+    def audio_set_volume(self, value):
+        if self.playing:
+            self.volume = value
 
     def audio_get_mute(self):
         return int(self.muted) if self.playing else -1
@@ -211,7 +221,7 @@ class _QuietMediaPlayer(_MediaPlayer):
             self.muted = bool(value)
 
 
-def test_mute_state_survives_while_no_sound_output_is_open(monkeypatch):
+def test_mute_and_volume_survive_while_no_sound_output_is_open(monkeypatch):
     media = _QuietMediaPlayer()
     _install_vlc(monkeypatch, _Instance(media))
     engine = VlcPlayer()
@@ -225,14 +235,17 @@ def test_mute_state_survives_while_no_sound_output_is_open(monkeypatch):
     assert engine.is_muted() is True
 
     engine.set_muted(False)
+    engine.set_volume(35)
     assert engine.is_muted() is False
     engine.play('http://tv.example/b')
     assert media.muted is True
+    media.volume = 56
     media._events.handlers['audio_volume'](None)
     for fn in scheduled:
         fn()
     assert media.muted is False
     assert engine.is_muted() is False
+    assert media.volume == 35
 
 
 def test_messages_are_skipped_without_marquee_support(monkeypatch):
