@@ -446,6 +446,12 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_plays_on_start(self, on):
             self.play = on
 
+        def shows_channel_logos(self):
+            return True
+
+        def set_shows_channel_logos(self, on):
+            self.logos = on
+
         def set_hides_dead_channels(self, on):
             self.hide = on
 
@@ -550,6 +556,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog.format_combo.setCurrentIndex(dialog.format_combo.findData('mp4'))
     assert host.format == 'mp4'
     assert dialog.awake_check.isChecked()
+    assert dialog.logos_check.isChecked()
+    dialog.logos_check.click()
+    assert host.logos is False
     assert dialog.picon_btn.text() == '&Download Picons'
     assert not dialog.picon_remove_btn.isEnabled()
     dialog.picon_btn.click()

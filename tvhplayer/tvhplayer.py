@@ -6411,6 +6411,13 @@ class TVHeadendClient(QMainWindow):
         if self.guide_sources(server) and (added or result.added or result.updated or result.removed):
             self.update_guide(server, automatic=not added)
 
+    def shows_channel_logos(self):
+        return bool(self.channel_options['logos'])
+
+    def set_shows_channel_logos(self, on):
+        # The View menu item saves the option and redraws the list.
+        self._channel_option_actions['logos'].setChecked(bool(on))
+
     def plays_on_start(self):
         return self.config['play_on_start']
 

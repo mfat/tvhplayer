@@ -59,6 +59,7 @@ PICON_HELP = (
     'Picons are channel logos collected by the picons project. TVHplayer shows one for each channel '
     'the server has no logo for, matched by the channel name. The pack is about 25 MB.'
 )
+LOGOS_HELP = "Each channel's logo is shown next to its name in the channel list and the guide."
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 
 
@@ -219,6 +220,10 @@ class SettingsDialog(QDialog):
 
         logos = QGroupBox('Channel logos')
         logos_layout = QVBoxLayout(logos)
+        self.logos_check = QCheckBox('Show channel &logos')
+        self.logos_check.setChecked(host.shows_channel_logos())
+        describe(self.logos_check, description=LOGOS_HELP)
+        logos_layout.addWidget(self.logos_check)
         logos_help = QLabel(PICON_HELP)
         logos_help.setWordWrap(True)
         logos_layout.addWidget(logos_help)
@@ -280,6 +285,7 @@ class SettingsDialog(QDialog):
         self.delete_check.toggled.connect(host.set_deletes_converted_original)
         self.awake_check.toggled.connect(host.set_stays_awake_for_scheduled)
         self.space_spin.editingFinished.connect(self._space_edited)
+        self.logos_check.toggled.connect(host.set_shows_channel_logos)
         self.picon_btn.clicked.connect(self._download_picons)
         self.picon_remove_btn.clicked.connect(self._remove_picons)
         self._picon_job = None

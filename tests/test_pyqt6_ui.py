@@ -2056,6 +2056,14 @@ def test_last_channel_plays_at_start_when_asked(monkeypatch, tmp_path):
 
         window.set_plays_on_start(True)
         assert window.plays_on_start()
+
+        # Settings and View > Channel List share the logos option.
+        window.set_shows_channel_logos(False)
+        assert not window.shows_channel_logos()
+        assert not window._channel_option_actions['logos'].isChecked()
+        assert window.config['channel_list']['logos'] is False
+        window._channel_option_actions['logos'].setChecked(True)
+        assert window.shows_channel_logos()
     finally:
         window.close()
 
