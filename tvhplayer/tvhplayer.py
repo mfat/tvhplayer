@@ -3210,6 +3210,18 @@ class TVHeadendClient(QMainWindow):
         )
         self.manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(self.manage_servers_btn)
+        self.guide_btn = QToolButton()
+        self.guide_btn.setText("TV Guide")
+        self.guide_btn.clicked.connect(lambda: self.show_guide())
+        if not prefers_high_contrast():
+            self.guide_btn.setStyleSheet("QToolButton:focus { border: 2px solid palette(highlight); }")
+        describe(
+            self.guide_btn,
+            "TV guide",
+            "Show what is on every channel, now and later. Keyboard: Ctrl+G.",
+        )
+        self.guide_btn.setToolTip("TV guide (Ctrl+G)")
+        server_layout.addWidget(self.guide_btn)
         left_layout.addLayout(server_layout)
         
     
@@ -3512,6 +3524,7 @@ class TVHeadendClient(QMainWindow):
         order = [
             self.server_combo,
             self.manage_servers_btn,
+            self.guide_btn,
             self.channel_list,
             self.channel_state.retry_btn,
             self.search_box,

@@ -2227,6 +2227,12 @@ def test_tv_guide_opens_from_the_view_menu_at_the_selected_channel(monkeypatch, 
         assert 'server' in guide.grid.message
         window.channel_recordings_changed([])
         assert guide.grid.recordings == {}
+        assert window.guide_btn.accessibleName() == 'TV guide'
+        assert window.guide_btn.text() == 'TV Guide'
+        window.selected_channel = lambda: channels[0]
+        window.guide_btn.click()
+        assert window._guide is guide
+        assert guide.grid.current_channel().name == 'Alpha'
         window.show_guide(channels[0])
         assert window._guide is guide
         assert guide.grid.current_channel().name == 'Alpha'
