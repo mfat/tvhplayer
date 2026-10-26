@@ -157,6 +157,8 @@ class PlayerBar(QWidget):
         self.record_btn = QPushButton()
         self.record_btn.setFixedHeight(36)
         self.record_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Tab focus only, so a mouse click doesn't leave the focus ring behind.
+        self.record_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.record_btn.setStyleSheet(button_stylesheet(
             f"background: {PILL_DARK}; border: none; border-radius: 18px; }}"
             f" QPushButton:hover {{ background: {PILL_DARK_HOVER};",
@@ -199,6 +201,7 @@ class PlayerBar(QWidget):
         self.stop_record_btn = QPushButton(" Stop recording")
         self.stop_record_btn.setFixedHeight(36)
         self.stop_record_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.stop_record_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.stop_record_btn.setIcon(svg_icon(SQUARE_SVG, '#ffffff', 10))
         self.stop_record_btn.setIconSize(QSize(10, 10))
         self.stop_record_btn.setStyleSheet(button_stylesheet(
@@ -216,6 +219,7 @@ class PlayerBar(QWidget):
         self.record_more_btn = QPushButton()
         self.record_more_btn.setFixedSize(30, 36)
         self.record_more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.record_more_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.record_more_btn.setIcon(svg_icon(CHEVRON_SVG, '#ffffff', 10))
         self.record_more_btn.setIconSize(QSize(10, 10))
         self.record_more_btn.setStyleSheet(button_stylesheet(
