@@ -7,6 +7,7 @@ from tvhplayer.core.playlist import (
     FILE_FAILED,
     MAX_PIPE_ARGS,
     NOT_A_PLAYLIST,
+    ONLY_FILMS,
     decode_playlist,
     ffmpeg_command,
     ffmpeg_input,
@@ -70,6 +71,14 @@ def test_parse_skips_xtream_films_and_series():
         'http://example.com/movie/live.m3u8\n'
     )
     assert [entry.name for entry in playlist.entries] == ['News', 'Movie Channel']
+    assert playlist.entries[0].groups == ['News']
+    assert playlist.films == 2
+
+
+def test_playlist_of_only_films_says_so():
+    with pytest.raises(PlaylistError) as info:
+        parse_playlist('#EXTM3U\n#EXTINF:-1,A Film\nhttp://xtream.example/movie/u/p/1.mkv\n')
+    assert str(info.value) == ONLY_FILMS
 
 
 def test_decode_falls_back_to_latin1():

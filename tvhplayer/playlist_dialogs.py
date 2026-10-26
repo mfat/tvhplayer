@@ -236,6 +236,7 @@ class PlaylistJob(QObject):
                 checkpoint=lambda: task.checkpoint.emit(source.to_dict()),
                 check=self._hide_failed,
             )
+            result.films = self._playlist.films
             # Removed duplicates and newly hidden channels are already gone from the server.
             task.channels_changed.emit()
             # A server on this computer takes the guide with the other guide sources.

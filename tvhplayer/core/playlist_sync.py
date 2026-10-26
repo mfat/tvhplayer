@@ -97,6 +97,8 @@ class SyncResult:
     skipped: List[SkippedEntry] = field(default_factory=list)
     cancelled: bool = False
     guide_failed: bool = False
+    # Films and series episodes the playlist lists, which are not imported.
+    films: int = 0
     # Channels whose stream passed the server's scan, and names of those that failed.
     working: int = 0
     not_working: List[str] = field(default_factory=list)
@@ -174,6 +176,11 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
         message += ' 1 entry could not be added.' if count == 1 else f' {count} entries could not be added.'
     if result.guide_failed:
         message += ' The program guide could not be loaded.'
+    if result.films and first_import:
+        message += (
+            ' 1 film or series episode was left out' if result.films == 1
+            else f' {result.films:,} films and series episodes were left out'
+        ) + ' because TVHplayer imports only TV channels.'
     return message
 
 

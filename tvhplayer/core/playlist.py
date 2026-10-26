@@ -25,6 +25,7 @@ NO_CHANNELS = 'This playlist has no channels TVHplayer can add.'
 DOWNLOAD_FAILED = 'Could not download the playlist. Check the address and your internet connection.'
 FILE_FAILED = 'Could not open the playlist file.'
 TOO_LARGE = 'This playlist is too large to import.'
+ONLY_FILMS = 'This playlist has only films and series, and TVHplayer imports only TV channels.'
 
 MAX_PLAYLIST_BYTES = 256 * 1024 * 1024
 DOWNLOAD_TIMEOUT = 30
@@ -36,8 +37,10 @@ MAX_PIPE_ARGS = 63
 
 _ATTRIBUTE = re.compile(r'''([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"',]+))''')
 _CHANNEL_NUMBER = re.compile(r'^\d+(\.\d+)?$')
-# Xtream Codes servers list films and series episodes as /movie/<user>/<pass>/<id>.<ext>;
-# they are not TV channels, and a large server lists hundreds of thousands of them.
+# Xtream Codes servers list films and series episodes as /movie/<user>/<pass>/<id>.<ext>.
+# As a channel a film always starts from the beginning and Tvheadend restarts it when
+# it ends, and a large server lists hundreds of thousands of them: each would be a mux,
+# service, and channel the server opens once to scan.
 _VOD_PATH = re.compile(r'^/(movie|series)/[^/]+/[^/]+/[^/]+$')
 _HEADER_NAMES = {
     'user-agent': 'User-Agent',
@@ -70,6 +73,8 @@ class PlaylistEntry:
 class Playlist:
     entries: List[PlaylistEntry]
     guide_url: str = ''
+    # Films and series episodes left out; see _VOD_PATH.
+    films: int = 0
 
 
 @dataclass
@@ -138,7 +143,7 @@ def playlist_name(location: str) -> str:
 
 
 def parse_playlist(text: str) -> Playlist:
-    """Raise ``PlaylistError`` when the text is not an M3U playlist."""
+    """Raise ``PlaylistError`` when the text is not an M3U playlist or has only films."""
     lines = (text or '').lstrip('﻿').splitlines()
     while lines and not lines[0].strip():
         lines.pop(0)
@@ -156,6 +161,7 @@ def parse_playlist(text: str) -> Playlist:
             break
 
     entries = []
+    films = 0
     pending = None
     extgrp: List[str] = []
     for raw in lines[1:]:
@@ -164,8 +170,8 @@ def parse_playlist(text: str) -> Playlist:
             continue
         upper = line.upper()
         if upper.startswith('#EXTINF:'):
-            attrs, name = _extinf(line[8:])
-            pending = {'attrs': attrs, 'name': name, 'headers': {}}
+            # Read only once its address shows it is a channel, not a film.
+            pending = {'extinf': line[8:], 'headers': {}}
         elif upper.startswith('#EXTGRP:'):
             extgrp = _split_groups(line[8:], ';')
         elif upper.startswith('#EXTVLCOPT:'):
@@ -173,28 +179,31 @@ def parse_playlist(text: str) -> Playlist:
             header = _VLC_HEADERS.get(key.strip().lower())
             if header and value.strip():
                 if pending is None:
-                    pending = {'attrs': {}, 'name': '', 'headers': {}}
+                    pending = {'extinf': None, 'headers': {}}
                 pending['headers'][header] = value.strip()
         elif line.startswith('#'):
             continue
         else:
-            info = pending or {'attrs': {}, 'name': '', 'headers': {}}
+            info = pending or {'extinf': None, 'headers': {}}
             pending = None
             url, url_headers = _split_url(line)
             if _is_vod(url):
+                films += 1
                 continue
             headers = dict(info['headers'])
             headers.update(url_headers)
-            attrs = info['attrs']
+            attrs, name = _extinf(info['extinf']) if info['extinf'] is not None else ({}, '')
             if 'group-title' in attrs:
                 groups = _split_groups(attrs['group-title'], ';')
             elif 'tvh-tags' in attrs:
                 groups = _split_groups(attrs['tvh-tags'], '|')
             else:
                 groups = list(extgrp)
-            name = info['name'] or attrs.get('tvg-name', '').strip() or _name_from_url(url)
+            name = name or attrs.get('tvg-name', '').strip() or _name_from_url(url)
             entries.append(PlaylistEntry(name=name, url=url, headers=headers, groups=groups, attrs=attrs))
-    return Playlist(entries=entries, guide_url=guide_url)
+    if films and not entries:
+        raise PlaylistError(ONLY_FILMS)
+    return Playlist(entries=entries, guide_url=guide_url, films=films)
 
 
 def _is_vod(url: str) -> bool:

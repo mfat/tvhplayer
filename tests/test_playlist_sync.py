@@ -526,6 +526,11 @@ def test_check_messages_read_naturally():
 
 def test_result_messages_read_naturally():
     assert result_message('ir', SyncResult(added=1, working=1), True) == 'Added 1 channel from ir.'
+    assert result_message('ir', SyncResult(added=1, films=244693), True) == (
+        'Added 1 channel from ir. 244,693 films and series episodes were left out '
+        'because TVHplayer imports only TV channels.'
+    )
+    assert result_message('ir', SyncResult(films=2), False) == 'The channels from ir are up to date.'
     assert result_message('ir', SyncResult(added=3, working=1, not_working=['b', 'c']), True) == (
         'Added 3 channels from ir. 2 are hidden because they are not working.'
     )
