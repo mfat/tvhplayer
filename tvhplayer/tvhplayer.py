@@ -6096,7 +6096,7 @@ class TVHeadendClient(QMainWindow):
         if is_builtin_server(self.current_server()):
             self.fetch_channels()
         self._refresh_builtin_playlists()
-        self._update_due_guides()
+        self._update_due_guides(started=find_builtin_server(self.servers))
 
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
@@ -6394,13 +6394,18 @@ class TVHeadendClient(QMainWindow):
             return
         self.statusbar.showMessage(job.message)
 
-    def _update_due_guides(self):
-        """Load the guides of servers on this computer when one of them is due."""
+    def _update_due_guides(self, started=None):
+        """Load the guides of servers on this computer when one of them is due.
+
+        A server that just ``started`` gets them anyway, from the copies kept
+        when none is due: its own EPG may be gone or older than they are.
+        """
         if self._closing:
             return
         for server in self.guide_servers():
             sources = self.guide_sources(server)
-            if not sources or not any(source.is_due() for source in sources):
+            just_started = started is not None and self._same_server(server, started)
+            if not sources or not (just_started or any(source.is_due() for source in sources)):
                 continue
             if is_builtin_server(server) and not (self.builtin is not None and self.builtin.is_running()):
                 continue
