@@ -2330,3 +2330,29 @@ def test_spinner_shows_tuner_signal(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_conflict_dialog_makes_the_chosen_recording_important(monkeypatch, tmp_path):
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        entries = [
+            DvrEntry(uuid='a', title='News', channel_name='BBC ONE', start=1_800_000_000, duration=3600),
+            DvrEntry(uuid='b', title='Film', channel_name='ITV', start=1_800_001_800, duration=7200),
+        ]
+        dialog = ui.RecordingConflictDialog(entries, 1, window)
+        assert dialog.list.count() == 2
+        assert dialog.list.item(1).text().startswith('Film on ITV, ')
+        dialog.list.setCurrentRow(1)
+        updates = []
+        backend = types.SimpleNamespace(update_dvr_entry=lambda entry, update: updates.append((entry, update)))
+        monkeypatch.setattr(window, 'get_backend', lambda: backend)
+        window._conflict_answered(dialog, ui.QDialog.DialogCode.Accepted)
+        assert updates[0][0] is entries[1]
+        assert updates[0][1].priority == 0
+        window._conflict_answered(dialog, ui.QDialog.DialogCode.Rejected)
+        assert len(updates) == 1
+    finally:
+        window.close()
+        app.processEvents()

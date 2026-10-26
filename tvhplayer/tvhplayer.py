@@ -47,7 +47,7 @@ try:
     from .core.dvr import instant_recording_title
     from .core.errors import TvhAuthError, TvhError
     from .core.server_log import ServerLogFeed
-    from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
+    from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
     from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from .core import convert
     from .core.vlc_player import VlcPlayer
@@ -74,6 +74,7 @@ try:
     from .core.storage import free_bytes, low_space_message
     from .core.channel_edit import ChannelEditor, check_number, is_favourite, number_text
     from .core.tvh_admin import TvhAdmin
+    from .core.conflicts import conflict_key, find_conflicts, read_tuner_use
     from .guide_view import GuideWindow
     from .core.channel_info import (
         channel_icon_reference,
@@ -123,7 +124,7 @@ except ImportError:
     from core.dvr import instant_recording_title
     from core.errors import TvhAuthError, TvhError
     from core.server_log import ServerLogFeed
-    from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
+    from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from core import convert
     from core.vlc_player import VlcPlayer
@@ -150,6 +151,7 @@ except ImportError:
     from core.storage import free_bytes, low_space_message
     from core.channel_edit import ChannelEditor, check_number, is_favourite, number_text
     from core.tvh_admin import TvhAdmin
+    from core.conflicts import conflict_key, find_conflicts, read_tuner_use
     from guide_view import GuideWindow
     from core.channel_info import (
         channel_icon_reference,
@@ -224,6 +226,8 @@ NOW_NEXT_REFRESH_SECONDS = 600
 NOW_NEXT_TICK_MS = 30000
 # How often to check whether a recording needs the computer awake.
 AWAKE_CHECK_MS = 30000
+# How long a server's tuner count and channel muxes are trusted before reading them again.
+TUNER_USE_REFRESH_SECONDS = 600
 DEINTERLACE_CHOICES = (
     (DEINTERLACE_AUTO, "&Automatic", "Deinterlace streams marked as interlaced, such as 1080i broadcasts"),
     (DEINTERLACE_ON, "Al&ways", "Deinterlace every stream, for channels that are interlaced but not marked as such"),
@@ -2795,6 +2799,78 @@ class ChannelFetch(QObject):
         self.loaded.emit(result)
 
 
+class TunerUseFetch(QObject):
+    """Read how many tuners a server has and which mux each channel needs, off the UI thread."""
+
+    done = pyqtSignal(str, object)
+
+    def __init__(self, server, parent=None):
+        super().__init__(parent)
+        self._server = dict(server)
+        self.key = server_key(self._server)
+        self._thread = threading.Thread(target=self._run, name='tuner-use', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _run(self):
+        use = None
+        try:
+            with TvhAdmin(self._server) as admin:
+                use = read_tuner_use(admin)
+        except Exception as exc:
+            # Without admin rights there is nothing to compare; no warnings for this server.
+            print(f"Debug: Could not read the server's tuners: {exc}")
+        try:
+            self.done.emit(self.key, use)
+        except RuntimeError:
+            pass
+
+
+# Tvheadend's highest recording priority.
+PRIORITY_IMPORTANT = 0
+
+
+class RecordingConflictDialog(QDialog):
+    """Recordings that overlap on more muxes than the server has tuners; pick the one to keep."""
+
+    def __init__(self, entries, tuners, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Not Enough Tuners")
+        self.setAccessibleName("Not enough tuners")
+        self.entries = list(entries)
+        layout = QVBoxLayout(self)
+        tuner_words = "1 tuner" if tuners == 1 else f"{tuners} tuners"
+        intro = QLabel(
+            f"These recordings overlap, and the server has only {tuner_words} for them. "
+            "The server records the most important ones; the others will fail.\n\n"
+            "Choose the recording that must not be missed:"
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self.list = QListWidget()
+        self.list.setAccessibleName("Overlapping recordings")
+        for entry in self.entries:
+            start = datetime.fromtimestamp(entry.start)
+            stop = datetime.fromtimestamp(entry.start + entry.duration)
+            self.list.addItem(
+                f"{entry.title} on {entry.channel_name}, {start:%a %H:%M}–{stop:%H:%M}"
+            )
+        self.list.setCurrentRow(0)
+        intro.setBuddy(self.list)
+        layout.addWidget(self.list)
+        buttons = QDialogButtonBox()
+        self.keep_button = buttons.addButton("&Record This One First", QDialogButtonBox.ButtonRole.AcceptRole)
+        buttons.addButton("&Leave as Is", QDialogButtonBox.ButtonRole.RejectRole)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def chosen(self):
+        row = self.list.currentRow()
+        return self.entries[row] if 0 <= row < len(self.entries) else None
+
+
 class ChannelEditJob(QObject):
     """Run one channel change on the server, off the UI thread. Emits ``done`` with an error or ''."""
 
@@ -3105,6 +3181,11 @@ class TVHeadendClient(QMainWindow):
         self._builtin_entries = []
         self._builtin_entries_fetching = False
         self._builtin_entries_read.connect(self._on_builtin_entries_read)
+        # Per server_key(): (when read, TunerUse or None), the reads running, and the warnings given.
+        self._tuner_use = {}
+        self._tuner_use_fetches = {}
+        self._conflicts_shown = set()
+        self._dvr_entries = []
         self._awake_timer = QTimer(self)
         self._awake_timer.timeout.connect(self._check_awake)
         self._awake_timer.start(AWAKE_CHECK_MS)
@@ -4099,6 +4180,51 @@ class TVHeadendClient(QMainWindow):
             self._mark_playing_channel()
         self._sync_record_controls()
         self._sync_awake()
+        self._check_conflicts()
+
+    def _check_conflicts(self):
+        """Warn once about each group of recordings that needs more tuners than the server has."""
+        server = self.current_server()
+        if not server or not self._server_requests_ready():
+            return
+        key = server_key(server)
+        cached = self._tuner_use.get(key)
+        if cached is None or time.monotonic() - cached[0] > TUNER_USE_REFRESH_SECONDS:
+            if key not in self._tuner_use_fetches:
+                fetch = TunerUseFetch(server, self)
+                fetch.done.connect(self._on_tuner_use)
+                self._tuner_use_fetches[key] = fetch
+                fetch.start()
+            if cached is None:
+                return
+        groups = find_conflicts(self._dvr_entries, cached[1], int(time.time()))
+        new = [group for group in groups if conflict_key(group) not in self._conflicts_shown]
+        if not new or getattr(self, '_conflict_dialog', None) is not None:
+            return
+        group = new[0]
+        self._conflicts_shown.add(conflict_key(group))
+        dialog = RecordingConflictDialog(group, cached[1].tuners, self)
+        self._conflict_dialog = dialog
+        dialog.finished.connect(lambda result, dialog=dialog: self._conflict_answered(dialog, result))
+        dialog.open()
+
+    def _on_tuner_use(self, key, use):
+        self._tuner_use_fetches.pop(key, None)
+        self._tuner_use[key] = (time.monotonic(), use)
+        self._check_conflicts()
+
+    def _conflict_answered(self, dialog, result):
+        self._conflict_dialog = None
+        entry = dialog.chosen()
+        if result != QDialog.DialogCode.Accepted or entry is None:
+            return
+        try:
+            self.get_backend().update_dvr_entry(entry, DvrEntryUpdate(priority=PRIORITY_IMPORTANT))
+        except Exception as exc:
+            QMessageBox.warning(self, "Not Enough Tuners", f"Could not change {entry.title}: {exc}")
+            return
+        self.statusbar.showMessage(f"{entry.title} is now the most important recording.")
+        self._refresh_tasks()
 
     def _check_awake(self):
         """Read the built-in server's recordings when it is not the selected server, then decide."""

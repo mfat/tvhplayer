@@ -87,6 +87,8 @@ Playlists on the built-in server are checked again each time TVHplayer starts, s
 
 The built-in server starts each recording 2 minutes early and ends it 5 minutes late, in case the broadcast runs early or late; change the margins under **Settings → Recordings**. The status bar warns when the recordings folder has less than 5 GB free; the amount is set there too.
 
+When scheduled recordings overlap on more channels than the server has tuners, TVHplayer says so once and lets you choose the recording that must not be missed; the server then records that one first. Channels on one multiplex share a tuner, and IPTV channels need none. This needs a login that may read the server's settings.
+
 While this computer is recording, TVHplayer keeps it from going to sleep. It also stays awake while a recording is scheduled on the built-in server or another server on this computer; turn that off under **Settings → Recordings → Sleep**. TVHplayer has to stay open for the built-in server to record.
 
 ## Troubleshooting

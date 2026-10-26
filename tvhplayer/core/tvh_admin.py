@@ -116,6 +116,19 @@ class TvhAdmin:
         )
         return _uuid(data, 'mux')
 
+    def hardware_tree(self, uuid: str = 'root') -> List[dict]:
+        """Hardware and its tuners: ``root`` lists the hardware, a node's uuid its children."""
+        data = self._request('api/hardware/tree', params={'uuid': uuid})
+        return data if isinstance(data, list) else []
+
+    def list_tuner_muxes(self) -> List[dict]:
+        """Muxes received with a tuner. IPTV muxes, which carry a URL, are left out."""
+        return [row for row in self._grid('api/mpegts/mux/grid', hidemode='none') if 'iptv_url' not in row]
+
+    def list_services_all(self) -> List[dict]:
+        """Every service, including unverified and disabled ones."""
+        return self._grid('api/mpegts/service/grid', hidemode='none')
+
     def list_channels(self) -> List[dict]:
         return self._grid('api/channel/grid')
 
