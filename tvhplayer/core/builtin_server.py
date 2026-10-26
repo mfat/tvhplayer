@@ -15,6 +15,7 @@ import os
 import random
 import re
 import secrets
+import shutil
 import signal
 import sys
 import time
@@ -23,6 +24,10 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
+from .ffmpeg_starter import install_starter, starter_path
+from .playlist_sync import retarget_commands
+from .tvh_admin import ADMIN_GRID_LIMIT, SAVE_BATCH
 
 BUILTIN_NAME = 'Built-in Server'
 STANDARD_HTTP_PORT = 9981
@@ -447,6 +452,32 @@ def apply_builtin_defaults(
     if padding is not None and not set_padding(http_port, padding, username, password):
         failed.append('recording margins')
     return failed
+
+
+def use_ffmpeg_starter(
+    http_port: int, username='', password='', which=shutil.which, starter=install_starter,
+) -> int:
+    """Make the server's playlist channels run the app's ffmpeg stand-in.
+
+    Channels imported before it existed run ffmpeg directly. When the stand-in
+    cannot be installed, channels that use it go back to ffmpeg. Returns how
+    many channels changed, or -1 when the server could not be asked.
+    """
+    ffmpeg = which('ffmpeg')
+    if not ffmpeg:
+        return 0
+    stand_in = starter(ffmpeg)
+    target, others = (stand_in, [ffmpeg]) if stand_in else (ffmpeg, [str(starter_path())])
+    form = {'limit': str(ADMIN_GRID_LIMIT), 'hidemode': 'none', 'list': 'uuid,iptv_url'}
+    grid = _post_json(http_port, 'api/mpegts/mux/grid', form, username, password, timeout=30)
+    if not isinstance(grid, dict):
+        return -1
+    changes = retarget_commands(grid.get('entries') or [], target, others)
+    for start in range(0, len(changes), SAVE_BATCH):
+        node = json.dumps(changes[start:start + SAVE_BATCH])
+        if not _post(http_port, 'api/idnode/save', {'node': node}, username, password, timeout=30):
+            return -1
+    return len(changes)
 
 
 def ensure_builtin_server(servers, http_port=0, htsp_port=0, username='', password='', available=None):

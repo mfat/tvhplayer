@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
 from .errors import PlaylistError, TvhAuthError, TvhConnectionError
-from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, ffmpeg_input
+from .ffmpeg_starter import install_starter
+from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, _quote, ffmpeg_input
 
 BUILTIN_SERVER_KEY = 'builtin'
 # Distro packages and the common Docker images install ffmpeg here. A bare
@@ -135,14 +136,31 @@ def server_key(server) -> str:
     return (server.get('url') or '').strip().rstrip('/')
 
 
-def ffmpeg_for_server(server, which=shutil.which) -> str:
-    """The ffmpeg Tvheadend should run. The built-in server shares this app's PATH."""
+def ffmpeg_for_server(server, which=shutil.which, starter=install_starter) -> str:
+    """The ffmpeg Tvheadend should run. The built-in server shares this app's PATH.
+
+    The built-in server runs the app's stand-in, which opens one quality of an HLS stream.
+    """
     if server.get('builtin'):
         path = which('ffmpeg')
         if not path:
             raise PlaylistError(NO_FFMPEG)
-        return path
+        return starter(path) or path
     return REMOTE_FFMPEG
+
+
+def retarget_commands(rows, ffmpeg: str, others) -> List[dict]:
+    """Mux changes that make commands starting with one of ``others`` run ``ffmpeg`` instead."""
+    wanted = 'pipe://' + _quote(ffmpeg) + ' '
+    unwanted = ['pipe://' + _quote(other) + ' ' for other in others if other and other != ffmpeg]
+    changes = []
+    for row in rows:
+        url = row.get('iptv_url') or ''
+        for prefix in unwanted:
+            if row.get('uuid') and url.startswith(prefix):
+                changes.append({'uuid': row['uuid'], 'iptv_url': wanted + url[len(prefix):]})
+                break
+    return changes
 
 
 def find_source(sources: List[PlaylistSource], location: str, key: str) -> Optional[PlaylistSource]:
