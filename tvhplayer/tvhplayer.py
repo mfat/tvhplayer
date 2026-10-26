@@ -3227,6 +3227,8 @@ class ServerLogDialog(QDialog):
 class TVHeadendClient(QMainWindow):
     # DVR entries of the built-in server, read in the background while another server is selected.
     _builtin_entries_read = pyqtSignal(object)
+    # Player callbacks. The engine calls from its own threads; a signal runs them on this one.
+    _player_callback = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -5103,11 +5105,12 @@ class TVHeadendClient(QMainWindow):
         self._splash_idle_timer = QTimer(self)
         self._splash_idle_timer.setSingleShot(True)
         self._splash_idle_timer.timeout.connect(self._show_splash_if_idle)
+        self._player_callback.connect(lambda fn: fn())
         try:
             self.player.set_handlers(
                 self._on_playback_started,
                 self._on_playback_stopped,
-                lambda fn: QTimer.singleShot(0, fn),
+                self._player_callback.emit,
                 on_error=self._on_playback_failed,
             )
         except Exception as e:
