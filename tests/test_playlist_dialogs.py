@@ -409,7 +409,9 @@ def test_check_and_show_every_channel_of_an_imported_playlist(app, tmp_path):
     assert _finish(app, check) == [('failed', dialogs.NETWORK_GONE)]
 
 
-def test_settings_toggle_hiding_and_check_now(app):
+def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
+    from PyQt6.QtWidgets import QFileDialog
+
     from tvhplayer.settings_dialog import SettingsDialog
 
     class Host:
@@ -430,6 +432,12 @@ def test_settings_toggle_hiding_and_check_now(app):
         def set_hides_dead_channels(self, on):
             self.hide = on
 
+        def local_recording_dir(self):
+            return '/videos'
+
+        def set_local_recording_dir(self, folder):
+            self.folder = folder
+
         def check_playlist_channels(self):
             self.checks += 1
             return list(self.jobs)
@@ -443,6 +451,11 @@ def test_settings_toggle_hiding_and_check_now(app):
     assert not dialog.play_check.isChecked()
     dialog.play_check.click()
     assert host.play is True
+    assert dialog.folder_edit.text() == '/videos'
+    monkeypatch.setattr(QFileDialog, 'getExistingDirectory', lambda *_a: '/recordings')
+    dialog.folder_btn.click()
+    assert host.folder == '/recordings'
+    assert dialog.folder_edit.text() == '/recordings'
     dialog.hide_check.click()
     assert host.hide is False
     assert 'shown again' in dialog.status_label.text()

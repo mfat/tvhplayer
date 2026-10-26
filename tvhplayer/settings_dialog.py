@@ -1,4 +1,4 @@
-"""The Settings window: playback at startup, and what to do with imported channels that do not work."""
+"""The Settings window: playback at startup, where recordings to this computer go, and imported channels that do not work."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QVBoxLayout,
 )
@@ -23,6 +25,7 @@ HIDE_HELP = (
     'Channels that fail are hidden and come back once a later test finds them working.'
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
+FOLDER_HELP = 'Recording to this computer saves here without asking for a file name.'
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 
 
@@ -50,6 +53,25 @@ class SettingsDialog(QDialog):
         play_help.setContentsMargins(24, 0, 0, 0)
         playback_layout.addWidget(play_help)
         layout.addWidget(playback)
+
+        recordings = QGroupBox('Recordings')
+        recordings_layout = QVBoxLayout(recordings)
+        folder_label = QLabel('&Save recordings to this computer in:')
+        recordings_layout.addWidget(folder_label)
+        folder_row = QHBoxLayout()
+        self.folder_edit = QLineEdit(host.local_recording_dir())
+        self.folder_edit.setReadOnly(True)
+        describe(self.folder_edit, 'Recordings folder', FOLDER_HELP)
+        folder_label.setBuddy(self.folder_edit)
+        folder_row.addWidget(self.folder_edit, 1)
+        self.folder_btn = QPushButton('&Browse…')
+        describe(self.folder_btn, 'Browse', 'Choose the folder for recordings to this computer.')
+        folder_row.addWidget(self.folder_btn)
+        recordings_layout.addLayout(folder_row)
+        folder_help = QLabel(FOLDER_HELP)
+        folder_help.setWordWrap(True)
+        recordings_layout.addWidget(folder_help)
+        layout.addWidget(recordings)
 
         group = QGroupBox('Imported channels')
         group_layout = QVBoxLayout(group)
@@ -80,9 +102,16 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
 
         self.play_check.toggled.connect(host.set_plays_on_start)
+        self.folder_btn.clicked.connect(self._choose_folder)
         self.hide_check.toggled.connect(self._toggled)
         self.check_btn.clicked.connect(self._check)
         self._sync()
+
+    def _choose_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, 'Recordings Folder', self.folder_edit.text())
+        if folder:
+            self.folder_edit.setText(folder)
+            self._host.set_local_recording_dir(folder)
 
     def _toggled(self, on):
         self._host.set_hides_dead_channels(on)

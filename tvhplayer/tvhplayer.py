@@ -10,13 +10,14 @@ from PyQt6.QtWidgets import (
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
     QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
     QFont, QFontDatabase, QFontMetrics, QKeySequence, QPalette, QValidator,
 )
 import html
 import json
+import re
 # Replace this line:
 #from . import resources_rc
 
@@ -1002,6 +1003,9 @@ class TasksPanel(QFrame):
         elapsed = time.time() - started if started else 0
         if running:
             detail = f"{path}, {_clock(elapsed)}"
+            end = getattr(host, '_local_recording_end', None)
+            if end:
+                detail += f", {_clock(max(end - time.time(), 0))} left"
             if getattr(recorder, 'stall_count', 0) > STALL_LIMIT:
                 detail += ", stalled"
             bucket = 'recording'
@@ -1233,17 +1237,20 @@ class MinutesSpinBox(QSpinBox):
 
 
 class RecordingDurationDialog(QDialog):
-    """Record on Server: how long to record, and when it will stop.
+    """Record on Server, or to this computer: how long to record, and when it will stop.
 
     With the programme on now known, "This programme" records until it ends.
+    ``save_dir`` makes it the local version, which names the folder it saves to.
     """
 
     PRESETS = [('30', "30 min", 30), ('60', "1 h", 60), ('120', "2 h", 120), ('240', "4 h", 240)]
     CUSTOM_STEP = 15
 
-    def __init__(self, parent=None, channel=None, event=None):
+    def __init__(self, parent=None, channel=None, event=None, save_dir=None):
         super().__init__(parent)
-        self.setWindowTitle("Record on Server")
+        self._save_dir = save_dir
+        self._title = "Record to This Computer" if save_dir else "Record on Server"
+        self.setWindowTitle(self._title)
         self.setModal(True)
         self._channel = channel
         now = int(time.time())
@@ -1261,8 +1268,9 @@ class RecordingDurationDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 12)
         layout.setSpacing(14)
-        self.setAccessibleName("Record on Server")
-        self.setAccessibleDescription("Choose how long to record the selected channel on the server.")
+        self.setAccessibleName(self._title)
+        where = "on this computer" if self._save_dir else "on the server"
+        self.setAccessibleDescription(f"Choose how long to record the selected channel {where}.")
 
         if self._channel is not None:
             heading = QVBoxLayout()
@@ -1368,6 +1376,13 @@ class RecordingDurationDialog(QDialog):
         summary_layout.addWidget(self.summary_label, 1)
         layout.addWidget(summary)
 
+        if self._save_dir:
+            self.folder_label = QLabel(f"Saved in {self._save_dir}")
+            self.folder_label.setWordWrap(True)
+            self.folder_label.setToolTip("Change the folder in Settings.")
+            _text_color(self.folder_label, '#5b6065')
+            layout.addWidget(self.folder_label)
+
         buttons = QDialogButtonBox()
         cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
         self.record_btn = buttons.addButton(" &Record", QDialogButtonBox.ButtonRole.AcceptRole)
@@ -1434,6 +1449,17 @@ class RecordingDurationDialog(QDialog):
         if event is not None:
             return max(event.stop - int(time.time()), 0)
         return self._minutes() * 60
+
+def default_recording_dir():
+    """The user's Videos folder, or their home folder when there is none."""
+    return QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MoviesLocation) or str(Path.home())
+
+
+def local_recording_name(channel_name, when):
+    """A file name for a recording to this computer, safe on every file system."""
+    safe = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', channel_name).strip(' ._') or 'channel'
+    return f"recording_{safe}_{when.strftime('%Y%m%d_%H%M%S')}.ts"
+
 
 SERVER_STATUS_ROLE = Qt.ItemDataRole.UserRole + 1
 URL_HINT = "Include http:// or https:// and the port."
@@ -5124,21 +5150,16 @@ class TVHeadendClient(QMainWindow):
 
             channel_name = channel.name
             print(f"Debug: Starting local recording for channel: {channel_name}")
-            
-            # Show file save dialog
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            default_filename = f"recording_{channel_name}_{timestamp}.ts"  # Using .ts format initially
-            
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save Recording As",
-                default_filename,
-                "TS Files (*.ts);;MP4 Files (*.mp4);;All Files (*.*)"
-            )
-            
-            if not file_path:  # User cancelled
-                print("Debug: Recording cancelled - no file selected")
+
+            folder = self.local_recording_dir()
+            dialog = RecordingDurationDialog(self, channel, self._programme_on_now(channel), save_dir=folder)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                print("Debug: Recording cancelled by user")
                 return
+            duration = dialog.get_duration()
+            event = dialog.programme_event()
+            os.makedirs(folder, exist_ok=True)
+            file_path = os.path.join(folder, local_recording_name(channel_name, datetime.now()))
 
             stream_url = self.get_backend().stream_url(channel)
             server = self.current_server() or {}
@@ -5153,7 +5174,16 @@ class TVHeadendClient(QMainWindow):
             self.recording_monitor = QTimer()
             self.recording_monitor.timeout.connect(self.check_recording_status)
             self.recording_monitor.start(2000)
-            self.statusbar.showMessage(f"Local recording started: {file_path}")
+            self._local_recording_end = time.time() + duration
+            self._local_recording_timer = QTimer(self)
+            self._local_recording_timer.setSingleShot(True)
+            self._local_recording_timer.timeout.connect(self.stop_local_recording)
+            self._local_recording_timer.start(duration * 1000)
+            if event is not None:
+                until = f"{event.title}, until {datetime.fromtimestamp(event.stop).strftime('%H:%M')}"
+            else:
+                until = f"{duration // 60} minutes"
+            self.statusbar.showMessage(f"Local recording started ({until}): {file_path}")
             self._show_on_picture("Recording to this computer")
             self.start_recording_indicator()
             self._refresh_tasks(server=False)
@@ -5183,8 +5213,8 @@ class TVHeadendClient(QMainWindow):
                     QMessageBox.critical(self, "Recording Error", "Recording failed - check console for errors")
                 return
             if status.stalled:
-                # Keep the ffmpeg process. Restarting opens a save dialog and
-                # would discard the file already being written.
+                # Keep the ffmpeg process. Restarting would discard the file
+                # already being written.
                 if not getattr(self, '_recording_stall_noted', False):
                     self._recording_stall_noted = True
                     self.statusbar.showMessage("Local recording stalled")
@@ -5200,6 +5230,11 @@ class TVHeadendClient(QMainWindow):
             if hasattr(self, 'recording_monitor') and self.recording_monitor is not None:
                 self.recording_monitor.stop()
                 self.recording_monitor = None
+            timer = getattr(self, '_local_recording_timer', None)
+            if timer is not None:
+                timer.stop()
+                self._local_recording_timer = None
+            self._local_recording_end = None
             self.local_recorder.stop()
             self.statusbar.showMessage("Local recording stopped")
             self._show_on_picture("Recording to this computer stopped")
@@ -5414,6 +5449,13 @@ class TVHeadendClient(QMainWindow):
 
     def set_plays_on_start(self, on):
         self.config['play_on_start'] = bool(on)
+        self.save_config()
+
+    def local_recording_dir(self):
+        return self.config.get('local_recording_dir') or default_recording_dir()
+
+    def set_local_recording_dir(self, folder):
+        self.config['local_recording_dir'] = folder
         self.save_config()
 
     def _remember_channel(self, channel):

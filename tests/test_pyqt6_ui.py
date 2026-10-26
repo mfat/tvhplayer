@@ -5,6 +5,8 @@ import time
 import types
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 UI_PATH = ROOT / 'tvhplayer' / 'tvhplayer.py'
@@ -1425,6 +1427,66 @@ def test_stalled_local_recording_is_left_running(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypatch, tmp_path):
+    from tvhplayer.core.models import Channel
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    started = []
+
+    class Recorder:
+        is_running = False
+        file_path = None
+
+        def start(self, url, path, *_auth):
+            started.append(path)
+            self.is_running = True
+            self.file_path = path
+
+        def stop(self):
+            self.is_running = False
+
+    class Dialog:
+        def __init__(self, _parent, _channel, _event, save_dir=None):
+            assert save_dir == str(tmp_path / 'videos')
+
+        def exec(self):
+            return ui.QDialog.DialogCode.Accepted
+
+        def get_duration(self):
+            return 1800
+
+        def programme_event(self):
+            return None
+
+    monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
+    monkeypatch.setattr(ui.QFileDialog, 'getSaveFileName', lambda *_a, **_k: pytest.fail('asked for a file'))
+    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c: 'http://tv/stream')
+    window._programme_on_now = lambda _c: None
+    window.local_recorder = Recorder()
+    window.set_local_recording_dir(str(tmp_path / 'videos'))
+    try:
+        window.start_local_recording(Channel(uuid='c', name='BBC/News'))
+        assert len(started) == 1
+        path = Path(started[0])
+        assert path.parent == tmp_path / 'videos' and path.parent.is_dir()
+        assert path.name.startswith('recording_BBC_News_') and path.suffix == '.ts'
+        assert window._local_recording_timer.interval() == 1800 * 1000
+        window._local_recording_timer.timeout.emit()
+        assert window.local_recorder.is_running is False
+        assert window._local_recording_timer is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_local_recordings_default_to_the_videos_folder(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.config.pop('local_recording_dir', None)
+    assert window.local_recording_dir() == ui.default_recording_dir()
+    window.close()
+    app.processEvents()
 
 
 def test_quit_asks_while_recording_to_this_computer(monkeypatch, tmp_path):
