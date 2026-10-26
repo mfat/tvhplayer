@@ -19,7 +19,8 @@ from .recorder import parse_ffmpeg_options
 
 log = logging.getLogger(__name__)
 
-DEFAULT_CONVERT_OPTIONS = '-c:v libx264 -preset veryfast -crf 18 -c:a copy -movflags +faststart'
+# Broadcast audio comes as MP2, AC-3, E-AC-3 or AAC; AAC is the one every editor opens.
+DEFAULT_CONVERT_OPTIONS = '-c:v libx264 -preset veryfast -crf 18 -c:a aac -b:a 256k -movflags +faststart'
 EDIT_SUFFIX = '_edit'
 EDIT_EXTENSION = '.mp4'
 _STDERR_LIMIT = 64 * 1024

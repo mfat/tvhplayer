@@ -5628,7 +5628,7 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
 
     def convert_options(self):
-        return self.config.get('convert_options') or convert.DEFAULT_CONVERT_OPTIONS
+        return self.config['convert_options'] or convert.DEFAULT_CONVERT_OPTIONS
 
     def set_convert_options(self, text):
         # Kept empty while it is the default, so a better default reaches everyone.
