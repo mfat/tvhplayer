@@ -3466,6 +3466,10 @@ class TVHeadendClient(QMainWindow):
             self.hw_check_timer = QTimer(self)
             self.hw_check_timer.setSingleShot(True)
             self.hw_check_timer.timeout.connect(self.player.log_stats)
+            # Again later: dropped frames that keep rising mean playback cannot keep up.
+            self.hw_check_late_timer = QTimer(self)
+            self.hw_check_late_timer.setSingleShot(True)
+            self.hw_check_late_timer.timeout.connect(self.player.log_stats)
             print(f"Debug: Hardware acceleration configured for {self.engine}")
         except Exception as e:
             print(f"Warning: Could not configure hardware acceleration: {str(e)}")
@@ -5186,9 +5190,10 @@ class TVHeadendClient(QMainWindow):
         self._set_playback_spinner(False)
         self._protect_video_surface(True)
         self._mark_playing_channel()
-        timer = getattr(self, 'hw_check_timer', None)
-        if timer is not None:
-            timer.start(3000)
+        for name, delay in (('hw_check_timer', 3000), ('hw_check_late_timer', 30000)):
+            timer = getattr(self, name, None)
+            if timer is not None:
+                timer.start(delay)
         channel = getattr(self, '_playback_channel', None)
         if channel is not None:
             self.statusbar.showMessage(f"Playing: {channel.name}")

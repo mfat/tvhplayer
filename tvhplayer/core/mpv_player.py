@@ -146,8 +146,12 @@ class MpvPlayer(Player):
         return True
 
     def show_message(self, text: str, duration_ms: int = 3000):
-        """mpv's on-screen text: drawn into the picture, so it shows in fullscreen too."""
-        self._mpv.show_text(text, int(duration_ms))
+        """mpv's on-screen text: drawn into the picture, so it shows in fullscreen too.
+
+        Sent without waiting: while a stream opens, mpv answers late, and the
+        window could not draw frames meanwhile.
+        """
+        self._mpv.command_async('show-text', text, str(int(duration_ms)))
 
     def log_stats(self):
         if not self.is_playing():

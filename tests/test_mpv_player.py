@@ -65,8 +65,8 @@ class _Mpv:
         if args == ('stop',):
             self.idle_active = True
 
-    def show_text(self, text, duration):
-        self.messages.append((text, duration))
+    def command_async(self, *args):
+        self.messages.append(args)
 
     def terminate(self):
         self.terminated = True
@@ -187,6 +187,12 @@ def test_deinterlace_changes_the_running_picture(engine):
     player.set_deinterlace(DEINTERLACE_AUTO)
     assert mpv.deinterlace == 'auto'
     assert player.deinterlace() == DEINTERLACE_AUTO
+
+
+def test_messages_do_not_wait_for_mpv(engine):
+    player, mpv, _seen = engine
+    player.show_message('101  News', 2500)
+    assert mpv.messages == [('show-text', '101  News', '2500')]
 
 
 def test_render_context_gets_the_wayland_display(engine):
