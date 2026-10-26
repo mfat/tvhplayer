@@ -1,6 +1,6 @@
 # Proposal: mpv render engine for Wayland playback
 
-- **Status:** Implemented for source, Debian, RPM and pip installs. The Flatpak still uses libvlc (see Packaging).
+- **Status:** Implemented. libmpv is a required dependency on Linux.
 - **Date:** October 2026
 
 ## Problem
@@ -37,14 +37,14 @@ This is the same arrangement Celluloid uses with GTK: a `GtkGLArea`, `mpv_render
 
 | Session | Engine | `QT_QPA_PLATFORM` |
 | :--- | :--- | :--- |
-| Linux, `WAYLAND_DISPLAY` set, `libmpv.so.2`, python-mpv and `PyQt6.QtOpenGLWidgets` load, and the user has not set `QT_QPA_PLATFORM` | mpv render engine | left unset, so Qt uses Wayland |
-| Linux X11, or the user already set `QT_QPA_PLATFORM` | `VlcPlayer` | existing `setdefault("xcb")` |
-| `libmpv` missing on a Wayland session | `VlcPlayer` | existing `setdefault("xcb")`, and a log line says why |
+| Linux, Qt would run on Wayland (`QT_QPA_PLATFORM` unset with `WAYLAND_DISPLAY` set, or `QT_QPA_PLATFORM` starting with `wayland`), and libmpv, python-mpv and `PyQt6.QtOpenGLWidgets` load | mpv render engine | left as it is, so Qt uses Wayland |
+| Linux X11, or `QT_QPA_PLATFORM=xcb` | `VlcPlayer` | `xcb` |
+| libmpv missing on a Wayland session (a source run without it) | `VlcPlayer` | `xcb`, and a log line says why |
 | Windows, macOS | `VlcPlayer` | unchanged |
 
-`TVHPLAYER_ENGINE=vlc` or `TVHPLAYER_ENGINE=mpv` skips the automatic choice (mpv still needs libmpv). `core/engine.py` makes the choice and `main()` logs it with the reason.
+Settings > General > Playback engine offers Automatic (the table above), mpv, or VLC on Linux. It is saved as `player_engine` and read by `main()` before `QApplication`, so a change applies at the next start; the dialog says which engine is running and whether a restart would change it. mpv chosen on X11 draws through the same OpenGL widget. `TVHPLAYER_ENGINE=vlc` or `TVHPLAYER_ENGINE=mpv` overrides the setting for one launch. `core/engine.py` makes the choice and `main()` logs it with the reason.
 
-`setdefault` remains for the libvlc path. It must not run when the mpv engine is selected. Forcing `xcb` and then asking mpv to render into a Wayland context would put the UI back on XWayland.
+With libvlc, `main()` sets `QT_QPA_PLATFORM=xcb` whenever Qt would otherwise pick Wayland, including when the user set `wayland` themselves: libvlc 3 cannot embed into a Wayland window. It never forces `xcb` for mpv, which would put the UI back on XWayland.
 
 ### Video widget
 
@@ -84,8 +84,8 @@ Audio output is mpv's default. The Flatpak manifest already has `--socket=pulsea
 ### Packaging
 
 - Runtime dependency on Linux: `libmpv.so.2` (mpv 0.41 or another build with client API 2 and the render API). The Python binding is `python-mpv`, alongside `python-vlc`.
-- Debian and RPM: `Recommends: python3-mpv`, which pulls in libmpv. pip: the `mpv` extra. Without them the app uses libvlc as before.
-- Flatpak: not done yet. mpv 0.41 needs FFmpeg 6.1 or newer, libplacebo and libass. The manifest builds FFmpeg 4.4.5 for libvlc, and the KDE 6.8 runtime has neither libplacebo nor libass. Adding mpv means a second FFmpeg build plus those two modules. Until then the Flatpak keeps libvlc and `xcb`.
+- Debian `Depends: python3-mpv` and RPM `Requires: python3-mpv`; each pulls in libmpv. pip and `requirements.txt` require `mpv`.
+- Flatpak: one FFmpeg serves libmpv, libvlc, and the `ffmpeg` command used for local recordings. libvlc moves from 3.0.21 to 3.0.24, which uses FFmpeg 8.1 itself (Debian builds it against 7.1 unpatched), and FFmpeg moves from 4.4.5 to 8.1.3; mpv 0.41 needs 6.1 or newer. libass, libplacebo and libmpv are built as in Celluloid's Flathub manifest, without the parts a TV player does not use (Lua and JavaScript scripting, the `mpv` command, libopenmpt, rubberband, uchardet). The KDE 6.8 SDK already has fribidi, harfbuzz, libva (with Wayland), dav1d, Vulkan, shaderc and lcms2.
 - Windows and macOS packages do not gain libmpv in this pass. They keep `VlcPlayer`.
 - Do not build or ship the unmerged libvlc fork.
 

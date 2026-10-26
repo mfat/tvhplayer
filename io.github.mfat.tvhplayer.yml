@@ -23,6 +23,7 @@ finish-args:
 
 
 modules:
+  # One FFmpeg for libmpv, libvlc, and the ffmpeg command used for local recordings.
   - name: ffmpeg
     config-opts:
       - --enable-pic
@@ -34,10 +35,83 @@ modules:
       - --enable-libmp3lame
       - --enable-libvorbis
       - --enable-libopus
+      - --enable-libdav1d
+      - --enable-vaapi
     sources:
       - type: archive
-        url: https://ffmpeg.org/releases/ffmpeg-4.4.5.tar.xz
-        sha256: f9514e0d3515aee5a271283df71636e1d1ff7274b15853bcd84e144be416ab07
+        url: https://ffmpeg.org/releases/ffmpeg-8.1.3.tar.xz
+        sha256: 7138d28c96d9d3e3af4ee3d8cad72741f8ffb40da90c1112235dea3ecd3178a3
+        x-checker-data:
+          type: anitya
+          project-id: 5405
+          stable-only: true
+          url-template: https://ffmpeg.org/releases/ffmpeg-$version.tar.xz
+
+  # libmpv draws the picture into the window's OpenGL widget, so Qt runs natively on Wayland.
+  # Modules as in Celluloid's Flathub manifest, without the parts a TV player does not use
+  # (Lua and JavaScript scripting, the mpv command, libopenmpt, rubberband, uchardet).
+  - name: libass
+    config-opts:
+      - --disable-static
+    cleanup:
+      - /include
+      - /lib/*.la
+      - /lib/pkgconfig
+    sources:
+      - type: archive
+        url: https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz
+        sha256: 2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc
+        x-checker-data:
+          type: anitya
+          project-id: 1560
+          stable-only: true
+          url-template: https://github.com/libass/libass/releases/download/$version/libass-$version.tar.xz
+
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Ddemos=false
+      - -Dtests=false
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+        x-checker-data:
+          type: git
+          tag-pattern: ^v([\d.]+)$
+
+  - name: libmpv
+    buildsystem: meson
+    config-opts:
+      - -Dlibmpv=true
+      - -Dcplayer=false
+      - -Dbuild-date=false
+      - -Dmanpage-build=disabled
+      - -Dalsa=disabled
+      - -Dlua=disabled
+      - -Djavascript=disabled
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/applications
+      - /share/bash-completion
+      - /share/doc
+      - /share/icons
+      - /share/man
+      - /share/zsh
+    sources:
+      - type: archive
+        url: https://github.com/mpv-player/mpv/archive/v0.41.0.tar.gz
+        sha256: ee21092a5ee427353392360929dc64645c54479aefdb5babc5cfbb5fad626209
+        x-checker-data:
+          type: anitya
+          project-id: 5348
+          stable-only: true
+          url-template: https://github.com/mpv-player/mpv/archive/v$version.tar.gz
 
   - name: libdvbpsi
     sources:
@@ -48,7 +122,8 @@ modules:
   - name: libmpeg2
     sources:
       - type: archive
-        url: http://libmpeg2.sourceforge.net/files/libmpeg2-0.5.1.tar.gz
+        # libmpeg2.sourceforge.net no longer serves it; same file, same checksum.
+        url: https://download.videolan.org/pub/contrib/libmpeg2/libmpeg2-0.5.1.tar.gz
         sha256: dee22e893cb5fc2b2b6ebd60b88478ab8556cb3b93f9a0d7ce8f3b61851871d4
     config-opts:
       - --enable-shared
@@ -64,12 +139,14 @@ modules:
       - --disable-udev
       - --enable-dvbpsi
       - --enable-libmpeg2
+      # No keyring: the app passes its own credentials. 3.0.24 finds libsecret.pc but not its headers.
+      - --disable-secret
     cleanup-commands:
       - /app/lib/vlc/vlc-cache-gen /app/lib/vlc/plugins
     sources:
       - type: archive
-        url: https://get.videolan.org/vlc/3.0.21/vlc-3.0.21.tar.xz
-        sha256: 24dbbe1d7dfaeea0994d5def0bbde200177347136dbfe573f5b6a4cee25afbb0
+        url: https://get.videolan.org/vlc/3.0.24/vlc-3.0.24.tar.xz
+        sha256: e7cab503d1d7d5849b89d2cf0e1ee60d0ef6d012407791b644b9cfc0cc225fdf
         x-checker-data:
           type: anitya
           project-id: 6504
