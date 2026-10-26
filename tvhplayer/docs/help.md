@@ -31,6 +31,13 @@ To connect TVHPlayer to your TVHeadend server:
 4. Enter your TVHeadend username and password.
 5. Save the settings and test the connection.
 
+### Setting up channels
+
+The first time the built-in server starts without channels, **Set Up Channels** opens. You can open it again from **File → Set Up Channels…**, for the built-in server or any server whose login may change its settings.
+
+- **A TV tuner**: TVHplayer lists the tuners the server found, USB and PCIe tuners as well as SAT>IP tuners on your network (**Look Again** searches again). Choose the signal, the tuners to use, and your region or satellite, then **Scan**. The server tries each frequency used there and adds the channels it finds; the TV guide fills in from the broadcast within minutes. Encrypted channels are left out unless you ask for them.
+- **An IPTV playlist**: goes on to **Import Playlist**, described below.
+
 ## Using TVHPlayer
 
 ### Streaming Live TV

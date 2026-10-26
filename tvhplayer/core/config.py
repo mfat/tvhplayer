@@ -76,6 +76,8 @@ def default_config():
         'builtin_padding_late': 5,
         # Warn when the recordings folder has less than this many GB free; 0 never warns.
         'low_space_gb': 5,
+        # Set Up Channels opens by itself once, when the built-in server first has no channels.
+        'setup_offered': False,
     }
 
 
@@ -110,7 +112,7 @@ def _normalize(data):
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
     for key in (
         'play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original',
-        'stay_awake_for_scheduled',
+        'stay_awake_for_scheduled', 'setup_offered',
     ):
         cfg[key] = bool(cfg.get(key))
     for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options'):

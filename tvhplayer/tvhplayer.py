@@ -69,6 +69,7 @@ try:
     )
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from .settings_dialog import SettingsDialog
+    from .setup_wizard import SetupWizard
     from .sleep_inhibit import SleepInhibitor
     from .core.sleep_guard import awake_reason, server_on_this_computer
     from .core.storage import free_bytes, low_space_message
@@ -146,6 +147,7 @@ except ImportError:
     )
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from settings_dialog import SettingsDialog
+    from setup_wizard import SetupWizard
     from sleep_inhibit import SleepInhibitor
     from core.sleep_guard import awake_reason, server_on_this_computer
     from core.storage import free_bytes, low_space_message
@@ -3347,6 +3349,11 @@ class TVHeadendClient(QMainWindow):
         self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(self.fullscreen_action)
 
+        setup_action = QAction("Set &Up Channels…", self)
+        setup_action.setStatusTip("Add channels from a TV tuner or an IPTV playlist")
+        setup_action.triggered.connect(self.show_setup_wizard)
+        file_menu.addAction(setup_action)
+
         import_playlist_action = QAction("&Import Playlist…", self)
         import_playlist_action.setShortcut("Ctrl+I")
         import_playlist_action.triggered.connect(self.import_playlist)
@@ -4578,8 +4585,13 @@ class TVHeadendClient(QMainWindow):
             self._show_channel_list()
         elif is_builtin_server(fetch.server):
             self._show_channel_state(
-                "The built-in server has no channels yet. Add some with File > Import Playlist…"
+                "The built-in server has no channels yet. Add some with File > Set Up Channels…"
             )
+            if not self.config['setup_offered']:
+                # Once, on the first start: offer the wizard instead of an empty list.
+                self.config['setup_offered'] = True
+                self.save_config()
+                QTimer.singleShot(0, self.show_setup_wizard)
         else:
             self._show_channel_state("This server has no channels yet.")
         self.statusbar.showMessage("Channels loaded successfully")
@@ -5952,6 +5964,25 @@ class TVHeadendClient(QMainWindow):
         self.statusbar.showMessage(
             f"Log in as \"{supervisor.username}\". The password is on the clipboard."
         )
+
+    def show_setup_wizard(self):
+        """Add channels from a tuner or a playlist to the selected server, starting the built-in one if needed."""
+        server = self.current_server()
+        if not server:
+            self.statusbar.showMessage("Add a server first.")
+            return
+
+        def ready(server):
+            wizard = SetupWizard(
+                server,
+                on_iptv=lambda server: ImportPlaylistDialog(self, self, server=server).exec(),
+                on_done=self.playlist_imported,
+                parent=self,
+            )
+            self._setup_wizard = wizard
+            wizard.open()
+
+        self.ensure_server_ready(server, ready, self.statusbar.showMessage)
 
     def import_playlist(self):
         ImportPlaylistDialog(self, self).exec()

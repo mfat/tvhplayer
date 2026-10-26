@@ -66,6 +66,10 @@ class TvhAdmin:
         except ValueError as exc:
             raise TvhError(f'Invalid JSON from {path}') from exc
 
+    def request(self, path, data=None, params=None):
+        """One API call: POST with ``data``, GET without. Returns the decoded JSON."""
+        return self._request(path, data=data, params=params)
+
     def _grid(self, path, **params) -> List[dict]:
         data = self._request(path, params=dict(params, limit=ADMIN_GRID_LIMIT))
         return [row for row in data.get('entries') or [] if isinstance(row, dict)]
