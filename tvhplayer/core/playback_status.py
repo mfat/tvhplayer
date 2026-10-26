@@ -184,6 +184,18 @@ def stream_path(url: str) -> str:
     return urlsplit(url or '').path
 
 
+def stream_reason(line: str, path: str) -> Optional[str]:
+    """Tvheadend's own reason the stream at ``path`` did not start or stopped, from one log line.
+
+    None when the line is about another stream, or the stream ended on request.
+    """
+    match = _STREAM_LINE.search(line or '')
+    if match is None or not path or urlsplit(match.group(1)).path != path:
+        return None
+    reason = match.group(2)
+    return None if reason in _NOT_A_PROBLEM else reason
+
+
 def stream_problem(line: str, path: str, scrambled: bool = False) -> Optional[str]:
     """Plain words for why the stream at ``path`` did not start or stopped, from one log line.
 
@@ -191,11 +203,8 @@ def stream_problem(line: str, path: str, scrambled: bool = False) -> Optional[st
     ``scrambled`` says the server could not decode the channel, which is why
     nothing came when the reason given is only that nothing came.
     """
-    match = _STREAM_LINE.search(line or '')
-    if match is None or not path or urlsplit(match.group(1)).path != path:
-        return None
-    reason = match.group(2)
-    if reason in _NOT_A_PROBLEM:
+    reason = stream_reason(line, path)
+    if reason is None:
         return None
     words = _NOTHING_SENT if reason.startswith('timeout') else STREAM_REASONS.get(reason, f'The server said: {reason}.')
     return SCRAMBLED if scrambled and words == _NOTHING_SENT else words

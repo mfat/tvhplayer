@@ -59,7 +59,7 @@ try:
     from .core.playlist_sync import PlaylistSource, server_key
     from .core.playback_status import (
         SCRAMBLED, SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, is_scrambled_notice, receiving,
-        signal_report, starting_caption, stream_path, stream_problem,
+        signal_report, starting_caption, stream_path, stream_problem, stream_reason,
     )
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
@@ -142,7 +142,7 @@ except ImportError:
     from core.playlist_sync import PlaylistSource, server_key
     from core.playback_status import (
         SCRAMBLED, SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, is_scrambled_notice, receiving,
-        signal_report, starting_caption, stream_path, stream_problem,
+        signal_report, starting_caption, stream_path, stream_problem, stream_reason,
     )
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
@@ -5173,18 +5173,20 @@ class TVHeadendClient(QMainWindow):
             return
         for line in lines:
             if is_scrambled_notice(line, stream['name']):
+                print(f"Debug: Server says it cannot decode {stream['name']}")
                 stream['scrambled'] = True
                 continue
             words = stream_problem(line, stream['path'], stream['scrambled'])
             if words is None:
                 continue
+            outcome = 'stopped' if stream['started'] else 'could not start'
+            print(f"Debug: Server says {stream['name']} {outcome}: {stream_reason(line, stream['path'])}")
             failed_at = stream['failed_at']
             if failed_at is not None and time.monotonic() - failed_at > self.STREAM_REASON_SECONDS:
                 return
             if failed_at is None:
                 self.stop_playback()
             self._stream = None
-            outcome = 'stopped' if stream['started'] else 'could not start'
             self.statusbar.showMessage(f"{stream['name']} {outcome}. {words}")
             return
 

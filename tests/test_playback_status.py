@@ -111,3 +111,13 @@ def test_a_scrambled_channel_explains_why_nothing_came():
     assert stream_problem('t webui: Stop streaming /stream/channel/x, No A/V data received', path, True) == SCRAMBLED
     assert stream_problem("t webui: Couldn't start streaming /stream/channel/x, No free adapter", path, True) == \
         STREAM_REASONS['No free adapter']
+
+
+def test_the_servers_own_reason_is_kept_for_the_log():
+    from tvhplayer.core.playback_status import stream_reason
+
+    path = '/stream/channel/x'
+    assert stream_reason("t webui: Couldn't start streaming /stream/channel/x?profile=pass, No free adapter", path) == \
+        'No free adapter'
+    assert stream_reason('t webui: Stop streaming /stream/channel/x, User request', path) is None
+    assert stream_reason('t webui: Stop streaming /stream/channel/y, No access', path) is None
