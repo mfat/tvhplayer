@@ -78,7 +78,7 @@ def test_rpm_builds_the_pinned_tvheadend():
     assert spec['scan_commit'] == pins['DTV_SCAN_TABLES_COMMIT']
     assert spec['dvbcsa_version'] == pins['LIBDVBCSA_VERSION']
     assert spec['hdhomerun_version'] == pins['LIBHDHOMERUN_VERSION']
-    # rpm spells 4.3-2900~gca801fa96 as 4.3^2900.gca801fa96.
+    # rpm spells 4.3-2901~gcc1b558b5 as 4.3^2901.gcc1b558b5.
     assert spec['tvh_version'] == pins['TVHEADEND_VERSION'].replace('-', '^').replace('~', '.')
 
 
