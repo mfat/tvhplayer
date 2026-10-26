@@ -1,7 +1,8 @@
 # The built-in server. These pins match packaging/tvheadend/pins.env;
 # tests/test_packaging_pins.py fails when they disagree.
-%global tvh_commit 51ec612fa22c4c78b4697e4c262c943da9cbd6cc
-%global tvh_version 4.3^2899.g51ec612fa
+%global tvh_repo https://github.com/mfat/tvheadend
+%global tvh_commit ca801fa96748b99ead0e7fc9bc132d0d89da676e
+%global tvh_version 4.3^2900.gca801fa96
 %global scan_commit 31d6fb8f8b86e204518ada99bfb8cf6807c717e5
 %global dvbcsa_version 1.1.0
 %global hdhomerun_version 20250815
@@ -19,7 +20,7 @@ Summary:        Tvheadend desktop client with a built-in server
 License:        GPL-3.0-or-later AND GPL-2.0-only AND GPL-2.0-or-later AND LGPL-2.1-or-later
 URL:            https://github.com/mfat/tvhplayer
 Source0:        %{name}-%{version}.tar.gz
-Source1:        https://github.com/tvheadend/tvheadend/archive/%{tvh_commit}/tvheadend-%{tvh_commit}.tar.gz
+Source1:        %{tvh_repo}/archive/%{tvh_commit}/tvheadend-%{tvh_commit}.tar.gz
 Source2:        https://github.com/tvheadend/dtv-scan-tables/archive/%{scan_commit}/dtv-scan-tables-%{scan_commit}.tar.gz
 Source3:        https://download.videolan.org/pub/videolan/libdvbcsa/%{dvbcsa_version}/libdvbcsa-%{dvbcsa_version}.tar.gz
 Source4:        https://files.pythonhosted.org/packages/5b/ee/7d76eb3b50ccb1397621f32ede0fb4d17aa55a9aa2251bc34e6b9929fdce/%{vlc_wheel}

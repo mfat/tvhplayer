@@ -35,6 +35,7 @@ def test_flatpak_builds_the_pinned_tvheadend():
     pins = load_pins()
     module = manifest_module('tvheadend')
     git = next(source for source in module['sources'] if source['type'] == 'git')
+    assert git['url'] == pins['TVHEADEND_REPO'] + '.git'
     assert git['commit'] == pins['TVHEADEND_COMMIT']
     scan = next(source for source in module['sources'] if source.get('dest') == 'data/dvb-scan')
     assert pins['DTV_SCAN_TABLES_COMMIT'] in scan['url']
@@ -72,11 +73,12 @@ def spec_globals():
 def test_rpm_builds_the_pinned_tvheadend():
     pins = load_pins()
     spec = spec_globals()
+    assert spec['tvh_repo'] == pins['TVHEADEND_REPO']
     assert spec['tvh_commit'] == pins['TVHEADEND_COMMIT']
     assert spec['scan_commit'] == pins['DTV_SCAN_TABLES_COMMIT']
     assert spec['dvbcsa_version'] == pins['LIBDVBCSA_VERSION']
     assert spec['hdhomerun_version'] == pins['LIBHDHOMERUN_VERSION']
-    # rpm spells 4.3-2899~g51ec612fa as 4.3^2899.g51ec612fa.
+    # rpm spells 4.3-2900~gca801fa96 as 4.3^2900.gca801fa96.
     assert spec['tvh_version'] == pins['TVHEADEND_VERSION'].replace('-', '^').replace('~', '.')
 
 

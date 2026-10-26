@@ -46,7 +46,7 @@ fetch_one() {
 cmd_fetch() {
     sources=$1
     mkdir -p "$sources"
-    fetch_one "https://github.com/tvheadend/tvheadend/archive/$TVHEADEND_COMMIT.tar.gz" \
+    fetch_one "$TVHEADEND_REPO/archive/$TVHEADEND_COMMIT.tar.gz" \
         "$sources/$TVH_ARCHIVE" "$TVHEADEND_SHA256"
     fetch_one "https://github.com/tvheadend/dtv-scan-tables/archive/$DTV_SCAN_TABLES_COMMIT.tar.gz" \
         "$sources/$SCAN_ARCHIVE" "$DTV_SCAN_TABLES_SHA256"
