@@ -1,4 +1,6 @@
 import shlex
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import requests
@@ -9,6 +11,7 @@ from tvhplayer.core.playlist import (
     MAX_PIPE_ARGS,
     NOT_A_PLAYLIST,
     ONLY_FILMS,
+    STOPPED,
     decode_playlist,
     ffmpeg_command,
     ffmpeg_input,
@@ -238,6 +241,34 @@ def test_load_playlist_reads_files(tmp_path):
     with pytest.raises(PlaylistError) as info:
         load_playlist(str(tmp_path / 'missing.m3u'))
     assert str(info.value) == FILE_FAILED
+
+
+def test_load_playlist_downloads_and_stops_when_cancelled():
+    body = b'#EXTM3U\n' + b'#EXTINF:-1,A\nhttp://x/a.ts\n' * 20000
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f'http://127.0.0.1:{server.server_address[1]}/get.php'
+    try:
+        assert len(load_playlist(url).entries) == 20000
+        asked = []
+        with pytest.raises(PlaylistError) as info:
+            load_playlist(url, cancelled=lambda: asked.append(True) or len(asked) > 1)
+        assert str(info.value) == STOPPED
+        assert len(asked) == 2
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 class _Reply:

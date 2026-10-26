@@ -208,7 +208,7 @@ class PlaylistJob(QObject):
             return
         self.status.emit('Reading the playlist…')
         location = self.source.location
-        self._run(lambda _task: load_playlist(location), self._loaded)
+        self._run(lambda _task: load_playlist(location, cancelled=lambda: self._cancelled), self._loaded)
 
     def _loaded(self, playlist):
         self._playlist = playlist

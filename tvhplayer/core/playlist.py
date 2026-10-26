@@ -12,7 +12,7 @@ import posixpath
 import re
 import shlex
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlencode, urlsplit, urlunsplit
 
 import requests
@@ -25,6 +25,7 @@ NO_CHANNELS = 'This playlist has no channels TVHplayer can add.'
 DOWNLOAD_FAILED = 'Could not download the playlist. Check the address and your internet connection.'
 FILE_FAILED = 'Could not open the playlist file.'
 TOO_LARGE = 'This playlist is too large to import.'
+STOPPED = 'Import stopped.'
 ONLY_FILMS = 'This playlist has only films and series, and TVHplayer imports only TV channels.'
 
 MAX_PLAYLIST_BYTES = 256 * 1024 * 1024
@@ -110,11 +111,15 @@ def is_web_address(location: str) -> bool:
     return (location or '').strip().lower().startswith(('http://', 'https://'))
 
 
-def load_playlist(location: str) -> Playlist:
-    """Download or read a playlist and parse it. Raises ``PlaylistError``."""
+def load_playlist(location: str, cancelled: Optional[Callable[[], bool]] = None) -> Playlist:
+    """Download or read a playlist and parse it. Raises ``PlaylistError``.
+
+    ``cancelled`` is asked between downloaded chunks; a large playlist can take
+    minutes to download, and the app waits for this when it quits.
+    """
     location = (location or '').strip()
     if is_web_address(location):
-        data = _download(location)
+        data = _download(location, cancelled or (lambda: False))
     else:
         path = unquote(location[7:]) if location.startswith('file://') else location
         try:
@@ -372,7 +377,7 @@ def tvh_split(command: str) -> List[str]:
     return args
 
 
-def _download(url: str) -> bytes:
+def _download(url: str, cancelled: Callable[[], bool]) -> bytes:
     with requests.Session() as session:
         configure_session(session, url)
         try:
@@ -382,6 +387,8 @@ def _download(url: str) -> bytes:
                 chunks = []
                 size = 0
                 for chunk in response.iter_content(64 * 1024):
+                    if cancelled():
+                        raise PlaylistError(STOPPED)
                     size += len(chunk)
                     if size > MAX_PLAYLIST_BYTES:
                         raise PlaylistError(TOO_LARGE)
