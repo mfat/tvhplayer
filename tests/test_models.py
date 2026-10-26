@@ -1,7 +1,8 @@
 from tvhplayer.core.models import Channel, DvrEntry, ServerConfig, recordings_to_stop
 
 
-def test_server_config_defaults_to_http():
+def test_new_server_defaults_to_htsp_and_old_saved_server_keeps_http():
+    assert ServerConfig(name='box', url='http://127.0.0.1:9981').protocol == 'htsp'
     cfg = ServerConfig.from_dict({'name': 'box', 'url': 'http://127.0.0.1:9981'})
     assert cfg.protocol == 'http'
     assert cfg.htsp_port == 9982

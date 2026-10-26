@@ -2142,7 +2142,7 @@ class ServerDialog(QDialog):
             'url': '',
             'username': '',
             'password': '',
-            'protocol': PROTOCOL_HTTP,
+            'protocol': PROTOCOL_HTSP,
             'htsp_port': 9982,
         })
         self.name_input.setFocus()

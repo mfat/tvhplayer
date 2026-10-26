@@ -107,6 +107,7 @@ def test_builtin_entry_is_permanent_and_separate_from_a_local_instance(monkeypat
     assert servers[0]['builtin'] is False
     assert servers[1]['builtin'] is True
     assert servers[1]['name'] == 'Built-in Server'
+    assert servers[1]['protocol'] == 'htsp'
     again = ensure_builtin_server(servers)
     assert len(again) == 2
 

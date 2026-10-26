@@ -107,6 +107,8 @@ def test_add_duplicate_and_remove(ui):
     assert dialog.server_list.currentRow() == 2
     assert dialog.servers[2]['name'] == 'New server'
     assert dialog.name_input.selectedText() == 'New server'
+    assert dialog.servers[2]['protocol'] == 'htsp'
+    assert dialog.protocol_combo.currentData() == 'htsp'
     assert dialog.status_label.text() == "Address needs fixing"
 
     dialog.server_list.setCurrentRow(0)

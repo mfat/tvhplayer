@@ -419,7 +419,7 @@ def ensure_builtin_server(servers, http_port=0, htsp_port=0, username='', passwo
         entry = dict(server)
         entry['name'] = BUILTIN_NAME
         entry['builtin'] = True
-        entry['protocol'] = 'http'
+        entry['protocol'] = 'htsp'
         entry['username'] = username
         entry['password'] = password
         if url:
@@ -432,7 +432,7 @@ def ensure_builtin_server(servers, http_port=0, htsp_port=0, username='', passwo
             'url': url,
             'username': username,
             'password': password,
-            'protocol': 'http',
+            'protocol': 'htsp',
             'htsp_port': htsp,
             'builtin': True,
         })

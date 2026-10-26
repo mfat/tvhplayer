@@ -12,13 +12,14 @@ class ServerConfig:
     url: str
     username: str = ''
     password: str = ''
-    protocol: str = PROTOCOL_HTTP
+    protocol: str = PROTOCOL_HTSP
     htsp_port: int = 9982
     builtin: bool = False
 
     @classmethod
     def from_dict(cls, data):
         data = data or {}
+        # A saved server with no protocol is from before HTSP support: it used HTTP.
         protocol = (data.get('protocol') or PROTOCOL_HTTP).lower()
         if protocol not in (PROTOCOL_HTTP, PROTOCOL_HTSP):
             protocol = PROTOCOL_HTTP
