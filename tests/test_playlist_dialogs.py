@@ -46,6 +46,9 @@ class FakeAdmin:
     def update_network(self, _uuid, _conf):
         pass
 
+    def has_network_bouquets(self, _network_uuid):
+        return True
+
     def list_muxes(self, _network_uuid, fields=None):
         return [dict(conf, uuid=uuid) for uuid, conf in self.muxes.items()]
 

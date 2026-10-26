@@ -40,7 +40,10 @@ from tvhplayer.core.xmltv import load_guide
 class FakeAdmin:
     """New and rescanned muxes stay pending until ``finish_scans``."""
 
-    def __init__(self, dead=()):
+    def __init__(self, dead=(), bouquets=True):
+        self.bouquets = bouquets
+        self.channels = {}
+        self.tags = {}
         self.networks = {}
         self.muxes = {}
         self.services = {}
@@ -69,6 +72,33 @@ class FakeAdmin:
 
     def update_network(self, uuid, conf):
         self.networks[uuid].update(conf)
+
+    def has_network_bouquets(self, network_uuid):
+        return self.bouquets
+
+    def list_channels(self):
+        return [dict(row, uuid=uuid) for uuid, row in self.channels.items()]
+
+    def create_channel(self, conf):
+        uuid = self._uuid()
+        self.channels[uuid] = conf
+        return uuid
+
+    def list_channel_tags(self):
+        return [{'uuid': uuid, 'name': name} for uuid, name in self.tags.items()]
+
+    def create_channel_tag(self, conf):
+        uuid = self._uuid()
+        self.tags[uuid] = conf['name']
+        return uuid
+
+    def channel_names(self):
+        """Names of the channels on a server without bouquets, from their services."""
+        return sorted(
+            self.muxes[self.services[service]['multiplex_uuid']]['iptv_sname']
+            for row in self.channels.values() for service in row['services']
+            if service in self.services and self.services[service]['multiplex_uuid'] in self.muxes
+        )
 
     def list_muxes(self, network_uuid, fields=None):
         return [dict(row, uuid=uuid) for uuid, row in self.muxes.items() if row['network_uuid'] == network_uuid]
@@ -115,6 +145,13 @@ class FakeAdmin:
     def delete(self, uuids):
         self.deleted.extend(uuids)
         for uuid in uuids:
+            if uuid in self.muxes:
+                # Tvheadend 4.2 keeps a channel whose service is deleted.
+                for service in [key for key, row in self.services.items() if row['multiplex_uuid'] == uuid]:
+                    del self.services[service]
+                    for row in self.channels.values():
+                        row['services'] = [other for other in row['services'] if other != service]
+            self.channels.pop(uuid, None)
             self.muxes.pop(uuid, None)
             self.networks.pop(uuid, None)
 
@@ -374,6 +411,55 @@ def test_remove_playlist_deletes_network():
     assert admin.tags_deleted == ['News']
     assert source.network_uuid == ''
     assert source.tags == []
+
+
+GROUPED = (
+    '#EXTM3U\n'
+    '#EXTINF:-1 tvg-id="a" group-title="News",A\nhttp://x/a.ts\n'
+    '#EXTINF:-1 tvg-id="b" group-title="news;Sport",B\nhttp://x/b.ts\n'
+)
+
+
+def test_without_bouquets_the_app_makes_the_channels():
+    admin = FakeAdmin(bouquets=False)
+    admin.tags['t0'] = 'Sport'
+    source = PlaylistSource('List', 'http://x/list.m3u', 'local')
+    sync_playlist(admin, source, _plans(GROUPED))
+    assert admin.mapped == []
+    assert admin.channel_names() == ['A', 'B']
+    # Channels take name and number from their service, and tags match by name without regard to case.
+    assert all(set(row) == {'enabled', 'services', 'tags'} for row in admin.channels.values())
+    assert sorted(admin.tags.values()) == ['News', 'Sport']
+    news = next(uuid for uuid, name in admin.tags.items() if name == 'News')
+    assert sorted(row['tags'] for row in admin.channels.values()) == [[news], [news, 't0']]
+
+    # A refresh makes no second channel.
+    sync_playlist(admin, source, _plans(GROUPED))
+    assert len(admin.channels) == 2
+
+
+def test_without_bouquets_hidden_channels_are_deleted_and_come_back():
+    admin = FakeAdmin(dead={'B'}, bouquets=False)
+    source = PlaylistSource('List', 'http://x/list.m3u', 'local')
+    result = sync_playlist(admin, source, _plans(FIRST))
+    wait_for_checks(admin, source, result, sleep=lambda _s: admin.finish_scans())
+    assert admin.channel_names() == ['A']
+    assert show_all_channels(admin, source) == 1
+    assert admin.channel_names() == ['A', 'B']
+
+
+def test_without_bouquets_removed_streams_take_their_channels():
+    admin = FakeAdmin(bouquets=False)
+    source = PlaylistSource('List', 'http://x/list.m3u', 'local')
+    sync_playlist(admin, source, _plans(FIRST))
+    admin.channels['mine'] = {'services': [], 'tags': []}
+    second = '#EXTM3U\n#EXTINF:-1 tvg-id="a",A\nhttp://x/a.ts\n'
+    sync_playlist(admin, source, _plans(second))
+    assert admin.channel_names() == ['A']
+    # A channel the user made without a service is not the playlist's.
+    assert set(admin.channels) == {next(iter(admin.channels)), 'mine'} and len(admin.channels) == 2
+    remove_playlist(admin, source)
+    assert list(admin.channels) == ['mine']
 
 
 def test_source_round_trips_and_names_its_server():

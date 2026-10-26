@@ -86,6 +86,13 @@ class TvhAdmin:
         data = self._request('api/idnode/load', params={'uuid': uuid})
         return bool(data.get('entries'))
 
+    def has_network_bouquets(self, network_uuid: str) -> bool:
+        """Whether the network can map its services to channels with a bouquet.
+
+        Tvheadend 4.3 and newer can; 4.2 has no such setting.
+        """
+        return 'bouquet' in self._node(network_uuid)
+
     def update_network(self, uuid: str, conf: dict) -> None:
         """Save the fields of ``conf`` that differ on the server."""
         node = self._node(uuid)
@@ -170,6 +177,10 @@ class TvhAdmin:
         params = {param.get('id'): param.get('value') for param in (entries[0].get('params') or [])} if entries else {}
         if not params.get('epgdb_saveafterimport'):
             self._request('api/epggrab/config/save', data={'node': json.dumps({'epgdb_saveafterimport': True})})
+
+    def create_channel(self, conf: dict) -> str:
+        data = self._request('api/channel/create', data={'conf': json.dumps(conf)})
+        return _uuid(data, 'channel')
 
     def list_channel_tags(self) -> List[dict]:
         return self._grid('api/channeltag/grid')

@@ -9,6 +9,10 @@ Tvheadend still scans each new mux once, and a refresh scans the muxes
 whose stream address changed. Only a mux whose scan passed keeps its
 service enabled; disabling a service makes the bouquet delete its channel,
 so dead streams never show. Checking a playlist scans all its muxes again.
+
+Tvheadend 4.2 has no network bouquet, so there TVHplayer does its work:
+``map_channels`` gives each enabled service a channel and deletes the
+channels of disabled ones, and the channels of a mux go before the mux.
 """
 
 from __future__ import annotations
@@ -246,7 +250,10 @@ def show_all_channels(admin, source: PlaylistSource) -> int:
     """Show every channel of the playlist again. Returns how many were hidden."""
     if not admin.network_exists(source.network_uuid):
         return 0
-    return apply_checks(admin, source, hide_failed=False)[3]
+    shown = apply_checks(admin, source, hide_failed=False)[3]
+    if shown:
+        _map_without_bouquet(admin, source)
+    return shown
 
 
 def error_message(exc: Exception, server_name: str, verb: str = 'add') -> str:
@@ -317,6 +324,7 @@ def sync_playlist(
             'max_timeout': NETWORK_CONF['max_timeout'],
             'max_streams': source.stream_limit(),
         })
+    bouquets = admin.has_network_bouquets(source.network_uuid)
 
     rows = {row['uuid']: row for row in admin.list_muxes(source.network_uuid) if row.get('uuid')}
     known = {key: uuid for key, uuid in source.muxes.items() if uuid in rows}
@@ -340,6 +348,8 @@ def sync_playlist(
                     source.muxes[plan.key] = spare.pop(0)
         leftover = [uuid for uuids in untracked.values() for uuid in uuids]
         if leftover:
+            if not bouquets:
+                _delete_channels_of(admin, leftover)
             admin.delete(leftover)
             result.removed += len(leftover)
         checkpoint()
@@ -380,6 +390,8 @@ def sync_playlist(
         result.updated = len(changes)
 
     if not result.cancelled and stale:
+        if not bouquets:
+            _delete_channels_of(admin, [source.muxes[key] for key in stale])
         admin.delete([source.muxes[key] for key in stale])
         for key in stale:
             del source.muxes[key]
@@ -397,10 +409,74 @@ def sync_playlist(
     if check:
         # Hide channels already known not to work before the bouquet maps them.
         apply_checks(admin, source)
-    admin.map_network_bouquet(source.network_uuid)
-    if refresh:
-        admin.delete_orphan_channels(source.network_uuid)
+    if bouquets:
+        admin.map_network_bouquet(source.network_uuid)
+        if refresh:
+            admin.delete_orphan_channels(source.network_uuid)
+    else:
+        map_channels(admin, source)
     return result
+
+
+def map_channels(admin, source: PlaylistSource) -> int:
+    """Do the network bouquet's work on a server without one (Tvheadend 4.2).
+
+    Each enabled service gets a channel, which takes its name, number and
+    icon from the service, and tags named after the mux's groups. A channel
+    whose services are all disabled is deleted. Returns how many channels
+    were added or deleted.
+    """
+    muxes = {row['uuid']: row for row in admin.list_muxes(source.network_uuid, fields=('iptv_tags',))}
+    services = admin.list_services(muxes, fields=('enabled',))
+    ours = {row['uuid'] for row in services}
+    enabled = {row['uuid'] for row in services if row.get('enabled')}
+    mapped = set()
+    unwanted = []
+    for channel in admin.list_channels():
+        linked = set(channel.get('services') or [])
+        if not linked & ours:
+            continue
+        mapped |= linked
+        # A channel the user also gave another service stays.
+        if linked <= ours and not linked & enabled:
+            unwanted.append(channel['uuid'])
+    admin.delete(unwanted)
+
+    # Tvheadend matches tag names without regard to case.
+    tags = {}
+    for row in admin.list_channel_tags():
+        tags.setdefault((row.get('name') or '').lower(), row.get('uuid'))
+    added = 0
+    for service in services:
+        if service['uuid'] in mapped or service['uuid'] not in enabled:
+            continue
+        mux = muxes.get(service.get('multiplex_uuid')) or {}
+        tag_uuids = []
+        for name in (mux.get('iptv_tags') or '').split('\n'):
+            name = name.strip()
+            if not name:
+                continue
+            if not tags.get(name.lower()):
+                tags[name.lower()] = admin.create_channel_tag({'name': name, 'enabled': True})
+            tag_uuids.append(tags[name.lower()])
+        admin.create_channel({'enabled': True, 'services': [service['uuid']], 'tags': tag_uuids})
+        added += 1
+    return added + len(unwanted)
+
+
+def _map_without_bouquet(admin, source: PlaylistSource) -> None:
+    if not admin.has_network_bouquets(source.network_uuid):
+        map_channels(admin, source)
+
+
+def _delete_channels_of(admin, mux_uuids) -> None:
+    """Delete the channels of these muxes, which Tvheadend 4.2 keeps without a stream."""
+    services = {row['uuid'] for row in admin.list_services(set(mux_uuids), fields=('enabled',))}
+    if services:
+        admin.delete([
+            row['uuid'] for row in admin.list_channels()
+            if row.get('services') and set(row['services']) <= services
+        ])
 
 
 def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
@@ -457,6 +533,7 @@ def wait_for_checks(
     while True:
         checked, total, failed, shown_or_hidden = apply_checks(admin, source)
         if shown_or_hidden:
+            _map_without_bouquet(admin, source)
             changed()
         progress(checked, total)
         if checked >= total or cancelled():
@@ -474,6 +551,8 @@ def wait_for_checks(
 def remove_playlist(admin, source: PlaylistSource) -> None:
     """Delete the playlist's network, its channels, and tags no other channel uses."""
     if admin.network_exists(source.network_uuid):
+        if not admin.has_network_bouquets(source.network_uuid):
+            _delete_channels_of(admin, [row['uuid'] for row in admin.list_muxes(source.network_uuid, fields=('uuid',))])
         admin.delete_network(source.network_uuid)
     admin.delete_unused_tags(source.tags)
     source.network_uuid = ''
