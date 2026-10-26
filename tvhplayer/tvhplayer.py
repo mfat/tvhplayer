@@ -55,7 +55,7 @@ try:
     from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from .core import convert
     from .core.vlc_player import VlcPlayer
-    from .core.engine import ENGINE_MPV, ENGINE_VLC, choose_engine
+    from .core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from .core.playlist_sync import PlaylistSource, server_key
     from .core.playback_status import (
@@ -139,7 +139,7 @@ except ImportError:
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from core import convert
     from core.vlc_player import VlcPlayer
-    from core.engine import ENGINE_MPV, ENGINE_VLC, choose_engine
+    from core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, server_key
     from core.playback_status import (
@@ -6651,6 +6651,15 @@ class TVHeadendClient(QMainWindow):
         self.config['play_on_start'] = bool(on)
         self.save_config()
 
+    def player_engine_choice(self):
+        """The Settings choice: automatic, mpv, or VLC. ``self.engine`` is the one running."""
+        return self.config['player_engine']
+
+    def set_player_engine_choice(self, choice):
+        if choice in ENGINE_CHOICES:
+            self.config['player_engine'] = choice
+            self.save_config()
+
     def stays_awake_for_scheduled(self):
         return self.config['stay_awake_for_scheduled']
 
@@ -7292,11 +7301,16 @@ def main():
     """Main entry point for the application"""
     configure_logging()
     try:
-        engine, reason = choose_engine()
+        try:
+            preference = ConfigStore().data['player_engine']
+        except Exception as e:
+            print(f"Debug: Could not read the engine setting: {e}")
+            preference = None
+        engine, reason = choose_engine(preference=preference)
         print(f"Debug: Playback engine: {engine} ({reason})")
-        if engine == ENGINE_VLC:
-            # libvlc 3 embeds only into an X11 window on Linux.
-            os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+        qt_platform = qt_platform_for(engine)
+        if qt_platform:
+            os.environ["QT_QPA_PLATFORM"] = qt_platform
         app = QApplication(sys.argv)
         app.setApplicationName("TVHplayer")
         app.setApplicationDisplayName("TVHplayer")

@@ -26,12 +26,12 @@ Depends: ${shlibs:Depends},
          ${python3:Depends},
          python3-pyqt6,
          python3-vlc,
+         python3-mpv,
          python3-requests,
          python3-psutil,
          qt6-svg-plugins | libqt6svg6,
          vlc,
          ffmpeg
-Recommends: python3-mpv
 Description: Tvheadend desktop client with a built-in server
  A desktop client for Tvheadend for live TV playback and recording.
  .

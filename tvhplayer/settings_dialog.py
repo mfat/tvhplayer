@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -24,15 +26,23 @@ from PyQt6.QtWidgets import (
 try:
     from .a11y import announce_label, describe
     from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
+    from .core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC, choose_engine
 except ImportError:
     from a11y import announce_label, describe
     from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
+    from core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC, choose_engine
 
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
     'Channels that fail are hidden and come back once a later test finds them working.'
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
+ENGINE_HELP = (
+    'Automatic plays with mpv when the desktop uses Wayland and with VLC on X11. '
+    'With VLC on a Wayland desktop, the whole window runs through XWayland and can look soft when scaled. '
+    'A change takes effect the next time TVHplayer starts.'
+)
+ENGINE_NAMES = {ENGINE_MPV: 'mpv', ENGINE_VLC: 'VLC'}
 FOLDER_HELP = 'Recording to this computer saves here without asking for a file name.'
 BUILTIN_FOLDER_HELP = ' The built-in server saves its recordings here too.'
 OPTIONS_HELP = (
@@ -91,6 +101,29 @@ class SettingsDialog(QDialog):
         play_help.setWordWrap(True)
         play_help.setContentsMargins(24, 0, 0, 0)
         playback_layout.addWidget(play_help)
+        self.engine_combo = None
+        # libmpv is used only on Linux; elsewhere VLC is the only engine.
+        if sys.platform.startswith('linux'):
+            engine_row = QHBoxLayout()
+            engine_label = QLabel('Playback &engine:')
+            self.engine_combo = QComboBox()
+            for label, choice in (('Automatic', ENGINE_AUTO), ('mpv', ENGINE_MPV), ('VLC', ENGINE_VLC)):
+                self.engine_combo.addItem(label, choice)
+            self.engine_combo.setCurrentIndex(max(self.engine_combo.findData(host.player_engine_choice()), 0))
+            describe(self.engine_combo, 'Playback engine', ENGINE_HELP)
+            engine_label.setBuddy(self.engine_combo)
+            engine_row.addWidget(engine_label)
+            engine_row.addWidget(self.engine_combo)
+            engine_row.addStretch(1)
+            playback_layout.addLayout(engine_row)
+            engine_help = QLabel(ENGINE_HELP)
+            engine_help.setWordWrap(True)
+            playback_layout.addWidget(engine_help)
+            self.engine_status = QLabel('')
+            self.engine_status.setWordWrap(True)
+            playback_layout.addWidget(self.engine_status)
+            self._show_engine()
+            self.engine_combo.currentIndexChanged.connect(self._engine_chosen)
         general.addWidget(playback)
 
         recordings = QGroupBox('Recordings')
@@ -304,6 +337,24 @@ class SettingsDialog(QDialog):
         height = layout.totalHeightForWidth(width)
         self.setMinimumHeight(height)
         self.resize(width, height)
+
+    def _engine_chosen(self, _index):
+        self._host.set_player_engine_choice(self.engine_combo.currentData())
+        self._show_engine(announce=True)
+
+    def _show_engine(self, announce=False):
+        running = self._host.engine
+        wanted, reason = choose_engine(preference=self.engine_combo.currentData())
+        if wanted == running:
+            text = f'Playing with {ENGINE_NAMES[running]}.'
+        else:
+            text = f'Playing with {ENGINE_NAMES[running]}. Restart TVHplayer to play with {ENGINE_NAMES[wanted]}.'
+        if wanted == ENGINE_VLC and self.engine_combo.currentData() == ENGINE_MPV:
+            text += f' mpv cannot be used: {reason}.'
+        if announce:
+            announce_label(self.engine_status, text)
+        else:
+            self.engine_status.setText(text)
 
     def _show_picons(self, text=None):
         count = self._host.picon_count()

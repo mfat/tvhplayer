@@ -14,6 +14,7 @@ from .channel_info import channel_list_options
 from .guide_feeds import GuideSource
 from .guide_match import Choice
 from .models import ServerConfig
+from .engine import ENGINE_AUTO, ENGINE_CHOICES
 from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES
 from .playlist_sync import PlaylistSource
 from .recorder import DEFAULT_FORMAT, RECORDING_FORMATS
@@ -73,6 +74,8 @@ def default_config():
         # Block sleep until scheduled recordings on this computer are done, not only while recording.
         'stay_awake_for_scheduled': True,
         'deinterlace': DEINTERLACE_AUTO,
+        # Automatic: libmpv where Qt runs on Wayland, libvlc on X11. Read before Qt starts.
+        'player_engine': ENGINE_AUTO,
         # Minutes the built-in server starts recordings early and ends them late.
         'builtin_padding_early': 2,
         'builtin_padding_late': 5,
@@ -132,6 +135,8 @@ def _normalize(data):
             cfg[key] = ''
     if cfg.get('deinterlace') not in DEINTERLACE_MODES:
         cfg['deinterlace'] = DEINTERLACE_AUTO
+    if cfg.get('player_engine') not in ENGINE_CHOICES:
+        cfg['player_engine'] = ENGINE_AUTO
     if cfg.get('local_recording_format') not in RECORDING_FORMATS:
         cfg['local_recording_format'] = DEFAULT_FORMAT
     if not isinstance(cfg.get('last_channel'), dict):
