@@ -22,6 +22,8 @@ DEFAULT_TIMEOUT = 30
 ADMIN_GRID_LIMIT = 200000
 SAVE_BATCH = 100
 BOUQUET_WAIT_SECONDS = 10
+# mpegts_mux_t scan_state that queues a scan, as the web interface's Force Scan does.
+SCAN_PENDING = 1
 
 
 def network_bouquet_source(network_uuid: str) -> str:
@@ -122,6 +124,10 @@ class TvhAdmin:
     def scan_network(self, network_uuid: str) -> None:
         """Queue a scan of every mux in the network."""
         self._request('api/mpegts/network/scan', data={'uuid': network_uuid})
+
+    def scan_muxes(self, uuids: List[str]) -> None:
+        """Queue a scan of these muxes only."""
+        self.save([{'uuid': uuid, 'scan_state': SCAN_PENDING} for uuid in uuids])
 
     def create_mux(self, network_uuid: str, conf: dict) -> str:
         data = self._request(

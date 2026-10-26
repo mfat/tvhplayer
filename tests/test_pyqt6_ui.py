@@ -1969,43 +1969,17 @@ def test_spinner_sits_above_the_video_and_shows_the_server_status(monkeypatch, t
         window.close()
 
 
-def test_startup_refresh_moves_on_when_a_playlist_reaches_its_stream_test(monkeypatch, tmp_path):
-    from PyQt6.QtCore import QObject, pyqtSignal
-
+def test_playlists_are_not_refreshed_when_the_builtin_server_starts(monkeypatch, tmp_path):
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
     try:
+        # The server keeps the channels; only the user's Refresh fetches the playlist again.
         started = []
-
-        class FakeJob(QObject):
-            checking = pyqtSignal()
-            finished = pyqtSignal(str, object)
-            failed = pyqtSignal(str)
-
-            def __init__(self, _host, source, server, parent=None):
-                super().__init__(parent)
-                self.source = source
-                self.server = server
-
-            def start(self):
-                started.append(self)
-
-        server = {'name': 'Built-in Server', 'url': 'http://127.0.0.1:1', 'builtin': True}
-        monkeypatch.setattr(ui, 'PlaylistJob', FakeJob)
-        monkeypatch.setattr(ui, 'find_builtin_server', lambda _servers: server)
-        monkeypatch.setattr(window, '_playlist_refreshed', lambda *_args: None)
-        sources = [ui.PlaylistSource(name, f'http://x/{name}.m3u', 'builtin') for name in ('eng', 'fas', 'ar')]
-        monkeypatch.setattr(window, 'playlist_sources', lambda: sources)
-
-        window._refresh_builtin_playlists()
-        assert [job.source.name for job in started] == ['eng']
-        started[0].checking.emit()
-        assert [job.source.name for job in started] == ['eng', 'fas']
-        started[0].finished.emit('done', [])
-        assert len(started) == 2
-        # 'ar' was removed while it waited; it is skipped, not imported again.
-        sources.pop()
-        started[1].failed.emit('Could not reach it.')
-        assert [job.source.name for job in started] == ['eng', 'fas']
+        monkeypatch.setattr(ui, 'PlaylistJob', lambda *args, **kwargs: started.append(args))
+        monkeypatch.setattr(window, 'playlist_sources', lambda: [ui.PlaylistSource('eng', 'http://x/eng.m3u', 'builtin')])
+        monkeypatch.setattr(window, 'fetch_channels', lambda keep_place=False: None)
+        monkeypatch.setattr(window, '_load_guides_after_start', lambda _server: None)
+        window._on_builtin_ready(23702, 42918)
+        assert started == []
     finally:
         window.close()
 

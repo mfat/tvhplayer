@@ -85,9 +85,9 @@ You can add internet TV channels from an M3U playlist.
 
 The channels appear in the channel list when the import finishes.
 
-Playlists on the built-in server are checked again each time TVHplayer starts, so new channels are added and channels that left the playlist are removed. To manage your playlists, choose **File → Playlists…**:
+The server keeps the channels, so TVHplayer does not read the playlist again by itself. When your provider adds or removes channels, or changes their addresses, refresh it. To manage your playlists, choose **File → Playlists…**:
 
-- **Refresh** reads the playlist again now.
+- **Refresh** reads the playlist again now: new channels are added, channels that left the playlist are removed, and channels whose address changed are tested again.
 - **Remove** removes the playlist and its channels.
 
 ### TV guide for internet channels

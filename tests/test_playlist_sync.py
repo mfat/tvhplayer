@@ -88,6 +88,11 @@ class FakeAdmin:
             if row['network_uuid'] == network_uuid:
                 row['scan_state'] = 1
 
+    def scan_muxes(self, uuids):
+        self.scanned.extend(uuids)
+        for uuid in uuids:
+            self.muxes[uuid]['scan_state'] = 1
+
     def finish_scans(self):
         for row in self.muxes.values():
             if row['scan_state']:
@@ -201,14 +206,37 @@ def test_channels_that_fail_the_scan_are_hidden():
     assert (result.working, result.not_working) == (1, ['B'])
     assert result.skipped[-1] == SkippedEntry('B', NOT_WORKING)
 
-    # A refresh tests every stream again; B keeps its mux and comes back once it works.
+    # A refresh of an unchanged playlist tests nothing.
     admin.dead = {'A'}
     result = sync_playlist(admin, source, _plans(FIRST))
-    assert admin.scanned == [source.network_uuid]
+    assert admin.scanned == []
     assert admin.visible() == ['A']
+
+    # Checking the playlist tests every stream again; B kept its mux and comes back once it works.
+    admin.scan_network(source.network_uuid)
     wait_for_checks(admin, source, result, sleep=lambda _s: admin.finish_scans())
     assert admin.visible() == ['B']
     assert len(admin.muxes) == 2
+
+
+def test_a_refresh_tests_only_streams_whose_address_changed():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    sync_playlist(admin, source, _plans(FIRST))
+    admin.finish_scans()
+    wait_for_checks(admin, source, SyncResult())
+    assert admin.visible() == ['A']
+    renamed = FIRST.replace(',A\n', ',A renamed\n')
+    assert renamed != FIRST
+    sync_playlist(admin, source, _plans(renamed))
+    assert admin.scanned == []
+    moved = FIRST.replace('http://x/b.ts', 'http://x/b-new.ts')
+    assert moved != FIRST
+    admin.dead = set()
+    result = sync_playlist(admin, source, _plans(moved))
+    assert admin.scanned == [source.muxes['id:b']]
+    wait_for_checks(admin, source, result, sleep=lambda _s: admin.finish_scans())
+    assert admin.visible() == ['A', 'B']
 
 
 def test_a_refresh_hides_channels_already_known_to_be_dead():

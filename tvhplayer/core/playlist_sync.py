@@ -5,9 +5,10 @@ without a scan (Service ID 1), and the network's bouquet maps them to
 channels. An entry keeps its mux across refreshes through its key, so a
 changed stream address or name edits the channel instead of replacing it.
 
-Tvheadend still scans each new mux once, and a refresh scans them all
-again. Only a mux whose scan passed keeps its service enabled; disabling a
-service makes the bouquet delete its channel, so dead streams never show.
+Tvheadend still scans each new mux once, and a refresh scans the muxes
+whose stream address changed. Only a mux whose scan passed keeps its
+service enabled; disabling a service makes the bouquet delete its channel,
+so dead streams never show. Checking a playlist scans all its muxes again.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
 from .errors import PlaylistError, TvhAuthError, TvhConnectionError
-from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry
+from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, ffmpeg_input
 
 BUILTIN_SERVER_KEY = 'builtin'
 # Distro packages and the common Docker images install ffmpeg here. A bare
@@ -330,6 +331,8 @@ def sync_playlist(
     total = len(plans) + len(stale)
     done = 0
     changes = []
+    # A new address may work where the old one failed, or fail where it worked.
+    retest = []
     created_since_checkpoint = 0
     for plan in plans:
         if cancelled():
@@ -340,6 +343,8 @@ def sync_playlist(
         if uuid:
             if _differs(conf, rows[uuid]):
                 changes.append(dict(conf, uuid=uuid))
+                if _stream_source(conf['iptv_url']) != _stream_source(rows[uuid].get('iptv_url', '')):
+                    retest.append(uuid)
         else:
             source.muxes[plan.key] = admin.create_mux(source.network_uuid, conf)
             result.added += 1
@@ -369,8 +374,8 @@ def sync_playlist(
         tags.update(plan.groups)
     source.tags = sorted(tags)
     checkpoint()
-    if check and refresh and not result.cancelled:
-        admin.scan_network(source.network_uuid)
+    if check and retest and not result.cancelled:
+        admin.scan_muxes(retest)
     if check:
         # Hide channels already known not to work before the bouquet maps them.
         apply_checks(admin, source)
@@ -456,6 +461,16 @@ def remove_playlist(admin, source: PlaylistSource) -> None:
     source.network_uuid = ''
     source.muxes = {}
     source.tags = []
+
+
+def _stream_source(url) -> tuple:
+    """What a mux plays: the input of an ffmpeg wrapper, which also names the channel, else the address."""
+    url = str(url or '')
+    wrapped = ffmpeg_input(url[7:]) if url.startswith('pipe://') else None
+    if wrapped is None:
+        return url, ()
+    address, headers = wrapped
+    return address, tuple(sorted(headers.items()))
 
 
 def _differs(conf: dict, row: dict) -> bool:

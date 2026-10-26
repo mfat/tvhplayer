@@ -56,7 +56,7 @@ try:
     from .core import convert
     from .core.vlc_player import VlcPlayer
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
-    from .core.playlist_sync import PlaylistSource, find_source, server_key
+    from .core.playlist_sync import PlaylistSource, server_key
     from .core.playback_status import (
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, signal_report, starting_caption,
     )
@@ -71,7 +71,7 @@ try:
         PlayerBar,
         svg_icon,
     )
-    from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
+    from .playlist_dialogs import ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from .guide_dialogs import GuideJob, GuideSourcesDialog
     from .settings_dialog import SettingsDialog
     from .setup_wizard import SetupWizard
@@ -139,7 +139,7 @@ except ImportError:
     from core import convert
     from core.vlc_player import VlcPlayer
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
-    from core.playlist_sync import PlaylistSource, find_source, server_key
+    from core.playlist_sync import PlaylistSource, server_key
     from core.playback_status import (
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, signal_report, starting_caption,
     )
@@ -154,7 +154,7 @@ except ImportError:
         PlayerBar,
         svg_icon,
     )
-    from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
+    from playlist_dialogs import ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from guide_dialogs import GuideJob, GuideSourcesDialog
     from settings_dialog import SettingsDialog
     from setup_wizard import SetupWizard
@@ -3236,7 +3236,6 @@ class TVHeadendClient(QMainWindow):
         self._backend = None
         self._backend_key = None
         self._busy_playlists = set()
-        self._builtin_playlists_refreshed = False
         self._playlist_jobs = []
         # Guide updates for servers on this computer, one per server.
         self._guide_jobs = {}
@@ -6176,7 +6175,6 @@ class TVHeadendClient(QMainWindow):
         self.close_backend()
         if is_builtin_server(self.current_server()):
             self.fetch_channels()
-        self._refresh_builtin_playlists()
         self._load_guides_after_start(find_builtin_server(self.servers))
 
     def _on_builtin_failed(self, message):
@@ -6311,44 +6309,6 @@ class TVHeadendClient(QMainWindow):
             if guide.server == gone.server and guide.playlist == gone.location:
                 self.remove_guide_source(guide)
         self.save_config()
-
-    def _refresh_builtin_playlists(self):
-        """Refresh playlists on the built-in server once per session.
-
-        Playlists are written one at a time. Each one's stream test can take
-        hours, so the next playlist starts as soon as only its test is left.
-        """
-        if self._builtin_playlists_refreshed:
-            return
-        self._builtin_playlists_refreshed = True
-        server = find_builtin_server(self.servers)
-        queue = [source for source in self.playlist_sources() if source.server == server_key(server or {})]
-
-        def next_job():
-            if not queue or self._closing:
-                return
-            # Read again: the playlist may have been removed or updated meanwhile.
-            source = find_source(self.playlist_sources(), queue.pop(0).location, server_key(server or {}))
-            if source is None:
-                next_job()
-                return
-            job = PlaylistJob(self, source, server, parent=self)
-            self._playlist_jobs.append(job)
-            moved_on = []
-
-            def move_on(*_args):
-                if not moved_on:
-                    moved_on.append(True)
-                    next_job()
-
-            job.finished.connect(lambda message, _skipped: self._playlist_refreshed(message, job.server))
-            job.failed.connect(lambda message: self._playlist_refresh_failed(source, message))
-            job.checking.connect(move_on)
-            job.finished.connect(move_on)
-            job.failed.connect(move_on)
-            job.start()
-
-        next_job()
 
     def keep_playlist_job(self, job):
         """Let a playlist's stream test go on after its window closes."""
@@ -6739,11 +6699,6 @@ class TVHeadendClient(QMainWindow):
         for job in jobs:
             job.start()
         return jobs
-
-    def _playlist_refresh_failed(self, source, message):
-        # An import the user started is already updating this playlist.
-        if message != PLAYLIST_BUSY:
-            self.statusbar.showMessage(f"Could not refresh {source.name}. {message}")
 
     def _playlist_refreshed(self, message, server):
         self.playlist_imported(server)

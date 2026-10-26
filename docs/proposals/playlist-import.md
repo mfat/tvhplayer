@@ -50,7 +50,7 @@ The playlist's name comes from the file name or the web address's host. A source
 
 **File → Playlists…** lists the imported playlists with **Refresh** and **Remove**:
 - **Remove** asks "Remove the channels from <name>?" and then deletes the network. Its muxes, services, channels, and bouquet go with it, which a test confirmed. The app then deletes the leftover `*** <name>` network tag, which Tvheadend leaves behind, and the group tags the playlist created once no other channel carries them. The source remembers those tag names for this.
-- Playlists imported to the built-in server refresh by themselves when TVHplayer starts. Since the built-in server runs only while the app runs, Tvheadend's own timers are not used.
+- A playlist is read again only when the user refreshes it. The server keeps the channels, and the channel list comes from the server. Refreshing every playlist at each start downloaded a 100 MB playlist and retested its 32768 streams every time.
 
 Plain-language errors:
 
@@ -128,10 +128,10 @@ Free playlists carry many dead entries: on iptv-org's Persian list, 147 of 202 s
 
 - Every channel is shown as soon as it is imported; the check runs afterwards. Disabling a service makes the bouquet delete its channel; enabling it maps the channel again (`bouquet_notify_service_enabled`).
 - The import then polls the muxes and applies each verdict as it lands: scan result *OK* or *OK (partial)* keeps the service enabled, *FAIL* disables it. The dialog shows "Checking channels… n of total" and can be closed; the check goes on and the status bar reports the result.
-- A refresh calls `api/mpegts/network/scan`, so every stream is tested again. A mux being rescanned follows its last verdict until the new one arrives, so a channel already known to be dead is hidden as soon as the refresh starts. A dead entry keeps its mux, so it comes back on a later refresh once it works.
+- A refresh tests only the muxes whose stream changed: the input address and headers, not the channel name the ffmpeg command also carries. It sets their `scan_state` to PEND, as the web interface's Force Scan does. A mux being rescanned follows its last verdict until the new one arrives, so a channel already known to be dead is hidden as soon as the refresh starts. A dead entry keeps its mux, so it comes back once *Check Channels Now* (`api/mpegts/network/scan`) finds it working.
 - Stopping the import during the check leaves unchecked channels shown.
 - With hiding off, imports and refreshes test nothing and leave visibility alone, and switching it off shows every hidden channel again. Settings → *Check Channels Now* tests every imported playlist and hides failures either way.
-- The guide is loaded before the check. At startup, the next playlist starts as soon as the previous one reaches its check, so one playlist's test never delays another's.
+- The guide is loaded before the check.
 - Scans share the network's connection limit (six streams), and a dead stream takes up to `max_timeout` to fail, so a large playlist takes a while to check.
 
 - A refresh switches the playlist's network back on if it was switched off. Tvheadend never scans the muxes of a disabled network, and their channels do not play.
@@ -226,7 +226,7 @@ Each phase is one commit with its tests.
 1. Parser, planner, and command builder.
 2. Admin client and sync, with the integration test.
 3. Import dialog, for the built-in server and other servers.
-4. Playlists dialog: refresh, remove, and refresh on start. One playlist is updated by one job at a time.
+4. Playlists dialog: refresh and remove. One playlist is updated by one job at a time.
 5. Guide data from `x-tvg-url`.
 
 ## Out of scope
