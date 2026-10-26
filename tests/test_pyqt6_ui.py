@@ -432,6 +432,17 @@ def _channel_row(table, name):
     return -1
 
 
+def _wait_for_now_next(app, window, timeout=5.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while window._now_next_fetch is not None:
+        assert time.monotonic() < deadline, "now/next fetch did not finish"
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+
 def _wait_for_channels(app, window, timeout=5.0):
     import time
 
@@ -2064,6 +2075,42 @@ class _ExtrasBackend:
         return f'http://tv.example/stream/{channel.uuid}'
 
 
+def test_logos_load_for_the_rows_on_screen(monkeypatch, tmp_path):
+    from tvhplayer.core.models import Channel
+
+    backend = _ExtrasBackend(int(time.time()))
+    requested = []
+    app, ui, window = _channel_list_window(monkeypatch, tmp_path, backend)
+    window.logo_loader.request = lambda server, reference, url: requested.append(reference)
+    try:
+        window.channel_options['logos'] = True
+        window._channels = [
+            Channel(uuid=f'c{n}', name=f'Channel {n:04d}', number=n + 1, raw={'icon_public_url': f'imagecache/{n}'})
+            for n in range(2000)
+        ]
+        window.resize(800, 600)
+        window.show()
+        window._show_channel_list()
+        window._fill_channel_rows()
+        app.processEvents()
+        table = window.channel_list
+        assert table.rowCount() == 2000
+        assert requested == []
+        window._visible_logo_timer.timeout.emit()
+        # The rows on screen and a screenful either side, not all 2000.
+        assert 'imagecache/0' in requested
+        assert 0 < len(requested) < 300
+        assert 'imagecache/1999' not in requested
+
+        table.verticalScrollBar().setValue(table.verticalScrollBar().maximum())
+        app.processEvents()
+        window._visible_logo_timer.timeout.emit()
+        assert 'imagecache/1999' in requested
+        assert len(requested) < 600
+    finally:
+        window.close()
+
+
 def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_path):
     from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, Qt
     from PyQt6.QtGui import QColor, QPixmap
@@ -2094,6 +2141,9 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         assert table.item(news_row, ui.COL_NEXT).text().endswith('Weather')
         assert 'Now: Headlines.' in table.item(news_row, ui.COL_NAME).data(Qt.ItemDataRole.AccessibleDescriptionRole)
         assert backend.service_calls == 0
+        # Logos are asked for once the rows are on screen, not while the list fills.
+        assert requested == []
+        window._visible_logo_timer.timeout.emit()
         assert requested == [('imagecache/1', 'http://127.0.0.1:9981/imagecache/1')]
 
         # A logo that arrives later is drawn next to the name.
@@ -2174,9 +2224,27 @@ def test_now_next_is_fetched_again_when_a_programme_ends(monkeypatch, tmp_path):
         backend.now_next['news'].now.stop = now - 1
         window._now_next_fetched -= 61
         window._tick_now_next()
+        # Fetched in the background: a tick never waits for the server.
+        _wait_for_now_next(app, window)
         assert backend.now_next_calls == 2
         news_row = _channel_row(window.channel_list, 'News')
         assert window.channel_list.item(news_row, ui.COL_NOW).text() == ''
+        assert window.channel_list.item(news_row, ui.COL_NEXT).text().endswith('Weather')
+
+        # A channel that had no programme gets one, and one that drops out of the guide is cleared.
+        from tvhplayer.core.channel_info import NowNext
+        from tvhplayer.core.models import EpgEvent
+        match = EpgEvent(start=now - 60, stop=now + 3600, title='Match', channel_uuid='sport', event_id=3)
+        backend.now_next = {'sport': NowNext(match, None)}
+        window._now_next_fetched -= 700
+        window._tick_now_next()
+        _wait_for_now_next(app, window)
+        assert backend.now_next_calls == 3
+        table = window.channel_list
+        assert table.item(_channel_row(table, 'Sport'), ui.COL_NOW).text() == 'Match'
+        news_row = _channel_row(table, 'News')
+        assert table.item(news_row, ui.COL_NEXT).text() == ''
+        assert table.item(news_row, ui.COL_NEXT).toolTip() == ''
     finally:
         window.close()
         app.processEvents()

@@ -257,6 +257,13 @@ LOGO_ROLE = Qt.ItemDataRole.UserRole + 2
 CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
 
 
+def _set_cell_data(item, role, value):
+    """Write a cell value only when it differs: every write notifies the view."""
+    current = item.data(role)
+    if current != value and not (current in (None, '') and value in (None, '')):
+        item.setData(role, value)
+
+
 class LocalJob:
     """One recording to this computer: its own ffmpeg, channel and stop timer."""
 
@@ -2855,6 +2862,48 @@ class ChannelFetch(QObject):
         self.loaded.emit(result)
 
 
+class NowNextFetch(QObject):
+    """Fetch what is on now and next for the channel list, off the UI thread.
+
+    On the UI thread, a new HTSP connection waited for every channel of a big
+    list before it could ask, freezing the window for seconds. ``done`` carries
+    the server key and the result, or None when it could not be read.
+    """
+
+    done = pyqtSignal(str, object)
+
+    def __init__(self, server, channels, open_backend=create_backend, parent=None):
+        super().__init__(parent)
+        self.server = dict(server)
+        self.key = server_key(self.server)
+        self._channels = list(channels)
+        self._open_backend = open_backend
+        self._thread = threading.Thread(target=self._run, name='now-next', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _run(self):
+        result = None
+        backend = None
+        try:
+            backend = self._open_backend(self.server)
+            result = backend.get_now_next(self._channels)
+        except Exception as e:
+            print(f"Debug: Could not refresh now and next: {e}")
+        finally:
+            if backend is not None:
+                try:
+                    backend.close()
+                except Exception:
+                    pass
+        try:
+            self.done.emit(self.key, result)
+        except RuntimeError:
+            # The window closed while this was on its way.
+            pass
+
+
 # Logo references that name a picon file on this computer instead of a server image.
 PICON_PREFIX = 'picon:'
 
@@ -3260,6 +3309,7 @@ class TVHeadendClient(QMainWindow):
         self._channel_tags = []
         self._now_next = {}
         self._now_next_fetched = 0.0
+        self._now_next_fetch = None
         self._channel_kinds = {}
         self._recording_keys = set()
         self._logo_pixmaps = {}
@@ -3274,10 +3324,21 @@ class TVHeadendClient(QMainWindow):
         self._row_marks = {}
         # Name cells by logo reference, so an arrived logo goes straight to its rows.
         self._logo_items = {}
+        # Now and next cells by channel key, and the keys whose cells show a programme:
+        # the half-minute update visits only those, not every row of a big list.
+        self._programme_items = {}
+        self._programme_keys = set()
         self._logo_timer = QTimer(self)
         self._logo_timer.setSingleShot(True)
         self._logo_timer.setInterval(100)
         self._logo_timer.timeout.connect(self._apply_arrived_logos)
+        # Logos load for the rows on screen. Asking for every row of a list of
+        # thousands kept the logo threads and the server busy for minutes.
+        self._visible_logo_timer = QTimer(self)
+        self._visible_logo_timer.setSingleShot(True)
+        self._visible_logo_timer.setInterval(150)
+        self._visible_logo_timer.timeout.connect(self._request_visible_logos)
+        self._placeholder_icon = None
         # Logos for channels the server has none for, once a picon pack is downloaded.
         self.picons = None
         self.picon_job = None
@@ -3612,6 +3673,11 @@ class TVHeadendClient(QMainWindow):
         self.channel_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.channel_list.setSortingEnabled(True)
         self.channel_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Scrolling, resizing, filtering, and sorting bring other rows on screen.
+        scroll = self.channel_list.verticalScrollBar()
+        scroll.valueChanged.connect(lambda *_: self._visible_logo_timer.start())
+        scroll.rangeChanged.connect(lambda *_: self._visible_logo_timer.start())
+        self.channel_list.horizontalHeader().sortIndicatorChanged.connect(lambda *_: self._visible_logo_timer.start())
         
         # Connect double-click to play
         self.channel_list.itemDoubleClicked.connect(self.play_channel_from_table)
@@ -4225,12 +4291,66 @@ class TVHeadendClient(QMainWindow):
             for entry in self._now_next.values()
         )
         if since >= NOW_NEXT_REFRESH_SECONDS or (ended and since >= 60):
-            try:
-                if self.current_server() and self._server_requests_ready():
-                    self._fetch_now_next(self.get_backend())
-            except Exception as e:
-                print(f"Debug: Could not refresh now and next: {e}")
-        self._update_channel_extras()
+            self._start_now_next_fetch()
+        self._update_programme_cells()
+
+    def _start_now_next_fetch(self):
+        server = self.current_server()
+        if self._now_next_fetch is not None or not server or not self._server_requests_ready():
+            return
+        fetch = NowNextFetch(server, self._channels, open_backend=self._open_channel_backend, parent=self)
+        fetch.done.connect(lambda key, result, fetch=fetch: self._on_now_next_fetched(fetch, key, result))
+        self._now_next_fetch = fetch
+        fetch.start()
+
+    def _on_now_next_fetched(self, fetch, key, result):
+        fetch.deleteLater()
+        if fetch is not self._now_next_fetch:
+            return
+        self._now_next_fetch = None
+        if key != self._channels_server or self._closing:
+            return
+        # A failed fetch keeps what is shown and waits as long as a good one.
+        self._now_next_fetched = time.monotonic()
+        if result is not None:
+            self._now_next = result
+            self._update_programme_cells()
+
+    def _update_programme_cells(self):
+        """Write now and next for the channels that have a programme or had one."""
+        keys = set(self._now_next) | self._programme_keys
+        if not keys:
+            return
+        table = self.channel_list
+        now = int(time.time())
+        show_progress = self.channel_options['now_progress']
+        sorting = table.isSortingEnabled()
+        table.setSortingEnabled(False)
+        shown = set()
+        try:
+            for key in keys:
+                items = self._programme_items.get(key)
+                if items is None:
+                    continue
+                current, following = self._programmes_for(key, now)
+                self._set_programme_cell(items[0], current, now, show_progress)
+                self._set_programme_cell(items[1], following, now, False, with_start=True)
+                if current is not None or following is not None:
+                    shown.add(key)
+        finally:
+            table.setSortingEnabled(sorting)
+        self._programme_keys = shown
+        table.viewport().update()
+
+    def _programmes_for(self, key, now):
+        """The programme on now, unless it ended, and the next one, from the last fetch."""
+        now_next = self._now_next.get(key)
+        if now_next is None:
+            return None, None
+        current = now_next.now
+        if current is not None and current.stop and current.stop <= now:
+            current = None
+        return current, now_next.next
 
     def _row_key(self, row):
         item = self.channel_list.item(row, COL_NAME)
@@ -4251,6 +4371,8 @@ class TVHeadendClient(QMainWindow):
         self._logo_items = {}
         self._row_channels = {}
         self._row_marks = {}
+        self._programme_items = {}
+        self._programme_keys = set()
         # Rows added one at a time each move every later row: slow for a big list.
         table.setRowCount(len(shown))
         for row, channel in enumerate(shown):
@@ -4271,16 +4393,53 @@ class TVHeadendClient(QMainWindow):
                 name_item.setData(LOGO_ROLE, reference)
                 if reference:
                     self._logo_items.setdefault(reference, []).append(name_item)
-                if reference and backend is None:
-                    backend = self._logo_backend()
-                pixmap = self._logo_for(reference, backend) if reference else None
-                name_item.setIcon(QIcon(pixmap if pixmap is not None else padded_pixmap()))
+                pixmap = self._logo_pixmaps.get(reference) if reference else None
+                name_item.setIcon(QIcon(pixmap) if pixmap is not None else self._logo_placeholder())
             table.setItem(row, COL_NAME, name_item)
             for column in (COL_STATUS, COL_NOW, COL_NEXT, COL_TYPE):
                 table.setItem(row, column, QTableWidgetItem(""))
-        self._update_channel_extras(sort=False)
+            if key and self._row_channels.get(key) is channel:
+                self._programme_items[key] = (table.item(row, COL_NOW), table.item(row, COL_NEXT))
+        if self._channel_kinds:
+            self._update_channel_extras(sort=False)
+        else:
+            # The new cells are blank; only channels with a programme need writing.
+            self._update_programme_cells()
         table.setSortingEnabled(True)
         self._apply_channel_filter()
+        self._visible_logo_timer.start()
+
+    def _logo_placeholder(self):
+        """Blank space the size of a logo, shared by every row still without one."""
+        if self._placeholder_icon is None:
+            self._placeholder_icon = QIcon(padded_pixmap())
+        return self._placeholder_icon
+
+    def _request_visible_logos(self):
+        """Ask for the logos of the rows on screen and a screenful either side."""
+        if not self.channel_options['logos']:
+            return
+        table = self.channel_list
+        rows = table.rowCount()
+        if not rows:
+            return
+        viewport = table.viewport()
+        top = table.rowAt(0)
+        bottom = table.rowAt(viewport.height() - 1)
+        top = 0 if top < 0 else top
+        bottom = rows - 1 if bottom < 0 else bottom
+        page = max(bottom - top, 20)
+        backend = None
+        for row in range(max(0, top - page), min(rows, bottom + page + 1)):
+            if table.isRowHidden(row):
+                continue
+            item = table.item(row, COL_NAME)
+            reference = item.data(LOGO_ROLE) if item is not None else None
+            if not reference or reference in self._logo_pixmaps:
+                continue
+            if backend is None and not reference.startswith(PICON_PREFIX):
+                backend = self._logo_backend()
+            self._logo_for(reference, backend)
 
     def _update_channel_extras(self, sort=True):
         """Write now, next, and type into each row from what was last fetched."""
@@ -4289,16 +4448,15 @@ class TVHeadendClient(QMainWindow):
         show_progress = self.channel_options['now_progress']
         sorting = table.isSortingEnabled()
         table.setSortingEnabled(False)
+        shown = set()
         try:
             for row in range(table.rowCount()):
                 key = self._row_key(row)
-                now_next = self._now_next.get(key)
-                current = now_next.now if now_next is not None else None
-                following = now_next.next if now_next is not None else None
+                current, following = self._programmes_for(key, now)
+                if key and (current is not None or following is not None):
+                    shown.add(key)
                 now_item = table.item(row, COL_NOW)
                 if now_item is not None:
-                    if current is not None and current.stop and current.stop <= now:
-                        current = None
                     self._set_programme_cell(now_item, current, now, show_progress)
                 next_item = table.item(row, COL_NEXT)
                 if next_item is not None:
@@ -4309,17 +4467,23 @@ class TVHeadendClient(QMainWindow):
                     label = kind.label() if kind is not None else ""
                     if type_item.text() != label:
                         type_item.setText(label)
-                    type_item.setToolTip(f"Provider: {kind.provider}" if kind is not None and kind.provider else "")
+                    _set_cell_data(
+                        type_item,
+                        Qt.ItemDataRole.ToolTipRole,
+                        f"Provider: {kind.provider}" if kind is not None and kind.provider else "",
+                    )
         finally:
             table.setSortingEnabled(sorting and sort)
+        self._programme_keys = shown
         table.viewport().update()
 
     def _set_programme_cell(self, item, event, now, show_progress, with_start=False):
         if event is None:
-            item.setText("")
-            item.setToolTip("")
-            item.setData(PROGRESS_ROLE, None)
-            item.setData(Qt.ItemDataRole.AccessibleTextRole, None)
+            # Most rows of a big list have no guide; reading is cheaper than writing.
+            _set_cell_data(item, Qt.ItemDataRole.DisplayRole, "")
+            _set_cell_data(item, Qt.ItemDataRole.ToolTipRole, "")
+            _set_cell_data(item, PROGRESS_ROLE, None)
+            _set_cell_data(item, Qt.ItemDataRole.AccessibleTextRole, None)
             return
         start = datetime.fromtimestamp(event.start).strftime('%H:%M') if event.start else ""
         stop = datetime.fromtimestamp(event.stop).strftime('%H:%M') if event.stop else ""
@@ -4337,9 +4501,9 @@ class TVHeadendClient(QMainWindow):
             lines.append(when)
         if event.summary and event.summary != event.subtitle:
             lines.append(event.summary)
-        item.setToolTip("\n".join(lines))
-        item.setData(Qt.ItemDataRole.AccessibleTextRole, ", ".join(lines[:3]))
-        item.setData(PROGRESS_ROLE, progress(event, now) if show_progress else None)
+        _set_cell_data(item, Qt.ItemDataRole.ToolTipRole, "\n".join(lines))
+        _set_cell_data(item, Qt.ItemDataRole.AccessibleTextRole, ", ".join(lines[:3]))
+        _set_cell_data(item, PROGRESS_ROLE, progress(event, now) if show_progress else None)
 
     def _logo_backend(self):
         try:
@@ -4858,6 +5022,8 @@ class TVHeadendClient(QMainWindow):
         self._logo_items = {}
         self._row_channels = {}
         self._row_marks = {}
+        self._programme_items = {}
+        self._programme_keys = set()
         self._refresh_tag_combo()
         self._guide_channels_changed()
 
