@@ -61,6 +61,7 @@ def _htsp():
     conn = _Conn()
     backend._conn = conn
     backend._ready = True
+    backend._metadata = True
     return backend, conn
 
 
@@ -389,6 +390,7 @@ def test_htsp_tags_guide_profiles_and_images():
     ))
     rooted._conn = conn
     rooted._ready = True
+    rooted._metadata = True
     assert rooted.image_url('imagecache/38') == 'http://u:p@127.0.0.1:9981/tvh/imagecache/38'
 
     conn.replies['api'] = {'response': {
@@ -402,3 +404,32 @@ def test_htsp_tags_guide_profiles_and_images():
     assert activity.activities['dvr'] == 30
     assert activity.get('subscription_count') == 1
     assert conn.calls[-1][1]['path'] == 'status/activity'
+
+
+def test_htsp_reads_the_channel_list_only_for_calls_that_need_it():
+    backend, conn = _htsp()
+    backend._ready = False
+    backend._metadata = False
+    logins = []
+    conn.connect = lambda: logins.append('connect')
+    conn.hello = lambda: None
+    conn.authenticate = lambda *args, **kwargs: None
+
+    def recv_until(done, timeout=None, on_async=None):
+        on_async({'method': 'channelAdd', 'channelId': 7, 'channelName': 'News', 'channelNumber': 1})
+        on_async({'method': 'initialSyncCompleted'})
+
+    conn.recv_until = recv_until
+    conn.replies['api'] = {'response': {'entries': [], 'total': 0}}
+
+    # Status and stream addresses: a login, no channel list.
+    assert backend.get_subscriptions() == []
+    assert backend.stream_url(Channel(uuid='', name='News', htsp_id=7)).endswith('/stream/channelid/7')
+    assert [method for method, _ in conn.calls] == ['api']
+    assert logins == ['connect']
+
+    # The channel list asks the same connection for metadata once.
+    assert [channel.name for channel in backend.get_channels()] == ['News']
+    backend.list_channel_tags()
+    assert [method for method, _ in conn.calls] == ['api', 'enableAsyncMetadata']
+    assert logins == ['connect']

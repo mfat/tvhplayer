@@ -352,6 +352,7 @@ def _htsp():
     conn = _Conn()
     backend._conn = conn
     backend._ready = True
+    backend._metadata = True
     return backend, conn
 
 

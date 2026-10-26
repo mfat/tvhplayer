@@ -92,10 +92,13 @@ class HtspBackend(TvhBackend):
         self._dvr = {}
         self._synced = False
         self._ready = False
+        # Whether the server sends this connection its channels, tags, and recordings.
+        self._metadata = False
 
     def close(self):
         self._ready = False
         self._synced = False
+        self._metadata = False
         self._conn.close()
 
     def _on_async(self, msg):
@@ -216,13 +219,21 @@ class HtspBackend(TvhBackend):
             raw=raw,
         )
 
-    def _ensure(self):
+    def _connect(self):
+        """Log in, without asking for the channel list.
+
+        Status, guide, recording actions, and stream and logo addresses need
+        no more. The server sends a new connection's metadata only after
+        enableAsyncMetadata, and for tens of thousands of channels reading it
+        took seconds of Python work that slowed the window.
+        """
         if self._ready and self._conn._sock is not None:
             return
         self._channels.clear()
         self._tags.clear()
         self._dvr.clear()
         self._synced = False
+        self._metadata = False
         self._conn.connect()
         self._conn.hello()
         self._conn.authenticate(
@@ -230,17 +241,28 @@ class HtspBackend(TvhBackend):
             self.server.password,
             on_async=self._on_async,
         )
-        self._conn.rpc('enableAsyncMetadata', {'epg': 0}, on_async=self._on_async)
-        if not self._synced:
-            self._conn.recv_until(
-                lambda msg: msg.get('method') in SYNC_METHODS,
-                timeout=30.0,
-                on_async=self._on_async,
-            )
         self._ready = True
 
+    def _ensure(self):
+        """Log in and read the channels, tags, and recordings, which then stay up to date."""
+        self._connect()
+        if self._metadata:
+            return
+        try:
+            self._conn.rpc('enableAsyncMetadata', {'epg': 0}, on_async=self._on_async)
+            if not self._synced:
+                self._conn.recv_until(
+                    lambda msg: msg.get('method') in SYNC_METHODS,
+                    timeout=30.0,
+                    on_async=self._on_async,
+                )
+        except Exception:
+            self.close()
+            raise
+        self._metadata = True
+
     def _api(self, path, args=None):
-        self._ensure()
+        self._connect()
         reply = self._conn.rpc(
             'api',
             {'path': path, 'args': args or {}},
@@ -259,7 +281,7 @@ class HtspBackend(TvhBackend):
         return sort_channel_tags(list(self._tags.values()))
 
     def query_epg(self, query: EpgQuery) -> List[EpgEvent]:
-        self._ensure()
+        self._connect()
         query = query or EpgQuery()
         transport = epg_htsp_transport(query)
         if transport == 'getEvents':
@@ -327,7 +349,7 @@ class HtspBackend(TvhBackend):
         comment: str = '',
         event_id: Optional[int] = None,
     ) -> None:
-        self._ensure()
+        self._connect()
         args = {'enabled': 1}
         if event_id:
             args['eventId'] = int(event_id)
@@ -489,7 +511,7 @@ class HtspBackend(TvhBackend):
         self._proxy('idnode/delete', {'uuid': entry_uuid(entry)})
 
     def _rpc(self, method, args=None):
-        self._ensure()
+        self._connect()
         return self._conn.rpc(method, args or {}, on_async=self._on_async)
 
     def _rpc_ok(self, method, args, label, require_success=True):
@@ -519,7 +541,7 @@ class HtspBackend(TvhBackend):
         self._proxy('idnode/save', {'node': [node]})
 
     def get_server_info(self) -> ServerInfo:
-        self._ensure()
+        self._connect()
         return ServerInfo(
             name=self._conn.server_name,
             version=f'{self._conn.server_version} (HTSP v{self._conn.htsp_version})',
@@ -550,7 +572,7 @@ class HtspBackend(TvhBackend):
         """Same HTTP streaming URL Kodi builds when streaming_http is enabled."""
         if channel.htsp_id is None:
             raise TvhError('Channel has no HTSP id')
-        self._ensure()
+        self._connect()
         base = http_base_url(self.server.url)
         webroot = getattr(self._conn, 'webroot', '') or ''
         url = resolve_reference(base, f'stream/channelid/{int(channel.htsp_id)}', webroot)
@@ -563,7 +585,7 @@ class HtspBackend(TvhBackend):
             return ''
         if reference.startswith(('http://', 'https://')):
             return reference
-        self._ensure()
+        self._connect()
         webroot = getattr(self._conn, 'webroot', '') or ''
         url = resolve_reference(http_base_url(self.server.url), reference, webroot)
         return insert_basic_auth(url, self.server.username, self.server.password)
