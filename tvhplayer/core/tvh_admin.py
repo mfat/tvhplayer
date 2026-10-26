@@ -116,6 +116,16 @@ class TvhAdmin:
         )
         return _uuid(data, 'mux')
 
+    def list_channels(self) -> List[dict]:
+        return self._grid('api/channel/grid')
+
+    def list_channel_tags(self) -> List[dict]:
+        return self._grid('api/channeltag/grid')
+
+    def create_channel_tag(self, conf: dict) -> str:
+        data = self._request('api/channeltag/create', data={'conf': json.dumps(conf)})
+        return _uuid(data, 'channel tag')
+
     def save(self, nodes: List[dict]) -> None:
         for start in range(0, len(nodes), SAVE_BATCH):
             batch = nodes[start:start + SAVE_BATCH]

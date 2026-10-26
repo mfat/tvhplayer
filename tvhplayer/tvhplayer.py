@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
+    QInputDialog,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
@@ -71,6 +72,8 @@ try:
     from .sleep_inhibit import SleepInhibitor
     from .core.sleep_guard import awake_reason, server_on_this_computer
     from .core.storage import free_bytes, low_space_message
+    from .core.channel_edit import ChannelEditor, check_number, is_favourite, number_text
+    from .core.tvh_admin import TvhAdmin
     from .guide_view import GuideWindow
     from .core.channel_info import (
         channel_icon_reference,
@@ -145,6 +148,8 @@ except ImportError:
     from sleep_inhibit import SleepInhibitor
     from core.sleep_guard import awake_reason, server_on_this_computer
     from core.storage import free_bytes, low_space_message
+    from core.channel_edit import ChannelEditor, check_number, is_favourite, number_text
+    from core.tvh_admin import TvhAdmin
     from guide_view import GuideWindow
     from core.channel_info import (
         channel_icon_reference,
@@ -2788,6 +2793,35 @@ class ChannelFetch(QObject):
                 except Exception:
                     pass
         self.loaded.emit(result)
+
+
+class ChannelEditJob(QObject):
+    """Run one channel change on the server, off the UI thread. Emits ``done`` with an error or ''."""
+
+    done = pyqtSignal(str)
+
+    def __init__(self, server, change, parent=None):
+        super().__init__(parent)
+        self._server = dict(server)
+        self._change = change
+        self._thread = threading.Thread(target=self._run, name='channel-edit', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _run(self):
+        error = ''
+        try:
+            with TvhAdmin(self._server) as admin:
+                self._change(ChannelEditor(admin))
+        except TvhAuthError:
+            error = "This server's login is not allowed to change channels."
+        except Exception as exc:
+            error = str(exc) or type(exc).__name__
+        try:
+            self.done.emit(error)
+        except RuntimeError:
+            pass
 
 
 class StartWatch(QObject):
@@ -6271,9 +6305,81 @@ class TVHeadendClient(QMainWindow):
             epg_action.triggered.connect(lambda: self.show_channel_epg(channel_data))
             guide_action = menu.addAction("Show in TV Guide")
             guide_action.triggered.connect(lambda: self.show_guide(channel_data))
-            
+
+            menu.addSeparator()
+            self._add_channel_edit_actions(menu, Channel.from_raw(channel_data))
+
             # Show the menu at the cursor position
             menu.exec(self.channel_list.viewport().mapToGlobal(position))
+
+    def _add_channel_edit_actions(self, menu, channel):
+        """Favourites, name, number, and hiding: saved on the server for every client."""
+        server = self.current_server()
+        usable = bool(server) and self._server_requests_ready()
+        favourite = is_favourite(channel, self._channel_tags)
+        actions = (
+            ("Remove from &Favourites" if favourite else "Add to &Favourites",
+             lambda: self._edit_channel(
+                 channel,
+                 lambda editor: editor.set_favourite(channel, not favourite),
+                 f"{channel.name} is {'no longer a favourite' if favourite else 'a favourite'}.",
+             )),
+            ("Re&name…", lambda: self._ask_channel_name(channel)),
+            ("Change N&umber…", lambda: self._ask_channel_number(channel)),
+            ("&Show Channel" if not channel.enabled else "&Hide Channel",
+             lambda: self._edit_channel(
+                 channel,
+                 lambda editor: editor.set_enabled(channel, not channel.enabled),
+                 f"{channel.name} is {'shown again' if not channel.enabled else 'hidden'}. "
+                 + ("" if not channel.enabled else "Turn off View > Channel List > Hide Disabled Channels to see it."),
+             )),
+        )
+        for label, slot in actions:
+            action = menu.addAction(label)
+            action.setEnabled(usable)
+            action.triggered.connect(slot)
+
+    def _ask_channel_name(self, channel):
+        name, ok = QInputDialog.getText(self, "Rename Channel", f"New name for {channel.name}:", text=channel.name)
+        name = name.strip()
+        if ok and name and name != channel.name:
+            self._edit_channel(channel, lambda editor: editor.rename(channel, name), f"{channel.name} is now {name}.")
+
+    def _ask_channel_number(self, channel):
+        current = number_text(channel)
+        text, ok = QInputDialog.getText(
+            self, "Change Channel Number", f"Number for {channel.name}, such as 12 or 12.1:", text=current,
+        )
+        if not ok or text.strip() == current:
+            return
+        try:
+            number = check_number(text)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Change Channel Number", f"{exc}.")
+            return
+        self._edit_channel(
+            channel, lambda editor: editor.set_number(channel, number), f"{channel.name} is now number {number}.",
+        )
+
+    def _edit_channel(self, channel, change, success):
+        server = self.current_server()
+        if not server or not self._server_requests_ready():
+            return
+        job = ChannelEditJob(server, change, self)
+        self._channel_edits = [*getattr(self, '_channel_edits', []), job]
+
+        def finished(error, job=job):
+            self._channel_edits = [other for other in self._channel_edits if other is not job]
+            if error:
+                QMessageBox.warning(self, "Change Channel", f"Could not change {channel.name}: {error}")
+                return
+            self.statusbar.showMessage(success)
+            if self._same_server(server, self.current_server()):
+                self.fetch_channels(keep_place=True)
+
+        job.done.connect(finished)
+        self.statusbar.showMessage(f"Changing {channel.name}…")
+        job.start()
 
     def show_guide(self, channel=None):
         """Open the TV guide at ``channel``, or at the highlighted channel."""

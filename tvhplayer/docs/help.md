@@ -52,6 +52,17 @@ Besides the channel name, the list can show the channel number, the program on n
 
 Your choices are saved and used the next time TVHplayer starts. The program and type columns only fill in when your server has guide data and service information for the channels. Some servers only share the channel type with admin users.
 
+### Editing channels
+
+Right-click a channel to change it on the server, so every app connected to that server sees the change:
+
+- **Add to Favourites** puts the channel in a Favourites group, which you can pick above the channel list. **Remove from Favourites** takes it out.
+- **Rename…** gives the channel a name of your own, kept when the server scans again.
+- **Change Number…** sets its number, such as 12 or 12.1. The list is sorted by number.
+- **Hide Channel** turns the channel off on the server. To bring it back, turn off **View → Channel List → Hide Disabled Channels**, then right-click it and choose **Show Channel**.
+
+These need a login that may change the server's settings. The built-in server always has one.
+
 ### Adding channels from a playlist
 
 You can add internet TV channels from an M3U playlist.
