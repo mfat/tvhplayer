@@ -77,11 +77,17 @@ class PlaylistSource:
     tags: List[str] = field(default_factory=list)
     # Streams the provider account allows at once; 0 when unknown.
     max_streams: int = 0
+    # Groups whose channels are added, or None for every group, including
+    # groups the playlist gains later. A channel counts as being in its first group.
+    chosen_groups: Optional[List[str]] = None
+    # Keys of channels left out of the chosen groups.
+    left_out: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data):
         data = data or {}
         muxes = data.get('muxes') if isinstance(data.get('muxes'), dict) else {}
+        chosen = data.get('chosen_groups')
         return cls(
             name=str(data.get('name') or ''),
             location=str(data.get('location') or ''),
@@ -91,6 +97,8 @@ class PlaylistSource:
             allow_commands=bool(data.get('allow_commands')),
             tags=[str(tag) for tag in data.get('tags') or [] if tag],
             max_streams=_count(data.get('max_streams')),
+            chosen_groups=[str(group) for group in chosen] if isinstance(chosen, list) else None,
+            left_out=[str(key) for key in data.get('left_out') or [] if key],
         )
 
     def to_dict(self):
@@ -103,6 +111,8 @@ class PlaylistSource:
             'allow_commands': self.allow_commands,
             'tags': list(self.tags),
             'max_streams': self.max_streams,
+            'chosen_groups': list(self.chosen_groups) if self.chosen_groups is not None else None,
+            'left_out': list(self.left_out),
         }
 
     def stream_limit(self) -> int:
@@ -131,6 +141,34 @@ class SyncResult:
     working: int = 0
     not_working: List[str] = field(default_factory=list)
     check_stopped: bool = False
+
+
+def plan_group(plan: ChannelPlan) -> str:
+    """The group a channel is chosen by: its first, or '' when it has none."""
+    return plan.groups[0] if plan.groups else ''
+
+
+def chosen_plans(source: PlaylistSource, plans: List[ChannelPlan]) -> List[ChannelPlan]:
+    """The channels of ``plans`` the user chose to add."""
+    groups = None if source.chosen_groups is None else set(source.chosen_groups)
+    left_out = set(source.left_out)
+    return [
+        plan for plan in plans
+        if plan.key not in left_out and (groups is None or plan_group(plan) in groups)
+    ]
+
+
+def choose_channels(source: PlaylistSource, plans: List[ChannelPlan], keys) -> None:
+    """Save that of ``plans`` only those with one of ``keys`` are added.
+
+    With every group kept, groups the playlist gains later are added too;
+    otherwise they are left out. New channels in a kept group are added.
+    """
+    keys = set(keys)
+    every = {plan_group(plan) for plan in plans}
+    kept = {plan_group(plan) for plan in plans if plan.key in keys}
+    source.chosen_groups = None if kept == every else sorted(kept)
+    source.left_out = sorted(plan.key for plan in plans if plan.key not in keys and plan_group(plan) in kept)
 
 
 def server_key(server) -> str:

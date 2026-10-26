@@ -168,6 +168,8 @@ class FakeHost:
 def app(monkeypatch):
     monkeypatch.setattr(dialogs, 'TvhAdmin', FakeAdmin)
     monkeypatch.setattr(dialogs, 'ffmpeg_for_server', lambda _server: '/usr/bin/ffmpeg')
+    # The channel choice is a modal window; keep every channel.
+    monkeypatch.setattr(dialogs, 'ask_to_choose', lambda *_args: True)
     FakeAdmin.servers = {}
     return QApplication.instance() or QApplication([])
 
@@ -712,3 +714,77 @@ def test_playlists_dialog_lists_servers_and_their_playlists(app, tmp_path):
     assert dialog.server_list.currentRow() == 0
     assert dialog.playlist_list.isHidden()
     assert not dialog.empty_label.isHidden()
+
+
+GROUPS = (
+    '#EXTM3U\n'
+    '#EXTINF:-1 group-title="News",A\nhttp://x/a.ts\n'
+    '#EXTINF:-1 group-title="News",B\nhttp://x/b.ts\n'
+    '#EXTINF:-1 group-title="Sport",C\nhttp://x/c.ts\n'
+)
+
+
+def _grouped_plans():
+    from tvhplayer.core.playlist import parse_playlist, plan_channels
+
+    plans, _skipped = plan_channels(parse_playlist(GROUPS), '/usr/bin/ffmpeg', 'news')
+    return plans
+
+
+def test_choose_window_ticks_groups_and_searches(app):
+    plans = _grouped_plans()
+    source = PlaylistSource('news', '/tmp/news.m3u', 'builtin', left_out=['name:B'])
+    dialog = dialogs.ChooseChannelsDialog(plans, source)
+    assert [dialog.tree.topLevelItem(i).text(0) for i in range(2)] == ['News (2)', 'Sport (1)']
+    assert dialog.chosen_keys() == ['name:A', 'name:C']
+    assert dialog.count_label.text() == '2 of 3 ticked'
+
+    dialog.search_input.setText('sport')
+    assert dialog.tree.topLevelItem(0).isHidden()
+    dialog.none_btn.click()
+    assert dialog.chosen_keys() == ['name:A']
+    dialog.search_input.setText('')
+    dialog.none_btn.click()
+    assert dialog.chosen_keys() == []
+    assert not dialog.ok_btn.isEnabled()
+    dialog.all_btn.click()
+    assert dialog.chosen_keys() == ['name:A', 'name:B', 'name:C']
+    dialog.tree.topLevelItem(1).setCheckState(0, dialogs.Qt.CheckState.Unchecked)
+    app.processEvents()
+    assert dialog.chosen_keys() == ['name:A', 'name:B']
+    assert dialog.count_label.text() == '2 of 3 ticked'
+
+
+def test_job_adds_only_the_chosen_channels(app, tmp_path):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    host.hide_dead = False
+    source = PlaylistSource('news', _playlist(tmp_path, GROUPS), 'builtin')
+
+    def keep_news(plans, chosen):
+        dialogs.choose_channels(chosen, plans, ['name:A', 'name:B'])
+        return True
+
+    events = _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True, choose=keep_news))
+    assert events == ['Added 2 channels from news.']
+    stored = PlaylistSource.from_dict(host.stored[-1])
+    assert stored.chosen_groups == ['News']
+    assert sorted(stored.muxes) == ['name:A', 'name:B']
+
+    # A refresh keeps the choice without asking.
+    _finish(app, dialogs.PlaylistJob(host, stored, BUILTIN))
+    assert sorted(PlaylistSource.from_dict(host.stored[-1]).muxes) == ['name:A', 'name:B']
+
+
+def test_cancelling_the_choice_changes_nothing(app, tmp_path):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    source = PlaylistSource('news', _playlist(tmp_path, GROUPS), 'builtin')
+    job = dialogs.PlaylistJob(host, source, BUILTIN, first_import=True, choose=lambda _plans, _source: False)
+    assert _finish(app, job) == [('failed', 'Nothing was changed.')]
+    assert host.stored == []
+    assert FakeAdmin.servers.get(BUILTIN['url'], {}).get('muxes', {}) == {}
+
+
+def test_refresh_says_when_no_chosen_channel_is_left(app, tmp_path):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    source = PlaylistSource('news', _playlist(tmp_path, GROUPS), 'builtin', chosen_groups=['Films'])
+    assert _finish(app, dialogs.PlaylistJob(host, source, BUILTIN)) == [('failed', dialogs.NONE_CHOSEN)]

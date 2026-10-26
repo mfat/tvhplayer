@@ -53,6 +53,9 @@ def test_playlists_are_saved_and_cleaned(tmp_path):
         'muxes': {'id:a': 'm1'},
         'allow_commands': False,
         'tags': [],
+        'max_streams': 0,
+        'chosen_groups': None,
+        'left_out': [],
     }]
 
 

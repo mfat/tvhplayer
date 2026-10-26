@@ -21,6 +21,8 @@ from tvhplayer.core.playlist_sync import (
     PlaylistSource,
     SyncResult,
     check_message,
+    choose_channels,
+    chosen_plans,
     error_message,
     ffmpeg_for_server,
     find_source,
@@ -686,3 +688,56 @@ def test_error_messages_are_plain():
     assert error_message(PlaylistError('This file is not a TV playlist.'), 'Home') == (
         'This file is not a TV playlist.'
     )
+
+
+CHOOSABLE = (
+    '#EXTM3U\n'
+    '#EXTINF:-1 tvg-id="a" group-title="News",A\nhttp://x/a.ts\n'
+    '#EXTINF:-1 tvg-id="b" group-title="News",B\nhttp://x/b.ts\n'
+    '#EXTINF:-1 tvg-id="c" group-title="Sport;News",C\nhttp://x/c.ts\n'
+    '#EXTINF:-1 tvg-id="d",D\nhttp://x/d.ts\n'
+)
+
+
+def _keys(plans):
+    return [plan.key for plan in plans]
+
+
+def test_keeping_every_group_also_keeps_groups_added_later():
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    plans = _plans(CHOOSABLE)
+    assert _keys(chosen_plans(source, plans)) == ['id:a', 'id:b', 'id:c', 'id:d']
+    choose_channels(source, plans, ['id:a', 'id:c', 'id:d'])
+    assert (source.chosen_groups, source.left_out) == (None, ['id:b'])
+    later = _plans(CHOOSABLE + '#EXTINF:-1 tvg-id="e" group-title="Films",E\nhttp://x/e.ts\n')
+    assert _keys(chosen_plans(source, later)) == ['id:a', 'id:c', 'id:d', 'id:e']
+
+
+def test_leaving_out_a_group_also_leaves_out_groups_added_later():
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    plans = _plans(CHOOSABLE)
+    # C is chosen by its first group, Sport; D has no group.
+    choose_channels(source, plans, ['id:a', 'id:b', 'id:d'])
+    assert (source.chosen_groups, source.left_out) == (['', 'News'], [])
+    later = _plans(
+        CHOOSABLE
+        + '#EXTINF:-1 tvg-id="e" group-title="Films",E\nhttp://x/e.ts\n'
+        + '#EXTINF:-1 tvg-id="f" group-title="News",F\nhttp://x/f.ts\n'
+    )
+    assert _keys(chosen_plans(source, later)) == ['id:a', 'id:b', 'id:d', 'id:f']
+    restored = PlaylistSource.from_dict(source.to_dict())
+    assert restored == source
+    # Playlists saved before channels could be chosen keep every channel.
+    assert PlaylistSource.from_dict({'name': 'Old'}).chosen_groups is None
+
+
+def test_sync_removes_channels_no_longer_chosen():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    plans = _plans(CHOOSABLE)
+    sync_playlist(admin, source, chosen_plans(source, plans))
+    assert len(source.muxes) == 4
+    choose_channels(source, plans, ['id:a'])
+    result = sync_playlist(admin, source, chosen_plans(source, plans))
+    assert result.removed == 3
+    assert list(source.muxes) == ['id:a']
