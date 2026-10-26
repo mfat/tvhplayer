@@ -277,7 +277,7 @@ def test_playlists_dialog_refreshes_and_removes(app, tmp_path, monkeypatch):
 
     dialog = dialogs.PlaylistsDialog(host)
     assert dialog.playlist_list.count() == 1
-    assert dialog.playlist_list.item(0).text() == 'news — Built-in Server'
+    assert dialog.playlist_list.item(0).text() == 'news'
     dialog.refresh_btn.click()
     _wait_job(app, dialog)
     assert dialog.status_label.text() == 'The channels from news are up to date.'
@@ -461,13 +461,13 @@ def test_a_playlist_being_updated_cannot_be_refreshed(app, tmp_path):
     # An update started elsewhere, such as the refresh at startup.
     host.busy.add(('builtin', location))
     dialog = dialogs.PlaylistsDialog(host)
-    assert dialog.playlist_list.item(0).text() == 'news — Built-in Server — updating…'
+    assert dialog.playlist_list.item(0).text() == 'news — updating…'
     assert not dialog.refresh_btn.isEnabled()
     assert dialog.remove_btn.isEnabled()
 
     host.busy.clear()
     dialog._follow_busy()
-    assert dialog.playlist_list.item(0).text() == 'news — Built-in Server'
+    assert dialog.playlist_list.item(0).text() == 'news'
     assert dialog.refresh_btn.isEnabled()
     assert dialog.remove_btn.isEnabled()
 
@@ -514,3 +514,37 @@ def test_removing_a_playlist_being_updated_stops_the_update_first(app, tmp_path,
     assert removed == ['net']
     assert host.stored == []
     assert dialog.status_label.text() == 'Removed the channels from news.'
+
+
+def test_playlists_dialog_lists_servers_and_their_playlists(app, tmp_path):
+    other = {'name': 'Living Room', 'url': 'http://10.0.0.2:9981'}
+    host = FakeHost([BUILTIN, other], current=other)
+    host.stored = [
+        PlaylistSource('news', str(tmp_path / 'news.m3u'), 'builtin').to_dict(),
+        PlaylistSource('films', str(tmp_path / 'films.m3u'), 'http://10.0.0.2:9981').to_dict(),
+        PlaylistSource('old', str(tmp_path / 'old.m3u'), 'http://gone:9981').to_dict(),
+    ]
+    dialog = dialogs.PlaylistsDialog(host)
+    servers = [dialog.server_list.item(row).text() for row in range(dialog.server_list.count())]
+    assert servers == ['Built-in Server (1)', 'Living Room (1)', 'Removed servers (1)']
+    # The server in use is selected first.
+    assert dialog.server_list.currentRow() == 1
+    assert dialog.title_label.text() == 'Living Room'
+    assert dialog.playlist_list.item(0).text() == 'films'
+    assert dialog.import_btn.isEnabled()
+
+    dialog.server_list.setCurrentRow(2)
+    assert dialog.playlist_list.item(0).text() == 'old'
+    assert not dialog.refresh_btn.isEnabled()
+    assert not dialog.import_btn.isEnabled()
+    dialog.remove_btn.click()
+    servers = [dialog.server_list.item(row).text() for row in range(dialog.server_list.count())]
+    assert servers == ['Built-in Server (1)', 'Living Room (1)']
+
+    dialog.server_list.setCurrentRow(0)
+    assert dialog.playlist_list.item(0).text() == 'news'
+    host.stored = []
+    dialog._load()
+    assert dialog.server_list.currentRow() == 0
+    assert dialog.playlist_list.isHidden()
+    assert not dialog.empty_label.isHidden()
