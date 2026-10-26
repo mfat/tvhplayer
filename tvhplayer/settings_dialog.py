@@ -14,7 +14,9 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
+    QWidget,
 )
 
 try:
@@ -34,6 +36,12 @@ OPTIONS_HELP = (
     'Added after the format\'s own ffmpeg output options, so they override them, '
     'for example -c:a aac -b:a 128k. Leave empty for the defaults.'
 )
+CONVERT_HELP = (
+    'Makes an MP4 next to each new recording with a constant frame rate and a keyframe every second, '
+    'so video editors seek through it smoothly. The frame rate is taken from the recording; '
+    'the options choose the encoder and quality. Any recording can also be converted from '
+    'File > Convert Recording for Editing… or by right-clicking it in Tasks.'
+)
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 
 
@@ -49,6 +57,11 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(480)
         self.setAccessibleName('Settings')
         layout = QVBoxLayout(self)
+        self.tabs = QTabWidget()
+        general_page = QWidget()
+        general = QVBoxLayout(general_page)
+        recordings_page = QWidget()
+        recording_tab = QVBoxLayout(recordings_page)
 
         playback = QGroupBox('Playback')
         playback_layout = QVBoxLayout(playback)
@@ -60,7 +73,7 @@ class SettingsDialog(QDialog):
         play_help.setWordWrap(True)
         play_help.setContentsMargins(24, 0, 0, 0)
         playback_layout.addWidget(play_help)
-        layout.addWidget(playback)
+        general.addWidget(playback)
 
         recordings = QGroupBox('Recordings')
         recordings_layout = QVBoxLayout(recordings)
@@ -111,7 +124,37 @@ class SettingsDialog(QDialog):
         self.options_status = QLabel('')
         self.options_status.setWordWrap(True)
         recordings_layout.addWidget(self.options_status)
-        layout.addWidget(recordings)
+        recording_tab.addWidget(recordings)
+
+        editing = QGroupBox('Converting for editing')
+        editing_layout = QVBoxLayout(editing)
+        self.convert_check = QCheckBox('Con&vert recordings for editing when they finish')
+        self.convert_check.setChecked(host.converts_after_recording())
+        describe(self.convert_check, description=CONVERT_HELP)
+        editing_layout.addWidget(self.convert_check)
+        convert_row = QHBoxLayout()
+        convert_label = QLabel('Conversion op&tions:')
+        self.convert_edit = QLineEdit(host.convert_options())
+        convert_label.setBuddy(self.convert_edit)
+        describe(self.convert_edit, 'Conversion options', 'ffmpeg options for the edit-friendly copy.')
+        convert_row.addWidget(convert_label)
+        convert_row.addWidget(self.convert_edit, 1)
+        editing_layout.addLayout(convert_row)
+        self.delete_check = QCheckBox('&Delete the original once a new recording is converted')
+        self.delete_check.setChecked(host.deletes_converted_original())
+        describe(
+            self.delete_check,
+            description='Only after a successful conversion. Recordings converted by hand are always kept.',
+        )
+        editing_layout.addWidget(self.delete_check)
+        convert_help = QLabel(CONVERT_HELP)
+        convert_help.setWordWrap(True)
+        editing_layout.addWidget(convert_help)
+        self.convert_status = QLabel('')
+        self.convert_status.setWordWrap(True)
+        editing_layout.addWidget(self.convert_status)
+        recording_tab.addWidget(editing)
+        recording_tab.addStretch(1)
 
         group = QGroupBox('Imported channels')
         group_layout = QVBoxLayout(group)
@@ -134,8 +177,11 @@ class SettingsDialog(QDialog):
         self.status_label = QLabel('')
         self.status_label.setWordWrap(True)
         group_layout.addWidget(self.status_label)
-        layout.addWidget(group)
-        layout.addStretch(1)
+        general.addWidget(group)
+        general.addStretch(1)
+        self.tabs.addTab(general_page, '&General')
+        self.tabs.addTab(recordings_page, '&Recordings')
+        layout.addWidget(self.tabs)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
@@ -145,6 +191,11 @@ class SettingsDialog(QDialog):
         self.folder_btn.clicked.connect(self._choose_folder)
         self.format_combo.currentIndexChanged.connect(self._format_chosen)
         self.options_edit.editingFinished.connect(self._options_edited)
+        self.convert_check.toggled.connect(self._convert_toggled)
+        self.convert_edit.editingFinished.connect(self._convert_edited)
+        self.delete_check.toggled.connect(host.set_deletes_converted_original)
+        self.delete_check.setEnabled(self.convert_check.isChecked())
+        self._show_convert_problem(self.convert_edit.text())
         self.hide_check.toggled.connect(self._toggled)
         self.check_btn.clicked.connect(self._check)
         self._sync()
@@ -181,9 +232,40 @@ class SettingsDialog(QDialog):
         if text != self._host.recording_ffmpeg_options():
             self._host.set_recording_ffmpeg_options(text)
 
+    def _convert_toggled(self, on):
+        self._host.set_converts_after_recording(on)
+        self.delete_check.setEnabled(on)
+
+    def _show_convert_problem(self, text):
+        problem = self._host.conversion_problem(text)
+        if problem:
+            announce_label(self.convert_status, f'{problem} Recordings cannot be converted with these options.')
+        else:
+            self.convert_status.setText('')
+        return problem
+
+    def _convert_edited(self):
+        text = self.convert_edit.text().strip()
+        if not text:
+            # Empty brings back the default options.
+            self._host.set_convert_options('')
+            self.convert_edit.setText(self._host.convert_options())
+            self._show_convert_problem(self.convert_edit.text())
+            return
+        try:
+            parse_ffmpeg_options(text)
+        except ValueError as e:
+            announce_label(self.convert_status, f'These options cannot be read ({e}); they were not saved.')
+            return
+        # A missing encoder is shown but the options are kept: it may be installed later.
+        self._show_convert_problem(text)
+        if text != self._host.convert_options():
+            self._host.set_convert_options(text)
+
     def done(self, result):
-        # Closing with the options field focused does not finish editing first.
+        # Closing with an options field focused does not finish editing first.
         self._options_edited()
+        self._convert_edited()
         super().done(result)
 
     def _toggled(self, on):

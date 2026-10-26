@@ -1332,12 +1332,20 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         labels = []
 
         def capture_menu(menu, *_args, **_kwargs):
-            labels.extend(action.text() for action in menu.actions())
+            labels.extend((action.text(), action.isEnabled()) for action in menu.actions() if not action.isSeparator())
             return None
 
         monkeypatch.setattr(ui.QMenu, 'exec', capture_menu)
         panel._show_task_menu(panel.task_table.visualItemRect(panel.task_table.item(0, 0)).center())
-        assert labels == ['Reveal in File Manager']
+        # A recording still going cannot be converted yet.
+        assert labels == [
+            ('Stop Recording', True), ('Reveal in File Manager', True), ('Convert for Editing', False),
+        ]
+        labels.clear()
+        _select_task(panel, 'Scheduled')
+        row = panel.task_table.currentRow()
+        panel._show_task_menu(panel.task_table.visualItemRect(panel.task_table.item(row, 0)).center())
+        assert labels[0] == ('Cancel Scheduled Recording', True)
         recorder.file_path = str(recording)
         panel.refresh()
         _wait_for_tasks(app, panel)
@@ -1571,6 +1579,96 @@ def test_flatpak_asks_for_the_recordings_folder_once(monkeypatch, tmp_path):
         assert [Path(path).parent for path in started] == [chosen, chosen]
     finally:
         window._confirm_quit = lambda: True
+        window.close()
+        app.processEvents()
+
+
+def test_conversions_show_in_tasks_and_follow_a_recording(monkeypatch, tmp_path):
+    from tvhplayer.core import convert
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    started = []
+    monkeypatch.setattr(convert.Conversion, 'start', lambda self: started.append(self) or setattr(self, 'status', convert.CONVERTING))
+    monkeypatch.setattr(window, 'conversion_problem', lambda _text: '')
+    recording = tmp_path / 'recording_One.ts'
+    recording.write_bytes(b'ts data')
+
+    class Recorder:
+        is_running = True
+        file_path = str(recording)
+        started_at = time.time()
+        stall_count = 0
+
+        def stop(self):
+            self.is_running = False
+
+    window.local_recorder = Recorder()
+    window.set_converts_after_recording(True)
+    window.set_deletes_converted_original(True)
+    window.current_server = lambda: None
+    try:
+        window.show()
+        app.processEvents()
+        window.stop_local_recording()
+        assert len(window.conversions) == 1
+        job = window.conversions[0]
+        assert job.target == str(tmp_path / 'recording_One_edit.mp4')
+        assert job.delete_original is True
+        assert job.options == convert.parse_ffmpeg_options(convert.DEFAULT_CONVERT_OPTIONS)
+        assert started == [job]
+
+        # A second one waits for the first.
+        manual = window.convert_for_editing(str(recording))
+        assert manual.delete_original is False and manual.status == convert.WAITING
+        assert manual.target == str(tmp_path / 'recording_One_edit_2.mp4')
+
+        panel = window.tasks_pane
+        panel.status_combo.setCurrentText('Active')
+        panel.refresh(server=False)
+        rows = {panel.task_table.item(r, 4).text(): r for r in range(panel.task_table.rowCount())}
+        assert 'Converting' in rows and 'Waiting' in rows
+        job.progress = 0.42
+        panel.refresh(server=False)
+        row = next(r for r in range(panel.task_table.rowCount()) if panel.task_table.item(r, 4).text() == 'Converting')
+        assert panel.task_table.item(row, 6).text().endswith('42%')
+        panel.task_table.selectRow(row)
+        assert panel.action_btn.text() == 'Cancel' and panel.action_btn.isEnabled()
+
+        # The first is done: the next one starts and the finish is told.
+        job.status = convert.DONE
+        window._tick_conversions()
+        assert started == [job, manual]
+        assert 'Converted recording_One.ts for editing' in window.status_label.text()
+
+        # Cancel from Tasks.
+        panel.refresh(server=False)
+        row = next(r for r in range(panel.task_table.rowCount()) if panel.task_table.item(r, 4).text() == 'Converting')
+        panel.task_table.selectRow(row)
+        menus = []
+        monkeypatch.setattr(ui.QMenu, 'exec', lambda menu, *_a: menus.append(menu.actions()))
+        panel._show_task_menu(panel.task_table.visualItemRect(panel.task_table.item(row, 0)).center())
+        assert menus[0][0].text() == 'Cancel Conversion' and menus[0][0].isEnabled()
+        menus[0][0].trigger()
+        assert manual._cancelled
+        assert 'original is kept' in window.status_label.text()
+    finally:
+        for job in window.conversions:
+            job.status = convert.DONE
+        window._confirm_quit = lambda: True
+        window.close()
+        app.processEvents()
+
+
+def test_conversion_is_refused_when_ffmpeg_cannot_encode(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    warnings = []
+    monkeypatch.setattr(ui.QMessageBox, 'warning', lambda *a: warnings.append(a[2]))
+    monkeypatch.setattr(window, 'conversion_problem', lambda _text: 'This ffmpeg has no libx264 encoder.')
+    try:
+        assert window.convert_for_editing(str(tmp_path / 'a.ts')) is None
+        assert window.conversions == []
+        assert 'no libx264 encoder' in warnings[0] and 'Settings' in warnings[0]
+    finally:
         window.close()
         app.processEvents()
 

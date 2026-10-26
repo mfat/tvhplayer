@@ -529,12 +529,14 @@ def quit_confirmation(
     local_recording: str = '',
     playlist_updates=(),
     now=None,
+    conversions=(),
 ) -> str | None:
     """Text for the quit dialog, or None when quit can proceed.
 
     ``titles`` and ``upcoming`` come from the built-in server; ``lookup_failed``
     says its recording list could not be read. ``local_recording`` names what is
-    being recorded to this computer. ``playlist_updates`` only adds a note when
+    being recorded to this computer; ``conversions`` names recordings being
+    converted for editing. ``playlist_updates`` only adds a note when
     there is already a reason to ask.
     """
     reasons = []
@@ -542,6 +544,11 @@ def quit_confirmation(
         reasons.append(
             f'A recording to this computer is in progress: {local_recording}. '
             'Quitting stops it and the file ends there.'
+        )
+    if conversions:
+        reasons.append(
+            f'Converting for editing: {", ".join(conversions)}. '
+            'Quitting stops the conversion; the original recording is kept.'
         )
     if titles:
         names = ', '.join(titles)

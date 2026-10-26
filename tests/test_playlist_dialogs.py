@@ -450,6 +450,27 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_recording_ffmpeg_options(self, text):
             self.options = text
 
+        def converts_after_recording(self):
+            return False
+
+        def set_converts_after_recording(self, on):
+            self.convert = on
+
+        def convert_options(self):
+            return getattr(self, 'convert_text', '') or '-c:v libx264 -crf 18'
+
+        def set_convert_options(self, text):
+            self.convert_text = text
+
+        def deletes_converted_original(self):
+            return False
+
+        def set_deletes_converted_original(self, on):
+            self.delete = on
+
+        def conversion_problem(self, text):
+            return 'This ffmpeg has no nope encoder.' if 'nope' in text else ''
+
         def check_playlist_channels(self):
             self.checks += 1
             return list(self.jobs)
@@ -479,6 +500,21 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog._options_edited()
     assert host.options == '-b:a 128k'
     assert dialog.options_status.text() == ''
+
+    assert not dialog.delete_check.isEnabled()
+    dialog.convert_check.click()
+    assert host.convert is True and dialog.delete_check.isEnabled()
+    dialog.delete_check.click()
+    assert host.delete is True
+    dialog.convert_edit.setText('-c:v nope')
+    dialog._convert_edited()
+    assert host.convert_text == '-c:v nope'
+    assert 'no nope encoder' in dialog.convert_status.text()
+    dialog.convert_edit.setText('')
+    dialog._convert_edited()
+    assert host.convert_text == ''
+    assert dialog.convert_edit.text() == '-c:v libx264 -crf 18'
+    assert dialog.convert_status.text() == ''
     dialog.hide_check.click()
     assert host.hide is False
     assert 'shown again' in dialog.status_label.text()

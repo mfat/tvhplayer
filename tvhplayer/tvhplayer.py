@@ -48,6 +48,7 @@ try:
     from .core.server_log import ServerLogFeed
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from .core.recorder import DEFAULT_FORMAT, RECORDING_FORMATS, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
+    from .core import convert
     from .core.vlc_player import VlcPlayer
     from .core.playlist_sync import PlaylistSource, find_source, server_key
     from .core.playback_status import STARTING, find_subscription, starting_caption
@@ -114,6 +115,7 @@ except ImportError:
     from core.server_log import ServerLogFeed
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
     from core.recorder import DEFAULT_FORMAT, RECORDING_FORMATS, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
+    from core import convert
     from core.vlc_player import VlcPlayer
     from core.playlist_sync import PlaylistSource, find_source, server_key
     from core.playback_status import STARTING, find_subscription, starting_caption
@@ -545,7 +547,7 @@ def _entry_filesize(entry):
 
 
 _TASK_TABLE_DESCRIPTION = (
-    "Ongoing, scheduled, and completed recordings. "
+    "Ongoing, scheduled, and completed recordings, and conversions for editing. "
     "The first column is a status icon. Recording rows are listed first."
 )
 _TASK_STATUS_ICONS = {}
@@ -564,7 +566,23 @@ def _task_status_icon(status):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor('#dc2626'))
         painter.drawEllipse(QRectF(2, 2, 12, 12))
-    elif status == 'Scheduled':
+    elif status == 'Converting':
+        pen = QPen(QColor('#1d4ed8'))
+        pen.setWidthF(2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawArc(QRectF(2.5, 2.5, 11, 11), 90 * 16, -270 * 16)
+        painter.drawLine(QPointF(8, 2.5), QPointF(10.5, 0.8))
+        painter.drawLine(QPointF(8, 2.5), QPointF(10.5, 4.6))
+    elif status in ('Conversion failed', 'Cancelled'):
+        pen = QPen(QColor('#b91c1c' if status == 'Conversion failed' else '#6b7280'))
+        pen.setWidthF(2.2)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(4, 4), QPointF(12, 12))
+        painter.drawLine(QPointF(12, 4), QPointF(4, 12))
+    elif status in ('Scheduled', 'Waiting'):
         pen = QPen(QColor('#1d4ed8'))
         pen.setWidthF(1.6)
         painter.setPen(pen)
@@ -786,6 +804,7 @@ class TasksPanel(QFrame):
         local = self._local_task()
         if local is not None:
             tasks.append(local)
+        tasks.extend(self._conversion_tasks())
         self._tasks = sorted(tasks, key=self._sort_key)
         self._apply_filter()
 
@@ -807,7 +826,9 @@ class TasksPanel(QFrame):
         title = task.get('title') or 'recording'
         channel = task.get('channel') or 'channel'
         try:
-            if task['kind'] == 'Local':
+            if task['kind'] == 'Convert':
+                host.cancel_conversion(task['conversion'])
+            elif task['kind'] == 'Local':
                 host.stop_local_recording()
             elif task['bucket'] == 'recording':
                 host.get_backend().stop_dvr_entry(task['entry'])
@@ -847,9 +868,25 @@ class TasksPanel(QFrame):
         self.task_table.selectRow(index.row())
         menu = QMenu(self)
         menu.setAccessibleName("Task actions")
+        task = self.selected_task()
+        bucket = task['bucket'] if task is not None else None
+        if bucket == 'converting':
+            label = "Cancel Conversion"
+        elif bucket == 'scheduled':
+            label = "Cancel Scheduled Recording"
+        else:
+            label = "Stop Recording"
+        # The same as the Stop or Cancel button under the list.
+        stop = menu.addAction(label)
+        stop.setEnabled(bucket in ('recording', 'converting', 'scheduled'))
+        stop.triggered.connect(self.run_action)
+        menu.addSeparator()
         action = menu.addAction("Reveal in File Manager")
-        action.setEnabled(self._can_reveal(self.selected_task()))
+        action.setEnabled(self._can_reveal(task))
         action.triggered.connect(self.reveal_selected)
+        convert_action = menu.addAction("Convert for Editing")
+        convert_action.setEnabled(self._can_convert(task))
+        convert_action.triggered.connect(lambda: self._host.convert_for_editing(task['path']))
         menu.exec(self.task_table.viewport().mapToGlobal(position))
 
     def _tell(self, host, message):
@@ -1028,18 +1065,62 @@ class TasksPanel(QFrame):
             'path': path,
         }
 
+    def _conversion_tasks(self):
+        host = self._host
+        tasks = []
+        for conversion in getattr(host, 'conversions', None) or []:
+            source = Path(conversion.source).name
+            target = conversion.target
+            if conversion.status == convert.WAITING:
+                status, bucket, detail = 'Waiting', 'converting', f"From {source}, waiting for the conversion before it"
+            elif conversion.status == convert.CONVERTING:
+                status, bucket = 'Converting', 'converting'
+                done = conversion.progress
+                detail = f"From {source}, {done * 100:.0f}%" if done is not None else f"From {source}"
+            elif conversion.status == convert.DONE:
+                status, bucket, detail = 'Converted', 'completed', target
+            elif conversion.status == convert.FAILED:
+                status, bucket, detail = 'Conversion failed', 'completed', f"{source}: {conversion.error}"
+            else:
+                status, bucket, detail = 'Cancelled', 'completed', f"From {source}; the original is kept"
+            try:
+                size = _format_size(os.path.getsize(target)) if os.path.exists(target) else ''
+            except OSError:
+                size = ''
+            tasks.append({
+                'kind': 'Convert',
+                'bucket': bucket,
+                'key': ('convert', id(conversion)),
+                'entry': None,
+                'conversion': conversion,
+                'channel': '',
+                'title': Path(target).name,
+                'status': status,
+                'size': size,
+                'detail': detail,
+                'start': int(getattr(conversion, 'queued_at', 0)),
+                'path': target if conversion.status == convert.DONE else '',
+            })
+        return tasks
+
+    def _can_convert(self, task):
+        if not task or task.get('bucket') != 'completed' or task.get('kind') not in ('Local', 'Convert'):
+            return False
+        path = task.get('path') or ''
+        return bool(path) and os.path.exists(path)
+
     def _sort_key(self, task):
-        order = {'recording': 0, 'scheduled': 1, 'completed': 2}.get(task['bucket'], 9)
+        order = {'recording': 0, 'converting': 1, 'scheduled': 2, 'completed': 3}.get(task['bucket'], 9)
         start = task['start']
         if task['bucket'] == 'completed':
             start = -start
         return (order, start, task.get('title') or '')
 
     def _can_reveal(self, task):
-        return bool(task and task.get('kind') == 'Local' and task.get('path'))
+        return bool(task and task.get('kind') in ('Local', 'Convert') and task.get('path'))
 
     def _matches(self, task, query, status_filter):
-        if status_filter == 'Active' and task['bucket'] not in ('recording', 'scheduled'):
+        if status_filter == 'Active' and task['bucket'] not in ('recording', 'converting', 'scheduled'):
             return False
         if status_filter == 'Recording' and task['bucket'] != 'recording':
             return False
@@ -1154,6 +1235,13 @@ class TasksPanel(QFrame):
             self._set_action(
                 "Cancel",
                 "Cancel the selected scheduled recording.",
+                True,
+            )
+            return
+        if task['kind'] == 'Convert':
+            self._set_action(
+                "Cancel",
+                "Stop converting this recording. The original is kept.",
                 True,
             )
             return
@@ -2883,6 +2971,10 @@ class TVHeadendClient(QMainWindow):
         self._now_next_timer.timeout.connect(self._tick_now_next)
         self._now_next_timer.start(NOW_NEXT_TICK_MS)
         self.local_recorder = LocalRecorder()
+        # Conversions for editing run one at a time, in the order asked.
+        self.conversions = []
+        self._conversion_timer = QTimer(self)
+        self._conversion_timer.timeout.connect(self._tick_conversions)
         self.builtin = None
         if platform_supports_builtin():
             self.builtin = BuiltinSupervisor(
@@ -3052,6 +3144,11 @@ class TVHeadendClient(QMainWindow):
         playlists_action = QAction("&Playlists…", self)
         playlists_action.triggered.connect(self.show_playlists)
         file_menu.addAction(playlists_action)
+        file_menu.addSeparator()
+        convert_action = QAction("&Convert Recording for Editing…", self)
+        convert_action.setStatusTip("Make an edit-friendly MP4 of a recording on this computer")
+        convert_action.triggered.connect(self.choose_file_to_convert)
+        file_menu.addAction(convert_action)
         file_menu.addSeparator()
         settings_action = QAction("&Settings…", self)
         settings_action.setShortcut("Ctrl+,")
@@ -5276,7 +5373,12 @@ class TVHeadendClient(QMainWindow):
                 timer.stop()
                 self._local_recording_timer = None
             self._local_recording_end = None
+            was_running = self.local_recorder.is_running
+            path = self.local_recorder.file_path
             self.local_recorder.stop()
+            if was_running and self.converts_after_recording() and not getattr(self, '_closing', False):
+                if path and os.path.exists(path) and os.path.getsize(path) > 0:
+                    self.convert_for_editing(path, automatic=True)
             self.statusbar.showMessage("Local recording stopped")
             self._show_on_picture("Recording to this computer stopped")
             self.sync_recording_indicator()
@@ -5303,6 +5405,8 @@ class TVHeadendClient(QMainWindow):
             if not job.shutdown(10000):
                 print("Debug: A playlist refresh did not stop in time")
         self.local_recorder.stop()
+        for conversion in self.conversions:
+            conversion.cancel()
         self._now_next_timer.stop()
         self.logo_loader.shutdown()
         self.close_backend()
@@ -5350,7 +5454,10 @@ class TVHeadendClient(QMainWindow):
         playlist_updates = [
             job.source.name for job in getattr(self, '_playlist_jobs', []) if job.is_writing()
         ]
-        message = quit_confirmation(titles, lookup_failed, upcoming, local_recording, playlist_updates)
+        converting = [Path(c.source).name for c in getattr(self, 'conversions', []) if c.is_active]
+        message = quit_confirmation(
+            titles, lookup_failed, upcoming, local_recording, playlist_updates, conversions=converting
+        )
         if not message:
             return True
         answer = QMessageBox.question(
@@ -5513,6 +5620,101 @@ class TVHeadendClient(QMainWindow):
     def set_recording_ffmpeg_options(self, text):
         self.config['local_recording_ffmpeg_options'] = text
         self.save_config()
+
+    def converts_after_recording(self):
+        return self.config.get('convert_after_recording', False)
+
+    def set_converts_after_recording(self, on):
+        self.config['convert_after_recording'] = bool(on)
+        self.save_config()
+
+    def convert_options(self):
+        return self.config.get('convert_options') or convert.DEFAULT_CONVERT_OPTIONS
+
+    def set_convert_options(self, text):
+        # Kept empty while it is the default, so a better default reaches everyone.
+        self.config['convert_options'] = '' if text == convert.DEFAULT_CONVERT_OPTIONS else text
+        self.save_config()
+
+    def deletes_converted_original(self):
+        return self.config.get('delete_converted_original', False)
+
+    def set_deletes_converted_original(self, on):
+        self.config['delete_converted_original'] = bool(on)
+        self.save_config()
+
+    def conversion_problem(self, text):
+        """Why ``text`` cannot convert with this computer's ffmpeg, or ''. Bad quoting counts."""
+        try:
+            return convert.missing_encoder(text) or ''
+        except ValueError as e:
+            return f"These options cannot be read ({e})."
+
+    def choose_file_to_convert(self):
+        folder = self.local_recording_dir() or str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Convert Recording for Editing", folder,
+            "Recordings (*.ts *.mts *.m2ts *.mp4 *.mkv *.mpg *.mpeg);;All files (*)",
+        )
+        if path:
+            self.convert_for_editing(path)
+
+    def convert_for_editing(self, path, automatic=False):
+        """Queue an edit-friendly copy of ``path``. ``automatic`` is the one made after a recording."""
+        text = self.convert_options()
+        problem = self.conversion_problem(text)
+        if problem:
+            message = f"Cannot convert {Path(path).name} for editing. {problem} Change the conversion options in Settings."
+            if automatic:
+                self.statusbar.showMessage(message)
+            else:
+                QMessageBox.warning(self, "Convert for Editing", message)
+            return None
+        # A file picked through the Flatpak's portal sits in a folder the app cannot write to.
+        folder = os.path.dirname(os.path.abspath(path))
+        if not os.access(folder, os.W_OK):
+            folder = self.local_recording_dir()
+            if not ensure_recording_dir(folder):
+                folder = self._ask_recording_dir(folder)
+                if not folder:
+                    return None
+        conversion = convert.Conversion(
+            path,
+            convert.edit_path(path, folder, {c.target for c in self.conversions if c.is_active}),
+            parse_ffmpeg_options(text),
+            delete_original=automatic and self.deletes_converted_original(),
+        )
+        conversion.queued_at = time.time()
+        self.conversions.append(conversion)
+        self.statusbar.showMessage(f"Converting {Path(path).name} for editing")
+        self._conversion_timer.start(1000)
+        self._tick_conversions()
+        return conversion
+
+    def cancel_conversion(self, conversion):
+        conversion.cancel()
+        self.statusbar.showMessage(f"Stopped converting {Path(conversion.source).name}. The original is kept.")
+        self._tick_conversions()
+
+    def _tick_conversions(self):
+        """Start the next conversion when none runs, and tell how finished ones went."""
+        for conversion in self.conversions:
+            if conversion.status in (convert.DONE, convert.FAILED) and not getattr(conversion, 'announced', False):
+                conversion.announced = True
+                name = Path(conversion.source).name
+                if conversion.status == convert.DONE:
+                    self.statusbar.showMessage(f"Converted {name} for editing: {conversion.target}")
+                else:
+                    self.statusbar.showMessage(f"Could not convert {name} for editing: {conversion.error}")
+        if not any(c.status == convert.CONVERTING for c in self.conversions):
+            waiting = next((c for c in self.conversions if c.status == convert.WAITING), None)
+            if waiting is not None:
+                waiting.start()
+        if not any(c.is_active for c in self.conversions):
+            self._conversion_timer.stop()
+        pane = getattr(self, 'tasks_pane', None)
+        if pane is not None:
+            pane.refresh(server=False)
 
     def _ask_recording_dir(self, previous):
         """Ask for the recordings folder and keep it; '' when none was chosen."""
