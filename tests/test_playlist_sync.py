@@ -70,7 +70,7 @@ class FakeAdmin:
     def update_network(self, uuid, conf):
         self.networks[uuid].update(conf)
 
-    def list_muxes(self, network_uuid):
+    def list_muxes(self, network_uuid, fields=None):
         return [dict(row, uuid=uuid) for uuid, row in self.muxes.items() if row['network_uuid'] == network_uuid]
 
     def create_mux(self, network_uuid, conf):
@@ -79,7 +79,7 @@ class FakeAdmin:
         self.services[f's{uuid}'] = {'multiplex_uuid': uuid, 'enabled': True}
         return uuid
 
-    def list_services(self, mux_uuids):
+    def list_services(self, mux_uuids, fields=None):
         return [dict(row, uuid=uuid) for uuid, row in self.services.items() if row['multiplex_uuid'] in mux_uuids]
 
     def scan_network(self, network_uuid):

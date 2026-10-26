@@ -98,15 +98,25 @@ class TvhAdmin:
         )
         return _uuid(data, 'network')
 
-    def list_muxes(self, network_uuid: str) -> List[dict]:
+    def list_muxes(self, network_uuid: str, fields=None) -> List[dict]:
+        """The network's muxes; with ``fields``, only those fields of each."""
         # The default hidemode leaves out every mux of a disabled network.
-        rows = self._grid('api/mpegts/mux/grid', hidemode='none')
+        params = {'hidemode': 'none'}
+        if fields:
+            params['list'] = ','.join({'uuid', 'network_uuid', *fields})
+        rows = self._grid('api/mpegts/mux/grid', **params)
         return [row for row in rows if row.get('network_uuid') == network_uuid]
 
-    def list_services(self, mux_uuids) -> List[dict]:
-        """Services of these muxes, including unverified and disabled ones."""
+    def list_services(self, mux_uuids, fields=None) -> List[dict]:
+        """Services of these muxes, including unverified and disabled ones.
+
+        With ``fields``, only those fields of each.
+        """
         mux_uuids = set(mux_uuids)
-        rows = self._grid('api/mpegts/service/grid', hidemode='none')
+        params = {'hidemode': 'none'}
+        if fields:
+            params['list'] = ','.join({'uuid', 'multiplex_uuid', *fields})
+        rows = self._grid('api/mpegts/service/grid', **params)
         return [row for row in rows if row.get('multiplex_uuid') in mux_uuids]
 
     def scan_network(self, network_uuid: str) -> None:

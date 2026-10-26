@@ -31,6 +31,11 @@ NO_FFMPEG = 'TVHplayer could not find ffmpeg, which it needs to play imported ch
 MAX_STREAMS = 6
 CHECKPOINT_EVERY = 50
 CHECK_POLL_SECONDS = 2
+# Each poll reads every mux and service of the server. A big playlist is read
+# less often: a second between polls for every thousand muxes.
+MUXES_PER_POLL_SECOND = 1000
+CHECK_MUX_FIELDS = ('scan_result', 'scan_state', 'name', 'iptv_sname')
+CHECK_SERVICE_FIELDS = ('enabled',)
 NOT_WORKING = 'It is not working right now.'
 NETWORK_GONE = 'The channels from this playlist are no longer on the server. Import it again.'
 
@@ -384,7 +389,10 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
     shown or hidden).
     """
     ours = set(source.muxes.values())
-    rows = [row for row in admin.list_muxes(source.network_uuid) if row.get('uuid') in ours]
+    rows = [
+        row for row in admin.list_muxes(source.network_uuid, fields=CHECK_MUX_FIELDS)
+        if row.get('uuid') in ours
+    ]
     wanted = {}
     checked = 0
     failed = []
@@ -398,7 +406,7 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
         if dead:
             failed.append(row.get('name') or row.get('iptv_sname') or '')
     changes = []
-    for service in admin.list_services(wanted):
+    for service in admin.list_services(wanted, fields=CHECK_SERVICE_FIELDS):
         want = wanted.get(service.get('multiplex_uuid'))
         if want is not None and bool(service.get('enabled')) != want:
             changes.append({'uuid': service['uuid'], 'enabled': want})
@@ -430,7 +438,10 @@ def wait_for_checks(
         progress(checked, total)
         if checked >= total or cancelled():
             break
-        sleep(CHECK_POLL_SECONDS)
+        waited = 0
+        while waited < max(CHECK_POLL_SECONDS, total / MUXES_PER_POLL_SECOND) and not cancelled():
+            sleep(CHECK_POLL_SECONDS)
+            waited += CHECK_POLL_SECONDS
     result.check_stopped = checked < total
     result.working = checked - len(failed)
     result.not_working = failed

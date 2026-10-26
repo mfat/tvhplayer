@@ -46,7 +46,7 @@ class FakeAdmin:
     def update_network(self, _uuid, _conf):
         pass
 
-    def list_muxes(self, _network_uuid):
+    def list_muxes(self, _network_uuid, fields=None):
         return [dict(conf, uuid=uuid) for uuid, conf in self.muxes.items()]
 
     def create_mux(self, _network_uuid, conf):
@@ -55,7 +55,7 @@ class FakeAdmin:
         self.muxes[uuid] = dict(conf, scan_state=0, scan_result=1)
         return uuid
 
-    def list_services(self, _mux_uuids):
+    def list_services(self, _mux_uuids, fields=None):
         return []
 
     def scan_network(self, _network_uuid):
