@@ -3492,11 +3492,6 @@ class TVHeadendClient(QMainWindow):
         guide_sources_action.triggered.connect(self.show_guide_sources)
         file_menu.addAction(guide_sources_action)
         file_menu.addSeparator()
-        convert_action = QAction("&Convert Recording for Editing…", self)
-        convert_action.setStatusTip("Make an edit-friendly MP4 of a recording on this computer")
-        convert_action.triggered.connect(self.choose_file_to_convert)
-        file_menu.addAction(convert_action)
-        file_menu.addSeparator()
         settings_action = QAction("&Settings…", self)
         settings_action.setShortcut("Ctrl+,")
         settings_action.triggered.connect(self.show_settings)
@@ -6631,15 +6626,6 @@ class TVHeadendClient(QMainWindow):
             return convert.missing_encoder(text) or ''
         except ValueError as e:
             return f"These options cannot be read ({e})."
-
-    def choose_file_to_convert(self):
-        folder = self.local_recording_dir() or str(Path.home())
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Convert Recording for Editing", folder,
-            "Recordings (*.ts *.mts *.m2ts *.mp4 *.mkv *.mpg *.mpeg);;All files (*)",
-        )
-        if path:
-            self.convert_for_editing(path)
 
     def convert_for_editing(self, path, automatic=False):
         """Queue an edit-friendly copy of ``path``. ``automatic`` is the one made after a recording."""

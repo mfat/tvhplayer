@@ -42,8 +42,8 @@ OPTIONS_HELP = (
 CONVERT_HELP = (
     'Makes an MP4 next to each new recording with a constant frame rate and a keyframe every second, '
     'so video editors seek through it smoothly. The frame rate is taken from the recording; '
-    'the options choose the encoder and quality. Any recording can also be converted from '
-    'File > Convert Recording for Editing… or by right-clicking it in Tasks.'
+    'the options choose the encoder and quality. Any recording can also be converted by '
+    'right-clicking it in Tasks.'
 )
 AWAKE_HELP = (
     'The computer never sleeps while it is recording. With this on, it also stays awake while a '
