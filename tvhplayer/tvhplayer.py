@@ -3642,13 +3642,10 @@ class TVHeadendClient(QMainWindow):
         self.manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(self.manage_servers_btn)
         self.reload_channels_btn = QToolButton()
-        self.reload_channels_btn.setText("⟳")
+        self.reload_channels_btn.setText("Reload")
         self.reload_channels_btn.clicked.connect(lambda: self.fetch_channels(keep_place=True))
         if not prefers_high_contrast():
-            self.reload_channels_btn.setStyleSheet(
-                "QToolButton { font-size: 18px; } "
-                "QToolButton:focus { border: 2px solid palette(highlight); }"
-            )
+            self.reload_channels_btn.setStyleSheet("QToolButton:focus { border: 2px solid palette(highlight); }")
         describe(
             self.reload_channels_btn,
             "Reload channel list",
