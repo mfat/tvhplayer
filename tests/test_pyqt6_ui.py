@@ -290,7 +290,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
         assert enabled['Fullscreen'] is True
 
         fake_player._playing = True
-        fake_player._muted = 1
+        window.player.set_muted(True)
         window.is_fullscreen = True
         playing_menu = window._video_context_menu()
         playing_labels = [

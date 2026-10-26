@@ -86,6 +86,7 @@ def _install_vlc(monkeypatch, instance):
                 MediaPlayerStopped='stopped',
                 MediaPlayerEndReached='ended',
                 MediaPlayerEncounteredError='error',
+                MediaPlayerAudioVolume='audio_volume',
             ),
             MediaStats=object,
             __version__='stub',
@@ -199,6 +200,41 @@ def test_messages_are_drawn_over_the_picture_and_never_carry_over(monkeypatch):
     assert media.log == [('text', ''), ('stop', None)]
 
 
+class _QuietMediaPlayer(_MediaPlayer):
+    """Like libvlc: no sound output while stopped, so mute reads -1 and changes are lost."""
+
+    def audio_get_mute(self):
+        return int(self.muted) if self.playing else -1
+
+    def audio_set_mute(self, value):
+        if self.playing:
+            self.muted = bool(value)
+
+
+def test_mute_state_survives_while_no_sound_output_is_open(monkeypatch):
+    media = _QuietMediaPlayer()
+    _install_vlc(monkeypatch, _Instance(media))
+    engine = VlcPlayer()
+    scheduled = []
+    engine.set_handlers(None, None, scheduled.append)
+    assert engine.is_muted() is False
+
+    engine.play('http://tv.example/a')
+    engine.set_muted(True)
+    engine.stop()
+    assert engine.is_muted() is True
+
+    engine.set_muted(False)
+    assert engine.is_muted() is False
+    engine.play('http://tv.example/b')
+    assert media.muted is True
+    media._events.handlers['audio_volume'](None)
+    for fn in scheduled:
+        fn()
+    assert media.muted is False
+    assert engine.is_muted() is False
+
+
 def test_messages_are_skipped_without_marquee_support(monkeypatch):
     media = _MediaPlayer()
     _install_vlc(monkeypatch, _Instance(media))
@@ -229,7 +265,7 @@ def test_deinterlace_back_to_automatic_starts_a_new_media_player(monkeypatch):
     second = _MediaPlayer()
     instance.player = second
     first.audio_get_volume = lambda: 30
-    first.muted = True
+    engine.set_muted(True)
     assert engine.set_deinterlace('auto') is False
     assert first.stopped is True
     assert second.window_id == 9

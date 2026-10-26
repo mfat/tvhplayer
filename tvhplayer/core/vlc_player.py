@@ -33,6 +33,9 @@ class VlcPlayer(Player):
         self._events_bound = False
         self._window_id = None
         self._deinterlace = DEINTERLACE_AUTO
+        # libvlc reads -1 and drops mute changes while no sound output is open,
+        # so the wanted state is kept here and applied once the output opens.
+        self._muted = False
         _prepare_frozen_plugins()
         # libvlc ignores no_proxy, so a local or LAN server would go through the proxy.
         hide_http_proxy_from_vlc()
@@ -75,6 +78,10 @@ class VlcPlayer(Player):
         error = getattr(event, 'MediaPlayerEncounteredError', None)
         if error is not None:
             manager.event_attach(error, lambda _event: self._emit(self._on_error))
+        # Sent when a new sound output opens. libvlc must not be called on its thread.
+        audio_volume = getattr(event, 'MediaPlayerAudioVolume', None)
+        if audio_volume is not None:
+            manager.event_attach(audio_volume, lambda _event: self._schedule(self._apply_mute))
         self._events_bound = True
 
     def audio_tracks(self):
@@ -145,7 +152,6 @@ class VlcPlayer(Player):
     def _replace_media_player(self):
         old = self._player
         volume = old.audio_get_volume() if hasattr(old, 'audio_get_volume') else None
-        muted = bool(old.audio_get_mute()) if hasattr(old, 'audio_get_mute') else False
         try:
             old.stop()
         except Exception:
@@ -159,7 +165,7 @@ class VlcPlayer(Player):
             self.attach(self._window_id)
         if volume is not None and volume >= 0:
             self._player.audio_set_volume(volume)
-        self._player.audio_set_mute(muted)
+        self._player.audio_set_mute(self._muted)
 
     def play(self, url: str):
         # Each new picture inherits the last marquee text. Clear it so the
@@ -215,10 +221,19 @@ class VlcPlayer(Player):
         self._player.audio_set_volume(int(value))
 
     def is_muted(self) -> bool:
-        return bool(self._player and self._player.audio_get_mute())
+        return self._muted
 
     def set_muted(self, muted: bool):
-        self._player.audio_set_mute(bool(muted))
+        self._muted = bool(muted)
+        self._apply_mute()
+
+    def _apply_mute(self):
+        player = self._player
+        if player is None:
+            return
+        state = player.audio_get_mute()
+        if state is None or state < 0 or bool(state) != self._muted:
+            player.audio_set_mute(self._muted)
 
     def log_stats(self):
         """Print decoded-picture counts once a stream is actually playing."""
