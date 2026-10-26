@@ -234,6 +234,8 @@ import logging
 import platform
 
 CHANNEL_RELOAD_SECONDS = 30
+# A reload of a big list freezes the window a while: space them by a second per this many channels.
+CHANNELS_PER_RELOAD_SECOND = 100
 # Now/next is asked for again this often, and sooner when a programme ends.
 NOW_NEXT_REFRESH_SECONDS = 600
 NOW_NEXT_TICK_MS = 30000
@@ -3266,6 +3268,13 @@ class TVHeadendClient(QMainWindow):
         self.logo_loader = LogoLoader(self)
         self.logo_loader.loaded.connect(self._on_logo_loaded)
         self._logos_arrived = set()
+        # Channels shown in the list by key. A row keeps only the key: a copy of
+        # the channel in every row took seconds to write and read for a big list.
+        self._row_channels = {}
+        # Highlight last written to each row, by channel key; rows not in it are plain.
+        self._row_marks = {}
+        # Name cells by logo reference, so an arrived logo goes straight to its rows.
+        self._logo_items = {}
         self._logo_timer = QTimer(self)
         self._logo_timer.setSingleShot(True)
         self._logo_timer.setInterval(100)
@@ -3987,6 +3996,9 @@ class TVHeadendClient(QMainWindow):
         item = self.channel_list.item(row, 1)
         if not item:
             return None
+        channel = self._row_channels.get(item.data(CHANNEL_KEY_ROLE))
+        if channel is not None:
+            return channel
         data = item.data(Qt.ItemDataRole.UserRole)
         if not data:
             return None
@@ -4104,11 +4116,20 @@ class TVHeadendClient(QMainWindow):
         table.setSortingEnabled(False)
         playing_item = None
         try:
+            shade = tuple(color.name() for color in colors) if colors is not None else None
             for row in range(table.rowCount()):
                 channel = self.channel_from_row(row)
                 is_playing = playing is not None and self._channels_match(channel, playing)
-                is_recording = channel is not None and channel_key(channel) in recording
-                self._set_channel_row_playing(row, channel, is_playing, colors, is_recording)
+                key = channel_key(channel) if channel is not None else ''
+                is_recording = bool(key) and key in recording
+                mark = (is_playing, is_recording, shade) if is_playing or is_recording else None
+                # Writing every cell of every row took seconds for a big list.
+                if not key or self._row_marks.get(key) != mark:
+                    self._set_channel_row_playing(row, channel, is_playing, colors, is_recording)
+                    if key and mark is not None:
+                        self._row_marks[key] = mark
+                    elif key:
+                        self._row_marks.pop(key, None)
                 if is_playing:
                     playing_item = table.item(row, COL_NAME)
         finally:
@@ -4228,20 +4249,29 @@ class TVHeadendClient(QMainWindow):
         logos = options['logos'] and any(channel_icon_reference(channel) for channel in shown)
         table.setSortingEnabled(False)
         table.setRowCount(0)
-        for channel in shown:
-            row = table.rowCount()
-            table.insertRow(row)
+        self._logo_items = {}
+        self._row_channels = {}
+        self._row_marks = {}
+        # Rows added one at a time each move every later row: slow for a big list.
+        table.setRowCount(len(shown))
+        for row, channel in enumerate(shown):
             number_item = QTableWidgetItem()
             number_item.setData(Qt.ItemDataRole.DisplayRole, channel.number)
             set_item_access(number_item, f"Channel {channel.number}", "Channel number")
             table.setItem(row, COL_NUMBER, number_item)
             name_item = QTableWidgetItem(channel.name)
-            name_item.setData(Qt.ItemDataRole.UserRole, channel.to_raw())
-            name_item.setData(CHANNEL_KEY_ROLE, channel_key(channel))
+            key = channel_key(channel)
+            if key and key not in self._row_channels:
+                self._row_channels[key] = channel
+            else:
+                name_item.setData(Qt.ItemDataRole.UserRole, channel.to_raw())
+            name_item.setData(CHANNEL_KEY_ROLE, key)
             set_item_access(name_item, channel.name, self._channel_description(channel))
             if logos:
                 reference = self.channel_logo_reference(channel)
                 name_item.setData(LOGO_ROLE, reference)
+                if reference:
+                    self._logo_items.setdefault(reference, []).append(name_item)
                 if reference and backend is None:
                     backend = self._logo_backend()
                 pixmap = self._logo_for(reference, backend) if reference else None
@@ -4358,16 +4388,13 @@ class TVHeadendClient(QMainWindow):
         arrived, self._logos_arrived = self._logos_arrived, set()
         if not self.channel_options['logos']:
             return
-        icons = {}
-        table = self.channel_list
-        for row in range(table.rowCount()):
-            item = table.item(row, COL_NAME)
-            reference = item.data(LOGO_ROLE) if item is not None else None
+        for reference in arrived:
             # A server change in the meantime drops what had arrived.
-            if reference in arrived and reference in self._logo_pixmaps:
-                icon = icons.get(reference)
-                if icon is None:
-                    icon = icons[reference] = QIcon(self._logo_pixmaps[reference])
+            pixmap = self._logo_pixmaps.get(reference)
+            if pixmap is None:
+                continue
+            icon = QIcon(pixmap)
+            for item in self._logo_items.get(reference, ()):
                 item.setIcon(icon)
 
     def channel_recordings_changed(self, entries):
@@ -4755,6 +4782,8 @@ class TVHeadendClient(QMainWindow):
             return
         self._channel_fetch = None
         self.channel_busy.hide()
+        # Any load counts: a reload for shown or hidden channels waits its turn after it.
+        self._last_channel_reload = time.monotonic()
         reload = bool(self._channels) and self._channels_server == fetch.key
         url = fetch.server.get('url')
         if url != self._logo_server:
@@ -4827,6 +4856,9 @@ class TVHeadendClient(QMainWindow):
         self._channel_kinds = {}
         self._now_next = {}
         self.channel_list.setRowCount(0)
+        self._logo_items = {}
+        self._row_channels = {}
+        self._row_marks = {}
         self._refresh_tag_combo()
         self._guide_channels_changed()
 
@@ -5526,44 +5558,6 @@ class TVHeadendClient(QMainWindow):
         except Exception as e:
             print(f"Debug: Error saving config: {str(e)}")
 
-    def play_channel(self, item):
-        """Play the selected channel"""
-        try:
-            # Get the current row
-            current_row = self.channel_list.currentRow()
-            if current_row < 0:
-                print("Debug: No channel selected")
-                self.statusbar.showMessage("Please select a channel to play")
-                return
-            
-            # Get channel data directly from the table
-            name_item = self.channel_list.item(current_row, 1)  # Get the name column item
-            if not name_item:
-                print("Debug: No channel item found")
-                return
-            
-            # Get the channel data stored in UserRole
-            channel_data = name_item.data(Qt.ItemDataRole.UserRole)
-            if not channel_data:
-                print("Debug: No channel data found in item")
-                return
-            
-            print(f"Debug: Playing channel: {channel_data.get('name', 'Unknown')}")
-            
-            # Get current server
-            server = self.servers[self.server_combo.currentIndex()]
-            
-            # Construct proper URL
-            base_url = server['url']
-            if not base_url.startswith(('http://', 'https://')):
-                base_url = f"http://{base_url}"
-            
-            url = f"{base_url}/stream/channel/{channel_data['uuid']}"
-            print(f"Debug: Playing URL: {url}")
-            
-            # Rest of the play logic...
-        except Exception as e:
-            print(f"Debug: Error in play_channel: {str(e)}")
             print(f"Debug: Traceback: {traceback.format_exc()}")
 
     def on_server_changed(self, index):
@@ -6830,7 +6824,8 @@ class TVHeadendClient(QMainWindow):
         """A running import showed or hid channels on ``server``."""
         if not self.is_current_server(server) or self._channel_reload_timer.isActive():
             return
-        wait = self._last_channel_reload + CHANNEL_RELOAD_SECONDS - time.monotonic()
+        spacing = max(CHANNEL_RELOAD_SECONDS, len(self._channels) / CHANNELS_PER_RELOAD_SECOND)
+        wait = self._last_channel_reload + spacing - time.monotonic()
         self._channel_reload_timer.start(max(0, int(wait * 1000)))
 
     def _reload_changed_channels(self):
@@ -6890,10 +6885,9 @@ class TVHeadendClient(QMainWindow):
         else:
             row = self.channel_list.rowAt(position.y())
         if row >= 0:
-            channel_item = self.channel_list.item(row, 1)  # Get name column item
-            if channel_item is None:
+            channel_data = self.channel_from_row(row)
+            if channel_data is None:
                 return
-            channel_data = channel_item.data(Qt.ItemDataRole.UserRole)
             
             # Add menu actions
             play_action = menu.addAction("Play")
@@ -6911,7 +6905,7 @@ class TVHeadendClient(QMainWindow):
             guide_action.triggered.connect(lambda: self.show_guide(channel_data))
 
             menu.addSeparator()
-            self._add_channel_edit_actions(menu, Channel.from_raw(channel_data))
+            self._add_channel_edit_actions(menu, channel_data)
 
             # Show the menu at the cursor position
             menu.exec(self.channel_list.viewport().mapToGlobal(position))
@@ -7024,10 +7018,7 @@ class TVHeadendClient(QMainWindow):
 
     def play_channel_from_table(self, item):
         """Play channel from table selection"""
-        row = item.row()
-        channel_item = self.channel_list.item(row, 1)  # Get name column item
-        channel_data = channel_item.data(Qt.ItemDataRole.UserRole)  # Original data is stored here
-        self.play_channel_by_data(channel_data)
+        self.play_channel_by_data(self.channel_from_row(item.row()))
 
     def play_channel_by_data(self, channel_data):
         """Play channel using channel data"""

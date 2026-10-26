@@ -2092,7 +2092,7 @@ class _ExtrasBackend:
 
 def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_path):
     from PyQt6.QtCore import QBuffer, QByteArray, QIODevice, Qt
-    from PyQt6.QtGui import QPixmap
+    from PyQt6.QtGui import QColor, QPixmap
 
     from tvhplayer.channel_view import logo_image
     from tvhplayer.core.models import DvrEntry
@@ -2131,7 +2131,8 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         image.save(buffer, 'PNG')
         window._on_logo_loaded('imagecache/1', logo_image(bytes(data)))
         window._logo_timer.timeout.emit()
-        assert not table.item(news_row, ui.COL_NAME).icon().isNull()
+        icon = table.item(news_row, ui.COL_NAME).icon().pixmap(80, 40).toImage()
+        assert icon.pixelColor(icon.width() // 2, icon.height() // 2) == QColor(Qt.GlobalColor.red)
 
         # Columns: the menu shows and hides them, and the choice is saved.
         window._channel_column_actions['type'].setChecked(True)
