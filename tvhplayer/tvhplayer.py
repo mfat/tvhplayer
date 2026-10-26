@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
-    QIcon, QAction, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
+    QIcon, QAction, QActionGroup, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
     QFont, QFontDatabase, QFontMetrics, QKeySequence, QPalette, QValidator,
 )
 import html
@@ -50,6 +50,7 @@ try:
     from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from .core import convert
     from .core.vlc_player import VlcPlayer
+    from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from .core.playlist_sync import PlaylistSource, find_source, server_key
     from .core.playback_status import STARTING, find_subscription, starting_caption
     from .builtin_supervisor import BuiltinSupervisor
@@ -120,6 +121,7 @@ except ImportError:
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from core import convert
     from core.vlc_player import VlcPlayer
+    from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, find_source, server_key
     from core.playback_status import STARTING, find_subscription, starting_caption
     from builtin_supervisor import BuiltinSupervisor
@@ -211,6 +213,11 @@ NOW_NEXT_REFRESH_SECONDS = 600
 NOW_NEXT_TICK_MS = 30000
 # How often to check whether a recording needs the computer awake.
 AWAKE_CHECK_MS = 30000
+DEINTERLACE_CHOICES = (
+    (DEINTERLACE_AUTO, "&Automatic", "Deinterlace streams marked as interlaced, such as 1080i broadcasts"),
+    (DEINTERLACE_ON, "Al&ways", "Deinterlace every stream, for channels that are interlaced but not marked as such"),
+    (DEINTERLACE_OFF, "&Off", "Show the picture as it is sent"),
+)
 LOGO_ROLE = Qt.ItemDataRole.UserRole + 2
 CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
 
@@ -3032,6 +3039,7 @@ class TVHeadendClient(QMainWindow):
         print("Debug: Initializing VLC instance")
         try:
             self.player = VlcPlayer()
+            self.player.set_deinterlace(self.config['deinterlace'])
             print("Debug: VLC media player created successfully")
         except Exception as e:
             print(f"Error initializing VLC: {str(e)}")
@@ -3132,6 +3140,10 @@ class TVHeadendClient(QMainWindow):
         menubar.setAccessibleName("Main menu")
         file_menu = menubar.addMenu("&File")
         view_menu = menubar.addMenu("&View")
+        self.playback_menu = menubar.addMenu("&Playback")
+        self.playback_menu.aboutToShow.connect(lambda: self._fill_playback_menu(self.playback_menu))
+        # Filled each time it opens: the tracks belong to the stream playing then.
+        self._fill_playback_menu(self.playback_menu)
         help_menu = menubar.addMenu("&Help")
 
         # Add User Guide action to Help menu
@@ -4906,7 +4918,63 @@ class TVHeadendClient(QMainWindow):
         guide_action = menu.addAction("Show in TV Guide")
         guide_action.setEnabled(channel is not None)
         guide_action.triggered.connect(lambda: self.show_guide(channel))
+
+        menu.addSeparator()
+        self._fill_playback_menu(menu)
         return menu
+
+    def _fill_playback_menu(self, menu):
+        """Audio Track, Subtitles, and Deinterlace submenus for the stream playing now."""
+        if menu is getattr(self, 'playback_menu', None):
+            menu.clear()
+        player = getattr(self, 'player', None)
+        audio = menu.addMenu("&Audio Track")
+        tracks = player.audio_tracks() if player is not None else []
+        self._add_track_choices(audio, tracks, player.audio_track() if tracks else NO_TRACK,
+                                lambda track_id: self.player.set_audio_track(track_id))
+        if not tracks:
+            audio.addAction("No Sound Tracks").setEnabled(False)
+
+        subtitles = menu.addMenu("&Subtitles")
+        tracks = player.subtitle_tracks() if player is not None else []
+        current = player.subtitle_track() if tracks else NO_TRACK
+        self._add_track_choices(subtitles, [(NO_TRACK, "Off")] + tracks, current,
+                                lambda track_id: self.player.set_subtitle_track(track_id))
+        if not tracks:
+            subtitles.actions()[0].setEnabled(False)
+            subtitles.addAction("No Subtitles in This Channel").setEnabled(False)
+
+        deinterlace = menu.addMenu("&Deinterlace")
+        group = QActionGroup(deinterlace)
+        mode = self.config['deinterlace']
+        for value, label, tip in DEINTERLACE_CHOICES:
+            action = deinterlace.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(value == mode)
+            action.setStatusTip(tip)
+            action.setToolTip(tip)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, value=value: self.set_deinterlace(value))
+        deinterlace.setToolTipsVisible(True)
+
+    def _add_track_choices(self, menu, tracks, current, choose):
+        group = QActionGroup(menu)
+        for track_id, name in tracks:
+            action = menu.addAction(name.replace('&', '&&'))
+            action.setCheckable(True)
+            action.setChecked(track_id == current)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, track_id=track_id: choose(track_id))
+
+    def set_deinterlace(self, mode):
+        self.config['deinterlace'] = mode
+        self.save_config()
+        if self.player.set_deinterlace(mode):
+            return
+        # The engine starts over for this one; play the channel again.
+        channel = self._playing_channel()
+        if channel is not None:
+            self.play_channel_by_data(channel)
 
     def show_video_context_menu(self, position):
         """Right-click menu on the video surface."""

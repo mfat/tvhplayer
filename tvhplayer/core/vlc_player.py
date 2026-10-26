@@ -6,7 +6,7 @@ import os
 import sys
 import traceback
 
-from .player import Player
+from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Player
 from .proxy import hide_http_proxy_from_vlc
 
 VLC_ARGS = (
@@ -15,7 +15,11 @@ VLC_ARGS = (
     '--network-caching=1000',
     '--no-video-title-show',
     '--no-snapshot-preview',
+    # Deinterlace interlaced broadcasts, with the method VLC picks for the decoder in use.
+    '--deinterlace=-1',
 )
+# The filter used when deinterlacing is always on: one picture per field, smooth on 1080i TV.
+DEINTERLACE_FILTER = 'yadif2x'
 
 
 class VlcPlayer(Player):
@@ -27,18 +31,26 @@ class VlcPlayer(Player):
 
         self._vlc = vlc
         self._events_bound = False
+        self._window_id = None
+        self._deinterlace = DEINTERLACE_AUTO
         _prepare_frozen_plugins()
         # libvlc ignores no_proxy, so a local or LAN server would go through the proxy.
         hide_http_proxy_from_vlc()
         self._instance = vlc.Instance(list(VLC_ARGS))
         if not self._instance:
             raise RuntimeError('VLC Instance creation returned None')
-        self._player = self._instance.media_player_new()
-        if not self._player:
+        self._player = self._new_media_player()
+
+    def _new_media_player(self):
+        player = self._instance.media_player_new()
+        if not player:
             raise RuntimeError('VLC media player creation returned None')
+        self._player = player
         self._setup_marquee()
+        return player
 
     def attach(self, window_id):
+        self._window_id = window_id
         player = self._player
         if sys.platform.startswith('linux'):
             if window_id is not None:
@@ -65,12 +77,97 @@ class VlcPlayer(Player):
             manager.event_attach(error, lambda _event: self._emit(self._on_error))
         self._events_bound = True
 
+    def audio_tracks(self):
+        return self._tracks('audio_get_track_description', skip_disable=True)
+
+    def audio_track(self):
+        return self._track_id('audio_get_track')
+
+    def set_audio_track(self, track_id):
+        if self._player is not None:
+            self._player.audio_set_track(int(track_id))
+
+    def subtitle_tracks(self):
+        return self._tracks('video_get_spu_description', skip_disable=True)
+
+    def subtitle_track(self):
+        return self._track_id('video_get_spu')
+
+    def set_subtitle_track(self, track_id):
+        if self._player is not None:
+            self._player.video_set_spu(int(track_id))
+
+    def _tracks(self, method, skip_disable=False):
+        getter = getattr(self._player, method, None)
+        if getter is None:
+            return []
+        tracks = []
+        for track_id, name in getter() or []:
+            if skip_disable and track_id == NO_TRACK:
+                continue
+            if isinstance(name, bytes):
+                name = name.decode('utf-8', 'replace')
+            tracks.append((int(track_id), str(name or f'Track {track_id}')))
+        return tracks
+
+    def _track_id(self, method):
+        getter = getattr(self._player, method, None)
+        if getter is None:
+            return NO_TRACK
+        try:
+            return int(getter())
+        except (TypeError, ValueError):
+            return NO_TRACK
+
+    def deinterlace(self):
+        return self._deinterlace
+
+    def set_deinterlace(self, mode):
+        if mode not in DEINTERLACE_MODES or mode == self._deinterlace:
+            return True
+        self._deinterlace = mode
+        if mode == DEINTERLACE_AUTO:
+            # libvlc 3 can turn the filter on or off but not back to automatic;
+            # a new media player starts automatic again.
+            self._replace_media_player()
+            return False
+        self._apply_deinterlace()
+        return True
+
+    def _apply_deinterlace(self):
+        if self._player is None or not hasattr(self._player, 'video_set_deinterlace'):
+            return
+        if self._deinterlace == DEINTERLACE_ON:
+            self._player.video_set_deinterlace(DEINTERLACE_FILTER)
+        elif self._deinterlace == DEINTERLACE_OFF:
+            self._player.video_set_deinterlace('')
+
+    def _replace_media_player(self):
+        old = self._player
+        volume = old.audio_get_volume() if hasattr(old, 'audio_get_volume') else None
+        muted = bool(old.audio_get_mute()) if hasattr(old, 'audio_get_mute') else False
+        try:
+            old.stop()
+        except Exception:
+            pass
+        if hasattr(old, 'release'):
+            old.release()
+        self._new_media_player()
+        self._events_bound = False
+        self.set_handlers(self._on_playing, self._on_stopped, None, self._on_error)
+        if self._window_id is not None:
+            self.attach(self._window_id)
+        if volume is not None and volume >= 0:
+            self._player.audio_set_volume(volume)
+        self._player.audio_set_mute(muted)
+
     def play(self, url: str):
         # Each new picture inherits the last marquee text. Clear it so the
         # previous channel's message does not reappear.
         self._set_marquee_text('')
         media = self._instance.media_new(url)
         self._player.set_media(media)
+        self._apply_deinterlace()
         self._player.play()
         self._release_input()
 

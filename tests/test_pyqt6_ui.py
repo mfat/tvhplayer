@@ -105,6 +105,27 @@ class _FakeVlcPlayer:
     def is_playing(self):
         return self._playing
 
+    def audio_get_track_description(self):
+        return getattr(self, 'audio', [])
+
+    def audio_get_track(self):
+        return getattr(self, 'audio_id', -1)
+
+    def audio_set_track(self, track_id):
+        self.audio_id = track_id
+
+    def video_get_spu_description(self):
+        return getattr(self, 'spu', [])
+
+    def video_get_spu(self):
+        return getattr(self, 'spu_id', -1)
+
+    def video_set_spu(self, track_id):
+        self.spu_id = track_id
+
+    def video_set_deinterlace(self, mode):
+        self.deinterlace = mode
+
     def stop(self):
         self._playing = False
 
@@ -252,6 +273,9 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             'Record Locally',
             'Show EPG',
             'Show in TV Guide',
+            '&Audio Track',
+            '&Subtitles',
+            '&Deinterlace',
         ]
         enabled = {
             action.text(): action.isEnabled()
@@ -2241,5 +2265,41 @@ def test_tv_guide_opens_from_the_view_menu_at_the_selected_channel(monkeypatch, 
         if guide is not None:
             guide.shutdown()
             guide.close()
+        window.close()
+        app.processEvents()
+
+
+def test_playback_menu_lists_tracks_and_deinterlace(monkeypatch, tmp_path):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        fake_player.audio = [(-1, b'Disable'), (1, b'Track 1 - [English]'), (2, b'Track 2 - [Deutsch]')]
+        fake_player.audio_id = 1
+        fake_player.spu = [(-1, b'Disable'), (5, b'DVB subtitles')]
+        menu = window.playback_menu
+        window._fill_playback_menu(menu)
+        submenus = {action.text(): action.menu() for action in menu.actions()}
+        audio = submenus['&Audio Track']
+        assert [a.text() for a in audio.actions()] == ['Track 1 - [English]', 'Track 2 - [Deutsch]']
+        assert audio.actions()[0].isChecked()
+        audio.actions()[1].trigger()
+        assert fake_player.audio_id == 2
+
+        subtitles = submenus['&Subtitles']
+        assert [a.text() for a in subtitles.actions()] == ['Off', 'DVB subtitles']
+        assert subtitles.actions()[0].isChecked()
+        subtitles.actions()[1].trigger()
+        assert fake_player.spu_id == 5
+
+        deinterlace = submenus['&Deinterlace']
+        assert [a.isChecked() for a in deinterlace.actions()] == [True, False, False]
+        deinterlace.actions()[1].trigger()
+        assert window.config['deinterlace'] == 'on'
+        assert fake_player.deinterlace == 'yadif2x'
+        deinterlace.actions()[2].trigger()
+        assert fake_player.deinterlace == ''
+        # Filled again when it opens, so the list follows the stream.
+        window._fill_playback_menu(menu)
+        assert len(menu.actions()) == 3
+    finally:
         window.close()
         app.processEvents()

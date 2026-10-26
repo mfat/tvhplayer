@@ -12,6 +12,7 @@ from pathlib import Path
 from .builtin_server import without_builtin_secrets
 from .channel_info import channel_list_options
 from .models import ServerConfig
+from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES
 from .playlist_sync import PlaylistSource
 from .recorder import DEFAULT_FORMAT, RECORDING_FORMATS
 
@@ -69,6 +70,7 @@ def default_config():
         'delete_converted_original': False,
         # Block sleep until scheduled recordings on this computer are done, not only while recording.
         'stay_awake_for_scheduled': True,
+        'deinterlace': DEINTERLACE_AUTO,
     }
 
 
@@ -109,6 +111,8 @@ def _normalize(data):
     for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options'):
         if not isinstance(cfg.get(key), str):
             cfg[key] = ''
+    if cfg.get('deinterlace') not in DEINTERLACE_MODES:
+        cfg['deinterlace'] = DEINTERLACE_AUTO
     if cfg.get('local_recording_format') not in RECORDING_FORMATS:
         cfg['local_recording_format'] = DEFAULT_FORMAT
     if not isinstance(cfg.get('last_channel'), dict):

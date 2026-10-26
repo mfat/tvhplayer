@@ -207,3 +207,34 @@ def test_messages_are_skipped_without_marquee_support(monkeypatch):
     engine.show_message('Muted')
     engine.stop()
     assert media.stopped is True
+
+
+def test_deinterlace_back_to_automatic_starts_a_new_media_player(monkeypatch):
+    first = _MediaPlayer()
+    instance = _Instance(first)
+    _install_vlc(monkeypatch, instance)
+    engine = VlcPlayer()
+    seen = []
+    engine.set_handlers(lambda: seen.append('playing'), None, None)
+    engine.attach(9)
+    modes = []
+    first.video_set_deinterlace = modes.append
+    assert engine.set_deinterlace('on') is True
+    assert modes == ['yadif2x']
+    engine.play('http://tv.example/a')
+    assert modes == ['yadif2x', 'yadif2x']
+    assert engine.set_deinterlace('off') is True
+    assert modes[-1] == ''
+
+    second = _MediaPlayer()
+    instance.player = second
+    first.audio_get_volume = lambda: 30
+    first.muted = True
+    assert engine.set_deinterlace('auto') is False
+    assert first.stopped is True
+    assert second.window_id == 9
+    assert second.volume == 30
+    assert second.muted is True
+    second._events.handlers['playing'](None)
+    assert seen == ['playing']
+    assert engine.deinterlace() == 'auto'

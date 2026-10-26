@@ -37,6 +37,10 @@ To connect TVHPlayer to your TVHeadend server:
 
 Press the play button or double-click a channel on the channel list to start playback.
 
+### Sound, subtitles, and picture
+
+The **Playback** menu, also at the bottom of the right-click menu on the picture, lists the playing channel's sound tracks (for example another language or audio description) and its subtitles, DVB and teletext subtitles included. **Deinterlace** smooths broadcasts sent as interlaced video, such as 1080i HD channels. **Automatic** does it for streams marked as interlaced, **Always** for every stream, and **Off** shows the picture as sent.
+
 ### Customizing the channel list
 
 Besides the channel name, the list can show the channel number, the program on now (with a bar showing how far it has got), the program on next, the channel type (Radio, SD, HD, UHD, Encrypted), and a status column that says when a channel is playing or recording.
