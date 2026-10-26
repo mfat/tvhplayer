@@ -6000,6 +6000,10 @@ class TVHeadendClient(QMainWindow):
             event.ignore()
             return
         self._closing = True
+        # Stopping the built-in server and background work takes seconds; out of
+        # sight, the desktop does not offer to force quit a window that stopped answering.
+        self.hide()
+        QApplication.processEvents()
         self.save_config()
         for job in self._playlist_jobs:
             job.cancel()
@@ -6056,7 +6060,9 @@ class TVHeadendClient(QMainWindow):
                 server = find_builtin_server(self.servers)
                 if server is None:
                     raise TvhError('Built-in server entry is missing')
-                backend = create_backend(server)
+                # Over HTSP the recordings come only after every channel, seconds
+                # for a big list; the HTTP API answers with just the recordings.
+                backend = create_backend(dict(server, protocol=PROTOCOL_HTTP))
                 entries = backend.list_dvr_entries()
                 titles = recording_titles(entries)
                 upcoming = upcoming_recordings(entries)

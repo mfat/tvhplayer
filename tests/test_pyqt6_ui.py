@@ -1884,7 +1884,7 @@ def test_quit_asks_the_builtin_server_even_when_another_is_selected(monkeypatch,
     window.servers = [
         {'name': 'NAS', 'url': 'http://nas:9981', 'protocol': 'http'},
         {
-            'name': 'Built-in Server', 'url': 'http://127.0.0.1:24111', 'protocol': 'http',
+            'name': 'Built-in Server', 'url': 'http://127.0.0.1:24111', 'protocol': 'htsp',
             'username': 'tvhplayer', 'password': 'secret-secret-secret', 'builtin': True,
         },
     ]
@@ -1921,6 +1921,7 @@ def test_quit_asks_the_builtin_server_even_when_another_is_selected(monkeypatch,
     )
     assert window._confirm_quit() is False
     assert [server['name'] for server in asked] == ['Built-in Server']
+    assert asked[0]['protocol'] == 'http'
     assert 'News Hour' in messages[0]
     app.processEvents()
 
