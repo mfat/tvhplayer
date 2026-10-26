@@ -21,11 +21,20 @@ class _Session:
     def __init__(self):
         self.calls = []
         self.queue = []
+        self.playlists = []
 
     def request(self, method, url, **kwargs):
         self.calls.append((method, url, kwargs))
         payload = self.queue.pop(0) if self.queue else {}
         return _Response(payload)
+
+    def get(self, url, **kwargs):
+        self.calls.append(('GET', url, kwargs))
+        response = _Response(status=404)
+        if self.playlists:
+            response.status_code = 200
+            response.text = self.playlists.pop(0)
+        return response
 
     def close(self):
         return None
@@ -185,6 +194,14 @@ def test_http_event_lists_profiles_images_and_status():
 
     url = backend.stream_url(Channel(uuid='chan', name='BBC'), profile='pass')
     assert url == 'http://u:p@127.0.0.1:9981/stream/channel/chan?profile=pass'
+    # A ticket replaces the login. The playlist's own profile=pass is dropped.
+    backend._session.playlists.append(
+        '#EXTM3U\n#EXTINF:-1,BBC\nhttp://elsewhere:9981/tvh/stream/channelid/4?ticket=tk&profile=pass\n'
+    )
+    assert backend.stream_url(Channel(uuid='chan', name='BBC')) == (
+        'http://127.0.0.1:9981/tvh/stream/channelid/4?ticket=tk'
+    )
+    assert backend._session.calls[-1][1] == 'http://127.0.0.1:9981/playlist/ticket/channel/chan'
     assert backend.image_url('imagecache/38') == 'http://u:p@127.0.0.1:9981/imagecache/38'
     assert backend.image_url('https://cdn.example/a.png') == 'https://cdn.example/a.png'
     assert backend.image_url('') == ''

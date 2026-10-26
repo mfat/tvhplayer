@@ -34,6 +34,12 @@ def http_base_url(url):
     return base + path if path else base
 
 
+def origin_url(url):
+    """Return scheme://host[:port] with any webroot path dropped."""
+    parsed = urlparse(http_base_url(url))
+    return f'{parsed.scheme}://{parsed.netloc}'
+
+
 def http_host_port(url):
     """Return (hostname, http_port) from a server URL."""
     parsed = urlparse(http_base_url(url))
