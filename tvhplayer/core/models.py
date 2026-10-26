@@ -194,7 +194,9 @@ class EpgQuery:
     ``channel`` is a ``Channel``. ``channel_tag`` is a ``ChannelTag``.
     ``mode`` is ``now`` or omitted. ``limit`` is a row count and ``offset``
     is the grid start index (HTTP ``start``), not a programme time.
-    ``fulltext`` asks HTTP for an exact title match.
+    ``fulltext`` asks HTTP for an exact title match. ``ends_after`` and
+    ``starts_before`` are Unix seconds that keep programmes overlapping
+    that span; they go to the HTTP grid as start/stop filters.
     """
 
     title: Optional[str] = None
@@ -208,6 +210,8 @@ class EpgQuery:
     limit: Optional[int] = None
     offset: Optional[int] = None
     lang: Optional[str] = None
+    ends_after: Optional[int] = None
+    starts_before: Optional[int] = None
 
 
 @dataclass

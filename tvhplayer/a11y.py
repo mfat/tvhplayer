@@ -41,7 +41,18 @@ Recording
   Ctrl+E           Stop the server recording
   Ctrl+Shift+R     Record on this computer
   Ctrl+Shift+E     Stop the local recording
-  Ctrl+G           Show the program guide for the selected channel
+  Ctrl+G           Open the TV guide at the selected channel
+
+TV guide
+  Arrow keys       Move between programmes and channels
+  Home             Go back to what is on now
+  Ctrl+Home/End    First or last channel
+  Page Up/Down     Move a page of channels
+  Type letters     Jump to a matching channel
+  Enter            Watch the channel
+  Ctrl+R           Record the programme, or cancel its recording
+  Shift+F10        Open the programme menu
+  Ctrl+F           Find a channel
 
 Menus
   Alt+F            File menu

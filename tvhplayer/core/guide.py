@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import List, Optional
 
 from .dvr import localized_text
@@ -146,6 +147,15 @@ def epg_http_params(query: Optional[EpgQuery]) -> dict:
         params['mode'] = 'now'
     if query.lang:
         params['lang'] = query.lang
+    # The server's comparisons include the bound, so a programme that ends
+    # exactly at the start of the span (or starts at its end) is left out.
+    filters = []
+    if query.ends_after is not None:
+        filters.append({'field': 'stop', 'type': 'numeric', 'value': int(query.ends_after) + 1, 'comparison': 'gt'})
+    if query.starts_before is not None:
+        filters.append({'field': 'start', 'type': 'numeric', 'value': int(query.starts_before) - 1, 'comparison': 'lt'})
+    if filters:
+        params['filter'] = json.dumps(filters)
     return params
 
 
@@ -153,11 +163,13 @@ def epg_htsp_transport(query: Optional[EpgQuery]) -> str:
     """``epgQuery``, ``getEvents``, or ``http`` for one HTSP guide read.
 
     ``epgQuery`` needs a title. ``getEvents`` is a single channel with no
-    other filter. Exact title match, ``mode``, and a non-zero grid offset
-    exist only on the HTTP grid, so those use the ``api`` proxy.
+    other filter. Exact title match, ``mode``, a non-zero grid offset, and
+    a time span exist only on the HTTP grid, so those use the ``api`` proxy.
     """
     query = query or EpgQuery()
     if query.fulltext or query.mode or query.offset:
+        return 'http'
+    if query.ends_after is not None or query.starts_before is not None:
         return 'http'
     if query.title:
         if query.channel is not None and query.channel.htsp_id is None:

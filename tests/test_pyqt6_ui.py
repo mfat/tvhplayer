@@ -251,6 +251,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             'Record',
             'Record Locally',
             'Show EPG',
+            'Show in TV Guide',
         ]
         enabled = {
             action.text(): action.isEnabled()
@@ -2200,5 +2201,39 @@ def test_player_bar_play_stop_and_record_controls(monkeypatch, tmp_path):
         assert bar.record_menu.isVisible()
         bar.record_menu.hide()
     finally:
+        window.close()
+        app.processEvents()
+
+
+def test_tv_guide_opens_from_the_view_menu_at_the_selected_channel(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        import tvhplayer.guide_view as guide_view
+
+        actions = {action.text(): action for menu in window.menuBar().findChildren(ui.QMenu) for action in menu.actions()}
+        guide_action = actions['TV &Guide']
+        assert guide_action.shortcut().toString() == 'Ctrl+G'
+        channels = [ui.Channel(uuid='a', name='Alpha', number=1), ui.Channel(uuid='b', name='Bravo', number=2)]
+        window._channels = channels
+        monkeypatch.setattr(window, 'selected_channel', lambda: channels[1])
+        monkeypatch.setattr(window, '_server_requests_ready', lambda: False)
+        guide_action.trigger()
+        guide = window._guide
+        assert isinstance(guide, guide_view.GuideWindow)
+        assert guide.isVisible()
+        assert [channel.name for channel in guide.grid.channels] == ['Alpha', 'Bravo']
+        assert guide.grid.current_channel().name == 'Bravo'
+        # Without a server there is nothing to read, and the grid says why.
+        assert 'server' in guide.grid.message
+        window.channel_recordings_changed([])
+        assert guide.grid.recordings == {}
+        window.show_guide(channels[0])
+        assert window._guide is guide
+        assert guide.grid.current_channel().name == 'Alpha'
+    finally:
+        guide = getattr(window, '_guide', None)
+        if guide is not None:
+            guide.shutdown()
+            guide.close()
         window.close()
         app.processEvents()

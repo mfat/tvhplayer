@@ -14,7 +14,7 @@
       <li>Watch live TV</li>
       <li>Record TV shows directly on the server</li>
       <li>Record streams locally to your computer</li>
-      <li>View EPG (Electronic Program Guide) data</li>
+      <li>TV guide showing every channel on a timeline, with watch and record from the guide</li>
       <li>Monitor server status and signal quality</li>
       <li>Support for multiple TVHeadend servers</li>
       <li>Cross-platform: runs on GNU/Linux, Windows and MacOS</li>

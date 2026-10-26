@@ -65,6 +65,7 @@ try:
     )
     from .playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from .settings_dialog import SettingsDialog
+    from .guide_view import GuideWindow
     from .core.channel_info import (
         channel_icon_reference,
         channel_key,
@@ -132,6 +133,7 @@ except ImportError:
     )
     from playlist_dialogs import BUSY as PLAYLIST_BUSY, ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from settings_dialog import SettingsDialog
+    from guide_view import GuideWindow
     from core.channel_info import (
         channel_icon_reference,
         channel_key,
@@ -3403,6 +3405,12 @@ class TVHeadendClient(QMainWindow):
         self.tasks_action.triggered.connect(self._toggle_tasks_pane)
         view_menu.addAction(self.tasks_action)
         self.tasks_pane.close_requested.connect(self._close_tasks_pane)
+
+        guide_action = QAction("TV &Guide", self)
+        guide_action.setShortcut("Ctrl+G")
+        guide_action.setStatusTip("Show what is on every channel, now and later")
+        guide_action.triggered.connect(lambda: self.show_guide())
+        view_menu.addAction(guide_action)
         
         # Set initial sizes (optional)
         self.splitter.setSizes([300, 640, 260])
@@ -3719,6 +3727,9 @@ class TVHeadendClient(QMainWindow):
         and status so the list still shows what is on. Channels the server is
         recording say so too, unless the user turned that off.
         """
+        guide = getattr(self, '_guide', None)
+        if guide is not None:
+            guide.playing_changed()
         table = getattr(self, 'channel_list', None)
         if table is None:
             return
@@ -3930,6 +3941,9 @@ class TVHeadendClient(QMainWindow):
     def channel_recordings_changed(self, entries):
         """The tasks pane read the server's recordings; mark channels being recorded."""
         self._dvr_entries = list(entries or [])
+        guide = getattr(self, '_guide', None)
+        if guide is not None:
+            guide.recordings_changed(self._dvr_entries)
         keys = recording_channel_keys(self._channels, self._dvr_entries)
         if keys != self._recording_keys:
             self._recording_keys = keys
@@ -4215,6 +4229,7 @@ class TVHeadendClient(QMainWindow):
         else:
             self._show_channel_state("This server has no channels yet.")
         self.statusbar.showMessage("Channels loaded successfully")
+        self._guide_channels_changed()
         if self._play_on_start:
             self._play_on_start = False
             self._play_last_channel(fetch.key)
@@ -4251,6 +4266,7 @@ class TVHeadendClient(QMainWindow):
         self._now_next = {}
         self.channel_list.setRowCount(0)
         self._refresh_tag_combo()
+        self._guide_channels_changed()
 
     def _show_channel_state(self, text, busy=False, retry=False):
         """Put a message, and a spinner or Retry button, where the channel list is."""
@@ -4785,6 +4801,10 @@ class TVHeadendClient(QMainWindow):
         epg_action = menu.addAction(QIcon(f"{self.icons_dir}/epg.svg"), "Show EPG")
         epg_action.setEnabled(channel is not None)
         epg_action.triggered.connect(lambda: self.show_channel_epg(channel))
+
+        guide_action = menu.addAction("Show in TV Guide")
+        guide_action.setEnabled(channel is not None)
+        guide_action.triggered.connect(lambda: self.show_guide(channel))
         return menu
 
     def show_video_context_menu(self, position):
@@ -4992,10 +5012,6 @@ class TVHeadendClient(QMainWindow):
             return
         if ctrl and not shift and key == Qt.Key.Key_E:
             self.stop_recording()
-            event.accept()
-            return
-        if ctrl and not shift and key == Qt.Key.Key_G:
-            self.show_channel_epg(self.selected_channel())
             event.accept()
             return
         if ctrl and not shift and key == Qt.Key.Key_Period:
@@ -5408,6 +5424,10 @@ class TVHeadendClient(QMainWindow):
         for conversion in self.conversions:
             conversion.cancel()
         self._now_next_timer.stop()
+        guide = getattr(self, '_guide', None)
+        if guide is not None:
+            guide.shutdown()
+            guide.close()
         self.logo_loader.shutdown()
         self.close_backend()
         if getattr(self, 'player', None) is not None:
@@ -5936,9 +5956,26 @@ class TVHeadendClient(QMainWindow):
             # Add EPG action
             epg_action = menu.addAction("Show EPG")
             epg_action.triggered.connect(lambda: self.show_channel_epg(channel_data))
+            guide_action = menu.addAction("Show in TV Guide")
+            guide_action.triggered.connect(lambda: self.show_guide(channel_data))
             
             # Show the menu at the cursor position
             menu.exec(self.channel_list.viewport().mapToGlobal(position))
+
+    def show_guide(self, channel=None):
+        """Open the TV guide at ``channel``, or at the highlighted channel."""
+        if isinstance(channel, dict):
+            channel = Channel.from_raw(channel)
+        if channel is None:
+            channel = self.selected_channel()
+        if getattr(self, '_guide', None) is None:
+            self._guide = GuideWindow(self, self)
+        self._guide.show_channel(channel)
+
+    def _guide_channels_changed(self):
+        guide = getattr(self, '_guide', None)
+        if guide is not None:
+            guide.channels_changed()
 
     def show_channel_epg(self, channel):
         """Fetch and show EPG data for the selected channel"""

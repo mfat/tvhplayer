@@ -15,7 +15,7 @@ A TVheadend client for watching and recording live TV on PC
 
 With TVHplayer you can:
 - Play live TV & radio channels
-- Browse EPG
+- TV guide: every channel on a timeline, with watch and record from the guide
 - Schedule recordings
 - Initiate instant recordings with custom duration 
 - Record live TV locally on your computer 
