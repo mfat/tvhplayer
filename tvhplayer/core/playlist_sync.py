@@ -26,6 +26,8 @@ BUILTIN_SERVER_KEY = 'builtin'
 REMOTE_FFMPEG = '/usr/bin/ffmpeg'
 NO_FFMPEG = 'TVHplayer could not find ffmpeg, which it needs to play imported channels.'
 # Also how many streams the server tests at once; each failing one waits max_timeout.
+# An Xtream Codes account that allows fewer gets its own limit: a stream over it
+# would cut off the oldest, and a viewer takes the place of a test, never the reverse.
 MAX_STREAMS = 6
 CHECKPOINT_EVERY = 50
 CHECK_POLL_SECONDS = 2
@@ -62,6 +64,8 @@ class PlaylistSource:
     allow_commands: bool = False
     # Channel tag names this playlist's groups created on the server.
     tags: List[str] = field(default_factory=list)
+    # Streams the provider account allows at once; 0 when unknown.
+    max_streams: int = 0
 
     @classmethod
     def from_dict(cls, data):
@@ -75,6 +79,7 @@ class PlaylistSource:
             muxes={str(key): str(value) for key, value in muxes.items()},
             allow_commands=bool(data.get('allow_commands')),
             tags=[str(tag) for tag in data.get('tags') or [] if tag],
+            max_streams=_count(data.get('max_streams')),
         )
 
     def to_dict(self):
@@ -86,7 +91,19 @@ class PlaylistSource:
             'muxes': dict(self.muxes),
             'allow_commands': self.allow_commands,
             'tags': list(self.tags),
+            'max_streams': self.max_streams,
         }
+
+    def stream_limit(self) -> int:
+        """The network's max_streams: the account's limit, at most MAX_STREAMS."""
+        return min(self.max_streams, MAX_STREAMS) if self.max_streams > 0 else MAX_STREAMS
+
+
+def _count(value) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 @dataclass
@@ -265,7 +282,7 @@ def sync_playlist(
     admin.check_admin()
     refresh = admin.network_exists(source.network_uuid)
     if not refresh:
-        conf = dict(NETWORK_CONF, networkname=source.name)
+        conf = dict(NETWORK_CONF, networkname=source.name, max_streams=source.stream_limit())
         source.network_uuid = admin.create_network(conf)
         source.muxes = {}
         checkpoint()
@@ -274,7 +291,7 @@ def sync_playlist(
         admin.update_network(source.network_uuid, {
             'enabled': True,
             'max_timeout': NETWORK_CONF['max_timeout'],
-            'max_streams': NETWORK_CONF['max_streams'],
+            'max_streams': source.stream_limit(),
         })
 
     rows = {row['uuid']: row for row in admin.list_muxes(source.network_uuid) if row.get('uuid')}

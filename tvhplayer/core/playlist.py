@@ -13,7 +13,7 @@ import re
 import shlex
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit, urlunsplit
 
 import requests
 
@@ -125,6 +125,33 @@ def load_playlist(location: str) -> Playlist:
         if len(data) > MAX_PLAYLIST_BYTES:
             raise PlaylistError(TOO_LARGE)
     return parse_playlist(decode_playlist(data))
+
+
+def xtream_connections(location: str) -> Optional[int]:
+    """How many streams at once the Xtream Codes account of a playlist allows, or None.
+
+    ``location`` is the server's ``get.php?username=…&password=…`` address.
+    Such a server drops the account's oldest stream when it opens one more.
+    """
+    parts = urlsplit((location or '').strip())
+    if parts.scheme not in ('http', 'https') or posixpath.basename(parts.path) != 'get.php':
+        return None
+    query = parse_qs(parts.query)
+    username = query.get('username', [''])[0]
+    password = query.get('password', [''])[0]
+    if not username or not password:
+        return None
+    path = posixpath.join(posixpath.dirname(parts.path), 'player_api.php')
+    url = urlunsplit((parts.scheme, parts.netloc, path, urlencode({'username': username, 'password': password}), ''))
+    with requests.Session() as session:
+        configure_session(session, url)
+        try:
+            response = session.get(url, timeout=DOWNLOAD_TIMEOUT)
+            connections = int(response.json()['user_info']['max_connections'])
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            return None
+    # Some panels report 0 for no limit.
+    return connections if connections > 0 else None
 
 
 def playlist_name(location: str) -> str:

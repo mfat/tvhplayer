@@ -115,7 +115,7 @@ One **IPTV Network** (`iptv_network`, not the automatic one) per playlist source
 | `networkname` | source name | Shown in Tvheadend's UI. |
 | `service_sid` | 1 | Creates the service without scanning. |
 | `scan_create`, `skipinitscan`, `idlescan` | off, on, off | No idle scans. Tvheadend still scans each new mux once (`mpegts_mux_post_create` queues a mux whose scan result is NONE). |
-| `max_streams` | connection limit | Provider limit. |
+| `max_streams` | 6, or the account's limit when lower | For an Xtream Codes playlist (`get.php?username=…&password=…`), `player_api.php` reports `user_info.max_connections`; it is asked on every import and refresh and kept in the source when the server does not answer. Such a server drops the account's oldest stream when it opens one more, so six scans at once on a one-connection account cut each other off and working channels were hidden. At the limit Tvheadend lets a viewer bump a scan (`iptv_input_is_free`), and the bumped scan goes back into the queue (`mpegts_network_scan_mux_cancel` with reinsert). |
 | `max_timeout` | 30 | Seconds a source may stay silent. Some streams take about 20 s to send their first data; at the web UI default of 15, Tvheadend gives up and retries them forever. The API default is 0. |
 | `bouquet` | on | Channels are created and kept in sync by a bouquet. |
 | `epgauto_default` | on | New channels auto-map guide data by `tvg-id`. |

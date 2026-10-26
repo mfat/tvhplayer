@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
 
 try:
     from .a11y import announce_label, buddy_label, describe, set_item_access
-    from .core.playlist import load_playlist, plan_channels, playlist_commands, playlist_name
+    from .core.playlist import load_playlist, plan_channels, playlist_commands, playlist_name, xtream_connections
     from .core.playlist_sync import (
         NETWORK_GONE,
         PlaylistSource,
@@ -51,7 +51,7 @@ try:
     from .core.xmltv import is_local_server, load_guide
 except ImportError:
     from a11y import announce_label, buddy_label, describe, set_item_access
-    from core.playlist import load_playlist, plan_channels, playlist_commands, playlist_name
+    from core.playlist import load_playlist, plan_channels, playlist_commands, playlist_name, xtream_connections
     from core.playlist_sync import (
         NETWORK_GONE,
         PlaylistSource,
@@ -225,6 +225,10 @@ class PlaylistJob(QObject):
         source = self.source
         ffmpeg = ffmpeg_for_server(self.server)
         plans, skipped = plan_channels(self._playlist, ffmpeg, source.name, source.allow_commands)
+        # When the account cannot be asked, the limit found last time stays.
+        connections = xtream_connections(source.location)
+        if connections is not None:
+            source.max_streams = connections
         with TvhAdmin(self.server) as admin:
             result = sync_playlist(
                 admin,

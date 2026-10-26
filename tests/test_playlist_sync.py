@@ -276,6 +276,18 @@ def test_refresh_switches_the_network_back_on():
     assert admin.orphans_cleared == [source.network_uuid]
 
 
+def test_network_streams_follow_the_account_limit():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/get.php', 'builtin', max_streams=1)
+    sync_playlist(admin, source, _plans(FIRST))
+    assert admin.networks[source.network_uuid]['max_streams'] == 1
+    source.max_streams = 20
+    sync_playlist(admin, source, _plans(FIRST))
+    assert admin.networks[source.network_uuid]['max_streams'] == MAX_STREAMS
+    assert PlaylistSource.from_dict(dict(source.to_dict(), max_streams='2')).max_streams == 2
+    assert PlaylistSource.from_dict({'max_streams': 'x'}).max_streams == 0
+
+
 def test_server_values_compare_equal_to_planned_values():
     plan = _plans(FIRST)[0]
     conf = mux_conf(plan)

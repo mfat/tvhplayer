@@ -1,6 +1,7 @@
 import shlex
 
 import pytest
+import requests
 
 from tvhplayer.core.errors import PlaylistError
 from tvhplayer.core.playlist import (
@@ -18,6 +19,7 @@ from tvhplayer.core.playlist import (
     playlist_name,
     shell_command,
     tvh_split,
+    xtream_connections,
 )
 
 KODI = (
@@ -236,3 +238,38 @@ def test_load_playlist_reads_files(tmp_path):
     with pytest.raises(PlaylistError) as info:
         load_playlist(str(tmp_path / 'missing.m3u'))
     assert str(info.value) == FILE_FAILED
+
+
+class _Reply:
+    def __init__(self, data):
+        self._data = data
+
+    def json(self):
+        if isinstance(self._data, Exception):
+            raise self._data
+        return self._data
+
+
+def test_xtream_connections_asks_the_account(monkeypatch):
+    asked = []
+
+    def get(_session, url, timeout):
+        asked.append(url)
+        return _Reply(replies.pop(0))
+
+    monkeypatch.setattr(requests.Session, 'get', get)
+    replies = [{'user_info': {'max_connections': '1'}}]
+    assert xtream_connections('http://xt.example:8080/get.php?username=u%40x&password=p&type=m3u_plus') == 1
+    assert asked == ['http://xt.example:8080/player_api.php?username=u%40x&password=p']
+    replies = [
+        {'user_info': {'max_connections': '0'}},
+        {'user_info': {}},
+        ['not', 'a', 'dict'],
+        ValueError('not JSON'),
+        requests.ConnectionError(),
+    ]
+    for _ in range(5):
+        assert xtream_connections('http://xt.example/get.php?username=u&password=p') is None
+    for location in ('http://example.com/list.m3u', 'http://xt.example/get.php?username=u', '/home/u/get.php'):
+        assert xtream_connections(location) is None
+    assert len(asked) == 6
