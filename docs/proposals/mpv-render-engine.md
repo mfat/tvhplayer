@@ -1,6 +1,6 @@
 # Proposal: mpv render engine for Wayland playback
 
-- **Status:** Proposed
+- **Status:** Implemented for source, Debian, RPM and pip installs. The Flatpak still uses libvlc (see Packaging).
 - **Date:** October 2026
 
 ## Problem
@@ -37,10 +37,12 @@ This is the same arrangement Celluloid uses with GTK: a `GtkGLArea`, `mpv_render
 
 | Session | Engine | `QT_QPA_PLATFORM` |
 | :--- | :--- | :--- |
-| Linux, `WAYLAND_DISPLAY` set, `libmpv.so.2` loads, and the user has not set `QT_QPA_PLATFORM` | mpv render engine | left unset, so Qt uses Wayland |
+| Linux, `WAYLAND_DISPLAY` set, `libmpv.so.2`, python-mpv and `PyQt6.QtOpenGLWidgets` load, and the user has not set `QT_QPA_PLATFORM` | mpv render engine | left unset, so Qt uses Wayland |
 | Linux X11, or the user already set `QT_QPA_PLATFORM` | `VlcPlayer` | existing `setdefault("xcb")` |
 | `libmpv` missing on a Wayland session | `VlcPlayer` | existing `setdefault("xcb")`, and a log line says why |
 | Windows, macOS | `VlcPlayer` | unchanged |
+
+`TVHPLAYER_ENGINE=vlc` or `TVHPLAYER_ENGINE=mpv` skips the automatic choice (mpv still needs libmpv). `core/engine.py` makes the choice and `main()` logs it with the reason.
 
 `setdefault` remains for the libvlc path. It must not run when the mpv engine is selected. Forcing `xcb` and then asking mpv to render into a Wayland context would put the UI back on XWayland.
 
@@ -51,6 +53,8 @@ The mpv path does not use `video_frame` as a native X11 window.
 - The picture surface is a `QOpenGLWidget` in `player_container`, with the same focus policy, accessible name, and context menu as `video_frame`.
 - Qt keeps painting that widget. `_show_playback_wait()` and `_protect_video_surface()` must not call `setUpdatesEnabled(False)` on it. The idle splash and spinner stay sibling overlays on `player_container`.
 - The framebuffer size passed to mpv is the widget size multiplied by `devicePixelRatio()`, the same role `gdk_surface_get_scale_factor()` plays in Celluloid.
+- The spinner and the fullscreen control bar stop being separate native windows. Over libvlc's native window only another native window shows on top, so the spinner is a native child and the bar is a frameless `Tool` window placed in screen coordinates. Over the GL widget both are plain children. This matters on Wayland, where a client cannot place its own top-level window, so the old bar would land wherever the compositor put it.
+- The window's event filter drops paint events on `video_frame` while libvlc plays. It must not do that to the GL widget.
 - Mouse and keyboard stay with Qt. `VlcPlayer` already turns off libvlc mouse and key grabbing for that reason. mpv has no video window to grab them.
 
 `Player.attach(window_id)` cannot describe this. A window id is what `set_xwindow()`, `set_hwnd()`, and `set_nsobject()` consume. The mpv engine needs the OpenGL widget, a repaint when a frame is ready, and the current framebuffer during that paint. `VlcPlayer.attach(winId)` stays for the libvlc path. The window branches on which engine it constructed. The shared `play`, `stop`, `is_playing`, volume, mute, and handler methods stay as they are.
@@ -58,25 +62,30 @@ The mpv path does not use `video_frame` as a native X11 window.
 ### Render loop
 
 1. Create one mpv handle and one render context for the life of the engine. Load the next URL with `loadfile` on that handle. Do not destroy the render context on stop or on a channel change.
-2. Create the render context on the widget's GL thread, with the widget context current. Pass `MPV_RENDER_API_TYPE_OPENGL`. On Wayland, pass the process `wl_display` from Qt's native interface as `MPV_RENDER_PARAM_WL_DISPLAY`.
+2. Create the render context on the widget's GL thread, with the widget context current. Pass `MPV_RENDER_API_TYPE_OPENGL`, and look up GL functions through `QOpenGLContext.getProcAddress()`. On Wayland, pass a `wl_display` as `MPV_RENDER_PARAM_WL_DISPLAY`. PyQt6 does not wrap `QNativeInterface::QWaylandApplication`, so Qt's own display is out of reach from Python. The widget opens a second connection with `wl_display_connect(NULL)` and keeps it until the render context is freed. mpv uses it only to open VA-API; frames still reach Qt's context as dma-bufs. Without any display, mpv's VA-API probe fails and decoding falls back to `vaapi-copy`.
 3. mpv's render-update callback schedules work on the Qt thread. If the update includes a new frame, the widget repaints.
 4. The widget's paint reads the bound framebuffer and calls `mpv_render_context_render()` with that framebuffer, the pixel size, and the Y flip mpv's OpenGL renderer requires.
-5. Hardware decoding is requested (`hwdec` auto, or the closest mpv equivalent of `--avcodec-hw=any`). The `wl_display` parameter is what makes that import possible. If the driver cannot import, mpv falls back inside the same context. Playback still has a picture.
+5. Hardware decoding is requested with `hwdec=auto-safe`. The `wl_display` parameter is what makes that import possible. If the driver cannot import, mpv falls back inside the same context. Playback still has a picture.
+
+`QApplication` sets `LC_NUMERIC` from the desktop, and libmpv refuses to start unless it is `C`. The engine resets it after `QApplication` exists and before creating the mpv handle.
+
+The widget frees the render context, with its GL context current, when that context sends `aboutToBeDestroyed`, and creates a new one in the next `initializeGL`. The engine's `close()` frees it before `terminate()`.
 
 Stop sets mpv's idle state and tells the window that playback stopped. The render context and the GL widget remain. The next `play()` loads another URL into the same context. That is the cycle the Wayland subsurface module crashes on, and this engine does not allocate a subsurface.
 
-`MediaPlayerPlaying`, `MediaPlayerStopped`, `MediaPlayerEndReached`, and `MediaPlayerEncounteredError` map to the existing `on_playing`, `on_stopped`, and `on_error` handlers. End of a recording and an open failure still reach the handlers the splash already uses. Events arrive on mpv's thread. `schedule` continues to hop them onto the Qt thread.
+The first `playback-restart` after each `loadfile` maps to `on_playing`. `end-file` with reason `eof` or `stop` maps to `on_stopped`, and with reason `error` to `on_error`. Replacing a playing channel also ends the old file with reason `stop`; the window already ignores a stop while a channel is starting or playing. End of a recording and an open failure still reach the handlers the splash already uses. Events arrive on mpv's thread. `schedule` continues to hop them onto the Qt thread.
 
 ### Proxy and audio
 
-`hide_http_proxy_from_vlc()` stays inside `VlcPlayer`. It exists because libvlc 3 sends every `http://` URL through `http_proxy` and ignores `no_proxy`. The mpv engine does not call it. Its first test against a loopback or LAN Tvheadend must show the request going directly when `no_proxy` covers that host. If mpv does not honor `no_proxy`, the engine gets its own narrow fix. It does not reuse the libvlc environment hack.
+mpv reads streams through FFmpeg, which honors `no_proxy` but has no rule that a server on this machine is always reached directly. The engine therefore also hides `http_proxy` from the process and sets mpv's `http-proxy` option for each URL from `proxy.stream_proxy()`: empty for loopback hosts and hosts in `no_proxy`, the saved proxy otherwise. That is the same decision requests sessions and ffmpeg children already get.
 
 Audio output is mpv's default. The Flatpak manifest already has `--socket=pulseaudio`.
 
 ### Packaging
 
 - Runtime dependency on Linux: `libmpv.so.2` (mpv 0.41 or another build with client API 2 and the render API). The Python binding is `python-mpv`, alongside `python-vlc`.
-- Flatpak: add mpv to `io.github.mfat.tvhplayer.yml`. The existing libvlc 3.0.21 module stays for the `xcb` fallback.
+- Debian and RPM: `Recommends: python3-mpv`, which pulls in libmpv. pip: the `mpv` extra. Without them the app uses libvlc as before.
+- Flatpak: not done yet. mpv 0.41 needs FFmpeg 6.1 or newer, libplacebo and libass. The manifest builds FFmpeg 4.4.5 for libvlc, and the KDE 6.8 runtime has neither libplacebo nor libass. Adding mpv means a second FFmpeg build plus those two modules. Until then the Flatpak keeps libvlc and `xcb`.
 - Windows and macOS packages do not gain libmpv in this pass. They keep `VlcPlayer`.
 - Do not build or ship the unmerged libvlc fork.
 
@@ -89,6 +98,8 @@ Audio output is mpv's default. The Flatpak manifest already has `--socket=pulsea
 
 ## Test plan
 
+Automated: `tests/test_engine.py` (the choice), `tests/test_mpv_player.py` (event mapping, proxy per stream, tracks, deinterlace, close order, and a run against the installed libmpv when there is one), and a window test that the mpv engine gets plain overlays and that Qt keeps painting the video widget.
+
 On a Wayland session with `libmpv.so.2` present and `QT_QPA_PLATFORM` unset:
 
 - The process platform is Wayland. `xcb` was not forced.
@@ -98,6 +109,9 @@ On a Wayland session with `libmpv.so.2` present and `QT_QPA_PLATFORM` unset:
 - A recording that reaches the end shows the splash. Playing something afterwards works.
 - At 125% or 150% scale the controls and the picture stay sharp.
 - Mute, volume, fullscreen, and the video context menu still work. Qt receives the keys.
+- In fullscreen the control bar appears at the bottom of the picture, and the spinner covers the picture while a channel starts.
+- The log shows `Using hardware decoding (vaapi)`, not `vaapi-copy`, on a VA-API driver.
+- With `http_proxy` set, the built-in server's streams still connect directly.
 
 On an X11 session, and on Wayland with `QT_QPA_PLATFORM=xcb` already set, or with `libmpv` absent:
 

@@ -55,6 +55,7 @@ try:
     from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from .core import convert
     from .core.vlc_player import VlcPlayer
+    from .core.engine import ENGINE_MPV, ENGINE_VLC, choose_engine
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from .core.playlist_sync import PlaylistSource, server_key
     from .core.playback_status import (
@@ -138,6 +139,7 @@ except ImportError:
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from core import convert
     from core.vlc_player import VlcPlayer
+    from core.engine import ENGINE_MPV, ENGINE_VLC, choose_engine
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, server_key
     from core.playback_status import (
@@ -2641,7 +2643,7 @@ class PlaybackSpinner(QWidget):
     When the channel fails, it stays up without the ring to show why.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, native=True):
         super().__init__(parent)
         self._angle = 0
         self._timer = QTimer(self)
@@ -2653,9 +2655,10 @@ class PlaybackSpinner(QWidget):
         self._problem = ''
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        # The video surface is a native window; a plain widget would be drawn underneath it.
-        self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+        if native:
+            # The video surface is a native window; a plain widget would be drawn underneath it.
+            self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setStyleSheet("background-color: black;")
         self.hide()
@@ -3279,8 +3282,10 @@ class TVHeadendClient(QMainWindow):
     # Player callbacks. The engine calls from its own threads; a signal runs them on this one.
     _player_callback = pyqtSignal(object)
 
-    def __init__(self):
+    def __init__(self, engine=ENGINE_VLC):
         super().__init__()
+        # libmpv draws into an OpenGL widget; libvlc into a native window.
+        self.engine = engine
         self.setup_paths()
         self.config_store = ConfigStore()
         self.config_file = str(self.config_store.path)
@@ -3431,14 +3436,14 @@ class TVHeadendClient(QMainWindow):
         self.recording_animation = None
         self.opacity_effect = None
         
-        print("Debug: Initializing VLC instance")
+        print(f"Debug: Initializing the {self.engine} playback engine")
         try:
-            self.player = VlcPlayer()
+            self.player = self._new_player()
             self.player.set_deinterlace(self.config['deinterlace'])
-            print("Debug: VLC media player created successfully")
+            print("Debug: Media player created successfully")
         except Exception as e:
-            print(f"Error initializing VLC: {str(e)}")
-            raise RuntimeError(f"Failed to initialize VLC: {str(e)}")
+            print(f"Error initializing {self.engine}: {str(e)}")
+            raise RuntimeError(f"Failed to initialize {self.engine}: {str(e)}")
 
         # Then setup UI
         self.setup_ui()
@@ -3453,7 +3458,10 @@ class TVHeadendClient(QMainWindow):
             self.builtin.start()
 
         try:
-            self.player.attach(self.video_frame.winId().__int__())
+            if self.engine == ENGINE_MPV:
+                self.player.attach(self.video_frame)
+            else:
+                self.player.attach(self.video_frame.winId().__int__())
             self.hw_check_timer = QTimer()
             self.hw_check_timer.setSingleShot(True)
             self.hw_check_timer.timeout.connect(self.player.log_stats)
@@ -3789,7 +3797,7 @@ class TVHeadendClient(QMainWindow):
         player_layout.setContentsMargins(0, 0, 0, 0)
         player_layout.setSpacing(0)
 
-        self.video_frame = QWidget()
+        self.video_frame = self._new_video_surface()
         self.video_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.video_frame.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # Pointer movement brings back the floating bar in fullscreen.
@@ -3802,10 +3810,11 @@ class TVHeadendClient(QMainWindow):
         )
         self.video_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.video_frame.customContextMenuRequested.connect(self.show_video_context_menu)
-        self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
-        self.video_frame.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
-        self.video_frame.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-        self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        if self.engine != ENGINE_MPV:
+            self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
+            self.video_frame.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
+            self.video_frame.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+            self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
         splash_path = Path(self.icons_dir) / 'playerbg.svg'
         self.idle_splash = QLabel(self.player_container)
@@ -3820,7 +3829,7 @@ class TVHeadendClient(QMainWindow):
         self.idle_splash.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         describe(self.idle_splash, "Nothing playing", "TVHplayer logo, shown when nothing is playing")
 
-        self.playback_spinner = PlaybackSpinner(self.player_container)
+        self.playback_spinner = PlaybackSpinner(self.player_container, native=self.engine != ENGINE_MPV)
         describe(
             self.playback_spinner,
             "Starting playback",
@@ -3868,7 +3877,7 @@ class TVHeadendClient(QMainWindow):
         self.fullscreen_btn.setToolTip("Fullscreen (F11)")
         self.right_layout.addWidget(self.controls_bar)
         # In fullscreen the bar moves into this window, over the picture.
-        self.floating_bar = FloatingBar(self)
+        self.floating_bar = FloatingBar(self, overlay=self.engine == ENGINE_MPV)
         
         # Add panes to splitter instead of layout
         self.tasks_pane = TasksPanel(self)
@@ -5087,7 +5096,7 @@ class TVHeadendClient(QMainWindow):
         self._set_playback_spinner(True)
         self._sync_play_button()
         self._watch_start()
-        if hasattr(self, 'video_frame'):
+        if hasattr(self, 'video_frame') and self.engine != ENGINE_MPV:
             self.video_frame.setUpdatesEnabled(False)
 
     def _watch_start(self):
@@ -5157,7 +5166,7 @@ class TVHeadendClient(QMainWindow):
         self._set_idle_splash((not playing) or waiting)
         if waiting:
             self._set_playback_spinner(True)
-        if hasattr(self, 'video_frame'):
+        if hasattr(self, 'video_frame') and self.engine != ENGINE_MPV:
             self.video_frame.setUpdatesEnabled(not playing and not waiting)
 
     def _show_on_picture(self, text):
@@ -5279,6 +5288,25 @@ class TVHeadendClient(QMainWindow):
         if self.player and self.player.is_playing():
             return
         self._protect_video_surface(False)
+
+    def _new_player(self):
+        if self.engine != ENGINE_MPV:
+            return VlcPlayer()
+        # Imported only here so a libvlc launch never loads libmpv or Qt's OpenGL widgets.
+        try:
+            from .core.mpv_player import MpvPlayer
+        except ImportError:
+            from core.mpv_player import MpvPlayer
+        return MpvPlayer()
+
+    def _new_video_surface(self):
+        if self.engine != ENGINE_MPV:
+            return QWidget()
+        try:
+            from .video_widget import MpvVideoWidget
+        except ImportError:
+            from video_widget import MpvVideoWidget
+        return MpvVideoWidget()
 
     def _bind_playback_splash(self):
         """Keep the splash in sync if playback starts or stops on its own."""
@@ -5738,7 +5766,8 @@ class TVHeadendClient(QMainWindow):
             if event.type() == QEvent.Type.MouseButtonDblClick:
                 self.toggle_fullscreen()
                 return True
-            if self._playback_active and event.type() in (
+            # libvlc owns the native window while playing; the OpenGL widget is always Qt's to paint.
+            if self._playback_active and self.engine != ENGINE_MPV and event.type() in (
                 QEvent.Type.Paint,
                 QEvent.Type.UpdateRequest,
             ):
@@ -7263,14 +7292,17 @@ def main():
     """Main entry point for the application"""
     configure_logging()
     try:
-        # VLC's window embedding is still more reliable on X11 than on Wayland.
-        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+        engine, reason = choose_engine()
+        print(f"Debug: Playback engine: {engine} ({reason})")
+        if engine == ENGINE_VLC:
+            # libvlc 3 embeds only into an X11 window on Linux.
+            os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
         app = QApplication(sys.argv)
         app.setApplicationName("TVHplayer")
         app.setApplicationDisplayName("TVHplayer")
         app.setDesktopFileName("io.github.mfat.tvhplayer")
         app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
-        player = TVHeadendClient()
+        player = TVHeadendClient(engine)
         player.show()
         sys.exit(app.exec())
     except Exception as e:

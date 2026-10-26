@@ -18,7 +18,7 @@ NO_TRACK = -1
 
 
 class Player(ABC):
-    """Play one media URL into a native window id."""
+    """Play one media URL into the window's video surface."""
 
     def __init__(self):
         self._on_playing: Optional[Callable[[], None]] = None
@@ -45,7 +45,7 @@ class Player(ABC):
 
     @abstractmethod
     def attach(self, window_id):
-        """Draw video into this native window id."""
+        """Draw video into this native window id, or the video widget for libmpv."""
 
     @abstractmethod
     def play(self, url: str):

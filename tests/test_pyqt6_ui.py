@@ -2795,3 +2795,35 @@ def test_channels_without_a_logo_use_a_picon(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_mpv_engine_uses_plain_widgets_qt_keeps_painting(monkeypatch, tmp_path):
+    from PyQt6.QtCore import Qt
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    window.close()
+    attached = []
+    vlc_engine = ui.TVHeadendClient._new_player
+
+    def fake_mpv_player(self):
+        player = vlc_engine(self)
+        player.attach = attached.append
+        return player
+
+    monkeypatch.setattr(ui.TVHeadendClient, '_new_player', fake_mpv_player)
+    window = ui.TVHeadendClient(ui.ENGINE_MPV)
+    try:
+        from tvhplayer.video_widget import MpvVideoWidget
+
+        assert isinstance(window.video_frame, MpvVideoWidget)
+        assert attached == [window.video_frame]
+        assert not window.video_frame.testAttribute(Qt.WidgetAttribute.WA_NativeWindow)
+        assert not window.playback_spinner.testAttribute(Qt.WidgetAttribute.WA_NativeWindow)
+        assert not window.floating_bar.isWindow()
+        window._show_playback_wait()
+        assert window.video_frame.updatesEnabled()
+        window._on_playback_started()
+        assert window.video_frame.updatesEnabled()
+    finally:
+        window.close()
+        app.processEvents()

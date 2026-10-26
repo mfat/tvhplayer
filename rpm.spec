@@ -49,6 +49,8 @@ Requires:       qt6-qtsvg
 Requires:       vlc-libs
 Requires:       vlc-plugins-base
 Requires:       /usr/bin/ffmpeg
+# On Wayland, libmpv draws the picture so the window is not run through XWayland.
+Recommends:     python3-mpv
 
 Provides:       bundled(tvheadend) = %{tvh_version}
 Provides:       bundled(libdvbcsa) = %{dvbcsa_version}

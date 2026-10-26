@@ -119,3 +119,11 @@ def test_local_recording_of_the_builtin_server_skips_the_proxy(proxied_env, monk
     recorder.start('http://127.0.0.1:24111/stream/channel/abc', tmp_path / 'a.ts')
     recorder.stop()
     assert 'http_proxy' not in seen['env']
+
+
+def test_mpv_gets_the_proxy_only_for_remote_streams(proxied_env, monkeypatch):
+    proxy.hide_http_proxy_from_vlc()
+    assert proxy.stream_proxy('http://127.0.0.1:24111/stream/channel/1') == ''
+    assert proxy.stream_proxy('http://nas.example:9981/stream/channel/1') == DEAD_PROXY
+    monkeypatch.setenv('no_proxy', 'nas.example')
+    assert proxy.stream_proxy('http://nas.example:9981/stream/channel/1') == ''

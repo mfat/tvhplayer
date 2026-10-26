@@ -1,0 +1,245 @@
+import sys
+import threading
+import types
+
+import pytest
+
+from tvhplayer.core import proxy
+from tvhplayer.core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
+
+
+class _EndFile:
+    EOF = 0
+    RESTARTED = 1
+    ABORTED = 2
+    QUIT = 3
+    ERROR = 4
+    REDIRECT = 5
+
+
+class _EventID:
+    END_FILE = 7
+    PLAYBACK_RESTART = 21
+
+
+def _event(kind, reason=None):
+    return types.SimpleNamespace(
+        event_id=types.SimpleNamespace(value=kind),
+        data=types.SimpleNamespace(reason=reason),
+    )
+
+
+class _Mpv:
+    def __init__(self, log_handler=None, loglevel=None, **options):
+        self.options = options
+        self.callbacks = []
+        self.props = {}
+        self.loaded = []
+        self.commands = []
+        self.messages = []
+        self.idle_active = True
+        self.volume = 100
+        self.mute = False
+        self.aid = 1
+        self.sid = False
+        self.deinterlace = 'no'
+        self.track_list = []
+        self.terminated = False
+
+    def register_event_callback(self, callback):
+        self.callbacks.append(callback)
+
+    def fire(self, event):
+        for callback in self.callbacks:
+            callback(event)
+
+    def __setitem__(self, name, value):
+        self.props[name] = value
+
+    def loadfile(self, url):
+        self.loaded.append((url, self.props.get('http-proxy')))
+        self.idle_active = False
+
+    def command(self, *args):
+        self.commands.append(args)
+        if args == ('stop',):
+            self.idle_active = True
+
+    def show_text(self, text, duration):
+        self.messages.append((text, duration))
+
+    def terminate(self):
+        self.terminated = True
+
+
+@pytest.fixture
+def engine(monkeypatch):
+    fake = types.SimpleNamespace(
+        MPV=_Mpv,
+        MpvEventID=_EventID,
+        MpvEventEndFile=_EndFile,
+        MpvGlGetProcAddressFn=lambda fn: fn,
+        MpvRenderContext=lambda mpv, api, **kw: types.SimpleNamespace(mpv=mpv, api=api, params=kw),
+    )
+    monkeypatch.setitem(sys.modules, 'mpv', fake)
+    monkeypatch.setattr(proxy, '_saved_http_proxy', proxy._HIDDEN)
+    monkeypatch.setenv('http_proxy', 'http://proxy.example:3128')
+    for name in ('no_proxy', 'NO_PROXY', 'HTTP_PROXY'):
+        monkeypatch.delenv(name, raising=False)
+    from tvhplayer.core.mpv_player import MpvPlayer
+
+    player = MpvPlayer()
+    seen = []
+    player.set_handlers(
+        on_playing=lambda: seen.append('playing'),
+        on_stopped=lambda: seen.append('stopped'),
+        on_error=lambda: seen.append('error'),
+    )
+    return player, player._mpv, seen
+
+
+def test_mpv_draws_only_through_the_render_api(engine):
+    _player, mpv, _seen = engine
+    assert mpv.options['vo'] == 'libmpv'
+    assert mpv.options['input_default_bindings'] is False
+    assert mpv.options['ytdl'] is False
+
+
+def test_first_picture_of_each_stream_reports_playing_once(engine):
+    player, mpv, seen = engine
+    player.play('http://nas.example:9981/stream/channel/1')
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    assert seen == ['playing']
+    player.play('http://nas.example:9981/stream/channel/2')
+    mpv.fire(_event(_EventID.END_FILE, _EndFile.ABORTED))
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    assert seen == ['playing', 'stopped', 'playing']
+
+
+def test_open_failure_reports_an_error(engine):
+    player, mpv, seen = engine
+    player.play('http://nas.example:9981/stream/channel/1')
+    mpv.fire(_event(_EventID.END_FILE, _EndFile.ERROR))
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    assert seen == ['error']
+
+
+def test_end_of_a_recording_reports_stopped(engine):
+    player, mpv, seen = engine
+    player.play('http://nas.example:9981/dvrfile/abc')
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    mpv.fire(_event(_EventID.END_FILE, _EndFile.EOF))
+    assert seen == ['playing', 'stopped']
+
+
+def test_stop_then_play_again(engine):
+    player, mpv, _seen = engine
+    player.play('http://nas.example:9981/stream/channel/1')
+    assert player.is_playing()
+    player.stop()
+    assert not player.is_playing()
+    player.play('http://nas.example:9981/stream/channel/2')
+    assert player.is_playing()
+    assert [url for url, _proxy in mpv.loaded] == [
+        'http://nas.example:9981/stream/channel/1',
+        'http://nas.example:9981/stream/channel/2',
+    ]
+
+
+def test_proxy_is_chosen_per_stream(engine):
+    import os
+
+    player, mpv, _seen = engine
+    assert 'http_proxy' not in os.environ
+    player.play('http://127.0.0.1:24111/stream/channel/1')
+    player.play('http://nas.example:9981/stream/channel/1')
+    assert [p for _url, p in mpv.loaded] == ['', 'http://proxy.example:3128']
+
+
+def test_tracks_volume_and_mute(engine):
+    player, mpv, _seen = engine
+    mpv.track_list = [
+        {'id': 1, 'type': 'video'},
+        {'id': 1, 'type': 'audio', 'lang': 'eng'},
+        {'id': 2, 'type': 'audio', 'title': 'Audio description', 'lang': 'eng'},
+        {'id': 1, 'type': 'sub'},
+    ]
+    assert player.audio_tracks() == [(1, 'eng'), (2, 'Audio description - eng')]
+    assert player.subtitle_tracks() == [(1, 'Track 1')]
+    assert player.subtitle_track() == NO_TRACK
+    player.set_subtitle_track(1)
+    assert player.subtitle_track() == 1
+    player.set_subtitle_track(NO_TRACK)
+    assert mpv.sid == 'no'
+    player.set_volume(130)
+    assert mpv.volume == 100
+    player.set_muted(True)
+    assert player.is_muted()
+
+
+def test_deinterlace_changes_the_running_picture(engine):
+    player, mpv, _seen = engine
+    assert player.set_deinterlace(DEINTERLACE_ON) is True
+    assert mpv.deinterlace == 'yes'
+    player.set_deinterlace(DEINTERLACE_OFF)
+    assert mpv.deinterlace == 'no'
+    player.set_deinterlace(DEINTERLACE_AUTO)
+    assert mpv.deinterlace == 'auto'
+    assert player.deinterlace() == DEINTERLACE_AUTO
+
+
+def test_render_context_gets_the_wayland_display(engine):
+    player, mpv, _seen = engine
+    context = player.create_render_context(lambda name: 0, wl_display=1234)
+    assert context.api == 'opengl'
+    assert context.params['wl_display'] == 1234
+    assert 'wl_display' not in player.create_render_context(lambda name: 0).params
+
+
+def test_close_frees_the_widget_render_context_before_mpv(engine):
+    player, mpv, _seen = engine
+    order = []
+
+    class _Surface:
+        def bind(self, bound):
+            order.append(('bind', bound))
+
+        def release(self):
+            order.append(('release', mpv.terminated))
+
+    player.attach(_Surface())
+    player.close()
+    assert order == [('bind', player), ('release', False)]
+    assert mpv.terminated
+
+
+def test_real_libmpv_reports_failure_and_playback(monkeypatch):
+    """Against the installed libmpv, when there is one."""
+    try:
+        import mpv  # noqa: F401
+    except (ImportError, OSError):
+        pytest.skip('libmpv is not installed')
+    from tvhplayer.core.mpv_player import MpvPlayer
+
+    player = MpvPlayer()
+    seen = []
+    done = threading.Event()
+
+    def note(name):
+        seen.append(name)
+        done.set()
+
+    player._mpv['ao'] = 'null'
+    player.set_handlers(on_playing=lambda: note('playing'), on_error=lambda: note('error'))
+    try:
+        player.play('http://127.0.0.1:9/nothing.ts')
+        assert done.wait(10)
+        assert seen == ['error']
+        done.clear()
+        player.play('av://lavfi:sine=frequency=440:duration=5')
+        assert done.wait(10)
+        assert seen == ['error', 'playing']
+        player.stop()
+    finally:
+        player.close()

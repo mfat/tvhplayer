@@ -427,14 +427,21 @@ class FloatingBar(QWidget):
     MARGIN_BOTTOM = 18
     RADIUS = 26
 
-    def __init__(self, window):
-        super().__init__(
-            window,
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.WindowDoesNotAcceptFocus,
-        )
+    def __init__(self, window, overlay=False):
+        # Over a native video window only another window shows on top. Over the
+        # OpenGL video widget a plain child does, and Wayland would not let a
+        # separate window choose its own position.
+        if overlay:
+            super().__init__(window)
+        else:
+            super().__init__(
+                window,
+                Qt.WindowType.Tool
+                | Qt.WindowType.FramelessWindowHint
+                | Qt.WindowType.WindowDoesNotAcceptFocus,
+            )
         self._window = window
+        self._overlay = overlay
         self._bar = None
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
@@ -465,7 +472,7 @@ class FloatingBar(QWidget):
         return bar
 
     def place(self):
-        frame = self._window.geometry()
+        frame = self._window.rect() if self._overlay else self._window.geometry()
         height = self._bar.sizeHint().height() if self._bar is not None else 52
         width = max(frame.width() - 2 * self.MARGIN_X, 200)
         self.setGeometry(
