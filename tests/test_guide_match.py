@@ -31,6 +31,9 @@ def test_names_lose_region_quality_and_plus_one():
     assert clean_name('Film4 Plus 1') == ('film4', True)
     assert clean_name('Sky Sports: F1') == ('sky sports f1', False)
     assert clean_name('Tom & Jerry') == ('tom and jerry', False)
+    assert clean_name('ABC News Live') == ('abc news live', False)
+    assert clean_name('Bloomberg TV+') != clean_name('Bloomberg TV')
+    assert clean_name('Travel+Adventure') == clean_name('Travel + Adventure')
 
 
 def _guide(*channels):
@@ -78,6 +81,16 @@ def test_suggestions_prefer_exact_names_and_the_region():
     assert [s.channel.id for s in suggestions[:2]] == ['FOX.uk', 'FOX.us']
     assert suggestions[0].score > suggestions[1].score
     assert all(s.channel.id != 'FoxNews.us' for s in suggestions)
+
+
+def test_the_channels_own_country_beats_the_servers():
+    index = _guide(('a', 'DiscoveryScience.us', ('Discovery Science',), 5))
+    own = index.suggest(ServerChannel('u1', 'Discovery Science', epg_ids=('DiscoveryScience.in@SD',)), region='us')
+    unknown = index.suggest(ServerChannel('u2', 'Discovery Science'), region='us')
+    assert own[0].score < unknown[0].score
+    assert not own[0].sure and unknown[0].sure
+    similar = _guide(('a', 'Nickelodeon.uk', ('Nickelodeon',), 5)).suggest(ServerChannel('u3', 'Nickelodeonn'))
+    assert not similar[0].sure
 
 
 def test_plus_one_channel_reuses_the_main_guide_an_hour_later():

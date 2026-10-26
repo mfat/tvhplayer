@@ -795,7 +795,8 @@ class MatchChannelsDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, channel.uuid)
             if suggestion is not None:
                 item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(Qt.CheckState.Checked if suggestion.score >= 0.9 else Qt.CheckState.Unchecked)
+                # Similar names, and names from another country, are left for the user to tick.
+                item.setCheckState(Qt.CheckState.Checked if suggestion.sure else Qt.CheckState.Unchecked)
             set_item_access(item, text)
             self.channel_list.addItem(item)
             if channel.uuid == current:

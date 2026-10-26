@@ -19,7 +19,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 _QUALITY_WORDS = {
     'hd', 'fhd', 'uhd', 'sd', 'hq', 'lq', '4k', '8k', 'hevc', 'h264', 'h265',
     '2160p', '1080p', '1080i', '720p', '576p', '576i', '540p', '480p', '360p',
-    'backup', 'raw', 'live',
+    'backup', 'raw',
 }
 # iptv-org feeds that differ only in picture quality.
 _QUALITY_FEEDS = {'', 'sd', 'hd', 'fhd', 'uhd', '4k'}
@@ -69,6 +69,8 @@ def clean_name(name: str) -> Tuple[str, bool]:
     plus_one = bool(_PLUS_ONE.search(text))
     if plus_one:
         text = _PLUS_ONE.sub('', text)
+    # "Bloomberg TV+" is another channel than "Bloomberg TV".
+    text = text.replace('+', ' plus ')
     words = [word for word in _WORDS.findall(text) if word not in _QUALITY_WORDS]
     return ' '.join(words), plus_one
 
@@ -106,6 +108,8 @@ class Suggestion:
     score: float
     shift: int = 0
     reason: str = ''
+    # The same name, and no sign of another country: safe to tick for the user.
+    sure: bool = False
 
 
 @dataclass(frozen=True)
@@ -200,7 +204,7 @@ class GuideIndex:
         if not words:
             return []
         countries = {id_country(epg_id) for epg_id in channel.epg_ids} - {''}
-        if region:
+        if region and not countries:
             countries.add(region)
         best: Dict[Tuple[str, str], Suggestion] = {}
 
@@ -212,11 +216,12 @@ class GuideIndex:
                 score -= SCORE_NAME - SCORE_NAME_OTHER_FEED
                 shift = PLUS_ONE_SHIFT
             country = id_country(guide.id)
+            foreign = bool(country and countries and country not in countries)
             if country and countries:
-                score += COUNTRY_BONUS if country in countries else -COUNTRY_BONUS
+                score += -COUNTRY_BONUS if foreign else COUNTRY_BONUS
             key = (guide.source, guide.id)
             if key not in best or best[key].score < score:
-                best[key] = Suggestion(guide, round(score, 4), shift, reason)
+                best[key] = Suggestion(guide, round(score, 4), shift, reason, reason == 'name' and not foreign)
 
         for guide, guide_plus_one in self._by_name.get(words, ()):
             offer(guide, guide_plus_one, SCORE_NAME, 'name')
