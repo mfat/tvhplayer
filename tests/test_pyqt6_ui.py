@@ -431,10 +431,53 @@ def test_spinner_shows_until_playback_starts(monkeypatch, tmp_path):
         fake_player._events.handlers['error'](None)
         app.processEvents()
 
+        # The spinner stays up without its ring to say what went wrong.
+        assert window.playback_spinner.isVisible()
+        assert not window.playback_spinner._timer.isActive()
+        assert window.playback_spinner.accessibleName() == 'Playback failed'
+        assert window.status_label.text() == 'Playback failed'
+
+        window.stop_playback()
+        app.processEvents()
         assert not window.playback_spinner.isVisible()
         assert window.idle_splash.isVisible()
-        assert window.status_label.text() == 'Playback failed'
     finally:
+        window.close()
+        app.processEvents()
+
+
+def test_the_servers_reason_shows_over_the_player(monkeypatch, tmp_path):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        window.show()
+        app.processEvents()
+
+        class Backend:
+            def stream_url(self, channel):
+                return 'http://tv.example/stream/channel/news?profile=pass'
+
+        window.get_backend = lambda: Backend()
+        window.servers = []
+        window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        fake_player._events.handlers['playing'](None)
+        app.processEvents()
+        log = object()
+        window._stream_log = log
+
+        window._on_stream_log(log, ['t webui: Stop streaming /stream/channel/news?profile=pass, Subscription overridden'])
+        app.processEvents()
+
+        assert not window._playback_active
+        assert window.status_label.text() == 'News stopped: Subscription overridden'
+        assert window.playback_spinner.isVisible()
+        assert window.playback_spinner.accessibleName() == 'News stopped: Subscription overridden'
+
+        window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        app.processEvents()
+        assert window.playback_spinner._timer.isActive()
+        assert not window.playback_spinner.showing_problem()
+    finally:
+        window._stream_log = None
         window.close()
         app.processEvents()
 

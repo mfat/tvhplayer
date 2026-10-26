@@ -2621,7 +2621,10 @@ SIGNAL_COLORS = {
 
 
 class PlaybackSpinner(QWidget):
-    """Ring drawn over the player until the first picture arrives."""
+    """Ring drawn over the player until the first picture arrives.
+
+    When the channel fails, it stays up without the ring to show why.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2632,6 +2635,7 @@ class PlaybackSpinner(QWidget):
         self._caption = STARTING
         self._signal_level = ''
         self._signal_words = ''
+        self._problem = ''
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         # The video surface is a native window; a plain widget would be drawn underneath it.
@@ -2653,6 +2657,18 @@ class PlaybackSpinner(QWidget):
         self._update_accessible_name()
         self.update()
 
+    def show_problem(self, text):
+        """Show why the channel did not start or stopped, until the next start or stop."""
+        self._problem = text
+        self._timer.stop()
+        self.setAccessibleName(text)
+        self.show()
+        self.raise_()
+        self.update()
+
+    def showing_problem(self):
+        return bool(self._problem)
+
     def _update_accessible_name(self):
         name = self._caption
         if self._signal_words:
@@ -2660,6 +2676,7 @@ class PlaybackSpinner(QWidget):
         self.setAccessibleName(name)
 
     def set_running(self, running):
+        self._problem = ''
         if running:
             if not self._timer.isActive():
                 self._timer.start()
@@ -2677,6 +2694,18 @@ class PlaybackSpinner(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.fillRect(self.rect(), QColor(0, 0, 0))
+        if self._problem:
+            painter.setPen(QColor(255, 255, 255, 230))
+            font = painter.font()
+            font.setPointSize(11)
+            painter.setFont(font)
+            painter.drawText(
+                QRectF(16, 0, max(0, self.width() - 32), self.height()),
+                Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                self._problem,
+            )
+            painter.end()
+            return
         span = min(self.width(), self.height())
         diameter = max(36, min(72, span // 6 if span else 36))
         thickness = max(4, diameter // 10)
@@ -5001,7 +5030,7 @@ class TVHeadendClient(QMainWindow):
         if spinner is None:
             return
         if visible:
-            already = spinner.isVisible()
+            already = spinner.isVisible() and not spinner.showing_problem()
             spinner.setGeometry(self.player_container.rect())
             spinner.set_running(True)
             if not already:
@@ -5076,11 +5105,11 @@ class TVHeadendClient(QMainWindow):
         stream = getattr(self, '_stream', None)
         self.stop_playback()
         if stream is not None and stream['scrambled']:
-            self.statusbar.showMessage(f"{name} could not start: {stream['scrambled']}")
+            self._show_playback_problem(f"{name} could not start: {stream['scrambled']}")
         elif level and level != SIGNAL_GOOD:
-            self.statusbar.showMessage(f"{name} is not working right now. {words}.")
+            self._show_playback_problem(f"{name} is not working right now. {words}.")
         else:
-            self.statusbar.showMessage(f"{name} is not working right now. Try another channel.")
+            self._show_playback_problem(f"{name} is not working right now. Try another channel.")
 
     def _protect_video_surface(self, playing):
         """While a channel is on, do not let Qt paint or flash the splash."""
@@ -5134,9 +5163,17 @@ class TVHeadendClient(QMainWindow):
             # The server's reason may still be on its way; it replaces this message when it comes.
             stream['failed_at'] = time.monotonic()
             if stream['scrambled']:
-                self.statusbar.showMessage(f"{stream['name']} could not start: {stream['scrambled']}")
+                self._show_playback_problem(f"{stream['name']} could not start: {stream['scrambled']}")
                 return
-        self.statusbar.showMessage("Playback failed")
+        self._show_playback_problem("Playback failed")
+
+    def _show_playback_problem(self, text):
+        """Say why playback ended in the status bar and over the player, where it shows in fullscreen too."""
+        self.statusbar.showMessage(text)
+        spinner = getattr(self, 'playback_spinner', None)
+        if spinner is not None:
+            spinner.setGeometry(self.player_container.rect())
+            spinner.show_problem(text)
 
     def _watch_stream_log(self):
         """Follow the current server's log for why a stream does not start or stops.
@@ -5188,7 +5225,7 @@ class TVHeadendClient(QMainWindow):
             if failed_at is None:
                 self.stop_playback()
             self._stream = None
-            self.statusbar.showMessage(f"{stream['name']} {outcome}: {reason}")
+            self._show_playback_problem(f"{stream['name']} {outcome}: {reason}")
             return
 
     def _on_playback_stopped(self):
