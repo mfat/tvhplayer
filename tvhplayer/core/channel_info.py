@@ -284,3 +284,31 @@ def channels_in_tag(channels: Iterable[Channel], tag: Optional[ChannelTag]) -> L
         or channel.uuid in members
         or (channel.htsp_id is not None and str(channel.htsp_id) in members)
     ]
+
+
+def tag_channel_counts(channels: Iterable[Channel], tags: Iterable[ChannelTag]) -> List[int]:
+    """How many channels ``channels_in_tag`` keeps for each tag, in one pass.
+
+    A playlist can have hundreds of groups and tens of thousands of channels;
+    calling ``channels_in_tag`` per group froze the window for half a minute.
+    """
+    tags = list(tags)
+    by_id: Dict[str, set] = {}
+    by_member: Dict[str, set] = {}
+    for index, tag in enumerate(tags):
+        by_id.setdefault(tag.uuid, set()).add(index)
+        if tag.htsp_id is not None:
+            by_id.setdefault(str(tag.htsp_id), set()).add(index)
+        for member in tag.member_ids or []:
+            by_member.setdefault(member, set()).add(index)
+    counts = [0] * len(tags)
+    for channel in channels:
+        found = set()
+        for tag_id in channel.tag_ids:
+            found.update(by_id.get(tag_id, ()))
+        found.update(by_member.get(channel.uuid, ()))
+        if channel.htsp_id is not None:
+            found.update(by_member.get(str(channel.htsp_id), ()))
+        for index in found:
+            counts[index] += 1
+    return counts

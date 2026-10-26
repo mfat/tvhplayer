@@ -13,6 +13,7 @@ from tvhplayer.core.channel_info import (
     match_now_next,
     progress,
     recording_channel_keys,
+    tag_channel_counts,
 )
 from tvhplayer.core.models import Channel, ChannelTag, DvrEntry, EpgEvent
 
@@ -133,6 +134,28 @@ def test_tag_filter_matches_http_uuids_and_htsp_members():
     assert channels_in_tag([a, b, c], None) == [a, b, c]
     assert channels_in_tag([a, b, c], ChannelTag(uuid='news')) == [a]
     assert channels_in_tag([a, b, c], ChannelTag(uuid='9', htsp_id=9, member_ids=['5'])) == [b]
+
+
+def test_tag_channel_counts_match_channels_in_tag():
+    channels = [
+        Channel(uuid='a', name='A', tag_ids=['news']),
+        Channel(uuid='b', name='B', htsp_id=5),
+        Channel(uuid='c', name='C', htsp_id=6, tag_ids=['9', 'news']),
+        Channel(uuid='d', name='D', tag_ids=['sport']),
+        Channel(uuid='e', name='E'),
+    ]
+    tags = [
+        ChannelTag(uuid='news'),
+        # Matched by its HTSP id, by a member's HTSP id, and by a member's uuid; c counts once.
+        ChannelTag(uuid='9', htsp_id=9, member_ids=['5', '6', 'c', 'd']),
+        ChannelTag(uuid='empty'),
+        ChannelTag(uuid='news'),
+    ]
+    expected = [len(channels_in_tag(channels, tag)) for tag in tags]
+    assert expected == [2, 3, 0, 2]
+    assert tag_channel_counts(channels, tags) == expected
+    assert tag_channel_counts([], tags) == [0, 0, 0, 0]
+    assert tag_channel_counts(channels, []) == []
 
 
 def test_http_loads_events_and_services_with_documented_parameters():

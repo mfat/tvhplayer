@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
 try:
     from .a11y import announce, announce_label, buddy_label, describe, prefers_high_contrast
     from .core.backend import create_backend
-    from .core.channel_info import channel_icon_reference, channel_key, channels_in_tag
+    from .core.channel_info import channel_icon_reference, channel_key, channels_in_tag, tag_channel_counts
     from .core.dvr import GRID_LIMIT
     from .core.guide_grid import (
         GUIDE_DAYS,
@@ -61,7 +61,7 @@ try:
 except ImportError:
     from a11y import announce, announce_label, buddy_label, describe, prefers_high_contrast
     from core.backend import create_backend
-    from core.channel_info import channel_icon_reference, channel_key, channels_in_tag
+    from core.channel_info import channel_icon_reference, channel_key, channels_in_tag, tag_channel_counts
     from core.dvr import GRID_LIMIT
     from core.guide_grid import (
         GUIDE_DAYS,
@@ -1079,8 +1079,7 @@ class GuideWindow(QDialog):
         try:
             combo.clear()
             combo.addItem("All channels", "")
-            for tag in tags:
-                count = len(channels_in_tag(channels, tag))
+            for tag, count in zip(tags, tag_channel_counts(channels, tags)):
                 if count:
                     combo.addItem(f"{tag.name or 'Unnamed'} ({count})", tag.uuid)
             index = combo.findData(wanted) if wanted else 0

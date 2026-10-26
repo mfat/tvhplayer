@@ -91,6 +91,7 @@ try:
         channels_in_tag,
         progress,
         recording_channel_keys,
+        tag_channel_counts,
     )
     from .channel_view import (
         COL_NAME,
@@ -173,6 +174,7 @@ except ImportError:
         channels_in_tag,
         progress,
         recording_channel_keys,
+        tag_channel_counts,
     )
     from channel_view import (
         COL_NAME,
@@ -4517,8 +4519,8 @@ class TVHeadendClient(QMainWindow):
         try:
             combo.clear()
             combo.addItem("All channels", "")
-            for tag in self._channel_tags:
-                count = len(channels_in_tag(self._channels, tag))
+            counts = tag_channel_counts(self._channels, self._channel_tags)
+            for tag, count in zip(self._channel_tags, counts):
                 if count:
                     combo.addItem(f"{tag.name or 'Unnamed'} ({count})", tag.uuid)
             index = combo.findData(wanted) if wanted else 0
