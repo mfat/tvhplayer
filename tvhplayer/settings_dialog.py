@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -17,8 +19,10 @@ from PyQt6.QtWidgets import (
 
 try:
     from .a11y import announce_label, describe
+    from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
 except ImportError:
     from a11y import announce_label, describe
+    from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
 
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
@@ -26,6 +30,10 @@ HIDE_HELP = (
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
 FOLDER_HELP = 'Recording to this computer saves here without asking for a file name.'
+OPTIONS_HELP = (
+    'Added after the format\'s own ffmpeg output options, so they override them, '
+    'for example -c:a aac -b:a 128k. Leave empty for the defaults.'
+)
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 
 
@@ -72,6 +80,37 @@ class SettingsDialog(QDialog):
         folder_help = QLabel(FOLDER_HELP)
         folder_help.setWordWrap(True)
         recordings_layout.addWidget(folder_help)
+
+        form = QGridLayout()
+        form.setColumnStretch(1, 1)
+        self.format_combo = QComboBox()
+        for key, (label, _description, _options) in RECORDING_FORMATS.items():
+            self.format_combo.addItem(label, key)
+        self.format_combo.setCurrentIndex(max(self.format_combo.findData(host.recording_format()), 0))
+        describe(self.format_combo, 'Format', 'The file format of recordings to this computer.')
+        format_label = QLabel('&Format:')
+        format_label.setBuddy(self.format_combo)
+        form.addWidget(format_label, 0, 0)
+        form.addWidget(self.format_combo, 0, 1)
+        self.options_edit = QLineEdit(host.recording_ffmpeg_options())
+        self.options_edit.setPlaceholderText('None')
+        describe(self.options_edit, 'Extra ffmpeg options', OPTIONS_HELP)
+        self.options_edit.setToolTip(OPTIONS_HELP)
+        options_label = QLabel('Extra ffmpeg &options:')
+        options_label.setBuddy(self.options_edit)
+        form.addWidget(options_label, 1, 0)
+        form.addWidget(self.options_edit, 1, 1)
+        recordings_layout.addLayout(form)
+        self.format_help = QLabel('')
+        self.format_help.setWordWrap(True)
+        recordings_layout.addWidget(self.format_help)
+        self._show_format_help()
+        options_help = QLabel(OPTIONS_HELP)
+        options_help.setWordWrap(True)
+        recordings_layout.addWidget(options_help)
+        self.options_status = QLabel('')
+        self.options_status.setWordWrap(True)
+        recordings_layout.addWidget(self.options_status)
         layout.addWidget(recordings)
 
         group = QGroupBox('Imported channels')
@@ -104,15 +143,48 @@ class SettingsDialog(QDialog):
 
         self.play_check.toggled.connect(host.set_plays_on_start)
         self.folder_btn.clicked.connect(self._choose_folder)
+        self.format_combo.currentIndexChanged.connect(self._format_chosen)
+        self.options_edit.editingFinished.connect(self._options_edited)
         self.hide_check.toggled.connect(self._toggled)
         self.check_btn.clicked.connect(self._check)
         self._sync()
+        # Qt opens the window at its guessed minimum height, too low for the
+        # wrapped help text, and squashes the rows. Size it for its width.
+        width = max(self.minimumWidth(), self.sizeHint().width())
+        height = layout.totalHeightForWidth(width)
+        self.setMinimumHeight(height)
+        self.resize(width, height)
 
     def _choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, 'Recordings Folder', self.folder_edit.text())
         if folder:
             self.folder_edit.setText(folder)
             self._host.set_local_recording_dir(folder)
+
+    def _show_format_help(self):
+        description = RECORDING_FORMATS[self.format_combo.currentData()][1]
+        self.format_help.setText(description)
+        self.format_combo.setAccessibleDescription(description)
+
+    def _format_chosen(self, _index):
+        self._show_format_help()
+        self._host.set_recording_format(self.format_combo.currentData())
+
+    def _options_edited(self):
+        text = self.options_edit.text().strip()
+        try:
+            parse_ffmpeg_options(text)
+        except ValueError as e:
+            announce_label(self.options_status, f'These options cannot be read ({e}); they were not saved.')
+            return
+        self.options_status.setText('')
+        if text != self._host.recording_ffmpeg_options():
+            self._host.set_recording_ffmpeg_options(text)
+
+    def done(self, result):
+        # Closing with the options field focused does not finish editing first.
+        self._options_edited()
+        super().done(result)
 
     def _toggled(self, on):
         self._host.set_hides_dead_channels(on)

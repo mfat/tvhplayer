@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import shlex
 import subprocess
 import threading
 import time
@@ -21,6 +22,37 @@ STALL_LIMIT = 5
 _STDERR_LIMIT = 64 * 1024
 
 
+# File extension -> (label, description, ffmpeg output options). The extension picks the format.
+RECORDING_FORMATS = {
+    'ts': (
+        'MPEG-TS (.ts)',
+        'The stream exactly as the server sends it. Plays everywhere, even if the recording is cut off.',
+        ['-c', 'copy', '-f', 'mpegts'],
+    ),
+    'mp4': (
+        'MP4 (.mp4)',
+        'Video copied, audio converted to AAC. Plays on phones and TVs; a recording cut off by a crash cannot be played.',
+        ['-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-f', 'mp4'],
+    ),
+    'mkv': (
+        'Matroska (.mkv)',
+        'The stream as the server sends it, in a file that is quick to seek in.',
+        ['-c', 'copy', '-f', 'matroska'],
+    ),
+}
+DEFAULT_FORMAT = 'ts'
+
+
+def recording_format(file_path):
+    ext = os.path.splitext(str(file_path))[1].lower().lstrip('.')
+    return ext if ext in RECORDING_FORMATS else DEFAULT_FORMAT
+
+
+def parse_ffmpeg_options(text):
+    """Split the user's extra ffmpeg output options; raises ValueError when they do not parse."""
+    return shlex.split(text or '')
+
+
 @dataclass
 class RecorderStatus:
     file_path: str
@@ -33,8 +65,11 @@ class RecorderStatus:
     stderr: str = ''
 
 
-def build_ffmpeg_command(stream_url, file_path, username='', password=''):
-    """Return the ffmpeg argv used for a local recording."""
+def build_ffmpeg_command(stream_url, file_path, username='', password='', extra_options=()):
+    """Return the ffmpeg argv used for a local recording.
+
+    ``extra_options`` come after the format's own output options, so they win.
+    """
     cmd = [
         'ffmpeg',
         '-hide_banner',
@@ -51,16 +86,8 @@ def build_ffmpeg_command(stream_url, file_path, username='', password=''):
         '-analyzeduration', '10M',
         '-probesize', '10M',
     ])
-    if str(file_path).lower().endswith('.mp4'):
-        cmd.extend([
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-b:a', '192k',
-            '-movflags', '+faststart',
-            '-f', 'mp4',
-        ])
-    else:
-        cmd.extend(['-c', 'copy', '-f', 'mpegts'])
+    cmd.extend(RECORDING_FORMATS[recording_format(file_path)][2])
+    cmd.extend(extra_options)
     cmd.append(str(file_path))
     return cmd
 
@@ -104,9 +131,9 @@ class LocalRecorder:
     def is_running(self):
         return self.process is not None and self.process.poll() is None
 
-    def start(self, stream_url, file_path, username='', password=''):
+    def start(self, stream_url, file_path, username='', password='', extra_options=()):
         self.stop()
-        cmd = build_ffmpeg_command(stream_url, file_path, username, password)
+        cmd = build_ffmpeg_command(stream_url, file_path, username, password, extra_options)
         if cmd[0] != self.ffmpeg_executable:
             cmd[0] = self.ffmpeg_executable
         log.info('Starting local recording: %s', redact_command(cmd))

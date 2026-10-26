@@ -438,6 +438,18 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_local_recording_dir(self, folder):
             self.folder = folder
 
+        def recording_format(self):
+            return 'ts'
+
+        def set_recording_format(self, fmt):
+            self.format = fmt
+
+        def recording_ffmpeg_options(self):
+            return getattr(self, 'options', '')
+
+        def set_recording_ffmpeg_options(self, text):
+            self.options = text
+
         def check_playlist_channels(self):
             self.checks += 1
             return list(self.jobs)
@@ -456,6 +468,17 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog.folder_btn.click()
     assert host.folder == '/recordings'
     assert dialog.folder_edit.text() == '/recordings'
+    assert dialog.format_combo.currentData() == 'ts'
+    dialog.format_combo.setCurrentIndex(dialog.format_combo.findData('mp4'))
+    assert host.format == 'mp4'
+    dialog.options_edit.setText('-metadata "title=unclosed')
+    dialog._options_edited()
+    assert not hasattr(host, 'options')
+    assert 'not saved' in dialog.options_status.text()
+    dialog.options_edit.setText(' -b:a 128k ')
+    dialog._options_edited()
+    assert host.options == '-b:a 128k'
+    assert dialog.options_status.text() == ''
     dialog.hide_check.click()
     assert host.hide is False
     assert 'shown again' in dialog.status_label.text()

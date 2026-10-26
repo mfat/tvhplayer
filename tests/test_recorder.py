@@ -3,7 +3,7 @@ import subprocess
 import threading
 import time
 
-from tvhplayer.core.recorder import LocalRecorder, build_ffmpeg_command, redact_command
+from tvhplayer.core.recorder import LocalRecorder, build_ffmpeg_command, parse_ffmpeg_options, redact_command
 
 
 def test_ts_command_copies_streams():
@@ -20,6 +20,18 @@ def test_mp4_command_transcodes_audio():
     cmd = build_ffmpeg_command('http://host/stream', '/tmp/show.mp4')
     assert 'aac' in cmd
     assert 'mp4' in cmd
+
+
+def test_mkv_command_copies_streams():
+    cmd = build_ffmpeg_command('http://host/stream', '/tmp/show.mkv')
+    assert cmd[-5:] == ['-c', 'copy', '-f', 'matroska', '/tmp/show.mkv']
+
+
+def test_extra_options_come_last_so_they_win():
+    extra = parse_ffmpeg_options('-c:a aac -b:a 128k -metadata "title=Evening news"')
+    cmd = build_ffmpeg_command('http://host/stream', '/tmp/a.ts', extra_options=extra)
+    assert cmd[-7:] == ['-c:a', 'aac', '-b:a', '128k', '-metadata', 'title=Evening news', '/tmp/a.ts']
+    assert cmd.index('-c:a') > cmd.index('mpegts')
 
 
 def test_auth_header_only_when_url_has_no_userinfo():

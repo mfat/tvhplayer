@@ -1433,14 +1433,15 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
     from tvhplayer.core.models import Channel
 
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
-    started = []
+    started, options = [], []
 
     class Recorder:
         is_running = False
         file_path = None
 
-        def start(self, url, path, *_auth):
+        def start(self, url, path, _user, _password, extra_options):
             started.append(path)
+            options.append(extra_options)
             self.is_running = True
             self.file_path = path
 
@@ -1476,6 +1477,21 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
         window._local_recording_timer.timeout.emit()
         assert window.local_recorder.is_running is False
         assert window._local_recording_timer is None
+        assert options == [[]]
+
+        window.set_recording_format('mp4')
+        window.set_recording_ffmpeg_options('-b:a 128k -metadata "title=Evening news"')
+        window.start_local_recording(Channel(uuid='c', name='BBC/News'))
+        assert Path(started[1]).suffix == '.mp4'
+        assert options[1] == ['-b:a', '128k', '-metadata', 'title=Evening news']
+        window.stop_local_recording()
+
+        # Options that do not parse stop before anything starts.
+        warnings = []
+        monkeypatch.setattr(ui.QMessageBox, 'warning', lambda *a: warnings.append(a[2]))
+        window.set_recording_ffmpeg_options('-metadata "title=unclosed')
+        window.start_local_recording(Channel(uuid='c', name='BBC/News'))
+        assert len(started) == 2 and 'cannot be read' in warnings[0]
     finally:
         window.close()
         app.processEvents()

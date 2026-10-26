@@ -47,7 +47,7 @@ try:
     from .core.errors import TvhAuthError, TvhError
     from .core.server_log import ServerLogFeed
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
-    from .core.recorder import STALL_LIMIT, LocalRecorder
+    from .core.recorder import DEFAULT_FORMAT, RECORDING_FORMATS, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from .core.vlc_player import VlcPlayer
     from .core.playlist_sync import PlaylistSource, find_source, server_key
     from .core.playback_status import STARTING, find_subscription, starting_caption
@@ -113,7 +113,7 @@ except ImportError:
     from core.errors import TvhAuthError, TvhError
     from core.server_log import ServerLogFeed
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
-    from core.recorder import STALL_LIMIT, LocalRecorder
+    from core.recorder import DEFAULT_FORMAT, RECORDING_FORMATS, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from core.vlc_player import VlcPlayer
     from core.playlist_sync import PlaylistSource, find_source, server_key
     from core.playback_status import STARTING, find_subscription, starting_caption
@@ -1482,10 +1482,10 @@ def ensure_recording_dir(folder):
     return os.access(folder, os.W_OK)
 
 
-def local_recording_name(channel_name, when):
+def local_recording_name(channel_name, when, extension=DEFAULT_FORMAT):
     """A file name for a recording to this computer, safe on every file system."""
     safe = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', '_', channel_name).strip(' ._') or 'channel'
-    return f"recording_{safe}_{when.strftime('%Y%m%d_%H%M%S')}.ts"
+    return f"recording_{safe}_{when.strftime('%Y%m%d_%H%M%S')}.{extension}"
 
 
 SERVER_STATUS_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -5178,6 +5178,14 @@ class TVHeadendClient(QMainWindow):
             channel_name = channel.name
             print(f"Debug: Starting local recording for channel: {channel_name}")
 
+            try:
+                extra_options = parse_ffmpeg_options(self.recording_ffmpeg_options())
+            except ValueError as e:
+                QMessageBox.warning(
+                    self, "Record to This Computer",
+                    f"The extra ffmpeg options in Settings cannot be read: {e}.",
+                )
+                return
             folder = self.local_recording_dir()
             if not ensure_recording_dir(folder):
                 folder = self._ask_recording_dir(folder)
@@ -5189,7 +5197,9 @@ class TVHeadendClient(QMainWindow):
                 return
             duration = dialog.get_duration()
             event = dialog.programme_event()
-            file_path = os.path.join(folder, local_recording_name(channel_name, datetime.now()))
+            file_path = os.path.join(
+                folder, local_recording_name(channel_name, datetime.now(), self.recording_format())
+            )
 
             stream_url = self.get_backend().stream_url(channel)
             server = self.current_server() or {}
@@ -5198,6 +5208,7 @@ class TVHeadendClient(QMainWindow):
                 file_path,
                 server.get('username') or '',
                 server.get('password') or '',
+                extra_options,
             )
             self._recording_channel = channel
             self._recording_stall_noted = False
@@ -5486,6 +5497,21 @@ class TVHeadendClient(QMainWindow):
 
     def set_local_recording_dir(self, folder):
         self.config['local_recording_dir'] = folder
+        self.save_config()
+
+    def recording_format(self):
+        fmt = self.config.get('local_recording_format')
+        return fmt if fmt in RECORDING_FORMATS else DEFAULT_FORMAT
+
+    def set_recording_format(self, fmt):
+        self.config['local_recording_format'] = fmt
+        self.save_config()
+
+    def recording_ffmpeg_options(self):
+        return self.config.get('local_recording_ffmpeg_options') or ''
+
+    def set_recording_ffmpeg_options(self, text):
+        self.config['local_recording_ffmpeg_options'] = text
         self.save_config()
 
     def _ask_recording_dir(self, previous):
