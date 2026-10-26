@@ -25,7 +25,6 @@ try:
         set_recordings_dir,
         startup_result,
         stop_leftover_servers,
-        use_ffmpeg_starter,
     )
     from .core.logs import SERVER_LOGGER
     from .core.proxy import child_env
@@ -46,7 +45,6 @@ except ImportError:
         set_recordings_dir,
         startup_result,
         stop_leftover_servers,
-        use_ffmpeg_starter,
     )
     from core.logs import SERVER_LOGGER
     from core.proxy import child_env
@@ -222,14 +220,7 @@ class BuiltinSupervisor(QObject):
             self._checked.emit(attempt, answered, failed)
         except RuntimeError:
             # The app closed while the server was being asked.
-            return
-        if answered:
-            # After the window has the server: a big playlist takes a while.
-            changed = use_ffmpeg_starter(http_port, username, password)
-            if changed < 0:
-                log.warning('Could not update the ffmpeg command of playlist channels')
-            elif changed:
-                log.info('Updated the ffmpeg command of %d playlist channels', changed)
+            pass
 
     def _on_checked(self, attempt, answered, failed) -> None:
         if attempt != self._check_attempt:

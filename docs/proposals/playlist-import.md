@@ -105,7 +105,6 @@ pipe://FFMPEG -nostdin -hide_banner -loglevel error
 - The service name and provider are set inside the stream, as the kodinerds-iptv playlist does.
 - The reconnect options are added for `http(s)` inputs only. They exist in FFmpeg 4.3 and later; the Flatpak builds 4.4.5.
 - Tvheadend stored a 759-character command intact in a test.
-- On the built-in server, FFMPEG is the app's stand-in, `$XDG_DATA_HOME/tvhplayer/bin/ffmpeg` (`core/ffmpeg_starter.py`, run by the app's Python). Before it sends anything, ffmpeg reads a piece of video from every variant of an HLS master, one after another. Al Jazeera Mubasher's five variants took 17–46 s to its first byte, and the server gives a stream 30 s (`max_timeout`), so the channel failed although VLC played it. The stand-in reads the master, puts the highest-bandwidth variant, the one ffmpeg would have played, in place of the input, and runs ffmpeg: 3–5 s for the same channel. It keeps the master when that variant's sound or picture is a separate rendition, when the list sets cookies, and on any error. Each start the app writes the stand-in again and points the built-in server's existing ffmpeg commands at it, or back at ffmpeg when it cannot be written, as in a frozen build. Other servers keep `/usr/bin/ffmpeg`.
 
 ## What is written to the server
 

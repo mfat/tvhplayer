@@ -540,10 +540,9 @@ def test_import_plays_refreshes_and_removes(tvheadend, media):
 
 
 def test_ffmpeg_location_per_server():
-    no_starter = functools.partial(ffmpeg_for_server, starter=lambda _path: None)
-    assert no_starter({'builtin': True}, which=lambda _name: '/app/bin/ffmpeg') == '/app/bin/ffmpeg'
+    assert ffmpeg_for_server({'builtin': True}, which=lambda _name: '/app/bin/ffmpeg') == '/app/bin/ffmpeg'
     with pytest.raises(PlaylistError):
-        no_starter({'builtin': True}, which=lambda _name: None)
+        ffmpeg_for_server({'builtin': True}, which=lambda _name: None)
     assert ffmpeg_for_server({'url': 'http://tv.lan:9981'}) == '/usr/bin/ffmpeg'
 
 
