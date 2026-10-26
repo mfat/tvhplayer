@@ -55,6 +55,7 @@ class FakeAdmin:
         self.saved = []
         self.deleted = []
         self.kept_after_import = False
+        self.has_epg = True
         self.guide_rows = [
             {'uuid': 'old', 'id': 'tvhplayer.gone', 'modid': 'xmltv'},
             {'uuid': 'eit', 'id': 'BBCOne.uk', 'modid': '/usr/bin/tv_grab_uk'},
@@ -90,6 +91,9 @@ class FakeAdmin:
 
     def enable_xmltv_socket(self):
         return self.socket_path
+
+    def has_programmes(self, _channel_uuid):
+        return self.has_epg
 
     def keep_guide_after_import(self):
         self.kept_after_import = True
@@ -159,13 +163,24 @@ def test_guide_is_sent_linked_and_sent_again(xmltv_socket, tmp_path):
     assert source.updated == NOW and source.error == ''
     assert report.message(NOW) == 'TV guide loaded for 3 of 4 channels, up to 2 days ahead.'
 
-    # Once linked, the guide is sent once.
+    # Nothing changed and the server still has it: nothing is sent.
     admin.saved.clear()
-    update_server_guide(admin, {'builtin': True}, cache, [source], {'c3': Choice(location, 'BBCOne.uk', 60)},
-                        now=NOW + 60, sleep=lambda _s: None)
+    choices = {'c3': Choice(location, 'BBCOne.uk', 60)}
+    again = update_server_guide(admin, {'builtin': True}, cache, [source], choices, now=NOW + 60, sleep=lambda _s: None)
+    assert again.unchanged and (again.covered, again.until) == (3, NOW + 49 * 3600)
+    assert again.message(NOW) == report.message(NOW)
+    # A server that lost its EPG gets it again, once, as the links are still there.
+    admin.has_epg = False
+    update_server_guide(admin, {'builtin': True}, cache, [source], choices, now=NOW + 60, sleep=lambda _s: None)
     _wait(received, 3)
     assert len(received) == 3
     assert admin.saved == []
+    # So does a server whose guide would change.
+    admin.has_epg = True
+    changed = update_server_guide(admin, {'builtin': True}, cache, [source], {'c3': Choice(location, 'BBCOne.uk', 30)},
+                                  now=NOW + 60, sleep=lambda _s: None)
+    _wait(received, 4)
+    assert len(received) == 4 and not changed.unchanged
 
 
 def test_a_failed_download_uses_the_last_copy(xmltv_socket, tmp_path):

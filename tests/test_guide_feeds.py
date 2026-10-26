@@ -242,3 +242,33 @@ def test_index_uses_good_copies_only(tmp_path):
     index = build_index(cache, [GuideSource('https://never.loaded/x.xml', 'builtin'), GuideSource(str(good), 'builtin')])
     assert index.order == [str(good)]
     assert index.find(str(good), 'BBCOne.uk') == GuideChannel(str(good), 'BBCOne.uk', ('BBC One',), 2, NOW + 7200)
+
+
+def test_fast_reading_finds_what_full_parsing_finds(tmp_path, monkeypatch):
+    import tvhplayer.core.guide_feeds as feeds
+
+    text = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<tv>'
+        '<channel id="A&amp;B.uk"><display-name>A</display-name></channel>'
+        '<programmeX channel="A&amp;B.uk"/>'
+        + ''.join(
+            f'<programme start="{format_time(NOW + h * 60)}" channel="A&amp;B.uk"><title>Ä {h} &lt;1&gt;</title></programme>\n'
+            f"<programme start='{format_time(NOW + h * 60)}' channel='Other.uk'><title>x</title></programme>"
+            for h in range(40)
+        )
+        + f'<programme start="{format_time(NOW)}" channel="A&amp;B.uk" />'
+        + '<programme start="20270101000000" channel="A&amp;B.uk"><title>&nbsp;</title></programme>'
+        + '</tv>'
+    )
+    path = tmp_path / 'g.xml.gz'
+    path.write_bytes(gzip.compress(text.encode('utf-8')))
+    monkeypatch.setattr(feeds, '_CHUNK', 97)
+    found = list(feeds.wanted_programmes(str(path), {'A&B.uk'}))
+    titles = [el.findtext('title') for el in found]
+    assert titles == [f'Ä {h} <1>' for h in range(40)] + [None]
+    assert {el.get('channel') for el in found} == {'A&B.uk'}
+
+    latin = tmp_path / 'latin.xml'
+    latin.write_bytes(text.replace('UTF-8', 'ISO-8859-1').replace('<title>&nbsp;</title>', '').encode('latin-1'))
+    found = list(feeds.wanted_programmes(str(latin), {'A&B.uk'}))
+    assert [el.findtext('title') for el in found][:2] == ['Ä 0 <1>', 'Ä 1 <1>']

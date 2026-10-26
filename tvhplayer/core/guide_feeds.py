@@ -437,16 +437,8 @@ def write_server_guide(
                 out.write(f'<channel id={quoteattr(guide_channel_id(uuid))}><display-name>{name}</display-name></channel>\n')
             for location, wanted in targets.items():
                 try:
-                    with open_guide(cache.file(location)) as source:
-                        for element in _elements(source):
-                            if cancelled():
-                                raise GuideError('Stopped.')
-                            if element.tag != 'programme':
-                                continue
-                            receivers = wanted.get(element.get('channel') or '')
-                            if not receivers:
-                                continue
-                            _write_programme(out, element, receivers, now, result)
+                    for element in wanted_programmes(cache.file(location), wanted, cancelled):
+                        _write_programme(out, element, wanted[element.get('channel') or ''], now, result)
                 except OSError as exc:
                     raise GuideError(FILE_FAILED) from exc
             out.write('</tv>\n')
@@ -454,6 +446,77 @@ def write_server_guide(
         os.unlink(path)
         raise
     return result
+
+
+_CHUNK = 4 * 1024 * 1024
+_PROGRAMME = b'<programme'
+_PROGRAMME_END = b'</programme>'
+_ENCODING = re.compile(rb'''^\s*<\?xml[^>]*\bencoding\s*=\s*["']([^"']+)''')
+
+
+def wanted_programmes(path: str, wanted, cancelled: Callable[[], bool] = lambda: False) -> Iterator[ET.Element]:
+    """The ``<programme>`` elements of the channels in ``wanted``.
+
+    A country's guide has a million programmes and a server uses a few
+    thousand, so the file is searched as text and only those are parsed.
+    Guides in another encoding than UTF-8 are read element by element.
+    """
+    with open_guide(path) as handle:
+        head = handle.read(_CHUNK)
+        encoding = _ENCODING.match(head[:500])
+        if encoding and encoding.group(1).decode('ascii', 'replace').lower().replace('_', '-') not in ('utf-8', 'utf8', 'us-ascii', 'ascii'):
+            handle.seek(0)
+            for element in _elements(handle):
+                if cancelled():
+                    raise GuideError('Stopped.')
+                if element.tag == 'programme' and (element.get('channel') or '') in wanted:
+                    yield element
+            return
+        # Only programmes of wanted channels match, so Python sees a few thousand, not a million.
+        ids = sorted({escape(channel_id, {'"': '&quot;', "'": '&apos;'}) for channel_id in wanted} | set(wanted), key=len, reverse=True)
+        if not ids:
+            return
+        pattern = re.compile(
+            rb'''<programme\s[^>]*?\bchannel\s*=\s*(["'])('''
+            + b'|'.join(re.escape(channel_id.encode('utf-8')) for channel_id in ids)
+            + rb''')\1'''
+        )
+        buffer = head
+        while True:
+            if cancelled():
+                raise GuideError('Stopped.')
+            chunk = handle.read(_CHUNK)
+            buffer = buffer + chunk if chunk else buffer
+            position = 0
+            waiting = None
+            for match in pattern.finditer(buffer):
+                start = match.start()
+                tag_end = buffer.find(b'>', match.end())
+                if tag_end < 0:
+                    waiting = start
+                    break
+                if buffer[tag_end - 1:tag_end] == b'/':
+                    end = tag_end + 1
+                else:
+                    close = buffer.find(_PROGRAMME_END, tag_end)
+                    if close < 0:
+                        waiting = start
+                        break
+                    end = close + len(_PROGRAMME_END)
+                position = end
+                try:
+                    element = ET.fromstring(buffer[start:end])
+                except ET.ParseError:
+                    continue
+                channel = element.get('channel') or ''
+                if channel in wanted:
+                    yield element
+            if not chunk:
+                return
+            if waiting is None:
+                # Keep a start tag that may be cut off at the end of what was read.
+                waiting = max(position, buffer.rfind(_PROGRAMME, position))
+            buffer = buffer[waiting:]
 
 
 def _write_programme(out, element, receivers, now, result) -> None:

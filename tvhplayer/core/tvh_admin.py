@@ -143,6 +143,11 @@ class TvhAdmin:
         """The channels every EPG grabber has seen, with the TV channels each feeds."""
         return self._grid('api/epggrab/channel/grid')
 
+    def has_programmes(self, channel_uuid: str) -> bool:
+        """Whether the server's EPG holds any programme for this channel."""
+        data = self._request('api/epg/events/grid', params={'channel': channel_uuid, 'limit': 1})
+        return bool(data.get('totalCount') or data.get('entries'))
+
     def keep_guide_after_import(self) -> None:
         """Have the server save its EPG after each XMLTV import, so a crash keeps it."""
         entries = self._request('api/epggrab/config/load').get('entries') or []

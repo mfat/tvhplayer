@@ -241,6 +241,9 @@ NOW_NEXT_TICK_MS = 30000
 AWAKE_CHECK_MS = 30000
 # How often to check whether a guide for a server on this computer is due for download.
 GUIDE_CHECK_MS = 30 * 60 * 1000
+# After a server starts, its guide loads this long after the channel list, or after this at the latest.
+GUIDE_AFTER_CHANNELS_MS = 3000
+GUIDE_START_FALLBACK_MS = 60000
 # How long a server's tuner count and channel muxes are trusted before reading them again.
 TUNER_USE_REFRESH_SECONDS = 600
 DEINTERLACE_CHOICES = (
@@ -3217,6 +3220,8 @@ class TVHeadendClient(QMainWindow):
         self._playlist_jobs = []
         # Guide updates for servers on this computer, one per server.
         self._guide_jobs = {}
+        # A server that just started, waiting for the channel list before its guide loads.
+        self._guide_waiting = None
         self._guide_timer = QTimer(self)
         self._guide_timer.timeout.connect(self._update_due_guides)
         self._guide_timer.start(GUIDE_CHECK_MS)
@@ -4709,6 +4714,7 @@ class TVHeadendClient(QMainWindow):
             self._show_channel_state("This server has no channels yet.")
         self.statusbar.showMessage("Channels loaded successfully")
         self._guide_channels_changed()
+        self._channel_list_settled()
         if self._play_on_start:
             self._play_on_start = False
             self._play_last_channel(fetch.key)
@@ -4736,6 +4742,7 @@ class TVHeadendClient(QMainWindow):
         self._clear_channels()
         self._show_channel_state(f"Could not connect to {name}.\n{message}", retry=True)
         self.statusbar.showMessage(f"Could not connect to {name}")
+        self._channel_list_settled()
 
     def _clear_channels(self):
         self._channels = []
@@ -6096,7 +6103,7 @@ class TVHeadendClient(QMainWindow):
         if is_builtin_server(self.current_server()):
             self.fetch_channels()
         self._refresh_builtin_playlists()
-        self._update_due_guides(started=find_builtin_server(self.servers))
+        self._load_guides_after_start(find_builtin_server(self.servers))
 
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
@@ -6385,8 +6392,25 @@ class TVHeadendClient(QMainWindow):
         job.start()
         return job
 
+    def _load_guides_after_start(self, server):
+        """Load a just started server's guides once the channel list has loaded, so the two do not compete."""
+        self._guide_waiting = server
+        # In case the list shown is another server's and is already loaded.
+        QTimer.singleShot(GUIDE_START_FALLBACK_MS, self._start_waiting_guides)
+
+    def _channel_list_settled(self):
+        if self._guide_waiting is not None:
+            QTimer.singleShot(GUIDE_AFTER_CHANNELS_MS, self._start_waiting_guides)
+
+    def _start_waiting_guides(self):
+        server, self._guide_waiting = self._guide_waiting, None
+        if server is not None:
+            self._update_due_guides(started=server)
+
     def _guide_done(self, job, automatic):
         if self._closing:
+            return
+        if automatic and job.ok and job.report is not None and job.report.unchanged:
             return
         if automatic and not job.ok:
             # A server that is not running now should not fill the status bar every half hour.

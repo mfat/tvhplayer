@@ -118,6 +118,7 @@ class GuideJob(QObject):
         self._cancelled = False
         self.message = ''
         self.ok = False
+        self.report = None
 
     def start(self):
         self._busy = True
@@ -174,6 +175,7 @@ class GuideJob(QObject):
         self._host.store_guide_states(sources)
         self._busy = False
         self.ok = True
+        self.report = report
         self.message = report.message()
         self.finished.emit(report)
 

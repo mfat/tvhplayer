@@ -10,6 +10,8 @@ added.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import time
 from dataclasses import dataclass, field
@@ -23,6 +25,8 @@ from .xmltv import send_guide, usable_socket
 NO_SOCKET = 'The server on this computer did not open its XMLTV socket.'
 # The server reads what the socket received on its own time; a big guide takes a while.
 LINK_WAIT_SECONDS = 180
+# Channels asked whether the server still has their programmes, before skipping a load.
+PROBE_CHANNELS = 3
 
 
 @dataclass
@@ -34,6 +38,8 @@ class GuideReport:
     unmatched: List[str] = field(default_factory=list)
     # Sources that could not be updated, with the reason; their last copy was used.
     failed: Dict[str, str] = field(default_factory=dict)
+    # Nothing changed since the last load and the server still had it, so nothing was sent.
+    unchanged: bool = False
 
     def message(self, now: Optional[float] = None) -> str:
         now = time.time() if now is None else now
@@ -188,6 +194,61 @@ def link_channels(
     return added
 
 
+def load_fingerprint(cache: GuideCache, assignments: Dict[str, Assignment], names: Dict[str, str]) -> str:
+    """What a load would send: each channel's guide channel and shift, and the guide files' versions."""
+    digest = hashlib.sha256()
+    for uuid in sorted(assignments):
+        assignment = assignments[uuid]
+        guide = assignment.channel
+        digest.update(f'{uuid}\0{guide.source}\0{guide.id}\0{assignment.shift}\0{names.get(uuid, "")}\n'.encode())
+    for location in sorted({assignment.channel.source for assignment in assignments.values()}):
+        try:
+            info = os.stat(cache.file(location))
+        except OSError:
+            continue
+        digest.update(f'{location}\0{info.st_size}\0{info.st_mtime_ns}\n'.encode())
+    return digest.hexdigest()
+
+
+def _state_path(cache: GuideCache, server):
+    key = 'builtin' if server.get('builtin') else (server.get('url') or '').strip().rstrip('/')
+    return cache.folder / f'loaded-{hashlib.sha256(key.encode()).hexdigest()[:16]}.json'
+
+
+def _read_state(cache: GuideCache, server) -> dict:
+    try:
+        data = json.loads(_state_path(cache, server).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_state(cache: GuideCache, server, fingerprint: str, last_stop: Dict[str, int]) -> None:
+    path = _state_path(cache, server)
+    try:
+        cache.folder.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'fingerprint': fingerprint, 'last_stop': last_stop}), encoding='utf-8')
+    except OSError:
+        pass
+
+
+def server_still_has(admin, state: dict, channels: List[ServerChannel], assignments: Dict[str, Assignment], now) -> bool:
+    """Whether the last load is still on the server: every channel linked, and programmes there.
+
+    The server can lose its EPG, for example when its database is deleted.
+    """
+    linked = {channel.uuid for channel in channels if channel.epggrab}
+    if not set(assignments) <= linked:
+        return False
+    last_stop = state.get('last_stop') or {}
+    # Channels whose programmes run on for a while, so a gap in one guide does not count.
+    probes = sorted((uuid for uuid, stop in last_stop.items() if uuid in assignments and stop > now + 3600),
+                    key=lambda uuid: -last_stop[uuid])[:PROBE_CHANNELS]
+    if assignments and not probes:
+        return False
+    return all(admin.has_programmes(uuid) for uuid in probes)
+
+
 def update_server_guide(
     admin,
     server,
@@ -217,8 +278,17 @@ def update_server_guide(
         raise GuideError(NO_SOCKET)
     if server.get('builtin'):
         admin.keep_guide_after_import()
-    status('Loading the TV guide into the server…')
     names = {channel.uuid: channel.name for channel in channels}
+    moment = time.time() if now is None else now
+    fingerprint = load_fingerprint(cache, assignments, names)
+    state = _read_state(cache, server)
+    if state.get('fingerprint') == fingerprint and server_still_has(admin, state, channels, assignments, moment):
+        last_stop = {uuid: stop for uuid, stop in (state.get('last_stop') or {}).items() if uuid in assignments}
+        report.unchanged = True
+        report.covered = sum(1 for stop in last_stop.values() if stop > moment)
+        report.until = max(last_stop.values(), default=0)
+        return report
+    status('Loading the TV guide into the server…')
     built = write_server_guide(cache, assignments, names, cache.folder, cancelled, now)
     try:
         try:
@@ -232,7 +302,7 @@ def update_server_guide(
             raise GuideError(str(exc)) from exc
     finally:
         os.unlink(built.path)
-    moment = time.time() if now is None else now
+    _write_state(cache, server, fingerprint, built.last_stop)
     report.covered = sum(1 for uuid, stop in built.last_stop.items() if stop > moment)
     report.until = max(built.last_stop.values(), default=0)
     return report
