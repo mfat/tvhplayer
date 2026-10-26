@@ -2099,7 +2099,8 @@ def test_reload_channel_list_reads_the_channels_again_in_place(monkeypatch, tmp_
         assert action.shortcut().toString() == 'F5'
         assert action in window.menuBar().actions()[1].menu().actions()
         action.trigger()
-        assert reloads == [True]
+        window.reload_channels_btn.click()
+        assert reloads == [True, True]
     finally:
         window.close()
 

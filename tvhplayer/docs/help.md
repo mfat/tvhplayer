@@ -56,7 +56,7 @@ Besides the channel name, the list can show the channel number, the program on n
 - To move a column, drag its heading.
 - **View → Channel List** also turns on or off channel logos, the progress bar, recording marks, the **Group** list (the channel tags set on your server), and hiding channels that are turned off on the server.
 - **Reset Channel List Layout** brings back the defaults.
-- **View → Reload Channel List** (F5) reads the channels from the server again, for example after you change them in the Tvheadend web interface.
+- The **⟳** button above the channel list, **View → Reload Channel List** or F5 reads the channels from the server again, for example after you change them in the Tvheadend web interface.
 
 Your choices are saved and used the next time TVHplayer starts. The program and type columns only fill in when your server has guide data and service information for the channels. Some servers only share the channel type with admin users.
 

@@ -3641,6 +3641,21 @@ class TVHeadendClient(QMainWindow):
         )
         self.manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(self.manage_servers_btn)
+        self.reload_channels_btn = QToolButton()
+        self.reload_channels_btn.setText("⟳")
+        self.reload_channels_btn.clicked.connect(lambda: self.fetch_channels(keep_place=True))
+        if not prefers_high_contrast():
+            self.reload_channels_btn.setStyleSheet(
+                "QToolButton { font-size: 18px; } "
+                "QToolButton:focus { border: 2px solid palette(highlight); }"
+            )
+        describe(
+            self.reload_channels_btn,
+            "Reload channel list",
+            "Read the channels from the server again. Keyboard: F5.",
+        )
+        self.reload_channels_btn.setToolTip("Reload channel list (F5)")
+        server_layout.addWidget(self.reload_channels_btn)
         self.guide_btn = QToolButton()
         self.guide_btn.setText("TV Guide")
         self.guide_btn.clicked.connect(lambda: self.show_guide())
