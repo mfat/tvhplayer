@@ -61,6 +61,7 @@ class SettingsDialog(QDialog):
         folder_row = QHBoxLayout()
         self.folder_edit = QLineEdit(host.local_recording_dir())
         self.folder_edit.setReadOnly(True)
+        self.folder_edit.setPlaceholderText('Chosen the first time you record')
         describe(self.folder_edit, 'Recordings folder', FOLDER_HELP)
         folder_label.setBuddy(self.folder_edit)
         folder_row.addWidget(self.folder_edit, 1)

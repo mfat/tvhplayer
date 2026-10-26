@@ -1454,29 +1454,26 @@ def in_flatpak():
     return os.path.exists('/.flatpak-info')
 
 
-def own_recording_dir():
-    """TVHplayer's own Recordings folder. In the Flatpak it is inside the app's sandbox folder."""
-    data = os.environ.get('XDG_DATA_HOME') or os.path.join(str(Path.home()), '.local', 'share')
-    return os.path.join(data, 'Recordings')
-
-
 def default_recording_dir():
-    """The user's Videos folder when TVHplayer can write there, else its own Recordings folder.
+    """The user's Videos folder, or '' when TVHplayer cannot write there.
 
-    The Flatpak sees the Videos folder only with the xdg-videos permission. Without it,
-    the home folder inside the sandbox is thrown away on exit, so nothing is made there.
+    The Flatpak cannot see the Videos folder: the home folder inside the sandbox
+    is thrown away on exit. The user picks a folder through the file chooser
+    portal instead, the first time they record.
     """
     videos = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MoviesLocation)
     if videos and (not in_flatpak() or os.access(videos, os.W_OK)):
         return videos
-    return own_recording_dir()
+    return ''
 
 
 def ensure_recording_dir(folder):
     """Make ``folder`` if needed; True when recordings can be written there."""
+    if not folder:
+        return False
     if not os.path.isdir(folder):
         # A folder made inside the Flatpak sandbox's home would vanish on exit.
-        if in_flatpak() and folder != own_recording_dir():
+        if in_flatpak():
             return False
         try:
             os.makedirs(folder, exist_ok=True)
@@ -5183,15 +5180,9 @@ class TVHeadendClient(QMainWindow):
 
             folder = self.local_recording_dir()
             if not ensure_recording_dir(folder):
-                fallback = default_recording_dir()
-                if fallback == folder or not ensure_recording_dir(fallback):
-                    QMessageBox.warning(
-                        self, "Record to This Computer",
-                        f"TVHplayer cannot save recordings in {folder}. Choose another folder in Settings.",
-                    )
+                folder = self._ask_recording_dir(folder)
+                if not folder:
                     return
-                self.statusbar.showMessage(f"Cannot save recordings in {folder}; saving in {fallback} instead")
-                folder = fallback
             dialog = RecordingDurationDialog(self, channel, self._programme_on_now(channel), save_dir=folder)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 print("Debug: Recording cancelled by user")
@@ -5496,6 +5487,30 @@ class TVHeadendClient(QMainWindow):
     def set_local_recording_dir(self, folder):
         self.config['local_recording_dir'] = folder
         self.save_config()
+
+    def _ask_recording_dir(self, previous):
+        """Ask for the recordings folder and keep it; '' when none was chosen."""
+        if previous:
+            text = (f"TVHplayer cannot save recordings in {previous}. "
+                    "Choose another folder; recordings go there from now on.")
+        else:
+            text = ("Choose a folder for recordings to this computer. "
+                    "Recordings go there from now on; you can change it in Settings.")
+        box = QMessageBox(QMessageBox.Icon.Information, "Recordings Folder", text, parent=self)
+        choose = box.addButton("&Choose Folder…", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(choose)
+        box.exec()
+        if box.clickedButton() is not choose:
+            return ''
+        folder = QFileDialog.getExistingDirectory(self, "Recordings Folder", str(Path.home()))
+        if not folder:
+            return ''
+        if not ensure_recording_dir(folder):
+            QMessageBox.warning(self, "Recordings Folder", f"TVHplayer cannot save recordings in {folder}.")
+            return ''
+        self.set_local_recording_dir(folder)
+        return folder
 
     def _remember_channel(self, channel):
         last = {'server': self._channels_server, 'key': channel_key(channel), 'name': channel.name}

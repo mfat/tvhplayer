@@ -1489,26 +1489,74 @@ def test_local_recordings_default_to_the_videos_folder(monkeypatch, tmp_path):
     app.processEvents()
 
 
-def test_flatpak_records_only_where_it_can_write(monkeypatch, tmp_path):
+def test_flatpak_asks_for_the_recordings_folder_once(monkeypatch, tmp_path):
+    from tvhplayer.core.models import Channel
+
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
-    window.close()
     videos = tmp_path / 'Videos'
-    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'data'))
     monkeypatch.setattr(ui.QStandardPaths, 'writableLocation', lambda _kind: str(videos))
     monkeypatch.setattr(ui, 'in_flatpak', lambda: True)
-
-    # Without the xdg-videos permission the Videos folder is not there: use the app's own folder.
-    own = str(tmp_path / 'data' / 'Recordings')
-    assert ui.default_recording_dir() == own
-    assert ui.ensure_recording_dir(own) and os.path.isdir(own)
-    # Never make a folder the sandbox would throw away.
+    # Without access, the Videos folder is not there; never make it in the sandbox.
+    assert ui.default_recording_dir() == ''
     assert not ui.ensure_recording_dir(str(videos))
     assert not videos.exists()
 
-    videos.mkdir()
-    assert ui.default_recording_dir() == str(videos)
-    assert ui.ensure_recording_dir(str(videos))
-    app.processEvents()
+    started, asked, prompts = [], [], []
+    chosen = tmp_path / 'portal'
+    chosen.mkdir()
+
+    class Recorder:
+        is_running = False
+        file_path = None
+
+        def start(self, _url, path, *_auth):
+            started.append(path)
+
+        def stop(self):
+            pass
+
+    class Box(ui.QMessageBox):
+        # Choose Folder… is the default button: "click" it without a modal loop.
+        def exec(self):
+            prompts.append(self.text())
+
+        def clickedButton(self):
+            return self.defaultButton()
+
+    class Dialog:
+        def __init__(self, _parent, _channel, _event, save_dir=None):
+            assert save_dir == str(chosen)
+
+        def exec(self):
+            return ui.QDialog.DialogCode.Accepted
+
+        def get_duration(self):
+            return 60
+
+        def programme_event(self):
+            return None
+
+    monkeypatch.setattr(ui, 'QMessageBox', Box)
+    monkeypatch.setattr(ui.QFileDialog, 'getExistingDirectory', lambda *_a: asked.append(1) or str(chosen))
+    monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
+    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c: 'http://tv/stream')
+    window._programme_on_now = lambda _c: None
+    window.local_recorder = Recorder()
+    window.config.pop('local_recording_dir', None)
+    try:
+        assert window.local_recording_dir() == ''
+        window.start_local_recording(Channel(uuid='c', name='One'))
+        window.stop_local_recording()
+        window.start_local_recording(Channel(uuid='c', name='One'))
+        window.stop_local_recording()
+        assert len(asked) == 1 and len(prompts) == 1
+        assert 'from now on' in prompts[0]
+        assert window.config_store.data['local_recording_dir'] == str(chosen)
+        assert [Path(path).parent for path in started] == [chosen, chosen]
+    finally:
+        window._confirm_quit = lambda: True
+        window.close()
+        app.processEvents()
 
 
 def test_quit_asks_while_recording_to_this_computer(monkeypatch, tmp_path):
