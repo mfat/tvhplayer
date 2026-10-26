@@ -2090,6 +2090,20 @@ def test_channel_list_reloads_at_most_every_30_seconds_during_a_playlist_check(m
         window.close()
 
 
+def test_reload_channel_list_reads_the_channels_again_in_place(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        reloads = []
+        monkeypatch.setattr(window, 'fetch_channels', lambda keep_place=False: reloads.append(keep_place))
+        action = window.reload_channels_action
+        assert action.shortcut().toString() == 'F5'
+        assert action in window.menuBar().actions()[1].menu().actions()
+        action.trigger()
+        assert reloads == [True]
+    finally:
+        window.close()
+
+
 def test_spinner_sits_above_the_video_and_shows_the_server_status(monkeypatch, tmp_path):
     import time
 

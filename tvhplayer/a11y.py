@@ -27,6 +27,7 @@ Channels
   Ctrl+F           Focus channel search
   S                Focus channel search (not while typing in the list)
   Ctrl+J           Go to the playing channel in the list
+  F5               Reload the channel list from the server
 
 Playback
   P                Play the selected channel, or stop playback

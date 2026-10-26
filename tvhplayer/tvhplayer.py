@@ -3560,6 +3560,12 @@ class TVHeadendClient(QMainWindow):
         self.go_to_playing_action.triggered.connect(self.show_playing_channel)
         view_menu.addAction(self.go_to_playing_action)
 
+        self.reload_channels_action = QAction("&Reload Channel List", self)
+        self.reload_channels_action.setShortcut("F5")
+        self.reload_channels_action.setStatusTip("Read the channels from the server again")
+        self.reload_channels_action.triggered.connect(lambda: self.fetch_channels(keep_place=True))
+        view_menu.addAction(self.reload_channels_action)
+
         setup_action = QAction("Set &Up Channels…", self)
         setup_action.setStatusTip("Add channels from a TV tuner or an IPTV playlist")
         setup_action.triggered.connect(self.show_setup_wizard)
