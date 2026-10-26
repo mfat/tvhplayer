@@ -21,6 +21,8 @@ HMF_UUID = 8
 
 Message = Union[Dict[str, Any], List[Any]]
 
+_FIELD_HEADER = struct.Struct('>BBI')
+
 
 class Binary(bytes):
     """Distinct type so binary blobs are not encoded as UTF-8 strings."""
@@ -41,9 +43,7 @@ def _s64_bytes(value: int) -> bytes:
 
 
 def _decode_s64(data: bytes) -> int:
-    unsigned = 0
-    for index in range(len(data) - 1, -1, -1):
-        unsigned = (unsigned << 8) | data[index]
+    unsigned = int.from_bytes(data, 'little')
     if len(data) == 8 and unsigned >= 2**63:
         return unsigned - 2**64
     return unsigned
@@ -98,28 +98,36 @@ def serialize(msg: dict) -> bytes:
 
 def deserialize(body: bytes, type_id: int = HMF_MAP) -> Message:
     """Deserialize a body (no 4-byte length prefix)."""
-    is_list = type_id == HMF_LIST
+    body = bytes(body)
+    return _decode_body(body, 0, len(body), type_id == HMF_LIST)
+
+
+def _decode_body(body: bytes, offset: int, end: int, is_list: bool) -> Message:
+    # Nested maps and lists are read in place: copying each one out took
+    # most of the time of a list of tens of thousands of channels.
     msg: Message = [] if is_list else {}
-    view = memoryview(body)
-    offset = 0
-    length = len(body)
-    while offset + 6 <= length:
-        field_type = view[offset]
-        name_len = view[offset + 1]
-        data_len = struct.unpack('>I', view[offset + 2:offset + 6].tobytes())[0]
+    unpack = _FIELD_HEADER.unpack_from
+    while offset + 6 <= end:
+        field_type, name_len, data_len = unpack(body, offset)
         offset += 6
-        if offset + name_len + data_len > length:
+        start = offset + name_len
+        stop = start + data_len
+        if stop > end:
             raise ValueError('Truncated HTSMSG field')
-        name = view[offset:offset + name_len].tobytes().decode('utf-8', 'replace')
-        offset += name_len
-        data = view[offset:offset + data_len].tobytes()
-        offset += data_len
-        item = _decode_value(field_type, data)
+        if field_type == HMF_STR:
+            item = body[start:stop].decode('utf-8', 'replace')
+        elif field_type == HMF_S64:
+            item = _decode_s64(body[start:stop])
+        elif field_type == HMF_MAP or field_type == HMF_LIST:
+            item = _decode_body(body, start, stop, field_type == HMF_LIST)
+        else:
+            item = _decode_value(field_type, body[start:stop])
         if is_list:
             msg.append(item)
         else:
-            msg[name] = item
-    if offset != length:
+            msg[body[offset:start].decode('utf-8', 'replace')] = item
+        offset = stop
+    if offset != end:
         raise ValueError('Trailing bytes in HTSMSG body')
     return msg
 
