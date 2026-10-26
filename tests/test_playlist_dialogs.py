@@ -471,6 +471,24 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         builtin = object()
         padding = (2, 5)
         space = 5
+        picon_job = None
+        picons = 0
+
+        def picon_count(self):
+            return self.picons
+
+        def download_picons(self):
+            from PyQt6.QtCore import QObject, pyqtSignal
+
+            class Job(QObject):
+                progress = pyqtSignal(int, int)
+                finished = pyqtSignal(object, str)
+
+            self.picon_job = Job()
+            return self.picon_job
+
+        def remove_picons(self):
+            self.picons = 0
 
         def recording_padding(self):
             return self.padding
@@ -515,6 +533,18 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog.format_combo.setCurrentIndex(dialog.format_combo.findData('mp4'))
     assert host.format == 'mp4'
     assert dialog.awake_check.isChecked()
+    assert dialog.picon_btn.text() == '&Download Picons'
+    assert not dialog.picon_remove_btn.isEnabled()
+    dialog.picon_btn.click()
+    assert not dialog.picon_btn.isEnabled()
+    host.picon_job.progress.emit(5, 10)
+    assert dialog.picon_progress.value() == 5
+    host.picons = 24054
+    host.picon_job.finished.emit(None, '')
+    assert dialog.picon_btn.text() == 'Up&date Picons'
+    assert dialog.picon_status.text().startswith('24,054 picons are ready.')
+    dialog.picon_remove_btn.click()
+    assert dialog.picon_status.text() == 'No picons downloaded.'
     assert (dialog.early_spin.value(), dialog.late_spin.value(), dialog.space_spin.value()) == (2, 5, 5)
     dialog.late_spin.setValue(10)
     dialog.space_spin.setValue(0)

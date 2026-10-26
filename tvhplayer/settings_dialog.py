@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -54,6 +55,10 @@ PADDING_HELP = (
     'keeps recording this long after it, in case the broadcast runs early or late.'
 )
 SPACE_HELP = 'The status bar warns when the recordings folder has less space than this. 0 turns the warning off.'
+PICON_HELP = (
+    'Picons are channel logos collected by the picons project. TVHplayer shows one for each channel '
+    'the server has no logo for, matched by the channel name. The pack is about 25 MB.'
+)
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 
 
@@ -212,6 +217,29 @@ class SettingsDialog(QDialog):
         recording_tab.addWidget(editing)
         recording_tab.addStretch(1)
 
+        logos = QGroupBox('Channel logos')
+        logos_layout = QVBoxLayout(logos)
+        logos_help = QLabel(PICON_HELP)
+        logos_help.setWordWrap(True)
+        logos_layout.addWidget(logos_help)
+        picon_row = QHBoxLayout()
+        self.picon_btn = QPushButton('&Download Picons')
+        describe(self.picon_btn, 'Download Picons', PICON_HELP)
+        self.picon_remove_btn = QPushButton('Remo&ve Picons')
+        describe(self.picon_remove_btn, 'Remove Picons', 'Delete the downloaded picons.')
+        picon_row.addWidget(self.picon_btn)
+        picon_row.addWidget(self.picon_remove_btn)
+        picon_row.addStretch(1)
+        logos_layout.addLayout(picon_row)
+        self.picon_progress = QProgressBar()
+        self.picon_progress.setAccessibleName('Picon download')
+        self.picon_progress.hide()
+        logos_layout.addWidget(self.picon_progress)
+        self.picon_status = QLabel('')
+        self.picon_status.setWordWrap(True)
+        logos_layout.addWidget(self.picon_status)
+        general.addWidget(logos)
+
         group = QGroupBox('Imported channels')
         group_layout = QVBoxLayout(group)
         self.hide_check = QCheckBox('&Hide channels that do not work')
@@ -252,6 +280,13 @@ class SettingsDialog(QDialog):
         self.delete_check.toggled.connect(host.set_deletes_converted_original)
         self.awake_check.toggled.connect(host.set_stays_awake_for_scheduled)
         self.space_spin.editingFinished.connect(self._space_edited)
+        self.picon_btn.clicked.connect(self._download_picons)
+        self.picon_remove_btn.clicked.connect(self._remove_picons)
+        self._picon_job = None
+        job = getattr(host, 'picon_job', None)
+        if job is not None and job.is_download():
+            self._follow_picon_job(job)
+        self._show_picons()
         self.delete_check.setEnabled(self.convert_check.isChecked())
         self._show_convert_problem(self.convert_edit.text())
         self.hide_check.toggled.connect(self._toggled)
@@ -263,6 +298,45 @@ class SettingsDialog(QDialog):
         height = layout.totalHeightForWidth(width)
         self.setMinimumHeight(height)
         self.resize(width, height)
+
+    def _show_picons(self, text=None):
+        count = self._host.picon_count()
+        busy = self._picon_job is not None
+        self.picon_btn.setText('Up&date Picons' if count else '&Download Picons')
+        self.picon_btn.setEnabled(not busy)
+        self.picon_remove_btn.setEnabled(bool(count) and not busy)
+        if text is None:
+            text = (f'{count:,} picons are ready. Channels without a logo from the server use them.'
+                    if count else 'No picons downloaded.')
+        announce_label(self.picon_status, text)
+
+    def _download_picons(self):
+        self._follow_picon_job(self._host.download_picons())
+
+    def _follow_picon_job(self, job):
+        self._picon_job = job
+        self.picon_progress.setRange(0, 0)
+        self.picon_progress.show()
+        job.progress.connect(self._picon_progress)
+        job.finished.connect(self._picons_done)
+        self._show_picons('Downloading picons…')
+
+    def _picon_progress(self, done, total):
+        if total:
+            self.picon_progress.setRange(0, total)
+            self.picon_progress.setValue(min(done, total))
+            if done >= total:
+                self.picon_progress.setRange(0, 0)
+                self.picon_status.setText('Unpacking the picons…')
+
+    def _picons_done(self, _index, error):
+        self._picon_job = None
+        self.picon_progress.hide()
+        self._show_picons(f'Could not download the picons: {error}' if error else None)
+
+    def _remove_picons(self):
+        self._host.remove_picons()
+        self._show_picons()
 
     def _minutes_spin(self, value, name, label):
         spin = QSpinBox()

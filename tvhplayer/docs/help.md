@@ -59,6 +59,10 @@ Besides the channel name, the list can show the channel number, the program on n
 
 Your choices are saved and used the next time TVHplayer starts. The program and type columns only fill in when your server has guide data and service information for the channels. Some servers only share the channel type with admin users.
 
+### Channel logos
+
+Channels show the logo the server has for them. For channels without one, download the picons project's logos under **Settings → General → Channel logos** (about 25 MB, light or dark to suit your theme). TVHplayer then picks each missing logo by the channel's name. **Update Picons** fetches the newest pack and **Remove Picons** deletes it.
+
 ### Editing channels
 
 Right-click a channel to change it on the server, so every app connected to that server sees the change:

@@ -945,7 +945,8 @@ class GuideWindow(QDialog):
         options = getattr(host, 'channel_options', {}) or {}
         if not options.get('logos', True) or not hasattr(host, '_logo_for'):
             return None
-        reference = channel_icon_reference(channel)
+        reference_for = getattr(host, 'channel_logo_reference', channel_icon_reference)
+        reference = reference_for(channel)
         if not reference:
             return None
         return host._logo_for(reference, getattr(host, '_backend', None))

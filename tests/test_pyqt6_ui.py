@@ -2356,3 +2356,33 @@ def test_conflict_dialog_makes_the_chosen_recording_important(monkeypatch, tmp_p
     finally:
         window.close()
         app.processEvents()
+
+
+def test_channels_without_a_logo_use_a_picon(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QBuffer, QIODevice
+    from PyQt6.QtGui import QColor, QPixmap
+
+    from tvhplayer.core.models import Channel
+    from tvhplayer.core.picons import PiconIndex
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        pixmap = QPixmap(10, 6)
+        pixmap.fill(QColor('red'))
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        pixmap.save(buffer, 'PNG')
+        (tmp_path / 'bbcone.png').write_bytes(bytes(buffer.data()))
+        window.picons = PiconIndex(tmp_path)
+        plain = Channel(uuid='1', name='BBC One HD')
+        reference = window.channel_logo_reference(plain)
+        assert reference == f"picon:{tmp_path / 'bbcone.png'}"
+        assert window._logo_for(reference, None) is not None
+        served = Channel(uuid='2', name='BBC One', icon='imagecache/7')
+        assert window.channel_logo_reference(served) == 'imagecache/7'
+        assert window.channel_logo_reference(Channel(uuid='3', name='Nothing')) == ''
+        window.picons = None
+        assert window.channel_logo_reference(plain) == ''
+    finally:
+        window.close()
+        app.processEvents()

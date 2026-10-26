@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import os
+import shutil
 import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -76,6 +77,7 @@ try:
     from .core.channel_edit import ChannelEditor, check_number, is_favourite, number_text
     from .core.tvh_admin import TvhAdmin
     from .core.conflicts import conflict_key, find_conflicts, read_tuner_use
+    from .core.picons import STYLE_DARK, STYLE_LIGHT, PiconIndex, default_picon_dir, download_pack
     from .guide_view import GuideWindow
     from .core.channel_info import (
         channel_icon_reference,
@@ -154,6 +156,7 @@ except ImportError:
     from core.channel_edit import ChannelEditor, check_number, is_favourite, number_text
     from core.tvh_admin import TvhAdmin
     from core.conflicts import conflict_key, find_conflicts, read_tuner_use
+    from core.picons import STYLE_DARK, STYLE_LIGHT, PiconIndex, default_picon_dir, download_pack
     from guide_view import GuideWindow
     from core.channel_info import (
         channel_icon_reference,
@@ -2801,6 +2804,55 @@ class ChannelFetch(QObject):
         self.loaded.emit(result)
 
 
+# Logo references that name a picon file on this computer instead of a server image.
+PICON_PREFIX = 'picon:'
+
+
+class PiconJob(QObject):
+    """Read the picon folder, or download a new pack into it first, off the UI thread.
+
+    ``finished`` carries the PiconIndex, or None and an error message.
+    """
+
+    progress = pyqtSignal(int, int)
+    finished = pyqtSignal(object, str)
+
+    def __init__(self, folder, style=None, parent=None):
+        super().__init__(parent)
+        self.folder = Path(folder)
+        self.style = style
+        self._cancelled = threading.Event()
+        self._thread = threading.Thread(target=self._run, name='picons', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def cancel(self):
+        self._cancelled.set()
+
+    def is_download(self):
+        return self.style is not None
+
+    def _run(self):
+        index, error = None, ''
+        try:
+            if self.style is not None:
+                download_pack(
+                    self.folder, self.style,
+                    progress=lambda done, total: self.progress.emit(done, total),
+                    cancelled=self._cancelled.is_set,
+                )
+            index = PiconIndex(self.folder)
+        except InterruptedError:
+            error = 'Cancelled.'
+        except Exception as exc:
+            error = str(exc) or type(exc).__name__
+        try:
+            self.finished.emit(index, error)
+        except RuntimeError:
+            pass
+
+
 class TunerUseFetch(QObject):
     """Read how many tuners a server has and which mux each channel needs, off the UI thread."""
 
@@ -3156,6 +3208,11 @@ class TVHeadendClient(QMainWindow):
         self._logo_server = None
         self.logo_loader = LogoLoader(self)
         self.logo_loader.loaded.connect(self._on_logo_loaded)
+        # Logos for channels the server has none for, once a picon pack is downloaded.
+        self.picons = None
+        self.picon_job = None
+        if default_picon_dir().is_dir():
+            self._start_picon_job(None)
         self._now_next_timer = QTimer(self)
         self._now_next_timer.timeout.connect(self._tick_now_next)
         self._now_next_timer.start(NOW_NEXT_TICK_MS)
@@ -4061,7 +4118,7 @@ class TVHeadendClient(QMainWindow):
             name_item.setData(CHANNEL_KEY_ROLE, channel_key(channel))
             set_item_access(name_item, channel.name, self._channel_description(channel))
             if logos:
-                reference = channel_icon_reference(channel)
+                reference = self.channel_logo_reference(channel)
                 name_item.setData(LOGO_ROLE, reference)
                 if reference and backend is None:
                     backend = self._logo_backend()
@@ -4141,10 +4198,26 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Could not reach the server for logos: {e}")
         return None
 
+    def channel_logo_reference(self, channel):
+        """The server's logo for the channel, else a matching picon, else ''."""
+        reference = channel_icon_reference(channel)
+        if reference or self.picons is None:
+            return reference
+        path = self.picons.find(channel.name)
+        return f"{PICON_PREFIX}{path}" if path is not None else ''
+
     def _logo_for(self, reference, backend):
         """Pixmap for a logo reference, or None while it loads in the background."""
         pixmap = self._logo_pixmaps.get(reference)
         if pixmap is not None:
+            return pixmap
+        if reference.startswith(PICON_PREFIX):
+            try:
+                pixmap = logo_pixmap(Path(reference[len(PICON_PREFIX):]).read_bytes())
+            except OSError:
+                pixmap = None
+            if pixmap is not None:
+                self._logo_pixmaps[reference] = pixmap
             return pixmap
         server = self.current_server() or {}
         pixmap = logo_pixmap(self.logo_loader.cached(server.get('url') or '', reference))
@@ -5873,6 +5946,8 @@ class TVHeadendClient(QMainWindow):
             guide.shutdown()
             guide.close()
         self.logo_loader.shutdown()
+        if self.picon_job is not None:
+            self.picon_job.cancel()
         self.close_backend()
         if getattr(self, 'player', None) is not None:
             self.player.close()
@@ -5983,6 +6058,52 @@ class TVHeadendClient(QMainWindow):
             wizard.open()
 
         self.ensure_server_ready(server, ready, self.statusbar.showMessage)
+
+    def picon_count(self):
+        return len(self.picons) if self.picons is not None else 0
+
+    def download_picons(self):
+        """Fetch the newest picon pack, light or dark to suit the window. Returns the running job."""
+        if self.picon_job is not None and self.picon_job.is_download():
+            return self.picon_job
+        dark_window = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        return self._start_picon_job(STYLE_LIGHT if dark_window else STYLE_DARK)
+
+    def remove_picons(self):
+        if self.picon_job is not None and self.picon_job.is_download():
+            self.picon_job.cancel()
+        shutil.rmtree(default_picon_dir(), ignore_errors=True)
+        self.picons = None
+        self._picons_changed()
+
+    def _start_picon_job(self, style):
+        job = PiconJob(default_picon_dir(), style, self)
+        self.picon_job = job
+        job.finished.connect(lambda index, error, job=job: self._picon_job_done(job, index, error))
+        job.start()
+        return job
+
+    def _picon_job_done(self, job, index, error):
+        if job is self.picon_job:
+            self.picon_job = None
+        if error:
+            if job.is_download():
+                self.statusbar.showMessage(f"Could not download the picons: {error}")
+            return
+        self.picons = index if index is not None and len(index) else None
+        if job.is_download():
+            self.statusbar.showMessage(f"Downloaded {self.picon_count():,} channel logos.")
+        self._picons_changed()
+
+    def _picons_changed(self):
+        self._logo_pixmaps = {
+            key: pixmap for key, pixmap in self._logo_pixmaps.items() if not key.startswith(PICON_PREFIX)
+        }
+        if self._channels:
+            self._reload_channel_rows()
+        guide = getattr(self, '_guide', None)
+        if guide is not None:
+            guide.grid.viewport().update()
 
     def import_playlist(self):
         ImportPlaylistDialog(self, self).exec()
