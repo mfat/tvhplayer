@@ -47,7 +47,7 @@ try:
     from .core.errors import TvhAuthError, TvhError
     from .core.server_log import ServerLogFeed
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
-    from .core.recorder import DEFAULT_FORMAT, RECORDING_FORMATS, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
+    from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from .core import convert
     from .core.vlc_player import VlcPlayer
     from .core.playlist_sync import PlaylistSource, find_source, server_key
@@ -114,7 +114,7 @@ except ImportError:
     from core.errors import TvhAuthError, TvhError
     from core.server_log import ServerLogFeed
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, recordings_to_stop
-    from core.recorder import DEFAULT_FORMAT, RECORDING_FORMATS, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
+    from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from core import convert
     from core.vlc_player import VlcPlayer
     from core.playlist_sync import PlaylistSource, find_source, server_key
@@ -2926,7 +2926,7 @@ class TVHeadendClient(QMainWindow):
             app.setApplicationDisplayName("TVHplayer")
             if not app.desktopFileName():
                 app.setDesktopFileName("io.github.mfat.tvhplayer")
-        geometry = self.config.get('window_geometry', {'x': 100, 'y': 100, 'width': 1200, 'height': 700})
+        geometry = self.config['window_geometry']
         self.setGeometry(
             geometry['x'],
             geometry['y'],
@@ -2937,8 +2937,8 @@ class TVHeadendClient(QMainWindow):
         # Initialize servers from config
         self.servers = ensure_builtin_server(
             self.config_store.servers,
-            self.config.get('builtin_http_port') or 0,
-            self.config.get('builtin_htsp_port') or 0,
+            self.config['builtin_http_port'],
+            self.config['builtin_htsp_port'],
         )
         self._backend = None
         self._backend_key = None
@@ -4220,7 +4220,7 @@ class TVHeadendClient(QMainWindow):
             self._play_last_channel(fetch.key)
 
     def _play_last_channel(self, server):
-        last = self.config.get('last_channel') or {}
+        last = self.config['last_channel']
         if last.get('server') != server or self._playback_channel is not None:
             return
         for channel in self._channels:
@@ -5593,7 +5593,7 @@ class TVHeadendClient(QMainWindow):
         SettingsDialog(self, self).exec()
 
     def plays_on_start(self):
-        return self.config.get('play_on_start', False)
+        return self.config['play_on_start']
 
     def set_plays_on_start(self, on):
         self.config['play_on_start'] = bool(on)
@@ -5607,22 +5607,21 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
 
     def recording_format(self):
-        fmt = self.config.get('local_recording_format')
-        return fmt if fmt in RECORDING_FORMATS else DEFAULT_FORMAT
+        return self.config['local_recording_format']
 
     def set_recording_format(self, fmt):
         self.config['local_recording_format'] = fmt
         self.save_config()
 
     def recording_ffmpeg_options(self):
-        return self.config.get('local_recording_ffmpeg_options') or ''
+        return self.config['local_recording_ffmpeg_options']
 
     def set_recording_ffmpeg_options(self, text):
         self.config['local_recording_ffmpeg_options'] = text
         self.save_config()
 
     def converts_after_recording(self):
-        return self.config.get('convert_after_recording', False)
+        return self.config['convert_after_recording']
 
     def set_converts_after_recording(self, on):
         self.config['convert_after_recording'] = bool(on)
@@ -5637,7 +5636,7 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
 
     def deletes_converted_original(self):
-        return self.config.get('delete_converted_original', False)
+        return self.config['delete_converted_original']
 
     def set_deletes_converted_original(self, on):
         self.config['delete_converted_original'] = bool(on)
@@ -5742,12 +5741,12 @@ class TVHeadendClient(QMainWindow):
 
     def _remember_channel(self, channel):
         last = {'server': self._channels_server, 'key': channel_key(channel), 'name': channel.name}
-        if self._channels_server and self.config.get('last_channel') != last:
+        if self._channels_server and self.config['last_channel'] != last:
             self.config['last_channel'] = last
             self.save_config()
 
     def hides_dead_channels(self):
-        return self.config.get('hide_dead_channels', True)
+        return self.config['hide_dead_channels']
 
     def set_hides_dead_channels(self, on):
         self.config['hide_dead_channels'] = bool(on)

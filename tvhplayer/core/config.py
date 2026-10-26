@@ -13,6 +13,7 @@ from .builtin_server import without_builtin_secrets
 from .channel_info import channel_list_options
 from .models import ServerConfig
 from .playlist_sync import PlaylistSource
+from .recorder import DEFAULT_FORMAT, RECORDING_FORMATS
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,17 @@ def default_config():
         'builtin_htsp_port': 0,
         'playlists': [],
         'channel_list': channel_list_options(None),
+        'play_on_start': False,
+        'last_channel': {},
+        'hide_dead_channels': True,
+        # Empty until chosen: the Videos folder, or asked the first time where that cannot be written.
+        'local_recording_dir': '',
+        'local_recording_format': DEFAULT_FORMAT,
+        'local_recording_ffmpeg_options': '',
+        'convert_after_recording': False,
+        # Empty while it is the default, so a better default reaches everyone.
+        'convert_options': '',
+        'delete_converted_original': False,
     }
 
 
@@ -87,6 +99,15 @@ def _normalize(data):
         cfg['volume'] = 50
     cfg['channel_list'] = channel_list_options(data.get('channel_list'))
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
+    for key in ('play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original'):
+        cfg[key] = bool(cfg.get(key))
+    for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options'):
+        if not isinstance(cfg.get(key), str):
+            cfg[key] = ''
+    if cfg.get('local_recording_format') not in RECORDING_FORMATS:
+        cfg['local_recording_format'] = DEFAULT_FORMAT
+    if not isinstance(cfg.get('last_channel'), dict):
+        cfg['last_channel'] = {}
     for key in ('builtin_http_port', 'builtin_htsp_port'):
         try:
             cfg[key] = int(cfg.get(key) or 0)

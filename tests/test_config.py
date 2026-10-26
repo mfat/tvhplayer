@@ -47,3 +47,22 @@ def test_playlists_are_saved_and_cleaned(tmp_path):
         'allow_commands': False,
         'tags': [],
     }]
+
+
+def test_every_setting_has_a_default_and_bad_values_are_replaced(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    path.write_text(json.dumps({
+        'local_recording_format': 'avi',
+        'local_recording_dir': None,
+        'convert_options': 3,
+        'last_channel': 'BBC',
+        'hide_dead_channels': 0,
+    }), encoding='utf-8')
+    data = ConfigStore(path).data
+    assert set(data) == set(default_config())
+    assert data['local_recording_format'] == 'ts'
+    assert data['local_recording_dir'] == ''
+    assert data['convert_options'] == ''
+    assert data['last_channel'] == {}
+    assert data['hide_dead_channels'] is False
+    assert default_config()['hide_dead_channels'] is True
