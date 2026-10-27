@@ -63,6 +63,7 @@ try:
         starting_caption, stream_path, stream_reason,
     )
     from .builtin_supervisor import BuiltinSupervisor
+    from . import cursor_debug
     from .file_manager import show_in_file_manager
     from .ui_theme import THEME_TVHPLAYER, RowStyle, follow_desktop, is_active as theme_is_active, polish_main_window, style_key
     from .player_bar import (
@@ -149,6 +150,7 @@ except ImportError:
         starting_caption, stream_path, stream_reason,
     )
     from builtin_supervisor import BuiltinSupervisor
+    import cursor_debug
     from file_manager import show_in_file_manager
     from ui_theme import THEME_TVHPLAYER, RowStyle, follow_desktop, is_active as theme_is_active, polish_main_window, style_key
     from player_bar import (
@@ -7304,8 +7306,10 @@ def main():
         qt_platform = qt_platform_for(engine)
         if qt_platform:
             os.environ["QT_QPA_PLATFORM"] = qt_platform
+        cursor_debug.prepare()
         app = QApplication(sys.argv)
         print(f"Debug: Qt platform: {app.platformName()}")
+        cursor_debug.install(app)
         app.setApplicationName("TVHplayer")
         app.setApplicationDisplayName("TVHplayer")
         app.setDesktopFileName("io.github.mfat.tvhplayer")
