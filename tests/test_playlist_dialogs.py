@@ -549,6 +549,15 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         engine = 'mpv'
         engine_choice = 'auto'
 
+        def theme_choice(self):
+            return 'TVHplayer'
+
+        def set_theme_choice(self, theme):
+            self.theme = theme
+
+        def running_theme(self):
+            return 'TVHplayer'
+
         def player_engine_choice(self):
             return self.engine_choice
 

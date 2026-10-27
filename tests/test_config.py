@@ -31,6 +31,13 @@ def test_missing_file_uses_defaults(tmp_path):
     assert json.loads((tmp_path / 'missing.conf').read_text())['volume'] == 50
 
 
+def test_theme_defaults_to_tvhplayer_and_keeps_a_qt_style_name(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    for saved, loaded in ((None, 'TVHplayer'), ('', 'TVHplayer'), (3, 'TVHplayer'), ('Breeze', 'Breeze')):
+        path.write_text(json.dumps({'ui_theme': saved}), encoding='utf-8')
+        assert ConfigStore(path).data['ui_theme'] == loaded
+
+
 def test_saved_volume_keeps_silence_and_stays_in_range(tmp_path):
     path = tmp_path / 'tvhplayer.conf'
     for saved, loaded in ((0, 0), (73, 73), (250, 100), ('loud', 50)):

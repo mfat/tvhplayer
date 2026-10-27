@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, pyqtProperty
-from PyQt6.QtGui import QColor, QFont, QPainter
+from PyQt6.QtGui import QColor, QFont, QPainter, QPalette
 from PyQt6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QFrame,
     QGridLayout,
@@ -19,8 +20,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )  # QCheckBox is the base of ToggleSwitch
 
-ACCENT = QColor('#3daee9')
-OFF = QColor(35, 38, 41, 72)
+
+
+def _alpha(color, alpha):
+    """``color`` with an alpha from 0 to 255. Colors come from the palette, so any theme, light or dark, fits."""
+    color = QColor(color)
+    color.setAlpha(alpha)
+    return color
 
 
 class ToggleSwitch(QCheckBox):
@@ -70,10 +76,13 @@ class ToggleSwitch(QCheckBox):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         track = QRectF(2, (self.height() - 20) / 2, 36, 20)
-        on_color = ACCENT if self.isEnabled() else QColor(61, 174, 233, 90)
-        color = on_color if self.isChecked() else OFF
+        pal = self.palette()
+        accent = pal.color(QPalette.ColorRole.Highlight)
+        ink = pal.color(QPalette.ColorRole.Text)
+        on_color = accent if self.isEnabled() else _alpha(accent, 90)
+        color = on_color if self.isChecked() else _alpha(ink, 72)
         if not self.isEnabled() and not self.isChecked():
-            color = QColor(35, 38, 41, 40)
+            color = _alpha(ink, 40)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(color)
         p.drawRoundedRect(track, 10, 10)
@@ -85,7 +94,7 @@ class ToggleSwitch(QCheckBox):
         if self.hasFocus():
             pen = p.pen()
             pen.setStyle(Qt.PenStyle.SolidLine)
-            pen.setColor(ACCENT)
+            pen.setColor(accent)
             pen.setWidthF(2)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
@@ -244,23 +253,25 @@ class _NavDelegate(QStyledItemDelegate):
         r = QRectF(option.rect).adjusted(0, 1, 0, -1)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        ink = option.palette.color(QPalette.ColorRole.Text)
         p.setPen(Qt.PenStyle.NoPen)
         if selected:
-            p.setBrush(QColor(61, 174, 233, 51))
+            # The app's highlight: the theme gives lists a clear one, as RowStyle draws their selection.
+            p.setBrush(_alpha(QApplication.palette().color(QPalette.ColorRole.Highlight), 56))
             p.drawRoundedRect(r, 6, 6)
         elif hover:
-            p.setBrush(QColor(35, 38, 41, 18))
+            p.setBrush(_alpha(ink, 18))
             p.drawRoundedRect(r, 6, 6)
         title_font = QFont(option.font)
         title_font.setPointSizeF(option.font.pointSizeF() * 1.04)
         title_font.setWeight(QFont.Weight.DemiBold if selected else QFont.Weight.Medium)
         p.setFont(title_font)
-        p.setPen(QColor('#124a6a') if selected else QColor('#232629'))
+        p.setPen(ink)
         p.drawText(r.adjusted(12, 7, -12, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, index.data())
         sub_font = QFont(option.font)
         sub_font.setPointSizeF(option.font.pointSizeF() * 0.9)
         p.setFont(sub_font)
-        p.setPen(QColor('#5d6166'))
+        p.setPen(_alpha(ink, 165))
         p.drawText(r.adjusted(12, 0, -12, -7), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom,
                    index.data(SUBTITLE_ROLE) or '')
         p.restore()

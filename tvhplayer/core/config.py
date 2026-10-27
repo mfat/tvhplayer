@@ -19,6 +19,9 @@ from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES
 from .playlist_sync import PlaylistSource
 from .recorder import DEFAULT_FORMAT, RECORDING_FORMATS
 
+# The app's own theme; any other ui_theme value names a Qt style.
+THEME_TVHPLAYER = 'TVHplayer'
+
 log = logging.getLogger(__name__)
 
 DEFAULT_GEOMETRY = {'x': 100, 'y': 100, 'width': 1200, 'height': 700}
@@ -76,6 +79,8 @@ def default_config():
         'deinterlace': DEINTERLACE_AUTO,
         # Automatic: libmpv where Qt runs on Wayland, libvlc on X11. Read before Qt starts.
         'player_engine': ENGINE_AUTO,
+        # TVHplayer's own look, or the name of a Qt style. Read before the window is built.
+        'ui_theme': THEME_TVHPLAYER,
         # Minutes the built-in server starts recordings early and ends them late.
         'builtin_padding_early': 2,
         'builtin_padding_late': 5,
@@ -137,6 +142,8 @@ def _normalize(data):
         cfg['deinterlace'] = DEINTERLACE_AUTO
     if cfg.get('player_engine') not in ENGINE_CHOICES:
         cfg['player_engine'] = ENGINE_AUTO
+    if not isinstance(cfg.get('ui_theme'), str) or not cfg['ui_theme'].strip():
+        cfg['ui_theme'] = THEME_TVHPLAYER
     if cfg.get('local_recording_format') not in RECORDING_FORMATS:
         cfg['local_recording_format'] = DEFAULT_FORMAT
     if not isinstance(cfg.get('last_channel'), dict):

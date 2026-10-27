@@ -97,7 +97,7 @@ class AboutDialog(QDialog):
         self.license_btn = QPushButton('Show')
         self.license_btn.setFlat(True)
         # A link-like button that still shows keyboard focus; high contrast keeps the system look.
-        self.license_btn.setStyleSheet(button_stylesheet('border: none; color: #1d79b0; padding: 0 4px; min-height: 0;', radius=3))
+        self.license_btn.setStyleSheet(button_stylesheet('border: none; color: palette(link); padding: 0 4px; min-height: 0;', radius=3))
         self.license_btn.setAccessibleName('Show the license')
         license_value = QWidget()
         license_row = QHBoxLayout(license_value)

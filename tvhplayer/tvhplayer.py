@@ -64,7 +64,7 @@ try:
     )
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
-    from .ui_theme import RowStyle, apply_theme, polish_main_window
+    from .ui_theme import THEME_TVHPLAYER, RowStyle, follow_desktop, is_active as theme_is_active, polish_main_window, style_key
     from .player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -150,7 +150,7 @@ except ImportError:
     )
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
-    from ui_theme import RowStyle, apply_theme, polish_main_window
+    from ui_theme import THEME_TVHPLAYER, RowStyle, follow_desktop, is_active as theme_is_active, polish_main_window, style_key
     from player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -1472,7 +1472,7 @@ class RecordingDurationDialog(QDialog):
             if self._event is not None:
                 until = datetime.fromtimestamp(self._event.stop).strftime('%H:%M')
                 now_label = QLabel(f"Now: {self._event.title} · until {until}")
-                _text_color(now_label, '#5b6065')
+                _text_color(now_label, 'palette(placeholder-text)')
                 heading.addWidget(now_label)
             layout.addLayout(heading)
 
@@ -1484,11 +1484,11 @@ class RecordingDurationDialog(QDialog):
         segments.setObjectName("segments")
         if not contrast:
             segments.setStyleSheet(
-                "#segments { border: 1px solid #b6b9bc; border-radius: 4px; background: #fcfcfc; }"
-                "#segments QPushButton { border: none; border-left: 1px solid #d1d3d5; "
-                "background: transparent; color: #232629; min-height: 32px; padding: 0 6px; }"
+                "#segments { border: 1px solid palette(mid); border-radius: 4px; background: palette(base); }"
+                "#segments QPushButton { border: none; border-left: 1px solid palette(mid); "
+                "background: transparent; color: palette(text); min-height: 32px; padding: 0 6px; }"
                 "#segments QPushButton[first=\"true\"] { border-left: none; }"
-                "#segments QPushButton:checked { background: #3daee9; color: #ffffff; font-weight: 600; }"
+                "#segments QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); font-weight: 600; }"
                 "#segments QPushButton:focus { border: 2px solid palette(highlight); }"
             )
         segment_layout = QHBoxLayout(segments)
@@ -1538,7 +1538,7 @@ class RecordingDurationDialog(QDialog):
         self.more_btn.clicked.connect(self.custom_spin.stepUp)
         self.custom_spin.valueChanged.connect(self._update_summary)
         steps = QLabel("steps of 15 min")
-        _text_color(steps, '#5b6065')
+        _text_color(steps, 'palette(placeholder-text)')
         custom_layout.addWidget(self.less_btn)
         custom_layout.addWidget(self.custom_spin)
         custom_layout.addWidget(self.more_btn)
@@ -1550,7 +1550,7 @@ class RecordingDurationDialog(QDialog):
         summary.setObjectName("summary")
         if not contrast:
             summary.setStyleSheet(
-                "#summary { background: #fcfcfc; border: 1px solid #d6d8da; border-radius: 4px; }"
+                "#summary { background: palette(base); border: 1px solid palette(mid); border-radius: 4px; }"
             )
         summary_layout = QHBoxLayout(summary)
         summary_layout.setContentsMargins(12, 10, 12, 10)
@@ -1567,7 +1567,7 @@ class RecordingDurationDialog(QDialog):
             self.folder_label = QLabel(f"Saved in {self._save_dir}")
             self.folder_label.setWordWrap(True)
             self.folder_label.setToolTip("Change the folder in Settings.")
-            _text_color(self.folder_label, '#5b6065')
+            _text_color(self.folder_label, 'palette(placeholder-text)')
             layout.addWidget(self.folder_label)
 
         buttons = QDialogButtonBox()
@@ -4005,7 +4005,7 @@ class TVHeadendClient(QMainWindow):
         search_layout.setSpacing(5)
 
         left_layout.addWidget(self.tag_row)
-        if not prefers_high_contrast():
+        if theme_is_active():
             polish_main_window(self)
         self._apply_channel_columns()
         self._apply_tab_order()
@@ -6637,6 +6637,19 @@ class TVHeadendClient(QMainWindow):
             self.config['player_engine'] = choice
             self.save_config()
 
+    def theme_choice(self):
+        """The Settings choice: TVHplayer or a Qt style. It takes effect at the next start."""
+        return self.config['ui_theme']
+
+    def set_theme_choice(self, theme):
+        self.config['ui_theme'] = theme
+        self.save_config()
+
+    def running_theme(self):
+        """The theme this run started with; None when high contrast kept the system look."""
+        app = QApplication.instance()
+        return app.property('tvhplayer_theme') if app is not None else None
+
     def stays_awake_for_scheduled(self):
         return self.config['stay_awake_for_scheduled']
 
@@ -7279,10 +7292,13 @@ def main():
     configure_logging()
     try:
         try:
-            preference = ConfigStore().data['player_engine']
+            settings = ConfigStore().data
+            preference = settings['player_engine']
+            theme = settings['ui_theme']
         except Exception as e:
-            print(f"Debug: Could not read the engine setting: {e}")
+            print(f"Debug: Could not read the engine and theme settings: {e}")
             preference = None
+            theme = THEME_TVHPLAYER
         engine, reason = choose_engine(preference=preference)
         print(f"Debug: Playback engine: {engine} ({reason})")
         qt_platform = qt_platform_for(engine)
@@ -7295,11 +7311,18 @@ def main():
         app.setDesktopFileName("io.github.mfat.tvhplayer")
         app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
         # Before any widget exists: a style change goes to every widget alive.
-        # Fusion gives Linux, macOS and Windows the same base for the theme;
-        # high contrast keeps the system theme.
-        app.setStyle(NoDialogButtonIconsStyle('Fusion'))
-        if not prefers_high_contrast():
-            apply_theme(app)
+        # The TVHplayer theme runs on Fusion, the same base on Linux, macOS and
+        # Windows; another theme is that Qt style. High contrast keeps the system look.
+        if prefers_high_contrast():
+            theme = None
+        elif style_key(theme) is None:
+            print(f"Debug: Theme {theme!r} is not available here; using {THEME_TVHPLAYER}")
+            theme = THEME_TVHPLAYER
+        if theme is not None:
+            app.setStyle(NoDialogButtonIconsStyle(style_key(theme)))
+            app.setProperty('tvhplayer_theme', theme)
+            follow_desktop(app, use_theme=theme == THEME_TVHPLAYER)
+        print(f"Debug: Theme: {theme or 'system (high contrast)'}")
         player = TVHeadendClient(engine)
         player.show()
         sys.exit(app.exec())
