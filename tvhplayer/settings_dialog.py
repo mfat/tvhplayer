@@ -1,6 +1,6 @@
 """The Settings window: playback at startup, where recordings go, and imported channels that do not work.
 
-Layout: a sidebar of five pages (Playback, Channels, Recordings, Conversion, Sleep). Every setting is a
+Layout: a sidebar of pages (Appearance, Playback, Channels, Recordings, Conversion, Sleep). Every setting is a
 row with its name and description on the left and the control on the right. The settings logic and
 the widget attribute names are unchanged from the tabbed version.
 """
@@ -98,12 +98,12 @@ class SettingsDialog(QDialog):
     """``host`` is the main window: it keeps the setting and runs the checks."""
 
     PAGES = (
+        ('Appearance', 'Theme, light or dark'),
         ('Playback', 'Startup, engine'),
         ('Channels', 'Logos, imported playlists'),
         ('Recordings', 'Folder, format, padding'),
         ('Conversion', 'Edit-friendly copies'),
         ('Sleep', 'Scheduled recordings'),
-        ('Appearance', 'Theme, light or dark'),
     )
 
     def __init__(self, host, parent=None):
@@ -118,12 +118,12 @@ class SettingsDialog(QDialog):
         has_builtin = getattr(host, 'builtin', None) is not None
 
         pages = [
+            self._appearance_page(host),
             self._playback_page(host),
             self._channels_page(host),
             self._recordings_page(host, has_builtin),
             self._conversion_page(host),
             self._sleep_page(host),
-            self._appearance_page(host),
         ]
 
         self.nav = SettingsNav()

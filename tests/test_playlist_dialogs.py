@@ -5,7 +5,7 @@ import pytest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 import tvhplayer.playlist_dialogs as dialogs  # noqa: E402
 from tvhplayer.core.errors import TvhAuthError  # noqa: E402
@@ -579,6 +579,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     )
     host = Host()
     dialog = SettingsDialog(host)
+    # Appearance comes first and Settings opens on it.
+    assert dialog.nav.item(0).text() == 'Appearance'
+    assert dialog.pages.currentWidget().widget().findChild(QLabel, 'pageTitle').text() == 'Appearance'
     assert dialog.engine_combo.currentData() == 'auto'
     assert dialog.engine_status.text() == 'Playing with mpv.'
     dialog.engine_combo.setCurrentIndex(dialog.engine_combo.findData('vlc'))
