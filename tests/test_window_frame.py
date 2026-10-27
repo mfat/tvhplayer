@@ -94,3 +94,21 @@ def test_frame_holds_the_menus_and_makes_room_for_the_shadow(qapp):
     finally:
         window.deleteLater()
         qapp.processEvents()
+
+
+def test_styles_that_ask_for_the_menu_bar_keep_the_title_bar(qapp):
+    # Breeze asks every main window for its menu bar; one that is no menu bar
+    # would be replaced by a new empty one and the title bar deleted.
+    window = QMainWindow()
+    window.setCentralWidget(QWidget())
+    menubar = QMenuBar(window)
+    menubar.addMenu('&File')
+    frame = WindowFrame(window, menubar, button_layout='icon:minimize,maximize,close')
+    try:
+        assert window.menuBar() is frame.title_bar
+        assert window.menuWidget() is frame.title_bar
+        assert not frame.title_bar.isNativeMenuBar()
+        frame.title_bar.sync_state()
+    finally:
+        window.deleteLater()
+        qapp.processEvents()

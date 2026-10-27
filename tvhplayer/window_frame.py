@@ -253,15 +253,23 @@ class WindowButton(QAbstractButton):
             painter.drawLine(QPointF(cx + 4, cy - 4), QPointF(cx - 4, cy + 4))
 
 
-class TitleBar(QWidget):
+class TitleBar(QMenuBar):
     """The menus, the window title in the middle, and the window buttons.
 
-    A drag on any empty part moves the window; a double click maximizes it."""
+    A drag on any empty part moves the window; a double click maximizes it.
+
+    It is a menu bar without menus of its own: some styles, such as Breeze, ask
+    the window for its menu bar, and a window whose menu widget is no menu bar
+    then gets a new empty one in place of this title bar."""
 
     def __init__(self, window, menubar, button_layout=DEFAULT_BUTTON_LAYOUT):
         super().__init__(window)
         self._window = window
         self.menubar = menubar
+        # Never handed to a global menu, which would hide the title bar.
+        self.setNativeMenuBar(False)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setProperty('titlebar', True)
         self.setAccessibleName('Title bar')
         self.setFixedHeight(TITLE_BAR_HEIGHT)
         # The theme leaves the line under this menu bar to the title bar.
@@ -352,7 +360,18 @@ class TitleBar(QWidget):
     def _empty_menubar_spot(self, event):
         return self.menubar.actionAt(event.position().toPoint()) is None
 
+    def sizeHint(self):
+        return QSize(super().sizeHint().width(), TITLE_BAR_HEIGHT)
+
+    def minimumSizeHint(self):
+        return QSize(0, TITLE_BAR_HEIGHT)
+
+    def heightForWidth(self, _width):
+        return TITLE_BAR_HEIGHT
+
     def eventFilter(self, obj, event):
+        # Not passed on to QMenuBar, which watches the window for the Alt key:
+        # the menus inside answer it.
         if obj is self.menubar and event.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
             if event.button() == Qt.MouseButton.LeftButton and self._empty_menubar_spot(event):
                 if event.type() == QEvent.Type.MouseButtonDblClick:
