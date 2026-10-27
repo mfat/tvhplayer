@@ -5,7 +5,7 @@
 # TVHplayer
 A desktop app for watching and recording live TV, with its own built-in Tvheadend server or any Tvheadend server you already have.
 
-![Screenshot_6](Screenshots/Screenshot_6.png)
+<img width="1418" height="894" alt="main" src="https://github.com/user-attachments/assets/95471032-de4f-4778-a984-722bd2d10dbf" />
 
 ## Features
 
