@@ -53,8 +53,7 @@ echo "==> Python packages"
 
 echo "==> Icon"
 icon="$WORK/tvhplayer.ico"
-"$PYTHON" -c 'import sys; from PIL import Image; Image.open(sys.argv[1]).save(sys.argv[2], sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])' \
-  "$ROOT/icons/tvhplayer.png" "$icon"
+"$PYTHON" "$ROOT/packaging/render_icon.py" "$icon"
 
 echo "==> PyInstaller"
 "$PYTHON" -m PyInstaller \

@@ -52,13 +52,18 @@ DYLD_FALLBACK_LIBRARY_PATH="$BREW_MPV/lib" "$PYTHON" -c 'import PyInstaller, PyQ
 printf 'Building %s for %s (Python: %s, libmpv: %s)\n' \
   "$APP_NAME" "$ARCH" "$("$PYTHON" --version 2>&1)" "$(brew list --versions mpv)"
 
+# A sharp app icon: PyInstaller makes the .icns from a 1024 px render of the SVG.
+mkdir -p "$MACOS_DIR/build"
+ICON="$MACOS_DIR/build/tvhplayer-1024.png"
+"$PYTHON" "$ROOT/packaging/render_icon.py" "$ICON"
+
 # PyInstaller collects the libraries libmpv links and rewrites their paths.
 "$PYTHON" -m PyInstaller \
   --noconfirm --clean --onedir --windowed \
   --name "$APP_NAME" \
   --target-arch "$ARCH" \
   --osx-bundle-identifier io.github.mfat.tvhplayer \
-  --icon "$MACOS_DIR/icons/tvhplayer.png" \
+  --icon "$ICON" \
   --paths "$ROOT/tvhplayer" \
   --collect-submodules core \
   --hidden-import resources_rc \
