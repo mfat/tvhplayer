@@ -926,6 +926,32 @@ def _apply_colors(app, dark):
         widget.update()
 
 
+BEVELS = (QPalette.ColorRole.Light, QPalette.ColorRole.Midlight, QPalette.ColorRole.Mid,
+          QPalette.ColorRole.Dark, QPalette.ColorRole.Shadow)
+
+
+def _mend_desktop_palette(app):
+    """Give a Qt style the desktop's palette, with shades between light and dark that show.
+
+    Qt's GNOME palette gives Mid as white in light mode, so table grid lines
+    and borders drawn in it vanish on a white page. There the shades are
+    worked out from the button color, as Qt does for a palette made from one.
+    """
+    if _active:
+        return
+    app.setPalette(QPalette())
+    desktop_palette = app.palette()
+    button = desktop_palette.color(QPalette.ColorRole.Button)
+    if desktop_palette.color(QPalette.ColorRole.Mid).lightness() < button.lightness():
+        return
+    derived = QPalette(button, desktop_palette.color(QPalette.ColorRole.Window))
+    mended = QPalette()
+    for group in ALL:
+        for role in BEVELS:
+            mended.setColor(group, role, derived.color(group, role))
+    app.setPalette(mended)
+
+
 def _follow_desktop(app, force=False):
     """Light or dark as the desktop is, or as set; ``force`` applies it again after a change.
 
@@ -939,6 +965,9 @@ def _follow_desktop(app, force=False):
         scheme = desktop.ColorScheme.Light
     else:
         scheme = desktop.system_color_scheme(app)
+    # Qt and the portal both report a change, in either order; after the
+    # second, Qt has the desktop's new palette.
+    QTimer.singleShot(0, lambda: _mend_desktop_palette(app))
     # Unknown after the first answer is the app's own pin read back: no change.
     if scheme == desktop.ColorScheme.Unknown and _scheme is not None:
         scheme = _scheme
@@ -953,6 +982,7 @@ def _follow_desktop(app, force=False):
     # KDE's styles read their scheme only when made, so the style is made again.
     if _kde_color_scheme(app, scheme) and not _active and _style is not None:
         app.setStyle(_style())
+    _mend_desktop_palette(app)
     if _active:
         _apply_colors(app, scheme == desktop.ColorScheme.Dark)
 
