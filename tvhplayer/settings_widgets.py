@@ -116,7 +116,10 @@ class SettingRow(QWidget):
         self.description = QLabel(description)
         self.description.setObjectName('rowDesc')
         self.description.setWordWrap(True)
-        self.description.setVisible(bool(description))
+        # Only hidden, never shown here: shown before the grid adopts it, it would be a
+        # window of its own, which on Wayland leaves GNOME showing a busy cursor.
+        if not description:
+            self.description.hide()
         grid.addWidget(self.title, 0, 0)
         grid.addWidget(self.description, 1, 0)
         grid.setColumnStretch(0, 1)
@@ -172,7 +175,11 @@ class StatusStrip(QFrame):
 
     def refresh(self):
         busy = self.progress is not None and not self.progress.isHidden()
-        self.setVisible(bool(self.label.text()) or busy)
+        wanted = bool(self.label.text()) or busy
+        # Shown only inside its group, as for row descriptions; add_strip refreshes it there.
+        if wanted and self.parentWidget() is None:
+            return
+        self.setVisible(wanted)
 
 
 class SettingsGroup(QWidget):
