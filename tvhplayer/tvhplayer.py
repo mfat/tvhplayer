@@ -5476,6 +5476,9 @@ class TVHeadendClient(QMainWindow):
         try:
             geometry = state.get('geometry')
             if geometry:
+                # restoreGeometry() of a maximized window adds Maximized but keeps FullScreen,
+                # and on Wayland the window then stays borderless and cannot be resized.
+                self.setWindowState(self.windowState() & ~Qt.WindowState.WindowFullScreen)
                 self.restoreGeometry(geometry)
             else:
                 self.showNormal()

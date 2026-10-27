@@ -267,6 +267,27 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def test_leaving_fullscreen_restores_a_maximized_window(monkeypatch, tmp_path):
+    from PyQt6.QtCore import Qt
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        window.showMaximized()
+        app.processEvents()
+
+        window.toggle_fullscreen()
+        app.processEvents()
+        window.toggle_fullscreen()
+        app.processEvents()
+
+        # Left fullscreen, so the desktop gives back the title bar and resizing.
+        assert not window.windowState() & Qt.WindowState.WindowFullScreen
+        assert window.windowState() & Qt.WindowState.WindowMaximized
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
     from PyQt6.QtCore import QEvent, QPointF, Qt
     from PyQt6.QtGui import QMouseEvent
