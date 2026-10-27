@@ -3337,7 +3337,9 @@ class TVHeadendClient(QMainWindow):
         self._backend = None
         self._backend_key = None
         self._busy_playlists = set()
+        # Background playlist jobs until they end; those not started yet wait their turn.
         self._playlist_jobs = []
+        self._waiting_playlist_jobs = []
         # Guide updates for servers on this computer, one per server.
         self._guide_jobs = {}
         # A server that just started, waiting for the channel list before its guide loads.
@@ -6219,6 +6221,7 @@ class TVHeadendClient(QMainWindow):
         QApplication.processEvents()
         self.save_config()
         self._stop_stream_log()
+        self._waiting_playlist_jobs.clear()
         for job in self._playlist_jobs:
             job.cancel()
         self._guide_timer.stop()
@@ -6428,6 +6431,9 @@ class TVHeadendClient(QMainWindow):
 
     def release_playlist(self, source):
         self._busy_playlists.discard((source.server, source.location))
+        if self._waiting_playlist_jobs:
+            # Later, so a job that ends while it starts does not start others meanwhile.
+            QTimer.singleShot(0, self._start_waiting_playlist_jobs)
 
     def is_playlist_busy(self, source):
         return (source.server, source.location) in self._busy_playlists
@@ -6458,6 +6464,13 @@ class TVHeadendClient(QMainWindow):
             self._playlist_jobs.append(job)
         job.finished.connect(lambda message, _skipped: self._playlist_refreshed(message, job.server))
         job.failed.connect(self.statusbar.showMessage)
+        job.finished.connect(lambda *_args: self._playlist_job_ended(job))
+        job.failed.connect(lambda *_args: self._playlist_job_ended(job))
+
+    def _playlist_job_ended(self, job):
+        if job in self._playlist_jobs:
+            self._playlist_jobs.remove(job)
+            job.dispose()
 
     def show_settings(self):
         SettingsDialog(self, self).exec()
@@ -6878,7 +6891,12 @@ class TVHeadendClient(QMainWindow):
     def set_hides_dead_channels(self, on):
         self.config['hide_dead_channels'] = bool(on)
         self.save_config()
-        if not on:
+        if on:
+            for job in [job for job in self._waiting_playlist_jobs if job.action == PlaylistJob.SHOW]:
+                self._waiting_playlist_jobs.remove(job)
+                self._playlist_job_ended(job)
+        else:
+            # A playlist being updated is shown once its update ends.
             self._start_playlist_jobs(PlaylistJob.SHOW)
 
     def check_playlist_channels(self):
@@ -6886,21 +6904,55 @@ class TVHeadendClient(QMainWindow):
         return self._start_playlist_jobs(PlaylistJob.CHECK)
 
     def playlist_checks(self):
+        """Checks of playlists that are running or waiting to start."""
         return [job for job in self._playlist_jobs if job.action == PlaylistJob.CHECK]
 
     def _start_playlist_jobs(self, action):
+        # A job doing this already, or waiting to, is enough.
+        doing = {(job.source.server, job.source.location) for job in self._playlist_jobs if job.action == action}
         jobs = []
         for source in self.playlist_sources():
             server = self.server_for_playlist(source)
-            if server is None:
+            if server is None or (source.server, source.location) in doing:
                 continue
             job = PlaylistJob(self, source, server, action=action, parent=self)
             self.keep_playlist_job(job)
             jobs.append(job)
         # Started after all are listed, so a job that fails at once is still counted.
-        for job in jobs:
-            job.start()
+        self._waiting_playlist_jobs.extend(jobs)
+        self._start_waiting_playlist_jobs()
         return jobs
+
+    def _start_waiting_playlist_jobs(self):
+        """Start each waiting job whose playlist is free.
+
+        A server checks one playlist at a time: each check tests as many
+        streams at once as its playlist allows, and playlists often share a
+        provider account.
+        """
+        if self._closing:
+            return
+        saved = {(source.server, source.location) for source in self.playlist_sources()}
+        checking = {
+            job.source.server for job in self._playlist_jobs
+            if job.action == PlaylistJob.CHECK and job.is_running()
+        }
+        for job in list(self._waiting_playlist_jobs):
+            if job not in self._waiting_playlist_jobs:
+                continue
+            if (job.source.server, job.source.location) not in saved:
+                # Removed while it waited.
+                self._waiting_playlist_jobs.remove(job)
+                self._playlist_job_ended(job)
+                continue
+            if self.is_playlist_busy(job.source):
+                continue
+            if job.action == PlaylistJob.CHECK:
+                if job.source.server in checking:
+                    continue
+                checking.add(job.source.server)
+            self._waiting_playlist_jobs.remove(job)
+            job.start()
 
     def _playlist_refreshed(self, message, server):
         self.playlist_imported(server)

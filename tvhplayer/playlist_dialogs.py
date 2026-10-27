@@ -190,6 +190,13 @@ class PlaylistJob(QObject):
         """Only the server's stream test is left, which can go on without a window."""
         return self._busy and self._checking
 
+    def dispose(self):
+        """Delete the job, which has ended, once its workers have returned."""
+        # Each worker ends right after its last signal, so this waits a moment at most.
+        for task in self.findChildren(_Task):
+            task.wait()
+        self.deleteLater()
+
     def detach(self):
         """Drop every window's connection, for the host to take the job over."""
         for signal in (self.status, self.progress, self.checking, self.finished, self.failed):

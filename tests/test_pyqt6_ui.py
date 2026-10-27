@@ -2285,6 +2285,121 @@ def test_playlists_are_not_refreshed_when_the_builtin_server_starts(monkeypatch,
         window.close()
 
 
+def _fake_playlist_jobs(monkeypatch, ui, window):
+    """Playlist jobs that run until the test ends them; returns those created."""
+    from PyQt6.QtCore import QObject, pyqtSignal
+
+    created = []
+
+    class Job(QObject):
+        SYNC, REMOVE, CHECK, SHOW = 'add', 'remove', 'check', 'show'
+        finished = pyqtSignal(str, object)
+        failed = pyqtSignal(str)
+
+        def __init__(self, host, source, server, action='add', parent=None):
+            super().__init__(parent)
+            self.host, self.source, self.server, self.action = host, source, server, action
+            self.running = self.disposed = False
+            created.append(self)
+
+        def start(self):
+            assert self.host.claim_playlist(self.source)
+            self.running = True
+
+        def is_running(self):
+            return self.running
+
+        def is_writing(self):
+            return self.running
+
+        def cancel(self):
+            pass
+
+        def shutdown(self, _timeout_ms):
+            return True
+
+        def dispose(self):
+            self.disposed = True
+
+        def end(self):
+            self.running = False
+            self.host.release_playlist(self.source)
+            self.finished.emit('done', [])
+
+    monkeypatch.setattr(ui, 'PlaylistJob', Job)
+    monkeypatch.setattr(window, 'save_config', lambda: None)
+    monkeypatch.setattr(window, 'fetch_channels', lambda keep_place=False: None)
+    window.servers = [{'name': 'A', 'url': 'http://a:9981'}, {'name': 'B', 'url': 'http://b:9981'}]
+    window.config['playlists'] = [
+        ui.PlaylistSource(name, f'http://x/{name}.m3u', server).to_dict()
+        for name, server in (('one', 'http://a:9981'), ('two', 'http://a:9981'), ('three', 'http://b:9981'))
+    ]
+    return created
+
+
+def _run_queued(app):
+    for _ in range(3):
+        app.processEvents()
+
+
+def test_check_now_checks_one_playlist_per_server_at_a_time(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        _fake_playlist_jobs(monkeypatch, ui, window)
+        one, two, three = window.check_playlist_channels()
+        assert (one.running, two.running, three.running) == (True, False, True)
+        assert window.playlist_checks() == [one, two, three]
+        one.end()
+        _run_queued(app)
+        assert two.running
+        # An ended job is let go.
+        assert one.disposed and window.playlist_checks() == [two, three]
+        two.end()
+        three.end()
+        _run_queued(app)
+        assert window.playlist_checks() == []
+    finally:
+        window.close()
+
+
+def test_turning_hiding_off_shows_a_busy_playlist_once_it_is_free(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        created = _fake_playlist_jobs(monkeypatch, ui, window)
+        check = window.check_playlist_channels()[0]
+        window.set_hides_dead_channels(False)
+        # One and three are being checked.
+        shows = [job for job in created if job.action == ui.PlaylistJob.SHOW]
+        assert [job.running for job in shows] == [False, True, False]
+        # Asked again, the waiting one is not doubled.
+        window.set_hides_dead_channels(True)
+        window.set_hides_dead_channels(False)
+        shows = [job for job in created if job.action == ui.PlaylistJob.SHOW and not job.disposed]
+        waiting = [job for job in shows if not job.running]
+        assert [job.source.name for job in waiting] == ['one', 'three']
+        check.end()
+        _run_queued(app)
+        assert [job.running for job in waiting] == [True, False]
+    finally:
+        window.close()
+
+
+def test_turning_hiding_back_on_drops_the_waiting_show(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        created = _fake_playlist_jobs(monkeypatch, ui, window)
+        check = window.check_playlist_channels()[0]
+        window.set_hides_dead_channels(False)
+        waiting = [job for job in created if job.action == ui.PlaylistJob.SHOW and not job.running]
+        window.set_hides_dead_channels(True)
+        assert waiting[0].disposed
+        check.end()
+        _run_queued(app)
+        assert not waiting[0].running
+    finally:
+        window.close()
+
+
 def test_last_channel_plays_at_start_when_asked(monkeypatch, tmp_path):
     from tvhplayer.core.models import Channel
 

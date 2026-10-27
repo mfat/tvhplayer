@@ -549,7 +549,7 @@ class SettingsDialog(QDialog):
         self._sync()
 
     def _sync(self):
-        running = any(job.is_running() for job in self._host.playlist_checks())
+        running = bool(self._host.playlist_checks())
         self.check_btn.setEnabled(not running)
         if running:
             self.check_btn.setToolTip('Channels are being checked.')
