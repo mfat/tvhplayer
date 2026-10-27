@@ -33,6 +33,11 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.0.1" date="2026-10-27">
+      <description>
+        <p>The Flatpak starts with the mpv engine again, and runs on the current KDE 6.11 runtime.</p>
+      </description>
+    </release>
     <release version="4.0" date="2026-10-27">
       <description>
         <p>A major release with its own built-in Tvheadend server.</p>
