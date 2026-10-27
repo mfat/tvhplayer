@@ -51,6 +51,7 @@ from PyQt6.QtWidgets import (
     QStyleOptionViewItem,
     QTableView,
     QToolButton,
+    QToolTip,
     QTreeView,
     QWidget,
 )
@@ -916,10 +917,21 @@ def style_key(theme):
     return None
 
 
+def _set_palette(app, palette):
+    """The app's palette, for tooltips too.
+
+    Qt gives tooltips a palette of their own, pale yellow with black text,
+    which the app's palette does not change: the TVHplayer theme's dark tip
+    had black text on it.
+    """
+    app.setPalette(palette)
+    QToolTip.setPalette(palette)
+
+
 def _apply_colors(app, dark):
     global colors
     colors = DARK if dark else LIGHT
-    app.setPalette(_palette(colors))
+    _set_palette(app, _palette(colors))
     # Labels and lists hold some of the colors themselves.
     for widget in app.allWidgets():
         if widget.property('theme_palette') is not None:
@@ -984,7 +996,7 @@ def _follow_desktop(app, force=False):
         _apply_colors(app, scheme == desktop.ColorScheme.Dark)
     else:
         colors = DARK if scheme == desktop.ColorScheme.Dark else LIGHT
-        app.setPalette(_style_palette(colors))
+        _set_palette(app, _style_palette(colors))
 
 
 def _kde_color_scheme(app, scheme):
