@@ -3457,10 +3457,6 @@ class TVHeadendClient(QMainWindow):
         self._bind_playback_splash()
         self._check_disk_space()
 
-        # Update to use config for last server
-        last_server = self.config.get('last_server', 0)
-        if self.servers and 0 <= last_server < len(self.servers):
-            self.server_combo.setCurrentIndex(last_server)
         if self.builtin is not None and self.config.get('builtin_autostart'):
             self.builtin.start()
 
@@ -3653,8 +3649,12 @@ class TVHeadendClient(QMainWindow):
         self.server_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         for server in self.servers:
             self.server_combo.addItem(server['name'])
-        
-        # Connect server combo box change signal
+        # The last server, chosen before the change signal is connected: the
+        # first channel load is for it, and the first server in the list is
+        # not loaded, or the built-in one started, on the way.
+        last_server = self.config.get('last_server', 0)
+        if 0 <= last_server < len(self.servers):
+            self.server_combo.setCurrentIndex(last_server)
         self.server_combo.currentIndexChanged.connect(self.on_server_changed)
         describe(self.server_combo, description="TVHeadend server used for the channel list")
         

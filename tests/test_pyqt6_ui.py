@@ -1,5 +1,6 @@
 import ast
 import os
+import json
 import sys
 import time
 import types
@@ -143,7 +144,7 @@ class _FakeVlcPlayer:
         return None
 
 
-def _make_player(monkeypatch, tmp_path):
+def _make_player(monkeypatch, tmp_path, prepare=None):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     fake_player = _FakeVlcPlayer()
     fake_instance = types.SimpleNamespace(
@@ -172,7 +173,10 @@ def _make_player(monkeypatch, tmp_path):
 
     store = ConfigStore(tmp_path / 'tvhplayer.conf')
     monkeypatch.setattr(ui, 'ConfigStore', lambda *a, **k: store)
-    monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
+    if prepare is None:
+        monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
+    else:
+        prepare(ui)
 
     from PyQt6.QtWidgets import QApplication
 
@@ -182,6 +186,34 @@ def _make_player(monkeypatch, tmp_path):
     app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
     window = ui.TVHeadendClient()
     return app, ui, window, fake_player
+
+
+def test_window_starts_on_the_last_server_only(monkeypatch, tmp_path):
+    # The built-in server comes first; the remote one was used last and
+    # autostart is off. Starting loads the remote server and nothing else.
+    (tmp_path / 'tvhplayer.conf').write_text(json.dumps({
+        'servers': [
+            {'name': 'Built-in', 'builtin': True, 'protocol': 'htsp', 'url': ''},
+            {'name': 'Remote', 'url': 'http://192.0.2.1:9981'},
+        ],
+        'last_server': 1,
+        'builtin_autostart': False,
+    }), encoding='utf-8')
+    events = []
+
+    def prepare(ui):
+        monkeypatch.setattr(ui, 'platform_supports_builtin', lambda: True)
+        monkeypatch.setattr(ui, 'find_bundled_binary', lambda: '/bin/true')
+        monkeypatch.setattr(ui.BuiltinSupervisor, 'start', lambda self, *a, **k: events.append('builtin'))
+        monkeypatch.setattr(ui.ChannelFetch, 'start', lambda self: events.append(self.server['name']))
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path, prepare)
+    try:
+        assert window.server_combo.currentIndex() == 1
+        assert events == ['Remote']
+    finally:
+        window.close()
+        app.processEvents()
 
 
 def test_window_starts_at_the_saved_volume(monkeypatch, tmp_path):
