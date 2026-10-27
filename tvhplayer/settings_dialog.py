@@ -533,8 +533,15 @@ class SettingsDialog(QDialog):
 
     def _check(self):
         self._jobs = self._host.check_playlist_channels()
+        orphans = sum(1 for source in self._host.playlist_sources() if self._host.server_for_playlist(source) is None)
+        not_checked = ''
+        if orphans:
+            not_checked = (
+                'The server of 1 playlist was removed, so it cannot be checked.' if orphans == 1
+                else f'The servers of {orphans} playlists were removed, so they cannot be checked.'
+            )
         if not self._jobs:
-            announce_label(self.status_label, 'There are no imported playlists to check.')
+            announce_label(self.status_label, not_checked or 'There are no imported playlists to check.')
             return
         for job in self._jobs:
             job.finished.connect(lambda *_args: self._sync())
@@ -544,7 +551,7 @@ class SettingsDialog(QDialog):
         announce_label(
             self.status_label,
             f'Checking {playlists} in the background. Channels that do not work are hidden as they are found; '
-            'the status bar says when it is done.',
+            f'the status bar says when it is done. {not_checked}'.rstrip(),
         )
         self._sync()
 

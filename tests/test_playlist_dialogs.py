@@ -562,6 +562,14 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def playlist_checks(self):
             return self.jobs
 
+        def playlist_sources(self):
+            return list(self.sources)
+
+        def server_for_playlist(self, source):
+            return None if source.server == 'http://gone' else {'url': source.server}
+
+        sources = []
+
         engine = 'mpv'
         engine_choice = 'auto'
 
@@ -684,6 +692,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog.check_btn.click()
     assert host.checks == 1
     assert dialog.status_label.text() == 'There are no imported playlists to check.'
+    host.sources = [PlaylistSource('old', 'http://x/old.m3u', 'http://gone')]
+    dialog.check_btn.click()
+    assert dialog.status_label.text() == 'The server of 1 playlist was removed, so it cannot be checked.'
 
 
 def test_a_playlist_being_updated_cannot_be_refreshed(app, tmp_path):
