@@ -189,7 +189,7 @@ jobs:
 
       - name: Install and smoke-test package
         run: |
-          dnf install -y ~/rpmbuild/RPMS/*/tvhplayer-*.rpm
+          dnf install -y ~/rpmbuild/RPMS/*/tvhplayer-[0-9]*.rpm
           cd / && python3 "$GITHUB_WORKSPACE/packaging/check-installed.py"
 
       - name: Name release packages
@@ -197,7 +197,8 @@ jobs:
           mkdir -p release-assets
           label="${{ steps.version.outputs.label }}"
           suffix="fedora${{ matrix.fedora }}-${{ matrix.arch }}"
-          set -- ~/rpmbuild/RPMS/${{ matrix.arch }}/tvhplayer-*.rpm
+          # [0-9]: the package itself, not its debuginfo and debugsource.
+          set -- ~/rpmbuild/RPMS/${{ matrix.arch }}/tvhplayer-[0-9]*.rpm
           if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
             echo "Expected exactly one binary RPM, found $#"
             exit 1
