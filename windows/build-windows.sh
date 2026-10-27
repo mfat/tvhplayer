@@ -7,7 +7,9 @@
 # build that mpv.io links. Writes windows/dist/tvhplayer-VERSION-windows-x86_64.zip.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# Windows paths (D:/a/...): PyInstaller is a Windows program and does not
+# understand Git Bash's /d/a/... inside its SOURCE;DEST arguments.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -W)"
 HERE="$ROOT/windows"
 # shellcheck source=windows/pins.env
 . "$HERE/pins.env"
@@ -37,8 +39,8 @@ echo "==> PyInstaller"
   --paths "$ROOT/tvhplayer" \
   --collect-submodules core \
   --hidden-import resources_rc \
-  --add-binary "$WORK/libmpv-2.dll:." \
-  --add-data "$ROOT/icons:icons" \
+  --add-binary "$WORK/libmpv-2.dll;." \
+  --add-data "$ROOT/icons;icons" \
   --distpath "$WORK/dist" \
   --workpath "$WORK/pyinstaller" \
   --specpath "$WORK" \
