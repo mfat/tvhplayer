@@ -105,6 +105,11 @@ def test_mpv_draws_only_through_the_render_api(engine):
     assert mpv.options['ytdl'] is False
 
 
+def test_painting_does_not_wait_for_the_next_frame(engine):
+    _player, mpv, _seen = engine
+    assert mpv.options['video_timing_offset'] == 0
+
+
 def test_first_picture_of_each_stream_reports_playing_once(engine):
     player, mpv, seen = engine
     player.play('http://nas.example:9981/stream/channel/1')

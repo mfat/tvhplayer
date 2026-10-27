@@ -24,6 +24,9 @@ MPV_OPTIONS = {
     'idle': True,
     'keep_open': False,
     'audio_client_name': 'TVHplayer',
+    # mpv hands a frame over this long before its display time, and the widget's
+    # paint then waits out the rest. Every repaint of a resize waited up to a frame.
+    'video_timing_offset': 0,
 }
 DEINTERLACE_VALUES = {DEINTERLACE_AUTO: 'auto', DEINTERLACE_ON: 'yes', DEINTERLACE_OFF: 'no'}
 
