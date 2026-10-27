@@ -102,7 +102,37 @@ def test_mpv_draws_only_through_the_render_api(engine):
     _player, mpv, _seen = engine
     assert mpv.options['vo'] == 'libmpv'
     assert mpv.options['input_default_bindings'] is False
-    assert mpv.options['ytdl'] is False
+
+
+class _MpvWithoutLua(_Mpv):
+    """libmpv built without Lua, as in the Flatpak: no osc or ytdl options."""
+
+    LUA_ONLY = ('osc', 'ytdl')
+
+    def __init__(self, log_handler=None, loglevel=None, **options):
+        for name in self.LUA_ONLY:
+            if name in options:
+                raise AttributeError('mpv option does not exist', -5, (None, name.encode(), b'no'))
+        super().__init__(log_handler, loglevel, **options)
+
+    def __setitem__(self, name, value):
+        if name in self.LUA_ONLY:
+            raise AttributeError('mpv property does not exist', -8, (None, name.encode(), b'no'))
+        super().__setitem__(name, value)
+
+
+def test_mpv_scripts_are_off_with_lua(engine):
+    _player, mpv, _seen = engine
+    assert mpv.props['osc'] is False
+    assert mpv.props['ytdl'] is False
+
+
+def test_mpv_without_lua_starts(engine, monkeypatch):
+    monkeypatch.setattr(sys.modules['mpv'], 'MPV', _MpvWithoutLua)
+    from tvhplayer.core.mpv_player import MpvPlayer
+
+    player = MpvPlayer()
+    assert player._mpv.options['vo'] == 'libmpv'
 
 
 def test_painting_does_not_wait_for_the_next_frame(engine):

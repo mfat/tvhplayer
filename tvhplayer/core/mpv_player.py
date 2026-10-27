@@ -17,9 +17,7 @@ MPV_OPTIONS = {
     # A player inside the app: no mpv keys, controls, scripts or config files.
     'input_default_bindings': False,
     'input_vo_keyboard': False,
-    'osc': False,
     'load_scripts': False,
-    'ytdl': False,
     'config': False,
     'idle': True,
     'keep_open': False,
@@ -28,6 +26,9 @@ MPV_OPTIONS = {
     # paint then waits out the rest. Every repaint of a resize waited up to a frame.
     'video_timing_offset': 0,
 }
+# mpv's built-in Lua scripts, which load_scripts does not cover. A libmpv built
+# without Lua, as in the Flatpak, has neither the scripts nor these options.
+LUA_SCRIPT_OPTIONS = {'osc': False, 'ytdl': False}
 DEINTERLACE_VALUES = {DEINTERLACE_AUTO: 'auto', DEINTERLACE_ON: 'yes', DEINTERLACE_OFF: 'no'}
 
 
@@ -48,6 +49,12 @@ class MpvPlayer(Player):
         # QApplication sets the numeric locale from the desktop; libmpv refuses anything but C.
         locale.setlocale(locale.LC_NUMERIC, 'C')
         self._mpv = mpv.MPV(log_handler=_log, loglevel='warn', **MPV_OPTIONS)
+        # Set after creation: an unknown option at creation leaves a running mpv behind.
+        for name, value in LUA_SCRIPT_OPTIONS.items():
+            try:
+                self._mpv[name] = value
+            except AttributeError:
+                pass
         self._mpv.register_event_callback(self._on_event)
 
     def attach(self, surface):
