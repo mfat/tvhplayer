@@ -1,10 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 298 84" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 336 108" role="img" aria-labelledby="title description">
   <title id="title">TVHplayer</title>
-  <desc id="description">TVH in white followed by player in blue.</desc>
+  <desc id="description">TVH in white followed by player in blue inside a rounded black badge.</desc>
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111722"/>
+      <stop offset="0.55" stop-color="#070b12"/>
+      <stop offset="1" stop-color="#020407"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.48" stop-color="#62a9f5" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#2f80ed" stop-opacity="0.12"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="334" height="106" rx="22" fill="url(#badge)" stroke="url(#edge)" stroke-width="2"/>
   <text
-    x="4"
-    y="64"
+    x="21"
+    y="76"
     fill="#ffffff"
     font-family="Inter, 'Segoe UI', Arial, sans-serif"
     font-size="64"
