@@ -66,7 +66,7 @@ try:
     from . import cursor_debug
     from . import window_frame
     from .file_manager import show_in_file_manager
-    from .ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
+    from .ui_theme import THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
     from .player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -154,7 +154,7 @@ except ImportError:
     import cursor_debug
     import window_frame
     from file_manager import show_in_file_manager
-    from ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
+    from ui_theme import THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
     from player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -7400,7 +7400,7 @@ class EPGDialog(QDialog):
                 f"Failed to schedule recording: {str(e)}"
             )
 
-class NoDialogButtonIconsStyle(RowStyle):
+class NoDialogButtonIconsStyle(ThemeStyle):
     """The desktop style, without icons on dialog buttons (OK, Cancel, Yes, No...)."""
 
     def styleHint(self, hint, option=None, widget=None, returnData=None):

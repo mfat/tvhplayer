@@ -31,21 +31,14 @@ QWIDGETSIZE_MAX = (1 << 24) - 1
 
 
 def _heading_font(label, scale=1.0):
-    """The TVHplayer theme's style sheet sets headings; with a Qt style they are bold in its font."""
+    """The TVHplayer theme's style sets headings; with a Qt style they are bold in its font."""
     if theme_is_active():
-        if label.property('tvhplayer_font'):
-            label.setProperty('tvhplayer_font', None)
-            # An empty font sets nothing; polished again, the label takes the style sheet's.
-            label.setFont(QFont())
-            label.style().unpolish(label)
-            label.style().polish(label)
         return
     font = QApplication.font()
     font.setWeight(QFont.Weight.DemiBold)
     if scale != 1.0:
         font.setPointSizeF(font.pointSizeF() * scale)
     label.setFont(font)
-    label.setProperty('tvhplayer_font', True)
 
 
 def _alpha(color, alpha):
@@ -353,7 +346,7 @@ class _NavDelegate(QStyledItemDelegate):
             if selected:
                 ink = option.palette.color(QPalette.ColorRole.HighlightedText)
         elif selected:
-            # The app's highlight: the theme gives lists a clear one, as RowStyle draws their selection.
+            # The app's highlight: the theme gives lists a clear one, as ThemeStyle draws their selection.
             p.setBrush(_alpha(QApplication.palette().color(QPalette.ColorRole.Highlight), 56))
             p.drawRoundedRect(r, 6, 6)
         elif hover:

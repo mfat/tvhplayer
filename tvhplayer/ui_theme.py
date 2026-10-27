@@ -1,28 +1,57 @@
 """Themes: TVHplayer's own look, or a Qt style, light or dark as the desktop is.
 
-The TVHplayer theme is Fusion with a palette and one stylesheet, built from a
-light or a dark set of colors. Any other theme is a Qt style used as it is.
-Every theme is light or dark as the desktop is set, following it while the
-app runs, unless set to always light or always dark. Both can be changed while
-the app runs. Under high contrast the system look stays in charge.
+The TVHplayer theme is a style over Fusion that draws the app's own look from
+a light or a dark set of colors, with a palette made from the same colors.
+Qt keeps style sheets for small, local changes and does not support them over
+a style of the app's own, so the look is drawn, not written as a style sheet.
+Any other theme is a Qt style used as it is. Every theme is light or dark as
+the desktop is set, following it while the app runs, unless set to always
+light or always dark. Both can be changed while the app runs. Under high
+contrast the system look stays in charge.
 """
 
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QObject, QRectF, QStandardPaths, Qt
-from PyQt6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPalette
+from PyQt6 import sip
+from PyQt6.QtCore import QPointF, QRect, QRectF, QSize, QStandardPaths, Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPainterPath, QPalette, QPen
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QAbstractSpinBox,
+    QApplication,
     QComboBox,
+    QFrame,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QProgressBar,
     QProxyStyle,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
     QStyle,
     QStyledItemDelegate,
     QStyleFactory,
+    QStyleOption,
+    QStyleOptionButton,
+    QStyleOptionComboBox,
+    QStyleOptionFrame,
+    QStyleOptionHeader,
+    QStyleOptionMenuItem,
+    QStyleOptionProgressBar,
+    QStyleOptionSlider,
+    QStyleOptionSpinBox,
+    QStyleOptionToolButton,
+    QStyleOptionViewItem,
     QTableView,
+    QToolButton,
     QTreeView,
+    QWidget,
 )
 
 try:
@@ -41,8 +70,8 @@ LIGHT = {
     'hover': '#f2f8fc', 'pressed': '#e3f2fb',
     'edge': 'rgba(35,38,41,64)', 'edge_soft': 'rgba(35,38,41,36)', 'menu_edge': 'rgba(35,38,41,51)',
     'rule': 'rgba(35,38,41,31)', 'hairline': 'rgba(35,38,41,26)', 'tint': 'rgba(35,38,41,18)',
-    # Solid, unlike the see-through edges: Qt draws each side of a border apart,
-    # and a see-through one darkens where the sides meet.
+    # Solid, unlike the see-through edges: drawn around a list, a see-through
+    # one would darken where it crosses the list's own background.
     'list_edge': '#bcbdbf',
     'scroll': 'rgba(35,38,41,70)', 'scroll_hover': 'rgba(35,38,41,110)', 'track': 'rgba(35,38,41,31)',
     'disabled': 'rgba(35,38,41,110)', 'disabled_soft': 'rgba(35,38,41,90)',
@@ -68,170 +97,47 @@ DARK = {
     'arrow': '#a1a9b1', 'arrow_off': '#5c6166',
 }
 
-STYLESHEET = """
-QWidget {{ color: {ink}; }}
-QWidget:disabled {{ color: {disabled}; }}
-QToolTip {{ background: {tooltip}; color: {tooltip_ink}; border: none; padding: 5px 8px; border-radius: 4px; }}
+# Labels the settings pages and dialogs name: point size, weight, color, color when disabled.
+LABELS = {
+    'pageTitle': (15, QFont.Weight.DemiBold, None, None),
+    'pageIntro': (None, None, 'muted', None),
+    'groupTitle': (None, QFont.Weight.DemiBold, None, None),
+    'rowTitle': (10.5, None, None, None),
+    'rowDesc': (9, None, 'muted', 'disabled_soft'),
+    'statusText': (9.5, None, 'strip_ink', None),
+    'footerNote': (9.5, None, 'muted', None),
+}
+# Frames the settings pages and dialogs name, drawn by ThemeStyle.
+NAMED_FRAMES = ('groupCard', 'rowSeparator', 'statusStrip', 'dialogFooter', 'settingsNav')
 
-/* Sizes come from padding, not min-height: a stylesheet min-height replaces a widget's fixed size. */
-QPushButton {{
-    padding: 4px 14px;
-    background: {base}; border: 1px solid {edge}; border-radius: 4px;
-}}
-QPushButton:hover {{ background: {hover}; border-color: {accent}; }}
-QPushButton:pressed {{ background: {pressed}; }}
-QPushButton:focus {{ border: 2px solid {accent}; padding: 3px 13px; }}
-QPushButton:disabled {{ color: {disabled}; border-color: {edge_soft}; background: {base}; }}
-QPushButton[primary="true"] {{ background: {primary}; border-color: {primary_edge}; color: {on_accent}; }}
-QPushButton[primary="true"]:hover {{ background: {primary_hover}; }}
-QPushButton[primary="true"]:disabled {{ background: {primary_off}; border-color: {primary_off}; color: {on_accent}; }}
-
-QLineEdit, QComboBox, QSpinBox {{
-    padding: 4px 8px;
-    background: {base}; border: 1px solid {edge}; border-radius: 4px;
-    selection-background-color: {accent}; selection-color: {on_accent};
-}}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 2px solid {accent}; padding: 3px 7px; }}
-QLineEdit:read-only {{ background: {read_only}; }}
-QLineEdit[mono="true"] {{ font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace; }}
-QComboBox QAbstractItemView {{
-    background: {base}; border: 1px solid {edge}; border-radius: 4px;
-    selection-background-color: {selected}; selection-color: {ink}; outline: 0;
-}}
-
-QProgressBar[textVisible="false"] {{ max-height: 4px; min-height: 4px; border: none; border-radius: 2px; background: {track}; }}
-QProgressBar[textVisible="false"]::chunk {{ background: {accent}; border-radius: 2px; }}
-
-QScrollArea {{ border: none; background: transparent; }}
-QScrollBar:vertical {{ width: 10px; background: transparent; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: {scroll}; border-radius: 3px; min-height: 30px; }}
-QScrollBar::handle:vertical:hover {{ background: {scroll_hover}; }}
-QScrollBar:horizontal {{ height: 10px; background: transparent; margin: 2px; }}
-QScrollBar::handle:horizontal {{ background: {scroll}; border-radius: 3px; min-width: 30px; }}
-QScrollBar::handle:horizontal:hover {{ background: {scroll_hover}; }}
-QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; background: none; }}
-QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
-
-/* Main window */
-QMenuBar {{ background: {window}; border-bottom: 1px solid {rule}; padding: 2px 6px; }}
-QMenuBar[titlebar="true"] {{ background: transparent; border: none; }}
-QMenuBar::item {{ padding: 5px 10px; border-radius: 4px; background: transparent; }}
-QMenuBar::item:selected {{ background: {tint}; }}
-QMenu {{ background: {base}; border: 1px solid {menu_edge}; border-radius: 6px; padding: 4px; }}
-QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: 4px; }}
-QMenu::item:selected {{ background: {selected}; color: {ink}; }}
-QMenu::separator {{ height: 1px; background: {hairline}; margin: 4px 8px; }}
-QSplitter::handle {{ background: transparent; }}
-QToolButton {{ padding: 4px 8px; background: {base}; border: 1px solid {edge}; border-radius: 4px; }}
-QToolButton:hover {{ border-color: {accent}; background: {hover}; }}
-QToolButton:focus {{ border: 2px solid {accent}; padding: 3px 7px; }}
-/* Padding keeps the square header and rows inside the rounded border. Selected rows
-   are drawn by RowStyle, which knows the first and last visible column. */
-QTableView, QTreeView, QListView {{
-    background: {base}; border: 1px solid {list_edge}; border-radius: 6px; padding: 4px;
-    gridline-color: transparent; selection-background-color: transparent; selection-color: {selected_ink};
-    alternate-background-color: {alt}; outline: 0;
-}}
-QComboBox QAbstractItemView::item {{ padding: 6px 12px; }}
-QComboBox QAbstractItemView::item:selected {{ background: {selected}; color: {ink}; border-radius: 4px; }}
-QHeaderView {{ background: transparent; }}
-QHeaderView::section {{
-    background: transparent; color: {muted}; font-weight: 600; padding: 6px 8px;
-    border: none; border-bottom: 1px solid {edge};
-}}
-QStatusBar {{ background: {window}; border-top: 1px solid {rule}; color: {muted}; }}
-QStatusBar::item {{ border: none; }}
-
-/* Settings building blocks (settings_widgets.py) */
-QLabel#pageTitle {{ font-size: 15pt; font-weight: 600; }}
-QLabel#pageIntro {{ color: {muted}; }}
-QLabel#groupTitle {{ font-weight: 600; }}
-QLabel#rowTitle {{ font-size: 10.5pt; }}
-QLabel#rowDesc {{ color: {muted}; font-size: 9pt; }}
-QLabel#rowDesc:disabled {{ color: {disabled_soft}; }}
-QFrame#groupCard {{ background: {base}; border: 1px solid {edge_soft}; border-radius: 8px; }}
-QFrame#rowSeparator {{ background: {hairline}; border: none; }}
-QFrame#statusStrip {{
-    background: {strip}; border: none; border-top: 1px solid {hairline};
-    border-bottom-left-radius: 7px; border-bottom-right-radius: 7px;
-}}
-QLabel#statusText {{ color: {strip_ink}; font-size: 9.5pt; }}
-QListWidget#settingsNav {{
-    background: {nav}; border: none; border-right: 1px solid {rule};
-    padding: 14px 10px; outline: 0;
-}}
-QFrame#dialogFooter {{ background: {window}; border: none; border-top: 1px solid {rule}; }}
-QLabel#footerNote {{ color: {muted}; font-size: 9.5pt; }}
-QWidget#settingsPage {{ background: {window}; }}
-"""
-
-
-# Styling the arrow buttons turns off Qt's own arrows, so these rules come with their images.
-# The @name@ tokens are replaced by the image files.
-ARROWS = """
-QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: center right; width: 24px; border: none; }
-QComboBox::down-arrow { image: url(@down@); width: 10px; height: 10px; }
-QComboBox::down-arrow:disabled { image: url(@down_disabled@); }
-QSpinBox { padding-right: 22px; }
-QSpinBox:focus { padding-right: 21px; }
-QSpinBox::up-button, QSpinBox::down-button { subcontrol-origin: border; width: 20px; border: none; background: transparent; }
-QSpinBox::up-button { subcontrol-position: top right; margin: 3px 2px 0 0; }
-QSpinBox::down-button { subcontrol-position: bottom right; margin: 0 2px 3px 0; }
-QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: @hover@; border-radius: 3px; }
-QSpinBox::up-arrow { image: url(@up@); width: 8px; height: 8px; }
-QSpinBox::down-arrow { image: url(@down@); width: 8px; height: 8px; }
-QSpinBox::up-arrow:disabled, QSpinBox::up-arrow:off { image: url(@up_disabled@); }
-QSpinBox::down-arrow:disabled, QSpinBox::down-arrow:off { image: url(@down_disabled@); }
-"""
-CHEVRON = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
-    '<path d="{path}" fill="none" stroke="{color}" stroke-width="1.6" '
-    'stroke-linecap="round" stroke-linejoin="round"/></svg>'
-)
-DOWN = 'M2 3.5 5 6.5 8 3.5'
-UP = 'M2 6.5 5 3.5 8 6.5'
+# Arrows on dropdowns and number boxes, as points in a 10 by 10 box.
+DOWN = ((2, 3.5), (5, 6.5), (8, 3.5))
+UP = ((2, 6.5), (5, 3.5), (8, 6.5))
 
 # The colors in use, and whether the TVHplayer theme is on.
 colors = LIGHT
 _active = False
-# Kept by apply(): the desktop's scheme, whether it is watched, the polish filter,
+# Kept by apply(): the desktop's scheme, whether it is watched, the style,
 # the app's font before the theme's, and the theme's font.
 _scheme = None
 _mode = SCHEME_SYSTEM
 _watching = False
-_polish = None
 _style = None
 _default_font = None
 _theme_font = None
 
+PE = QStyle.PrimitiveElement
+CE = QStyle.ControlElement
+CC = QStyle.ComplexControl
+SC = QStyle.SubControl
+SE = QStyle.SubElement
+PM = QStyle.PixelMetric
+CT = QStyle.ContentsType
+State = QStyle.StateFlag
+
 
 def is_active():
     return _active
-
-
-def _arrow_rules(c, dark):
-    """Qt stylesheets load images only from files or resources, so the arrows are written to the cache."""
-    folder = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation)) / 'theme'
-    suffix = '-dark' if dark else ''
-    rules = ARROWS.replace('@hover@', c['pressed'])
-    images = {
-        'down': (DOWN, c['arrow']),
-        'up': (UP, c['arrow']),
-        'down_disabled': (DOWN, c['arrow_off']),
-        'up_disabled': (UP, c['arrow_off']),
-    }
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        for name, (path, color) in images.items():
-            file = folder / f'{name}{suffix}.svg'
-            svg = CHEVRON.format(path=path, color=color)
-            if not file.exists() or file.read_text() != svg:
-                file.write_text(svg)
-            rules = rules.replace(f'@{name}@', file.as_posix())
-    except OSError:
-        # Without the images the base style draws the arrows.
-        return ''
-    return rules
 
 
 def _palette(c):
@@ -290,7 +196,6 @@ def _load_fonts():
 def polish_main_window(window):
     """With the TVHplayer theme, flatten the raised side panes and hide the splitter handle;
     without it, put them back. Call after the UI is built and after each theme change."""
-    from PyQt6.QtWidgets import QFrame
     for name in ('left_pane', 'right_pane', 'tasks_pane'):
         pane = getattr(window, name, None)
         if pane is not None:
@@ -318,59 +223,681 @@ def _row_ends(view, index):
     return index.column() == shown[0], index.column() == shown[-1]
 
 
-class RowStyle(QProxyStyle):
-    """With the TVHplayer theme on, a selected row is one tint rounded at its two ends.
+# Drawing ---------------------------------------------------------------------
 
-    Style sheet ::item:first and :last cannot do it: a table counts hidden columns,
-    so with the first column hidden no visible cell starts the row.
+def _box(painter, rect, radius, fill=None, edge=None, width=1):
+    """A rounded box; the edge is drawn inside ``rect``."""
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    r = QRectF(rect)
+    if edge is not None:
+        r = r.adjusted(width / 2, width / 2, -width / 2, -width / 2)
+        radius = max(0.0, radius - width / 2)
+        painter.setPen(QPen(edge, width))
+    else:
+        painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(fill if fill is not None else Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(r, radius, radius)
+    painter.restore()
+
+
+def _field(painter, rect, fill, focused):
+    """Text fields, dropdowns and number boxes: a thin edge, a thicker accent one with focus."""
+    if focused:
+        _box(painter, rect, 4, fill, color('accent'), 2)
+    else:
+        _box(painter, rect, 4, fill, color('edge'))
+
+
+def _chevron(painter, rect, points, ink, size):
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    scale = size / 10
+    center = QRectF(rect).center()
+    path = QPainterPath()
+    for i, (x, y) in enumerate(points):
+        point = QPointF(center.x() + (x - 5) * scale, center.y() + (y - 5) * scale)
+        path.moveTo(point) if i == 0 else path.lineTo(point)
+    pen = QPen(ink, 1.6 * scale)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPath(path)
+    painter.restore()
+
+
+def _line(painter, x, y, width, height, name):
+    painter.fillRect(QRect(x, y, width, height), color(name))
+
+
+def _in_combo_popup(widget):
+    parent = widget.parentWidget() if widget is not None else None
+    return parent is not None and parent.inherits('QComboBoxPrivateContainer')
+
+
+def _frame_kind(widget):
+    """Which of the theme's frames ``widget`` gets, or None for the base style's."""
+    if widget is None:
+        return None
+    name = widget.objectName()
+    if name in NAMED_FRAMES:
+        return name
+    if isinstance(widget, QAbstractItemView) and not isinstance(widget, QHeaderView):
+        return 'popup' if _in_combo_popup(widget) else 'list'
+    if isinstance(widget, QScrollArea) or widget.inherits('QComboBoxPrivateContainer'):
+        return 'none'
+    return None
+
+
+# What each frame leaves around its contents: left, top, right, bottom. A list's
+# padding keeps its square header and rows inside the rounded edge.
+FRAME_INSETS = {
+    'list': (5, 5, 5, 5),
+    'popup': (5, 5, 5, 5),
+    'settingsNav': (10, 14, 11, 14),
+    'groupCard': (1, 1, 1, 1),
+    'statusStrip': (0, 1, 0, 0),
+    'dialogFooter': (0, 1, 0, 0),
+    'rowSeparator': (0, 0, 0, 0),
+    'none': (0, 0, 0, 0),
+}
+
+
+def _draw_frame(kind, painter, rect):
+    if kind == 'list':
+        _box(painter, rect, 6, color('base'), color('list_edge'))
+    elif kind == 'popup':
+        _box(painter, rect, 4, color('base'), color('edge'))
+    elif kind == 'settingsNav':
+        # Edges are see-through: drawn over what is behind the frame, not over its fill.
+        painter.fillRect(rect.adjusted(0, 0, -1, 0), color('nav'))
+        _line(painter, rect.right(), rect.top(), 1, rect.height(), 'rule')
+    elif kind == 'groupCard':
+        _box(painter, rect, 8, color('base'), color('edge_soft'))
+    elif kind == 'statusStrip':
+        r = QRectF(rect.adjusted(0, 1, 0, 0))
+        path = QPainterPath()
+        path.addRoundedRect(r, 7, 7)
+        top = QPainterPath()
+        top.addRect(QRectF(r.x(), r.y(), r.width(), r.height() / 2))
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillPath(path.united(top), color('strip'))
+        painter.restore()
+        _line(painter, rect.left(), rect.top(), rect.width(), 1, 'hairline')
+    elif kind == 'dialogFooter':
+        painter.fillRect(rect.adjusted(0, 1, 0, 0), color('window'))
+        _line(painter, rect.left(), rect.top(), rect.width(), 1, 'rule')
+    elif kind == 'rowSeparator':
+        painter.fillRect(rect, color('hairline'))
+
+
+def _option_classes():
+    import PyQt6.QtWidgets as widgets
+
+    found = {}
+    for name in dir(widgets):
+        if name.startswith('QStyleOption') and not name.endswith('V2'):
+            cls = getattr(widgets, name)
+            kind = getattr(getattr(cls, 'StyleOptionType', None), 'Type', None)
+            if kind is not None:
+                found.setdefault(kind.value, cls)
+    return found
+
+
+OPTION_CLASSES = _option_classes()
+
+
+def _typed(option):
+    """``option`` as the class its type says.
+
+    Qt makes options on the stack, and PyQt can hand on the Python object of
+    an earlier option that lived at the same address, of another class.
+    """
+    cls = OPTION_CLASSES.get(option.type)
+    if cls is None or type(option) is cls:
+        return option
+    # sip casts only up or down the class tree, so through the common base.
+    return sip.cast(sip.cast(option, QStyleOption), cls)
+
+
+def _primary(widget):
+    return isinstance(widget, QPushButton) and bool(widget.property('primary'))
+
+
+# What the look sets on widgets themselves ------------------------------------
+
+def _keep(widget):
+    """Remember the widget's own palette and font once, for _undress()."""
+    if widget.property('theme_palette') is None:
+        widget.setProperty('theme_palette', QPalette(widget.palette()))
+        widget.setProperty('theme_font', QFont(widget.font()))
+
+
+LIVE = (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive)
+ALL = LIVE + (QPalette.ColorGroup.Disabled,)
+
+
+def _set_ink(palette, role, name, groups=LIVE):
+    for group in groups:
+        palette.setColor(group, role, color(name))
+
+
+def _dress(widget):
+    """Give ``widget`` the colors and fonts the look needs that a style cannot draw.
+
+    Done again after a light or dark change, as the colors are set on the
+    widget; _undress() gives the widget back what it had.
+    """
+    name = widget.objectName()
+    palette = font = None
+    if isinstance(widget, QLabel) and name in LABELS:
+        size, weight, ink, ink_off = LABELS[name]
+        _keep(widget)
+        if size or weight:
+            font = QFont(QApplication.font())
+            if size:
+                font.setPointSizeF(size)
+            if weight:
+                font.setWeight(weight)
+        if ink:
+            palette = QPalette(widget.property('theme_palette'))
+            _set_ink(palette, QPalette.ColorRole.WindowText, ink)
+            if ink_off:
+                _set_ink(palette, QPalette.ColorRole.WindowText, ink_off, (QPalette.ColorGroup.Disabled,))
+    elif isinstance(widget, QHeaderView):
+        _keep(widget)
+        # On the header, not in its painting: Qt fits and shortens the titles with the header's font.
+        font = QFont(widget.property('theme_font'))
+        font.setWeight(QFont.Weight.DemiBold)
+    elif isinstance(widget, QAbstractItemView):
+        _keep(widget)
+        palette = QPalette(widget.property('theme_palette'))
+        # ThemeStyle draws the selected row as a light tint, so its text is dark, not white.
+        _set_ink(palette, QPalette.ColorRole.HighlightedText, 'ink' if _in_combo_popup(widget) else 'selected_ink')
+        if name == 'settingsNav':
+            _set_ink(palette, QPalette.ColorRole.Base, 'nav', ALL)
+        if isinstance(widget, QTableView) and widget.property('theme_grid') is None:
+            # The theme draws no grid lines, which left a gap between cells.
+            widget.setProperty('theme_grid', widget.showGrid())
+            widget.setShowGrid(False)
+    elif isinstance(widget, QLineEdit) and widget.property('mono'):
+        _keep(widget)
+        font = QFont(widget.property('theme_font'))
+        font.setFamilies(['Noto Sans Mono', 'DejaVu Sans Mono', 'monospace'])
+        font.setStyleHint(QFont.StyleHint.Monospace)
+    elif isinstance(widget, QProgressBar) and not widget.isTextVisible():
+        # Qt keeps a bar at least a line of text tall; the theme's has no text.
+        if widget.property('theme_height') is None:
+            widget.setProperty('theme_height', widget.maximumHeight())
+        widget.setMaximumHeight(4)
+    elif isinstance(widget, QComboBox):
+        # Qt's own list delegate fills the whole row with the accent; a styled one lets
+        # ThemeStyle draw the row. The combo's own is put back for other styles.
+        delegate = widget.itemDelegate()
+        if not isinstance(delegate, QStyledItemDelegate):
+            widget.setProperty('theme_delegate', delegate)
+            widget.setItemDelegate(QStyledItemDelegate(widget))
+    if palette is not None:
+        widget.setPalette(palette)
+    if font is not None:
+        widget.setFont(font)
+    if isinstance(widget, QFrame) and _frame_kind(widget) is not None:
+        # The frame's width was taken before the widget had its name, or from another style.
+        widget.setFrameStyle(widget.frameStyle())
+
+
+def _undress(widget):
+    if widget.property('theme_palette') is not None:
+        widget.setPalette(widget.property('theme_palette'))
+        widget.setFont(widget.property('theme_font'))
+        widget.setProperty('theme_palette', None)
+        widget.setProperty('theme_font', None)
+    if widget.property('theme_height') is not None:
+        widget.setMaximumHeight(widget.property('theme_height'))
+        widget.setProperty('theme_height', None)
+    if widget.property('theme_grid') is not None:
+        widget.setShowGrid(widget.property('theme_grid'))
+        widget.setProperty('theme_grid', None)
+    native = widget.property('theme_delegate')
+    if native is not None:
+        ours = widget.itemDelegate()
+        # Qt picks the right delegate for the next style from this one.
+        widget.setItemDelegate(native)
+        widget.setProperty('theme_delegate', None)
+        if ours is not native:
+            ours.deleteLater()
+
+
+# The style ---------------------------------------------------------------------
+
+class ThemeStyle(QProxyStyle):
+    """With the TVHplayer theme on, Fusion drawn in the app's own look; otherwise the style as it is.
+
+    Each drawing call checks the theme, so that this style can stay under
+    another Qt style for the app's own rules (see NoDialogButtonIconsStyle).
     """
 
-    def drawPrimitive(self, element, option, painter, widget=None):
-        if (_active and element == QStyle.PrimitiveElement.PE_PanelItemViewItem
-                and option.state & QStyle.StateFlag.State_Selected and isinstance(widget, QAbstractItemView)):
-            first, last = _row_ends(widget, option.index)
-            rect = QRectF(option.rect)
-            # The rounded shape runs past the cell on a side that joins another cell, then is cut off.
-            if not first:
-                rect.setLeft(rect.left() - 8)
-            if not last:
-                rect.setRight(rect.right() + 8)
-            painter.save()
-            painter.setClipRect(option.rect)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(color('selected'))
-            painter.drawRoundedRect(rect, 4, 4)
-            painter.restore()
-            return
-        super().drawPrimitive(element, option, painter, widget)
+    def __init__(self, key):
+        super().__init__(key)
+        self._busy = {}
+        self._busy_timer = QTimer(self)
+        self._busy_timer.setInterval(33)
+        self._busy_timer.timeout.connect(self._step_busy)
+
+    # Widgets ---------------------------------------------------------------
+
+    def polish(self, target):
+        result = super().polish(target)
+        if _active and isinstance(target, QWidget):
+            _dress(target)
+        return result
+
+    def unpolish(self, target):
+        # Not by _active: the theme is already off when the style it leaves unpolishes.
+        if isinstance(target, QWidget):
+            _undress(target)
+        return super().unpolish(target)
+
+    def _step_busy(self):
+        for key, bar in list(self._busy.items()):
+            if sip.isdeleted(bar) or not bar.isVisible() or bar.maximum() != bar.minimum():
+                del self._busy[key]
+            else:
+                bar.update()
+        if not self._busy:
+            self._busy_timer.stop()
+
+    # Sizes -------------------------------------------------------------------
+
+    def pixelMetric(self, metric, option=None, widget=None):
+        if _active:
+            if metric == PM.PM_ScrollBarExtent:
+                return 10
+            if metric == PM.PM_ScrollBarSliderMin:
+                return 30
+            if metric in (PM.PM_MenuHMargin, PM.PM_MenuVMargin):
+                return 4
+            if metric == PM.PM_MenuPanelWidth:
+                return 1
+            if metric == PM.PM_MenuBarHMargin:
+                return 6
+            if metric == PM.PM_MenuBarVMargin:
+                return 2
+            if metric == PM.PM_MenuBarItemSpacing:
+                return 6
+            if metric == PM.PM_MenuBarPanelWidth:
+                return 0
+            if metric == PM.PM_ToolTipLabelFrameWidth:
+                return 5
+        return super().pixelMetric(metric, option, widget)
+
+    def sizeFromContents(self, kind, option, size, widget=None):
+        option = _typed(option)
+        if not _active:
+            return super().sizeFromContents(kind, option, size, widget)
+        # Each adds the theme's padding and edge to what the widget needs for its text.
+        if kind == CT.CT_PushButton:
+            return QSize(size.width() + 30, size.height() + 10)
+        if kind == CT.CT_ToolButton:
+            return QSize(size.width() + 21, size.height() + 13)
+        if kind == CT.CT_LineEdit and isinstance(option, QStyleOptionFrame) and option.lineWidth > 0:
+            return QSize(size.width() + 18, size.height() + 10)
+        if kind == CT.CT_ComboBox and isinstance(option, QStyleOptionComboBox) and option.frame:
+            return QSize(size.width() + 44, size.height() + 10)
+        if kind == CT.CT_SpinBox and isinstance(widget, QSpinBox):
+            return QSize(size.width() + 76, size.height() + 9)
+        if kind == CT.CT_ProgressBar and isinstance(option, QStyleOptionProgressBar) and not option.textVisible:
+            return QSize(size.width(), 4)
+        if kind == CT.CT_HeaderSection and isinstance(option, QStyleOptionHeader):
+            base = super().sizeFromContents(kind, option, size, widget)
+            return QSize(base.width() + 16, base.height() + 13)
+        if kind == CT.CT_MenuBarItem:
+            return QSize(size.width() + 20, size.height() + 10)
+        if kind == CT.CT_MenuItem and isinstance(option, QStyleOptionMenuItem):
+            base = super().sizeFromContents(kind, option, size, widget)
+            if option.menuItemType == QStyleOptionMenuItem.MenuItemType.Separator:
+                return QSize(base.width(), 9)
+            return QSize(base.width() + 3, max(base.height(), option.fontMetrics.height() + 12))
+        if kind == CT.CT_ItemViewItem and _in_combo_popup(widget):
+            base = super().sizeFromContents(kind, option, size, widget)
+            return QSize(base.width() + 18, option.fontMetrics.height() + 12)
+        return super().sizeFromContents(kind, option, size, widget)
+
+    def subElementRect(self, element, option, widget=None):
+        option = _typed(option)
+        if _active:
+            if element in (SE.SE_ShapedFrameContents, SE.SE_FrameContents):
+                kind = _frame_kind(widget)
+                if kind is not None:
+                    left, top, right, bottom = FRAME_INSETS[kind]
+                    return option.rect.adjusted(left, top, -right, -bottom)
+            elif (element == SE.SE_LineEditContents and isinstance(option, QStyleOptionFrame)
+                  and option.lineWidth > 0):
+                return option.rect.adjusted(9, 5, -9, -5)
+            elif element == SE.SE_HeaderLabel and isinstance(option, QStyleOptionHeader):
+                return option.rect.adjusted(8, 6, -8, -7)
+            elif element == SE.SE_ItemViewItemText and _in_combo_popup(widget):
+                r = super().subElementRect(element, option, widget)
+                r.setLeft(r.left() + 12)
+                return r
+        return super().subElementRect(element, option, widget)
+
+    def subControlRect(self, control, option, sub, widget=None):
+        option = _typed(option)
+        if not _active:
+            return super().subControlRect(control, option, sub, widget)
+        r = option.rect
+        if control == CC.CC_ComboBox and isinstance(option, QStyleOptionComboBox) and option.frame:
+            if sub == SC.SC_ComboBoxArrow:
+                return QRect(r.right() - 24, r.top() + 1, 24, r.height() - 2)
+            if sub == SC.SC_ComboBoxEditField:
+                return QRect(r.left() + 9, r.top() + 5, r.width() - 34, r.height() - 10)
+            if sub == SC.SC_ComboBoxFrame:
+                return QRect(r)
+        elif control == CC.CC_SpinBox and isinstance(widget, QSpinBox):
+            half = r.height() // 2
+            if sub == SC.SC_SpinBoxUp:
+                return QRect(r.right() - 21, r.top() + 3, 20, half - 3)
+            if sub == SC.SC_SpinBoxDown:
+                return QRect(r.right() - 21, r.top() + half, 20, r.height() - half - 3)
+            if sub == SC.SC_SpinBoxEditField:
+                return QRect(r.left() + 9, r.top() + 5, r.width() - 32, r.height() - 10)
+            if sub == SC.SC_SpinBoxFrame:
+                return QRect(r)
+        elif control == CC.CC_ScrollBar and isinstance(option, QStyleOptionSlider):
+            return self._scroll_rect(option, sub)
+        return super().subControlRect(control, option, sub, widget)
+
+    @staticmethod
+    def _scroll_rect(option, sub):
+        """A bar with no arrow buttons: a rounded handle in a 2px margin."""
+        groove = option.rect.adjusted(2, 2, -2, -2)
+        if sub == SC.SC_ScrollBarGroove:
+            return groove
+        if sub not in (SC.SC_ScrollBarSlider, SC.SC_ScrollBarSubPage, SC.SC_ScrollBarAddPage):
+            return QRect()
+        horizontal = option.orientation == Qt.Orientation.Horizontal
+        length = groove.width() if horizontal else groove.height()
+        span = option.maximum - option.minimum
+        handle = length if span <= 0 else max(30, length * option.pageStep // (span + option.pageStep))
+        handle = min(handle, length)
+        start = QStyle.sliderPositionFromValue(option.minimum, option.maximum, option.sliderPosition,
+                                               length - handle, option.upsideDown)
+        if sub == SC.SC_ScrollBarSlider:
+            first, size = start, handle
+        elif sub == SC.SC_ScrollBarSubPage:
+            first, size = 0, start
+        else:
+            first, size = start + handle, length - start - handle
+        if horizontal:
+            return QRect(groove.left() + first, groove.top(), size, groove.height())
+        return QRect(groove.left(), groove.top() + first, groove.width(), size)
 
     def styleHint(self, hint, option=None, widget=None, returnData=None):
-        # Fusion opens a dropdown like a menu, sized without the theme's padding, so the
-        # last item was cut off behind a scroll arrow; a plain list fits its items.
+        # Fusion opens a dropdown like a menu, over the dropdown; the theme opens a list below it.
         if _active and hint == QStyle.StyleHint.SH_ComboBox_Popup:
             return 0
         return super().styleHint(hint, option, widget, returnData)
 
+    # Painting ------------------------------------------------------------------
 
-class _ThemePolish(QObject):
-    """Widget settings a style sheet cannot make, applied as each widget is polished."""
+    def drawPrimitive(self, element, option, painter, widget=None):
+        option = _typed(option)
+        if _active and self._draw_primitive(element, option, painter, widget):
+            return
+        super().drawPrimitive(element, option, painter, widget)
 
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Polish:
-            self.polish(obj)
-        return False
+    def _draw_primitive(self, element, option, painter, widget):
+        """Draw ``element`` the theme's way; False leaves it to Fusion."""
+        state = option.state
+        if element == PE.PE_PanelButtonCommand:
+            self._button(option, painter, widget)
+        elif element == PE.PE_PanelButtonTool and isinstance(widget, QToolButton):
+            self._button(option, painter, widget)
+        elif element == PE.PE_FrameFocusRect:
+            # Buttons and fields show focus with their edge; lists show none.
+            return isinstance(widget, (QPushButton, QToolButton, QAbstractItemView, QComboBox))
+        elif element == PE.PE_PanelLineEdit:
+            if not isinstance(option, QStyleOptionFrame) or option.lineWidth <= 0:
+                return False
+            read_only = isinstance(widget, QLineEdit) and widget.isReadOnly()
+            _field(painter, option.rect, color('read_only' if read_only else 'base'), state & State.State_HasFocus)
+        elif element == PE.PE_PanelItemViewItem:
+            if not (state & State.State_Selected and isinstance(widget, QAbstractItemView)
+                    and isinstance(option, QStyleOptionViewItem)):
+                return False
+            self._selected_row(option, painter, widget)
+        elif element == PE.PE_PanelItemViewRow:
+            if not (state & State.State_Selected and isinstance(option, QStyleOptionViewItem)):
+                return False
+            # The selection is drawn on the cells, rounded at the row's ends.
+            self._unselected(element, option, painter, widget)
+        elif element == PE.PE_IndicatorBranch and state & State.State_Selected:
+            # Only the arrow, for the same reason.
+            self._unselected(element, option, painter, widget)
+        elif element == PE.PE_PanelScrollAreaCorner:
+            pass
+        elif element == PE.PE_PanelMenu:
+            if not isinstance(widget, QMenu):
+                return False
+            _box(painter, option.rect, 6, color('base'))
+        elif element == PE.PE_FrameMenu:
+            if not isinstance(widget, QMenu):
+                return False
+            _box(painter, option.rect, 6, None, color('menu_edge'))
+        elif element == PE.PE_PanelMenuBar:
+            pass
+        elif element == PE.PE_PanelStatusBar:
+            painter.fillRect(option.rect, color('window'))
+            _line(painter, option.rect.left(), option.rect.top(), option.rect.width(), 1, 'rule')
+        elif element == PE.PE_FrameStatusBarItem:
+            pass
+        elif element == PE.PE_PanelTipLabel:
+            painter.fillRect(option.rect, color('tooltip'))
+        else:
+            return False
+        return True
+
+    def _unselected(self, element, option, painter, widget):
+        state = option.state
+        option.state = state & ~State.State_Selected
+        super().drawPrimitive(element, option, painter, widget)
+        option.state = state
 
     @staticmethod
-    def polish(obj):
-        if isinstance(obj, QTableView):
-            # The theme hides grid lines, which left a gap between cells.
-            if obj.property('tvhplayer_grid') is None:
-                obj.setProperty('tvhplayer_grid', obj.showGrid())
-            obj.setShowGrid(False)
-        elif isinstance(obj, QComboBox) and not isinstance(obj.itemDelegate(), QStyledItemDelegate):
-            # Qt's own popup delegate draws items as menu items and ignores ::item rules.
-            obj.setItemDelegate(QStyledItemDelegate(obj))
+    def _button(option, painter, widget):
+        state = option.state
+        enabled = bool(state & State.State_Enabled)
+        focused = bool(state & State.State_HasFocus) and enabled
+        if _primary(widget):
+            fill = color('primary_off' if not enabled else
+                         'primary_hover' if state & State.State_MouseOver else 'primary')
+            edge = color('primary_off' if not enabled else 'primary_edge')
+        else:
+            fill = color('pressed' if state & State.State_Sunken else
+                         'hover' if enabled and state & State.State_MouseOver else 'base')
+            edge = color('accent' if focused or (enabled and state & State.State_MouseOver) else
+                         'edge' if enabled else 'edge_soft')
+        _box(painter, option.rect, 4, fill, edge, 2 if focused else 1)
+
+    @staticmethod
+    def _selected_row(option, painter, widget):
+        """A selected row is one tint, rounded at its two ends.
+
+        A table counts hidden columns, so with its first column hidden no
+        visible cell would start the row: the ends are the visible ones.
+        """
+        first, last = _row_ends(widget, option.index)
+        rect = QRectF(option.rect)
+        # The rounded shape runs past the cell on a side that joins another cell, then is cut off.
+        if not first:
+            rect.setLeft(rect.left() - 8)
+        if not last:
+            rect.setRight(rect.right() + 8)
+        painter.save()
+        painter.setClipRect(option.rect)
+        _box(painter, rect, 4, color('selected'))
+        painter.restore()
+
+    def drawControl(self, element, option, painter, widget=None):
+        option = _typed(option)
+        if _active and self._draw_control(element, option, painter, widget):
+            return
+        super().drawControl(element, option, painter, widget)
+
+    def _draw_control(self, element, option, painter, widget):
+        state = option.state
+        if element == CE.CE_ShapedFrame:
+            kind = _frame_kind(widget)
+            if kind is None:
+                return False
+            _draw_frame(kind, painter, option.rect)
+        elif (element == CE.CE_PushButtonBevel and isinstance(option, QStyleOptionButton)
+              and option.features & QStyleOptionButton.ButtonFeature.Flat):
+            # The theme gives flat buttons their edge too.
+            features = option.features
+            option.features = features & ~QStyleOptionButton.ButtonFeature.Flat
+            super().drawControl(element, option, painter, widget)
+            option.features = features
+        elif element == CE.CE_PushButtonLabel and _primary(widget) and isinstance(option, QStyleOptionButton):
+            label = QStyleOptionButton(option)
+            label.palette = QPalette(option.palette)
+            for group in ALL:
+                label.palette.setColor(group, QPalette.ColorRole.ButtonText, color('on_accent'))
+            super().drawControl(element, label, painter, widget)
+        elif element == CE.CE_HeaderSection and isinstance(option, QStyleOptionHeader):
+            r = option.rect
+            if option.orientation == Qt.Orientation.Horizontal:
+                _line(painter, r.left(), r.bottom(), r.width(), 1, 'edge')
+        elif element == CE.CE_HeaderLabel and isinstance(option, QStyleOptionHeader):
+            label = QStyleOptionHeader(option)
+            label.palette = QPalette(option.palette)
+            for group in LIVE:
+                label.palette.setColor(group, QPalette.ColorRole.ButtonText, color('muted'))
+            super().drawControl(element, label, painter, widget)
+        elif element == CE.CE_HeaderEmptyArea:
+            pass
+        elif element == CE.CE_ProgressBar and isinstance(option, QStyleOptionProgressBar):
+            if option.textVisible or not state & State.State_Horizontal:
+                return False
+            self._thin_progress(option, painter, widget)
+        elif element == CE.CE_Splitter:
+            pass
+        elif element in (CE.CE_MenuBarEmptyArea, CE.CE_MenuBarItem) and isinstance(option, QStyleOptionMenuItem):
+            self._menu_bar(element, option, painter, widget)
+        elif element == CE.CE_MenuItem:
+            if not (isinstance(widget, QMenu) and isinstance(option, QStyleOptionMenuItem)):
+                return False
+            self._menu_item(option, painter, widget)
+        elif element == CE.CE_MenuEmptyArea:
+            pass
+        else:
+            return False
+        return True
+
+    def _thin_progress(self, option, painter, widget):
+        """The thin bar shown without a percentage: a track and an accent fill."""
+        r = option.rect
+        _box(painter, r, 2, color('track'))
+        if option.maximum == option.minimum:
+            # Busy: a piece of fill runs along the track.
+            if isinstance(widget, QProgressBar):
+                self._busy[id(widget)] = widget
+                if not self._busy_timer.isActive():
+                    self._busy_timer.start()
+            size = max(r.width() * 3 // 10, 8)
+            step = int(time.monotonic() * r.width() * 0.8) % (r.width() + size)
+            chunk = QRect(r.left() + step - size, r.top(), size, r.height())
+            painter.save()
+            painter.setClipRect(r)
+            _box(painter, chunk, 2, color('accent'))
+            painter.restore()
+            return
+        done = (option.progress - option.minimum) / (option.maximum - option.minimum)
+        width = round(r.width() * min(max(done, 0.0), 1.0))
+        if width > 0:
+            chunk = QRect(r.left(), r.top(), width, r.height())
+            if option.invertedAppearance:
+                chunk.moveRight(r.right())
+            _box(painter, chunk, 2, color('accent'))
+
+    def _menu_bar(self, element, option, painter, widget):
+        titlebar = widget is not None and bool(widget.property('titlebar'))
+        r = option.rect
+        if not titlebar:
+            painter.fillRect(r, color('window'))
+            if widget is not None:
+                _line(painter, r.left(), widget.height() - 1, r.width(), 1, 'rule')
+        if element == CE.CE_MenuBarEmptyArea:
+            return
+        state = option.state
+        if state & State.State_Enabled and state & (State.State_Selected | State.State_Sunken):
+            _box(painter, r, 4, color('tint'))
+        flags = (Qt.AlignmentFlag.AlignCenter.value | Qt.TextFlag.TextShowMnemonic.value
+                 | Qt.TextFlag.TextDontClip.value | Qt.TextFlag.TextSingleLine.value)
+        if not self.styleHint(QStyle.StyleHint.SH_UnderlineShortcut, option, widget):
+            flags |= Qt.TextFlag.TextHideMnemonic.value
+        self.drawItemText(painter, r, flags, option.palette, bool(state & State.State_Enabled),
+                          option.text, QPalette.ColorRole.WindowText)
+
+    def _menu_item(self, option, painter, widget):
+        r = option.rect
+        if option.menuItemType == QStyleOptionMenuItem.MenuItemType.Separator:
+            _line(painter, r.left() + 8, r.top() + r.height() // 2, r.width() - 16, 1, 'hairline')
+            return
+        if option.state & State.State_Selected and option.state & State.State_Enabled:
+            _box(painter, r, 4, color('selected'))
+        # Fusion draws the check, icon, text, shortcut and arrow on the theme's own highlight.
+        state = option.state
+        option.state = state & ~State.State_Selected
+        super().drawControl(CE.CE_MenuItem, option, painter, widget)
+        option.state = state
+
+    def drawComplexControl(self, control, option, painter, widget=None):
+        option = _typed(option)
+        if _active and self._draw_complex(control, option, painter, widget):
+            return
+        super().drawComplexControl(control, option, painter, widget)
+
+    def _draw_complex(self, control, option, painter, widget):
+        state = option.state
+        enabled = bool(state & State.State_Enabled)
+        if control == CC.CC_ComboBox:
+            if not (isinstance(option, QStyleOptionComboBox) and option.frame):
+                return False
+            _field(painter, option.rect, color('base'), state & State.State_HasFocus)
+            arrow = self.subControlRect(control, option, SC.SC_ComboBoxArrow, widget)
+            _chevron(painter, arrow, DOWN, color('arrow' if enabled else 'arrow_off'), 10)
+        elif control == CC.CC_SpinBox:
+            if not (isinstance(widget, QSpinBox) and isinstance(option, QStyleOptionSpinBox)):
+                return False
+            if option.frame:
+                _field(painter, option.rect, color('base'), state & State.State_HasFocus)
+            steps = QAbstractSpinBox.StepEnabledFlag
+            for sub, points, step in ((SC.SC_SpinBoxUp, UP, steps.StepUpEnabled),
+                                      (SC.SC_SpinBoxDown, DOWN, steps.StepDownEnabled)):
+                r = self.subControlRect(control, option, sub, widget)
+                live = enabled and bool(option.stepEnabled & step)
+                if live and option.activeSubControls & sub and state & State.State_MouseOver:
+                    _box(painter, r, 3, color('pressed'))
+                _chevron(painter, r, points, color('arrow' if live else 'arrow_off'), 8)
+        elif control == CC.CC_ScrollBar and isinstance(option, QStyleOptionSlider):
+            if option.maximum == option.minimum:
+                return True
+            handle = self.subControlRect(control, option, SC.SC_ScrollBarSlider, widget)
+            over = option.activeSubControls & SC.SC_ScrollBarSlider and state & (State.State_MouseOver | State.State_Sunken)
+            _box(painter, handle, 3, color('scroll_hover' if over else 'scroll'))
+        elif control == CC.CC_ToolButton and isinstance(option, QStyleOptionToolButton):
+            if not state & State.State_AutoRaise:
+                return False
+            # The theme gives every tool button its edge, raised or not.
+            self._button(option, painter, widget)
+            super().drawComplexControl(control, option, painter, widget)
+        else:
+            return False
+        return True
 
 
 def style_names():
@@ -392,7 +919,11 @@ def _apply_colors(app, dark):
     global colors
     colors = DARK if dark else LIGHT
     app.setPalette(_palette(colors))
-    app.setStyleSheet(STYLESHEET.format(**colors) + _arrow_rules(colors, dark))
+    # Labels and lists hold some of the colors themselves.
+    for widget in app.allWidgets():
+        if widget.property('theme_palette') is not None:
+            _dress(widget)
+        widget.update()
 
 
 def _follow_desktop(app, force=False):
@@ -447,20 +978,6 @@ def _kde_color_scheme(app, scheme):
     return True
 
 
-def _remove_polish(app):
-    global _polish
-    if _polish is not None:
-        app.removeEventFilter(_polish)
-        _polish = None
-
-
-def _restore_grids(app):
-    for widget in app.allWidgets():
-        if isinstance(widget, QTableView) and widget.property('tvhplayer_grid') is not None:
-            widget.setShowGrid(widget.property('tvhplayer_grid'))
-            widget.setProperty('tvhplayer_grid', None)
-
-
 def set_color_scheme(app, mode):
     """Light or dark as the desktop is (``system``), or always ``light`` or ``dark``, from now on."""
     global _mode
@@ -475,14 +992,14 @@ def set_color_scheme(app, mode):
     _follow_desktop(app, force=True)
 
 
-def apply(app, theme, style_class=RowStyle):
+def apply(app, theme, style_class=ThemeStyle):
     """Use ``theme``, TVHplayer or a Qt style's name, at startup or while the app runs.
 
     Returns False when there is no such style. Qt sends every widget a
     StyleChange, so widgets that set themselves up for a theme can follow;
     the main window's panes need polish_main_window() again.
     """
-    global _active, _polish, _style, _default_font, _watching
+    global _active, _style, _default_font, _watching
     key = style_key(theme)
     if key is None:
         return False
@@ -490,21 +1007,12 @@ def apply(app, theme, style_class=RowStyle):
         _default_font = app.font()
     _active = theme == THEME_TVHPLAYER
     if _active:
-        if _polish is None:
-            _polish = _ThemePolish(app)
-            app.installEventFilter(_polish)
-            # Widgets already shown were polished before the filter was there.
-            for widget in app.allWidgets():
-                _polish.polish(widget)
         app.setFont(_load_fonts() or _default_font)
     else:
-        _remove_polish(app)
-        # Qt keeps the style sheet and the palette set by the app across a style
-        # change, so the TVHplayer theme's are taken off; QPalette() is the style's own.
-        app.setStyleSheet('')
+        # Qt keeps the palette set by the app across a style change, so the
+        # TVHplayer theme's is taken off; QPalette() is the style's own.
         app.setPalette(QPalette())
         app.setFont(_default_font)
-        _restore_grids(app)
     _style = lambda: style_class(key)
     app.setStyle(_style())
     app.setProperty('tvhplayer_theme', theme)
@@ -512,7 +1020,4 @@ def apply(app, theme, style_class=RowStyle):
     if not _watching:
         _watching = True
         desktop.watch(app, lambda: _follow_desktop(app))
-        # Off before PyQt's exit cleanup: events from the objects it deletes would
-        # run Python in the filter while it walks the objects it still has to delete.
-        app.aboutToQuit.connect(lambda: _remove_polish(app))
     return True
