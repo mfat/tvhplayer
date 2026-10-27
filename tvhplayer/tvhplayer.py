@@ -3955,7 +3955,7 @@ class TVHeadendClient(QMainWindow):
 
         # Create status message label
         self.status_label = QLabel("Ready")
-        describe(self.status_label, "Ready", "Application status")
+        describe(self.status_label, description="Application status")
         
         # Add widgets to horizontal layout
         status_layout.addWidget(self.recording_indicator)

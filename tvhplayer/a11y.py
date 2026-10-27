@@ -2,9 +2,10 @@
 
 Qt exposes widgets to Orca, Narrator, and VoiceOver through accessible names
 and descriptions. Icon-only controls need an explicit name. Status changes
-are announced by updating that name, which emits the platform name-change
-event. PyQt 6.11 does not wrap QAccessibleAnnouncementEvent, so this name
-change is the supported way to notify assistive technology.
+are announced through the platform name-change event. PyQt6 does not wrap
+QAccessible or QAccessibleAnnouncementEvent, so that event is the way left
+to notify assistive technology. A QLabel sends it on each new text while it
+has no accessible name; other widgets send it when their name is set.
 """
 
 from PyQt6.QtGui import QColor, QKeySequence
@@ -125,9 +126,17 @@ def announce(widget, message):
 
 
 def announce_label(label, message):
-    """Show a message and expose the same text to assistive technology."""
+    """Show a message and expose the same text to assistive technology.
+
+    The label reports the change itself, with its text as its name. A name set
+    on it would replace the text and stop those reports, so the old message
+    would stay with screen readers after the label is cleared.
+    """
+    label.setAccessibleName("")
+    if message and label.text() == message:
+        # The same message again is announced again.
+        label.setText("")
     label.setText(message)
-    announce(label, message)
 
 
 def set_item_access(item, name, description=""):

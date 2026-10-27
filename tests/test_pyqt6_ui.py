@@ -1106,7 +1106,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         window.statusbar.showMessage("Playing: News")
         window.statusbar.showMessage("Playing: News")
         assert window.status_label.text() == "Playing: News"
-        assert window.status_label.accessibleName() == "Playing: News"
+        # Read from its text: a name of its own would stop the label reporting changes.
+        assert window.status_label.accessibleName() == ""
 
         window.video_frame.setFocus()
         app.processEvents()
@@ -1116,7 +1117,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert fake_player.audio_get_mute()
         assert window.mute_btn.isChecked() is True
         assert window.mute_btn.accessibleName() == "Unmute"
-        assert window.status_label.accessibleName() == "Muted"
+        assert window.status_label.text() == "Muted"
 
         window.channel_list.setFocus()
         app.processEvents()
