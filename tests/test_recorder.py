@@ -1,3 +1,4 @@
+import io
 import os
 import subprocess
 import threading
@@ -70,6 +71,8 @@ class _FakeProcess:
         self.returncode = None
         self.terminated = False
         self.killed = False
+        self.quits_on_q = True
+        self.stdin = self
 
     def poll(self):
         return self.returncode
@@ -81,6 +84,18 @@ class _FakeProcess:
     def kill(self):
         self.killed = True
         self.returncode = -9
+
+    # stdin, for the Windows stop: ffmpeg quits on 'q'.
+    def write(self, data):
+        self.typed = getattr(self, 'typed', b'') + data
+        if b'q' in data and self.quits_on_q:
+            self.returncode = 0
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
 
     def wait(self, timeout=None):
         if self.returncode is None:
@@ -177,3 +192,34 @@ def test_free_path_never_reuses_a_recording_name(tmp_path):
     second = str(tmp_path / 'recording_News_20260101_120000_2.ts')
     assert free_path(path) == second
     assert free_path(path, {second}) == str(tmp_path / 'recording_News_20260101_120000_3.ts')
+
+
+def test_windows_stop_lets_ffmpeg_finish_the_file(monkeypatch, tmp_path):
+    # Windows has no SIGTERM: terminate() kills ffmpeg before it writes an MP4's index.
+    process = _FakeProcess(io.BytesIO())
+    seen = {}
+
+    def fake_popen(cmd, **kwargs):
+        seen.update(kwargs)
+        return process
+
+    monkeypatch.setattr('tvhplayer.core.recorder.subprocess.Popen', fake_popen)
+    recorder = LocalRecorder()
+    recorder.stops_with_q = True
+    recorder.start('http://127.0.0.1:9981/stream/channel/abc', tmp_path / 'a.mp4')
+    assert seen['stdin'] == subprocess.PIPE
+    recorder.stop()
+    assert process.typed == b'q'
+    assert process.terminated is False and process.killed is False
+
+
+def test_windows_stop_kills_an_ffmpeg_that_does_not_quit(monkeypatch, tmp_path):
+    process = _FakeProcess(io.BytesIO())
+    process.quits_on_q = False
+    monkeypatch.setattr('tvhplayer.core.recorder.subprocess.Popen', lambda cmd, **kwargs: process)
+    recorder = LocalRecorder()
+    recorder.stops_with_q = True
+    recorder.start('http://127.0.0.1:9981/stream/channel/abc', tmp_path / 'a.mp4')
+    recorder.stop(timeout=0)
+    assert process.typed == b'q'
+    assert process.terminated is True

@@ -7,12 +7,14 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
 from typing import List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .processes import no_window_flags
 from .proxy import child_env
 
 log = logging.getLogger(__name__)
@@ -129,6 +131,10 @@ def redact_command(cmd: List[str]) -> str:
 
 
 class LocalRecorder:
+    # Windows has no SIGTERM: terminate() kills ffmpeg before it writes the end
+    # of the file, which an MP4 needs. There ffmpeg is asked to quit with 'q'.
+    stops_with_q = sys.platform == 'win32'
+
     def __init__(self, ffmpeg_executable='ffmpeg'):
         self.ffmpeg_executable = ffmpeg_executable
         self.process = None
@@ -154,10 +160,11 @@ class LocalRecorder:
         # and a full pipe blocks ffmpeg so SIGTERM never reaches the trailer.
         self.process = subprocess.Popen(
             cmd,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if self.stops_with_q else subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             env=child_env(stream_url),
+            creationflags=no_window_flags(),
         )
         self.file_path = str(file_path)
         self.started_at = time.time()
@@ -204,6 +211,14 @@ class LocalRecorder:
         self._stderr_thread = None
         if process is None:
             return
+        if process.poll() is None and self.stops_with_q and process.stdin is not None:
+            try:
+                process.stdin.write(b'q')
+                process.stdin.flush()
+                process.stdin.close()
+                process.wait(timeout=timeout)
+            except (OSError, ValueError, subprocess.TimeoutExpired):
+                pass
         if process.poll() is None:
             process.terminate()
             try:

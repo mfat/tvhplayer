@@ -15,6 +15,7 @@ import threading
 from fractions import Fraction
 from typing import List, Optional
 
+from .processes import no_window_flags
 from .recorder import parse_ffmpeg_options
 
 log = logging.getLogger(__name__)
@@ -53,7 +54,10 @@ def probe(path, ffprobe='ffprobe'):
         str(path),
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+            creationflags=no_window_flags(),
+        )
         data = json.loads(result.stdout or '{}')
     except (OSError, subprocess.TimeoutExpired, ValueError):
         log.debug('ffprobe failed for %s', path, exc_info=True)
@@ -131,6 +135,7 @@ def available_encoders(ffmpeg='ffmpeg'):
             result = subprocess.run(
                 [ffmpeg, '-hide_banner', '-encoders'],
                 capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL,
+                creationflags=no_window_flags(),
             )
             started = False
             for line in result.stdout.splitlines():
@@ -249,6 +254,7 @@ class Conversion:
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    creationflags=no_window_flags(),
                 )
         except OSError as exc:
             return None, str(exc)
