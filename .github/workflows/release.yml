@@ -2,7 +2,7 @@ name: Release
 
 # Actions → Release → Run workflow. Bumps the version on main, tags it, and
 # creates the GitHub release. The tag push builds the deb, rpm and AppImage
-# (packages.yml) and the Windows and macOS binaries (build.yml); this workflow
+# (packages.yml) and the Windows and macOS builds (build-windows.yml, build-macos.yml); this workflow
 # then opens the Flathub pull request (flathub.yml).
 on:
   workflow_dispatch:

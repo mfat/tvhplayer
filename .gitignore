@@ -29,3 +29,7 @@ __pycache__/
 
 # AppImage build work
 /build/appimage/
+
+# Windows build work
+/windows/build/
+/windows/dist/
