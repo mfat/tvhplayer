@@ -732,6 +732,9 @@ class TasksPanel(QFrame):
         # answer from a server only fills this: its recordings are not new.
         self._known_keys = set()
         self._server_seen = False
+        # The first answer from the server after startup opens the pane when a
+        # recording is running or scheduled.
+        self._startup_checked = False
         self._error_text = ""
         self._table_description = None
         self.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)
@@ -1046,6 +1049,10 @@ class TasksPanel(QFrame):
             return
         if error is None:
             self._apply_server_entries(entries)
+            if not self._startup_checked:
+                self._startup_checked = True
+                if any(task['bucket'] in ('recording', 'scheduled') for task in self._server_tasks):
+                    self.task_added.emit()
         else:
             print(f"Debug: Error refreshing tasks: {error}")
             self._set_error("Couldn't refresh server recordings")
