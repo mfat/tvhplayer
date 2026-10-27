@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Downloading TVHplayer</title>
+</head>
+<body>
+  <p id="status">Finding the latest TVHplayer download…</p>
+  <script>
+    const formats = {
+      'appimage-x86_64': /-x86_64\.AppImage$/,
+      'deb-amd64': /-ubuntu[^/]*-amd64\.deb$/,
+      'deb-arm64': /-ubuntu[^/]*-arm64\.deb$/,
+      'rpm-x86_64': /-fedora\d+-x86_64\.rpm$/,
+      'rpm-aarch64': /-fedora\d+-aarch64\.rpm$/,
+      'macos-arm64': /-macos-arm64\.dmg$/,
+      'macos-x86_64': /-macos-x86_64\.dmg$/,
+      'windows-setup': /-windows-x86_64-setup\.exe$/,
+      'windows-zip': /-windows-x86_64\.zip$/,
+    };
+    const status = document.getElementById('status');
+    const format = new URLSearchParams(location.search).get('format');
+    const pattern = formats[format];
+
+    if (!pattern) {
+      status.textContent = 'Unknown download format.';
+    } else {
+      fetch('https://api.github.com/repos/mfat/tvhplayer/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+      })
+        .then(response => {
+          if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+          return response.json();
+        })
+        .then(release => {
+          const asset = release.assets.find(candidate => pattern.test(candidate.name));
+          if (!asset) throw new Error('No matching file was published');
+          status.textContent = `Downloading ${asset.name}…`;
+          location.replace(asset.browser_download_url);
+        })
+        .catch(error => {
+          status.textContent = `The download could not be started: ${error.message}. `;
+          const link = document.createElement('a');
+          link.href = 'https://github.com/mfat/tvhplayer/releases/latest';
+          link.textContent = 'Open the latest release';
+          status.append(link, '.');
+        });
+    }
+  </script>
+</body>
+</html>

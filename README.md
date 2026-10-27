@@ -42,11 +42,14 @@ A desktop app for watching and recording live TV, with its own built-in Tvheaden
 - Keyboard shortcuts for everything (F1 lists them) and screen reader support
 
 ## Download
-- **Flatpak** from [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer)
-- **deb** (Debian, Ubuntu) and **rpm** (Fedora) packages for x86_64 and arm64 from [Releases](https://github.com/mfat/tvhplayer/releases)
-- **macOS and Windows** builds from [Releases](https://github.com/mfat/tvhplayer/releases). These connect to an existing Tvheadend server; the built-in server is part of the Linux packages only.
+- **Flatpak:** [download](https://dl.flathub.org/repo/appstream/io.github.mfat.tvhplayer.flatpakref) · [Flathub page](https://flathub.org/apps/io.github.mfat.tvhplayer)
+- **AppImage:** [x86_64](https://mfat.github.io/tvhplayer/download.html?format=appimage-x86_64)
+- **deb** (Debian, Ubuntu): [x86_64](https://mfat.github.io/tvhplayer/download.html?format=deb-amd64) · [arm64](https://mfat.github.io/tvhplayer/download.html?format=deb-arm64)
+- **rpm** (Fedora): [x86_64](https://mfat.github.io/tvhplayer/download.html?format=rpm-x86_64) · [arm64](https://mfat.github.io/tvhplayer/download.html?format=rpm-aarch64)
+- **macOS:** [Apple silicon](https://mfat.github.io/tvhplayer/download.html?format=macos-arm64) · [Intel](https://mfat.github.io/tvhplayer/download.html?format=macos-x86_64)
+- **Windows:** [installer](https://mfat.github.io/tvhplayer/download.html?format=windows-setup) · [portable zip](https://mfat.github.io/tvhplayer/download.html?format=windows-zip)
 
-The Flatpak, deb and rpm include the built-in server, VLC, mpv and ffmpeg, or pull them in as dependencies.
+The download links automatically get the latest version. The Flatpak, AppImage, deb and rpm include the built-in server, VLC, mpv and ffmpeg, or pull them in as dependencies. The macOS and Windows builds connect to an existing Tvheadend server; the built-in server is part of the Linux packages only. You can also [browse all releases](https://github.com/mfat/tvhplayer/releases).
 
 ## Getting started
 - **Built-in server**: on first start with no channels, TVHplayer opens **Set Up Channels**. Choose a TV tuner or an IPTV playlist and follow the steps.
