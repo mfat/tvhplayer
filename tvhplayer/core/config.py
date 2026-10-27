@@ -87,7 +87,7 @@ def default_config():
         # TVHplayer's own look, or the name of a Qt style. Read before the window is built.
         'ui_theme': THEME_TVHPLAYER,
         'color_scheme': SCHEME_SYSTEM,
-        # On GNOME on Wayland, the app's own title bar instead of Qt's. Read before the window is built.
+        # On GNOME and KDE, the app's own title bar instead of the desktop's. Read before the window is built.
         'own_title_bar': False,
         # Minutes the built-in server starts recordings early and ends them late.
         'builtin_padding_early': 2,

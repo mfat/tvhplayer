@@ -1,17 +1,21 @@
-"""TVHplayer's own title bar and window frame, for GNOME on Wayland.
+"""TVHplayer's own title bar and window frame, for GNOME and KDE.
 
 GNOME leaves the title bar of a Wayland window to the app, and Qt's stand-in
-is pale and has no shadow, so on a white page the window has no edge. There
-the main window drops the system frame and draws its own: a title bar that
-holds the menus, the title and the window buttons, a shadow, and an outline.
-Moving and resizing are handed to the compositor, which is the only way a
-Wayland window can be moved and keeps GNOME's snapping. Elsewhere the desktop
-draws the title bar and nothing here is used.
+is pale and has no shadow, so on a white page the window has no edge. There,
+and on KDE by choice, the main window drops the system frame and draws its
+own: a title bar that holds the menus, the title and the window buttons, a
+shadow, and an outline. Moving and resizing are handed to the window manager,
+which is the only way a Wayland window can be moved and keeps its snapping.
+The shadow needs a compositor, so on X11 the frame is used only while one
+runs. Elsewhere the desktop draws the title bar and nothing here is used.
 """
 
 from __future__ import annotations
 
+import ctypes
 import os
+from configparser import ConfigParser
+from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QMargins, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPalette, QPen, QPixmap
@@ -36,13 +40,47 @@ BUTTONS = ('minimize', 'maximize', 'close')
 TITLE_BAR_HEIGHT = 47
 
 
-def wants_own_title_bar(platform_name, environ=None) -> bool:
-    """True where the app must draw its window's title bar: GNOME on Wayland."""
+def _desktops(environ):
+    return environ.get('XDG_CURRENT_DESKTOP', '').lower().split(':')
+
+
+def wants_own_title_bar(platform_name, environ=None, compositing=None) -> bool:
+    """True where the app can draw its window's title bar: GNOME and KDE on
+    Wayland, and KDE on X11 while a compositor shows the shadow."""
     environ = os.environ if environ is None else environ
-    if not platform_name.startswith('wayland'):
+    desktops = _desktops(environ)
+    if platform_name.startswith('wayland'):
+        return 'gnome' in desktops or 'kde' in desktops
+    if platform_name == 'xcb' and 'kde' in desktops:
+        # Under XWayland the Wayland compositor shows every window.
+        if environ.get('WAYLAND_DISPLAY'):
+            return True
+        return x11_compositing() if compositing is None else compositing
+    return False
+
+
+def x11_compositing() -> bool:
+    """True while an X11 compositor runs: it owns the _NET_WM_CM_S<screen> selection."""
+    try:
+        xlib = ctypes.CDLL('libX11.so.6')
+    except OSError:
         return False
-    desktops = environ.get('XDG_CURRENT_DESKTOP', '').lower().split(':')
-    return 'gnome' in desktops
+    xlib.XOpenDisplay.restype = ctypes.c_void_p
+    xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    xlib.XDefaultScreen.argtypes = [ctypes.c_void_p]
+    xlib.XInternAtom.restype = ctypes.c_ulong
+    xlib.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    xlib.XGetSelectionOwner.restype = ctypes.c_ulong
+    xlib.XGetSelectionOwner.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    xlib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    display = xlib.XOpenDisplay(None)
+    if not display:
+        return False
+    try:
+        atom = xlib.XInternAtom(display, f'_NET_WM_CM_S{xlib.XDefaultScreen(display)}'.encode(), 0)
+        return bool(xlib.XGetSelectionOwner(display, atom))
+    finally:
+        xlib.XCloseDisplay(display)
 
 
 def parse_button_layout(layout):
@@ -55,6 +93,40 @@ def parse_button_layout(layout):
         return [name for name in names if name in BUTTONS]
 
     return buttons(left), buttons(right)
+
+
+# KWin's button letters: I minimize, A maximize, X close. The others are left out.
+KWIN_BUTTONS = {'I': 'minimize', 'A': 'maximize', 'X': 'close'}
+
+
+def kwin_button_layout(left='MS', right='HIAX'):
+    """KWin's ButtonsOnLeft and ButtonsOnRight, given in its letters, as a GNOME-style layout."""
+
+    def names(letters):
+        return ','.join(KWIN_BUTTONS[letter] for letter in letters if letter in KWIN_BUTTONS)
+
+    return f'{names(left)}:{names(right)}'
+
+
+def kde_button_layout(environ=None):
+    """The window buttons as KWin places them, from kwinrc, or KWin's default."""
+    environ = os.environ if environ is None else environ
+    config_home = environ.get('XDG_CONFIG_HOME') or str(Path.home() / '.config')
+    parser = ConfigParser(interpolation=None, strict=False)
+    parser.optionxform = str
+    try:
+        parser.read(Path(config_home) / 'kwinrc', encoding='utf-8')
+    except Exception:
+        return kwin_button_layout()
+    section = parser['org.kde.kdecoration2'] if parser.has_section('org.kde.kdecoration2') else {}
+    return kwin_button_layout(section.get('ButtonsOnLeft', 'MS'), section.get('ButtonsOnRight', 'HIAX'))
+
+
+def desktop_button_layout(environ=None):
+    environ = os.environ if environ is None else environ
+    if 'kde' in _desktops(environ):
+        return kde_button_layout(environ)
+    return portal_button_layout()
 
 
 def portal_button_layout():
@@ -345,7 +417,7 @@ class WindowFrame(QObject):
         window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.title_bar = TitleBar(
-            window, menubar, portal_button_layout() if button_layout is None else button_layout
+            window, menubar, desktop_button_layout() if button_layout is None else button_layout
         )
         window.setMenuWidget(self.title_bar)
         self.grips = [_ResizeGrip(self) for _ in range(4)]

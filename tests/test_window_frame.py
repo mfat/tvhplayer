@@ -7,20 +7,42 @@ from tvhplayer.window_frame import (
     WindowFrame,
     cursor_for,
     edges_at,
+    kde_button_layout,
+    kwin_button_layout,
     parse_button_layout,
     wants_own_title_bar,
 )
 
 GNOME = {'XDG_CURRENT_DESKTOP': 'ubuntu:GNOME'}
+KDE = {'XDG_CURRENT_DESKTOP': 'KDE'}
 
 
-def test_only_gnome_on_wayland_gets_the_apps_title_bar():
+def test_gnome_and_kde_can_have_the_apps_title_bar():
     assert wants_own_title_bar('wayland', GNOME)
     assert wants_own_title_bar('wayland', {'XDG_CURRENT_DESKTOP': 'GNOME'})
-    # GNOME draws the title bar of X11 windows; KDE and others draw it on Wayland too.
+    assert wants_own_title_bar('wayland', KDE)
+    # GNOME draws the title bar of X11 windows, and other desktops keep theirs.
     assert not wants_own_title_bar('xcb', GNOME)
-    assert not wants_own_title_bar('wayland', {'XDG_CURRENT_DESKTOP': 'KDE'})
+    assert not wants_own_title_bar('wayland', {'XDG_CURRENT_DESKTOP': 'XFCE'})
     assert not wants_own_title_bar('wayland', {})
+    assert not wants_own_title_bar('cocoa', KDE)
+
+
+def test_kde_on_x11_needs_a_compositor_for_the_shadow():
+    assert wants_own_title_bar('xcb', KDE, compositing=True)
+    assert not wants_own_title_bar('xcb', KDE, compositing=False)
+    # Under XWayland, as with VLC in a Wayland session, the compositor is always there.
+    assert wants_own_title_bar('xcb', {**KDE, 'WAYLAND_DISPLAY': 'wayland-0'}, compositing=False)
+
+
+def test_kwin_button_order_is_followed(tmp_path):
+    assert kwin_button_layout() == ':minimize,maximize,close'
+    assert parse_button_layout(kwin_button_layout('XAI', 'M')) == (['close', 'maximize', 'minimize'], [])
+    (tmp_path / 'kwinrc').write_text(
+        '[org.kde.kdecoration2]\nButtonsOnLeft=X\nButtonsOnRight=IA\n', encoding='utf-8'
+    )
+    assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path)}) == 'close:minimize,maximize'
+    assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path / 'none')}) == ':minimize,maximize,close'
 
 
 def test_button_layout_keeps_the_window_buttons_on_their_sides():
