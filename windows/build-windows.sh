@@ -28,6 +28,13 @@ echo "$MPV_DEV_SHA256  $archive" | sha256sum -c --quiet -
 7z e -y -o"$WORK" "$archive" libmpv-2.dll >/dev/null
 test -f "$WORK/libmpv-2.dll"
 
+echo "==> Vulkan loader $VULKAN_RT_VERSION"
+vulkan="$WORK/vulkan-runtime.zip"
+curl --fail --silent --show-error --location --retry 3 -o "$vulkan" "$VULKAN_RT_URL"
+echo "$VULKAN_RT_SHA256  $vulkan" | sha256sum -c --quiet -
+7z e -y -o"$WORK/vulkan" "$vulkan" "*/x64/vulkan-1.dll" "*/VulkanRT-License.txt" >/dev/null
+test -f "$WORK/vulkan/vulkan-1.dll"
+
 echo "==> Python packages"
 "$PYTHON" -m pip install --quiet -r "$HERE/requirements-build.txt"
 
@@ -40,6 +47,8 @@ echo "==> PyInstaller"
   --collect-submodules core \
   --hidden-import resources_rc \
   --add-binary "$WORK/libmpv-2.dll;." \
+  --add-binary "$WORK/vulkan/vulkan-1.dll;." \
+  --add-data "$WORK/vulkan/VulkanRT-License.txt;licenses" \
   --add-data "$ROOT/icons;icons" \
   --distpath "$WORK/dist" \
   --workpath "$WORK/pyinstaller" \
@@ -49,6 +58,7 @@ echo "==> PyInstaller"
 app="$WORK/dist/TVHplayer"
 test -f "$app/TVHplayer.exe"
 test -f "$app/_internal/libmpv-2.dll"
+test -f "$app/_internal/vulkan-1.dll"
 
 echo "==> Zip"
 zip="$DIST/tvhplayer-$VERSION-windows-x86_64.zip"
