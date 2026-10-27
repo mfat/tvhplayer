@@ -83,12 +83,12 @@ jobs:
           codesign --verify --deep --verbose=2 "$APP"
           bash macos/package-dmg.sh
 
-      # Uninstall Homebrew's mpv first, so the app can only use the libmpv inside it.
+      # Uninstall Homebrew's mpv and ffmpeg first, so the app can only use its own.
       - name: Start the app
         shell: bash
         run: |
           set -u
-          brew uninstall --ignore-dependencies mpv >/dev/null
+          brew uninstall --ignore-dependencies mpv ffmpeg >/dev/null
           LOG="$HOME/Library/Logs/TVHplayer/app.log"
           QT_QPA_PLATFORM=offscreen 'macos/dist/${{ matrix.app }}.app/Contents/MacOS/${{ matrix.app }}' &
           pid=$!
@@ -101,6 +101,7 @@ jobs:
           grep -q 'Playback engine: mpv' "$LOG" || { echo 'mpv was not chosen'; exit 1; }
           grep -q 'Media player created successfully' "$LOG" || { echo 'mpv did not start'; exit 1; }
           ! grep -q 'Error starting application' "$LOG" || { echo 'The app reported a startup error'; exit 1; }
+          'macos/dist/${{ matrix.app }}.app/Contents/Frameworks/ffmpeg' -hide_banner -version | head -n 1
 
       - name: Name release files
         run: |

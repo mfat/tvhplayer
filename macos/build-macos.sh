@@ -2,8 +2,9 @@
 # Build TVHplayer for macOS (Intel or Apple Silicon, whichever this Mac is).
 # Also used by .github/workflows/build-macos.yml.
 #
-# Plays with mpv: Homebrew's libmpv (brew install mpv) goes into the app with
-# every library it needs, so the app runs on Macs without Homebrew. Homebrew's
+# Plays with mpv: Homebrew's libmpv (brew install mpv), and its ffmpeg and
+# ffprobe for recording, go into the app with every library they need, so the
+# app runs on Macs without Homebrew. Homebrew's
 # libraries are built for the macOS version they were installed on, which is
 # therefore the oldest macOS the app runs on.
 set -euo pipefail
@@ -36,7 +37,17 @@ if [[ ! -f "$LIBMPV" ]]; then
   exit 1
 fi
 
-"$PYTHON" -c 'import PyInstaller, PyQt6, mpv, requests'
+BREW_FFMPEG="$(brew --prefix ffmpeg 2>/dev/null || true)"
+for program in ffmpeg ffprobe; do
+  if [[ ! -x "$BREW_FFMPEG/bin/$program" ]]; then
+    echo "ERROR: $program not found. Install it with: brew install ffmpeg" >&2
+    exit 1
+  fi
+done
+
+# python-mpv searches only the default library paths, and Apple Silicon's
+# Homebrew lives in /opt/homebrew.
+DYLD_FALLBACK_LIBRARY_PATH="$BREW_MPV/lib" "$PYTHON" -c 'import PyInstaller, PyQt6, mpv, requests'
 
 printf 'Building %s for %s (Python: %s, libmpv: %s)\n' \
   "$APP_NAME" "$ARCH" "$("$PYTHON" --version 2>&1)" "$(brew list --versions mpv)"
@@ -52,6 +63,8 @@ printf 'Building %s for %s (Python: %s, libmpv: %s)\n' \
   --collect-submodules core \
   --hidden-import resources_rc \
   --add-binary "$LIBMPV:." \
+  --add-binary "$BREW_FFMPEG/bin/ffmpeg:." \
+  --add-binary "$BREW_FFMPEG/bin/ffprobe:." \
   --add-data "$ROOT/icons:icons" \
   --distpath "$MACOS_DIR/dist" \
   --workpath "$MACOS_DIR/build" \
@@ -59,8 +72,9 @@ printf 'Building %s for %s (Python: %s, libmpv: %s)\n' \
   "$ROOT/tvhplayer/tvhplayer.py"
 
 BUNDLE="$MACOS_DIR/dist/$APP_NAME.app"
-if [[ ! -x "$BUNDLE/Contents/MacOS/$APP_NAME" || ! -f "$BUNDLE/Contents/Frameworks/libmpv.2.dylib" ]]; then
-  echo 'ERROR: Incomplete bundle: the program or libmpv is missing.' >&2
+if [[ ! -x "$BUNDLE/Contents/MacOS/$APP_NAME" || ! -f "$BUNDLE/Contents/Frameworks/libmpv.2.dylib" ||
+      ! -x "$BUNDLE/Contents/Frameworks/ffmpeg" || ! -x "$BUNDLE/Contents/Frameworks/ffprobe" ]]; then
+  echo 'ERROR: Incomplete bundle: the program, libmpv, ffmpeg or ffprobe is missing.' >&2
   exit 1
 fi
 

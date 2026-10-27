@@ -1,6 +1,6 @@
 # Building TVHplayer for macOS
 
-The build makes an app for the Mac it runs on: **Intel (x86_64)** or **Apple Silicon (arm64)**. It uses Python **3.15.0**, PyInstaller **6.22.3**, and **mpv** from Homebrew. libmpv and every library it needs go inside the app, so the finished app runs on Macs without Homebrew.
+The build makes an app for the Mac it runs on: **Intel (x86_64)** or **Apple Silicon (arm64)**. It uses Python **3.15.0**, PyInstaller **6.22.3**, and **mpv** and **ffmpeg** from Homebrew. libmpv, ffmpeg, ffprobe and every library they need go inside the app, so the finished app runs on Macs without Homebrew.
 
 Homebrew's libraries are built for the macOS version they were installed on. That version is the oldest macOS the app runs on.
 
