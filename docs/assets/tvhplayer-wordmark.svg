@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 298 84" role="img" aria-labelledby="title description">
+  <title id="title">TVHplayer</title>
+  <desc id="description">TVH in white followed by player in blue.</desc>
+  <text
+    x="4"
+    y="64"
+    fill="#ffffff"
+    font-family="Inter, 'Segoe UI', Arial, sans-serif"
+    font-size="64"
+    font-weight="800"
+    letter-spacing="-2.4"
+  >TVH<tspan fill="#62a9f5" font-weight="450">player</tspan></text>
+</svg>
