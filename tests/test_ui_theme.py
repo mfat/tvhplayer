@@ -2,7 +2,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 
-def _apply(monkeypatch, answers, theme, mode='system'):
+def _apply(monkeypatch, answers, theme, mode='system', palettes=None):
     """Apply ``theme`` with the desktop's answers in turn; return the desktop's callback and what was applied."""
     from tvhplayer import ui_theme
 
@@ -23,7 +23,7 @@ def _apply(monkeypatch, answers, theme, mode='system'):
                         ('_default_font', None), ('_mode', mode)):
         monkeypatch.setattr(ui_theme, name, value)
     monkeypatch.setattr(app, 'setProperty', lambda *_args: True)
-    monkeypatch.setattr(app, 'setPalette', lambda _palette: None)
+    monkeypatch.setattr(app, 'setPalette', (palettes if palettes is not None else []).append)
     assert ui_theme.apply(app, theme)
     return (callbacks[0] if callbacks else None), applied, pinned, styles
 
@@ -42,10 +42,19 @@ def test_tvhplayer_theme_follows_the_desktop_between_light_and_dark(monkeypatch)
     assert pinned == [dark, light]
 
 
-def test_a_qt_style_follows_the_desktop_without_the_tvhplayer_colors(monkeypatch):
-    changed, applied, pinned, styles = _apply(monkeypatch, [Qt.ColorScheme.Dark], 'Fusion')
+def test_a_qt_style_paints_the_tvhplayer_colors_in_every_role(monkeypatch):
+    from PyQt6.QtGui import QPalette
+    from tvhplayer import ui_theme
+
+    palettes = []
+    changed, applied, pinned, styles = _apply(monkeypatch, [Qt.ColorScheme.Dark], 'Fusion', palettes=palettes)
     assert applied == []
     assert pinned == [Qt.ColorScheme.Dark]
+    # Not the desktop's palette, which on GNOME has a white Mid for grid lines and borders.
+    for group in ui_theme.ALL:
+        assert palettes[-1].color(group, QPalette.ColorRole.Window) == ui_theme._qcolor(ui_theme.DARK['window'])
+        assert palettes[-1].color(group, QPalette.ColorRole.Mid) == ui_theme._qcolor(ui_theme.DARK['list_edge'])
+        assert palettes[-1].color(group, QPalette.ColorRole.Shadow) == ui_theme._qcolor(ui_theme.DARK['list_edge'])
 
 
 def test_a_theme_change_while_running_takes_the_tvhplayer_look_off_and_back(monkeypatch):

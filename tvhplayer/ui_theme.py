@@ -4,10 +4,11 @@ The TVHplayer theme is a style over Fusion that draws the app's own look from
 a light or a dark set of colors, with a palette made from the same colors.
 Qt keeps style sheets for small, local changes and does not support them over
 a style of the app's own, so the look is drawn, not written as a style sheet.
-Any other theme is a Qt style used as it is. Every theme is light or dark as
-the desktop is set, following it while the app runs, unless set to always
-light or always dark. Both can be changed while the app runs. Under high
-contrast the system look stays in charge.
+Any other theme is a Qt style, which paints the same colors through a palette
+of every role, as Jottr's Classic look does, rather than the desktop's. Every
+theme is light or dark as the desktop is set, following it while the app
+runs, unless set to always light or always dark. Both can be changed while the
+app runs. Under high contrast the system look stays in charge.
 """
 
 from __future__ import annotations
@@ -926,48 +927,45 @@ def _apply_colors(app, dark):
         widget.update()
 
 
-BEVELS = (QPalette.ColorRole.Light, QPalette.ColorRole.Midlight, QPalette.ColorRole.Mid,
-          QPalette.ColorRole.Dark, QPalette.ColorRole.Shadow)
+def _style_palette(c):
+    """The palette a Qt style paints from: every role, in every state, from the TVHplayer colors.
 
-
-def _mend_desktop_palette(app):
-    """Give a Qt style the desktop's palette, with shades between light and dark that show.
-
-    Qt's GNOME palette gives Mid as white in light mode, so table grid lines
-    and borders drawn in it vanish on a white page. There the shades are
-    worked out from the button color, as Qt does for a palette made from one.
+    A style left with the desktop's palette paints it only in part: on GNOME
+    Breeze and Oxygen got light or dark fills with the wrong shades, and the
+    shade grid lines and borders are drawn in was white.
     """
-    if _active:
-        return
-    app.setPalette(QPalette())
-    desktop_palette = app.palette()
-    button = desktop_palette.color(QPalette.ColorRole.Button)
-    if desktop_palette.color(QPalette.ColorRole.Mid).lightness() < button.lightness():
-        return
-    derived = QPalette(button, desktop_palette.color(QPalette.ColorRole.Window))
-    mended = QPalette()
-    for group in ALL:
-        for role in BEVELS:
-            mended.setColor(group, role, derived.color(group, role))
-    app.setPalette(mended)
+    pal = _palette(c)
+    roles = {
+        QPalette.ColorRole.BrightText: c['accent'],
+        QPalette.ColorRole.LinkVisited: c['link'],
+        QPalette.ColorRole.Light: c['base'],
+        QPalette.ColorRole.Midlight: c['alt'],
+        QPalette.ColorRole.Mid: c['list_edge'],
+        QPalette.ColorRole.Dark: c['muted'],
+        QPalette.ColorRole.Shadow: c['list_edge'],
+    }
+    # Qt 6.6 and later.
+    if hasattr(QPalette.ColorRole, 'Accent'):
+        roles[QPalette.ColorRole.Accent] = c['accent']
+    for role, value in roles.items():
+        pal.setColor(role, _qcolor(value))
+    return pal
 
 
 def _follow_desktop(app, force=False):
     """Light or dark as the desktop is, or as set; ``force`` applies it again after a change.
 
-    Qt is told the scheme too, which reaches Qt styles and the title bar Qt
-    draws on GNOME. With the TVHplayer theme its colors follow as well.
+    Qt is told the scheme too, which reaches the title bar Qt draws on GNOME.
+    The TVHplayer colors follow, drawn by the TVHplayer theme or given to a
+    Qt style as its palette.
     """
-    global _scheme
+    global _scheme, colors
     if _mode == SCHEME_DARK:
         scheme = desktop.ColorScheme.Dark
     elif _mode == SCHEME_LIGHT:
         scheme = desktop.ColorScheme.Light
     else:
         scheme = desktop.system_color_scheme(app)
-    # Qt and the portal both report a change, in either order; after the
-    # second, Qt has the desktop's new palette.
-    QTimer.singleShot(0, lambda: _mend_desktop_palette(app))
     # Unknown after the first answer is the app's own pin read back: no change.
     if scheme == desktop.ColorScheme.Unknown and _scheme is not None:
         scheme = _scheme
@@ -982,9 +980,11 @@ def _follow_desktop(app, force=False):
     # KDE's styles read their scheme only when made, so the style is made again.
     if _kde_color_scheme(app, scheme) and not _active and _style is not None:
         app.setStyle(_style())
-    _mend_desktop_palette(app)
     if _active:
         _apply_colors(app, scheme == desktop.ColorScheme.Dark)
+    else:
+        colors = DARK if scheme == desktop.ColorScheme.Dark else LIGHT
+        app.setPalette(_style_palette(colors))
 
 
 def _kde_color_scheme(app, scheme):
@@ -1039,9 +1039,7 @@ def apply(app, theme, style_class=ThemeStyle):
     if _active:
         app.setFont(_load_fonts() or _default_font)
     else:
-        # Qt keeps the palette set by the app across a style change, so the
-        # TVHplayer theme's is taken off; QPalette() is the style's own.
-        app.setPalette(QPalette())
+        # The style's palette is set by _follow_desktop() below.
         app.setFont(_default_font)
     _style = lambda: style_class(key)
     app.setStyle(_style())
