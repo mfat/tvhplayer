@@ -83,3 +83,10 @@ def test_every_setting_has_a_default_and_bad_values_are_replaced(tmp_path):
     assert data['last_channel'] == {}
     assert data['hide_dead_channels'] is False
     assert default_config()['hide_dead_channels'] is True
+
+
+def test_light_or_dark_choice_is_kept_and_unknown_values_follow_the_system(tmp_path):
+    path = tmp_path / 'config.json'
+    for saved, loaded in (('dark', 'dark'), ('light', 'light'), ('purple', 'system'), (None, 'system')):
+        path.write_text(json.dumps({'color_scheme': saved}), encoding='utf-8')
+        assert ConfigStore(path).data['color_scheme'] == loaded

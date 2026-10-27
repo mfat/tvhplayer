@@ -65,7 +65,7 @@ try:
     from .builtin_supervisor import BuiltinSupervisor
     from . import cursor_debug
     from .file_manager import show_in_file_manager
-    from .ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, style_key
+    from .ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
     from .player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -152,7 +152,7 @@ except ImportError:
     from builtin_supervisor import BuiltinSupervisor
     import cursor_debug
     from file_manager import show_in_file_manager
-    from ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, style_key
+    from ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
     from player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -6653,6 +6653,15 @@ class TVHeadendClient(QMainWindow):
         if apply_theme(app, theme, NoDialogButtonIconsStyle):
             polish_main_window(self)
 
+    def color_scheme_choice(self):
+        """Light or dark as the desktop is (system), or always light or dark."""
+        return self.config['color_scheme']
+
+    def set_color_scheme_choice(self, mode):
+        self.config['color_scheme'] = mode
+        self.save_config()
+        set_color_scheme(QApplication.instance(), mode)
+
     def running_theme(self):
         """The theme in use; None when high contrast kept the system look."""
         app = QApplication.instance()
@@ -7303,10 +7312,12 @@ def main():
             settings = ConfigStore().data
             preference = settings['player_engine']
             theme = settings['ui_theme']
+            scheme = settings['color_scheme']
         except Exception as e:
             print(f"Debug: Could not read the engine and theme settings: {e}")
             preference = None
             theme = THEME_TVHPLAYER
+            scheme = None
         engine, reason = choose_engine(preference=preference)
         print(f"Debug: Playback engine: {engine} ({reason})")
         qt_platform = qt_platform_for(engine)
@@ -7329,6 +7340,7 @@ def main():
             print(f"Debug: Theme {theme!r} is not available here; using {THEME_TVHPLAYER}")
             theme = THEME_TVHPLAYER
         if theme is not None:
+            set_color_scheme(app, scheme)
             apply_theme(app, theme, NoDialogButtonIconsStyle)
         print(f"Debug: Theme: {theme or 'system (high contrast)'}")
         player = TVHeadendClient(engine)

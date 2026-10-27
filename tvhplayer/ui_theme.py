@@ -2,9 +2,9 @@
 
 The TVHplayer theme is Fusion with a palette and one stylesheet, built from a
 light or a dark set of colors. Any other theme is a Qt style used as it is.
-Every theme follows the desktop's light or dark setting while the app runs.
-A theme can be changed while the app runs too. Under high contrast the system
-look stays in charge.
+Every theme is light or dark as the desktop is set, following it while the
+app runs, unless set to always light or always dark. Both can be changed while
+the app runs. Under high contrast the system look stays in charge.
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ from PyQt6.QtWidgets import (
 
 try:
     from . import system_color_scheme as desktop
-    from .core.config import THEME_TVHPLAYER
+    from .core.config import SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
 except ImportError:
     import system_color_scheme as desktop
-    from core.config import THEME_TVHPLAYER
+    from core.config import SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
 
 LIGHT = {
     'ink': '#232629', 'muted': '#5d6166', 'placeholder': '#8a8d90', 'link': '#1d79b0',
@@ -195,6 +195,7 @@ _active = False
 # Kept by apply(): the desktop's scheme, whether it is watched, the polish filter,
 # the app's font before the theme's, and the theme's font.
 _scheme = None
+_mode = SCHEME_SYSTEM
 _watching = False
 _polish = None
 _default_font = None
@@ -385,13 +386,18 @@ def _apply_colors(app, dark):
 
 
 def _follow_desktop(app, force=False):
-    """Light or dark as the desktop is; ``force`` applies it again after a theme change.
+    """Light or dark as the desktop is, or as set; ``force`` applies it again after a change.
 
     Qt is told the scheme too, which reaches Qt styles and the title bar Qt
     draws on GNOME. With the TVHplayer theme its colors follow as well.
     """
     global _scheme
-    scheme = desktop.system_color_scheme(app)
+    if _mode == SCHEME_DARK:
+        scheme = desktop.ColorScheme.Dark
+    elif _mode == SCHEME_LIGHT:
+        scheme = desktop.ColorScheme.Light
+    else:
+        scheme = desktop.system_color_scheme(app)
     # Unknown after the first answer is the app's own pin read back: no change.
     if scheme == desktop.ColorScheme.Unknown and _scheme is not None:
         scheme = _scheme
@@ -419,6 +425,20 @@ def _restore_grids(app):
         if isinstance(widget, QTableView) and widget.property('tvhplayer_grid') is not None:
             widget.setShowGrid(widget.property('tvhplayer_grid'))
             widget.setProperty('tvhplayer_grid', None)
+
+
+def set_color_scheme(app, mode):
+    """Light or dark as the desktop is (``system``), or always ``light`` or ``dark``, from now on."""
+    global _mode
+    _mode = mode if mode in (SCHEME_LIGHT, SCHEME_DARK) else SCHEME_SYSTEM
+    if not _watching:
+        return
+    hints = app.styleHints()
+    if _mode == SCHEME_SYSTEM and hasattr(hints, 'setColorScheme'):
+        # Unpinned, Qt reports the desktop's scheme again where the portal and GTK say nothing.
+        desktop.note_pinned(desktop.ColorScheme.Unknown)
+        hints.setColorScheme(desktop.ColorScheme.Unknown)
+    _follow_desktop(app, force=True)
 
 
 def apply(app, theme, style_class=RowStyle):

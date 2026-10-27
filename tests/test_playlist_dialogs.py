@@ -558,6 +558,12 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def running_theme(self):
             return 'TVHplayer'
 
+        def color_scheme_choice(self):
+            return 'system'
+
+        def set_color_scheme_choice(self, mode):
+            self.color_scheme = mode
+
         def player_engine_choice(self):
             return self.engine_choice
 

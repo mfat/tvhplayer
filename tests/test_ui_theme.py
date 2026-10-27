@@ -2,7 +2,7 @@ from PyQt6.QtCore import QObject, Qt
 from PyQt6.QtWidgets import QApplication
 
 
-def _apply(monkeypatch, answers, theme):
+def _apply(monkeypatch, answers, theme, mode='system'):
     """Apply ``theme`` with the desktop's answers in turn; return the desktop's callback and what was applied."""
     from tvhplayer import ui_theme
 
@@ -20,7 +20,7 @@ def _apply(monkeypatch, answers, theme):
     monkeypatch.setattr(app.styleHints(), 'setColorScheme', pinned.append, raising=False)
     monkeypatch.setattr(app, 'setStyle', lambda style: styles.append(style.baseStyle().name()))
     for name, value in (('_active', False), ('_scheme', None), ('_watching', False),
-                        ('_polish', None), ('_default_font', None)):
+                        ('_polish', None), ('_default_font', None), ('_mode', mode)):
         monkeypatch.setattr(ui_theme, name, value)
     monkeypatch.setattr(app, 'setProperty', lambda *_args: True)
     monkeypatch.setattr(app, 'setPalette', lambda _palette: None)
@@ -107,3 +107,25 @@ def test_tables_get_their_grid_back_with_a_qt_style(qapp):
     assert not table.showGrid()
     ui_theme._restore_grids(qapp)
     assert table.showGrid()
+
+
+def test_light_or_dark_can_be_set_over_the_desktop_and_given_back(monkeypatch):
+    from tvhplayer import ui_theme
+
+    dark, light = Qt.ColorScheme.Dark, Qt.ColorScheme.Light
+    changed, applied, pinned, _styles = _apply(monkeypatch, [dark, dark, dark], 'TVHplayer')
+    app = QApplication.instance()
+    ui_theme.set_color_scheme(app, 'light')
+    assert applied == [True, False]
+    changed()  # The desktop changing has no say while Light is set.
+    assert applied == [True, False]
+    ui_theme.set_color_scheme(app, 'system')
+    assert applied == [True, False, True]
+    # Following the desktop again first takes off the app's own pin.
+    assert pinned == [dark, light, Qt.ColorScheme.Unknown, dark]
+
+
+def test_light_or_dark_set_before_start_is_used_from_the_first_paint(monkeypatch):
+    _changed, applied, pinned, _styles = _apply(monkeypatch, [Qt.ColorScheme.Light], 'TVHplayer', mode='dark')
+    assert applied == [True]
+    assert pinned == [Qt.ColorScheme.Dark]

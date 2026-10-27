@@ -29,21 +29,20 @@ try:
     from .a11y import announce_label, describe
     from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
     from .core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC, choose_engine
-    from .core.config import THEME_TVHPLAYER
+    from .core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
     from .ui_theme import style_names
     from .settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 except ImportError:
     from a11y import announce_label, describe
     from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
     from core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC, choose_engine
-    from core.config import THEME_TVHPLAYER
+    from core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
     from ui_theme import style_names
     from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 
-THEME_SHORT = (
-    "TVHplayer is the app's own look, light or dark as the desktop is set. "
-    'The others are the styles Qt offers on this computer.'
-)
+THEME_SHORT = "TVHplayer is the app's own look. The others are the styles Qt offers on this computer."
+SCHEME_SHORT = 'Follow System is light or dark as the desktop is set, and changes with it.'
+SCHEME_NAMES = {SCHEME_SYSTEM: 'Follow System', SCHEME_LIGHT: 'Light', SCHEME_DARK: 'Dark'}
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
     'Channels that fail are hidden and come back once a later test finds them working.'
@@ -104,7 +103,7 @@ class SettingsDialog(QDialog):
         ('Recordings', 'Folder, format, padding'),
         ('Conversion', 'Edit-friendly copies'),
         ('Sleep', 'Scheduled recordings'),
-        ('Appearance', 'Theme'),
+        ('Appearance', 'Theme, light or dark'),
     )
 
     def __init__(self, host, parent=None):
@@ -371,10 +370,18 @@ class SettingsDialog(QDialog):
         self.theme_combo.setCurrentIndex(index)
         describe(self.theme_combo, 'Theme', THEME_SHORT)
         group.add_row(SettingRow('&Theme', THEME_SHORT, self.theme_combo))
+        self.scheme_combo = QComboBox()
+        self.scheme_combo.setMinimumWidth(170)
+        for mode in SCHEME_CHOICES:
+            self.scheme_combo.addItem(SCHEME_NAMES[mode], mode)
+        self.scheme_combo.setCurrentIndex(max(0, self.scheme_combo.findData(host.color_scheme_choice())))
+        describe(self.scheme_combo, 'Light or dark', SCHEME_SHORT)
+        group.add_row(SettingRow('&Light or dark', SCHEME_SHORT, self.scheme_combo))
         strip = group.add_strip(StatusStrip())
         self.theme_status = strip.label
         self._show_theme()
         self.theme_combo.currentIndexChanged.connect(self._theme_chosen)
+        self.scheme_combo.currentIndexChanged.connect(self._scheme_chosen)
         page.finish()
         return page
 
@@ -387,6 +394,10 @@ class SettingsDialog(QDialog):
     def _use_chosen_theme(self):
         self._host.set_theme_choice(self.theme_combo.currentData())
         self._show_theme(announce=True)
+
+    def _scheme_chosen(self, _index):
+        # Once the list has closed, as for the theme: the new colors repaint every widget.
+        QTimer.singleShot(0, lambda: self._host.set_color_scheme_choice(self.scheme_combo.currentData()))
 
     def _show_theme(self, announce=False):
         running = self._host.running_theme()

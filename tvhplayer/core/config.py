@@ -21,6 +21,11 @@ from .recorder import DEFAULT_FORMAT, RECORDING_FORMATS
 
 # The app's own theme; any other ui_theme value names a Qt style.
 THEME_TVHPLAYER = 'TVHplayer'
+# Light or dark: as the desktop is, or always one of them.
+SCHEME_SYSTEM = 'system'
+SCHEME_LIGHT = 'light'
+SCHEME_DARK = 'dark'
+SCHEME_CHOICES = (SCHEME_SYSTEM, SCHEME_LIGHT, SCHEME_DARK)
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +86,7 @@ def default_config():
         'player_engine': ENGINE_AUTO,
         # TVHplayer's own look, or the name of a Qt style. Read before the window is built.
         'ui_theme': THEME_TVHPLAYER,
+        'color_scheme': SCHEME_SYSTEM,
         # Minutes the built-in server starts recordings early and ends them late.
         'builtin_padding_early': 2,
         'builtin_padding_late': 5,
@@ -144,6 +150,8 @@ def _normalize(data):
         cfg['player_engine'] = ENGINE_AUTO
     if not isinstance(cfg.get('ui_theme'), str) or not cfg['ui_theme'].strip():
         cfg['ui_theme'] = THEME_TVHPLAYER
+    if cfg.get('color_scheme') not in SCHEME_CHOICES:
+        cfg['color_scheme'] = SCHEME_SYSTEM
     if cfg.get('local_recording_format') not in RECORDING_FORMATS:
         cfg['local_recording_format'] = DEFAULT_FORMAT
     if not isinstance(cfg.get('last_channel'), dict):
