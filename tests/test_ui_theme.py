@@ -223,3 +223,27 @@ def test_tvhplayer_dropdowns_show_every_item_without_scrolling(qapp, monkeypatch
     monkeypatch.setattr(ui_theme, '_active', False)
     assert style.styleHint(QStyle.StyleHint.SH_ComboBox_Popup, None, QComboBox()) == \
         ui_theme.QStyleFactory.create('Fusion').styleHint(QStyle.StyleHint.SH_ComboBox_Popup, None, QComboBox())
+
+
+def test_tooltips_take_the_app_palette_after_qt_gives_them_the_desktops(qapp):
+    from PyQt6.QtGui import QColor, QPalette
+    from PyQt6.QtWidgets import QLabel, QToolTip
+    from tvhplayer import ui_theme
+
+    text = QPalette.ColorRole.ToolTipText
+    app_palette, tip_palette = qapp.palette(), QToolTip.palette()
+    ours = QPalette(app_palette)
+    ours.setColor(text, QColor('#fcfcfc'))
+    # At startup Qt's theme change gives tooltips the desktop's palette again, black text on GNOME.
+    desktops = QPalette(tip_palette)
+    desktops.setColor(text, QColor('#000000'))
+    try:
+        qapp.setPalette(ours)
+        QToolTip.setPalette(desktops)
+        tip = QLabel(None, Qt.WindowType.ToolTip)
+        tip.setPalette(QToolTip.palette())
+        ui_theme.ThemeStyle('Fusion').polish(tip)
+        assert tip.palette().color(text) == QColor('#fcfcfc')
+    finally:
+        qapp.setPalette(app_palette)
+        QToolTip.setPalette(tip_palette)

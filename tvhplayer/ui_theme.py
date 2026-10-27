@@ -492,6 +492,10 @@ class ThemeStyle(QProxyStyle):
 
     def polish(self, target):
         result = super().polish(target)
+        # Qt gives tooltips the desktop's palette again on each theme change,
+        # which comes after the app has set its own at startup.
+        if isinstance(target, QLabel) and target.windowType() == Qt.WindowType.ToolTip:
+            target.setPalette(QApplication.palette())
         if _active and isinstance(target, QWidget):
             _dress(target)
         return result
