@@ -29,6 +29,17 @@ def test_index_finds_loosely(tmp_path):
     assert len(PiconIndex(tmp_path / 'missing')) == 0
 
 
+def test_index_keys_match_picon_key(tmp_path):
+    names = ('arte.png', 'ARTE HD.png', 'zdf2.png', 'rtéone.png', '.red.png', 'kika.PNG')
+    for name in names:
+        (tmp_path / name).write_bytes(b'png')
+    index = PiconIndex(tmp_path)
+    assert sorted(index._files) == sorted(['arte', 'artehd', 'zdf2', 'rtéone', 'red'])
+    assert index.find('Arte HD') == tmp_path / 'ARTE HD.png'
+    assert index.find('RTÉ One') == tmp_path / 'rtéone.png'
+    assert index.find('.red') == tmp_path / '.red.png'
+
+
 def test_pack_address_from_the_latest_release():
     location = 'https://github.com/picons/picons/releases/tag/2026-10-25--00-12-17'
     assert latest_tag(location) == '2026-10-25--00-12-17'

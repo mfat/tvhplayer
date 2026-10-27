@@ -78,20 +78,28 @@ class PiconIndex:
 
     def __init__(self, folder: Optional[Path] = None):
         self.folder = Path(folder) if folder else None
-        self._files: Dict[str, Path] = {}
+        # File names, not Paths: a pack has tens of thousands, read while the window is built.
+        self._files: Dict[str, str] = {}
         if self.folder is not None and self.folder.is_dir():
+            # Names can start with a dot, such as '.red.png' for the channel '.red'.
+            names = [n for n in os.listdir(self.folder) if n.endswith('.png')]
             # Shorter names first, so a plain name wins over a regional variant with the same key.
-            for path in sorted(self.folder.glob('*.png'), key=lambda p: (len(p.name), p.name)):
-                self._files.setdefault(picon_key(path.stem), path)
+            names.sort(key=lambda n: (len(n), n))
+            for name in names:
+                stem = name[:-4]
+                # Most pack names are their own key already.
+                if not (stem.isascii() and stem.isalnum() and stem == stem.lower()):
+                    stem = picon_key(stem)
+                self._files.setdefault(stem, name)
 
     def __len__(self):
         return len(self._files)
 
     def find(self, channel_name: str) -> Optional[Path]:
         for key in name_keys(channel_name):
-            path = self._files.get(key)
-            if path is not None:
-                return path
+            name = self._files.get(key)
+            if name is not None:
+                return self.folder / name
         return None
 
 
