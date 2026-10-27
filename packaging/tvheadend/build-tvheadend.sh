@@ -1,14 +1,16 @@
 #!/bin/sh
-# Build the built-in Tvheadend for the deb and rpm packages.
+# Build the built-in Tvheadend for the deb, rpm and AppImage packages.
 #
 #   build-tvheadend.sh fetch SOURCES            download the pinned archives (network)
-#   build-tvheadend.sh build SOURCES WORK [--bundle-dvbcsa]
+#   build-tvheadend.sh build SOURCES WORK [--bundle-dvbcsa] [--relocatable]
 #                                               verify, unpack, and compile (offline)
 #   build-tvheadend.sh install WORK DESTDIR     install into a package root
 #
 # The result lands in /usr/libexec/tvhplayer/tvheadend, with its data in
 # /usr/share/tvhplayer/tvheadend, away from a distro tvheadend package.
 # --bundle-dvbcsa links libdvbcsa statically, for distros that do not ship it.
+# --relocatable builds the web UI and data into the binary, which then runs
+# from any folder: the AppImage mounts at a different path on every start.
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -60,6 +62,7 @@ cmd_build() {
     sources=$(cd "$1" && pwd)
     work=$2
     bundle_dvbcsa=$3
+    relocatable=$4
     verify "$sources/$TVH_ARCHIVE" "$TVHEADEND_SHA256"
     verify "$sources/$SCAN_ARCHIVE" "$DTV_SCAN_TABLES_SHA256"
     verify "$sources/$HDHOMERUN_ARCHIVE" "$LIBHDHOMERUN_SHA256"
@@ -109,11 +112,14 @@ cmd_build() {
     # configure defaults to "python", which Debian and Fedora do not provide.
     PYTHON=${PYTHON:-python3}
     export PYTHON
+    bundle_flag=--disable-bundle
+    [ "$relocatable" = yes ] && bundle_flag=--enable-bundle
     # shellcheck disable=SC2086 # the flags are a word list
     ./configure \
         --prefix=/usr \
         --bindir=/usr/libexec/tvhplayer \
         --datadir=/usr/share/tvhplayer \
+        "$bundle_flag" \
         $TVHEADEND_CONFIGURE_FLAGS
     # configure quietly leaves a feature out when its library is missing.
     grep -q '^CONFIG_HDHOMERUN_CLIENT = yes' .config.mk || die "Tvheadend was configured without HDHomeRun"
@@ -133,7 +139,7 @@ cmd_install() {
         "$destdir/usr/libexec/tvhplayer/tv_meta_tvdb.py"
 }
 
-[ $# -ge 1 ] || die "usage: $0 fetch SOURCES | build SOURCES WORK [--bundle-dvbcsa] | install WORK DESTDIR"
+[ $# -ge 1 ] || die "usage: $0 fetch SOURCES | build SOURCES WORK [--bundle-dvbcsa] [--relocatable] | install WORK DESTDIR"
 command=$1
 shift
 case "$command" in
@@ -142,10 +148,20 @@ case "$command" in
         cmd_fetch "$1"
         ;;
     build)
-        [ $# -ge 2 ] || die "usage: $0 build SOURCES WORK [--bundle-dvbcsa]"
+        [ $# -ge 2 ] || die "usage: $0 build SOURCES WORK [--bundle-dvbcsa] [--relocatable]"
+        sources=$1
+        work=$2
+        shift 2
         bundle=no
-        [ "${3:-}" = --bundle-dvbcsa ] && bundle=yes
-        cmd_build "$1" "$2" "$bundle"
+        relocatable=no
+        for option in "$@"; do
+            case "$option" in
+                --bundle-dvbcsa) bundle=yes ;;
+                --relocatable) relocatable=yes ;;
+                *) die "unknown build option: $option" ;;
+            esac
+        done
+        cmd_build "$sources" "$work" "$bundle" "$relocatable"
         ;;
     install)
         [ $# -eq 2 ] || die "usage: $0 install WORK DESTDIR"

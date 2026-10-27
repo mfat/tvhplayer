@@ -1,4 +1,4 @@
-name: Linux packages (deb, rpm)
+name: Linux packages (deb, rpm, AppImage)
 
 # Each package compiles the built-in Tvheadend from the archives pinned in
 # packaging/tvheadend/pins.env, against the libraries of the distro it targets.
@@ -36,8 +36,8 @@ jobs:
           # --noconftest: the shared conftest needs PyQt6, which these file checks do not.
           python3 -m pytest -q --noconftest tests/test_packaging_pins.py
 
-      - name: Lint the build script
-        run: shellcheck -x packaging/tvheadend/build-tvheadend.sh
+      - name: Lint the build scripts
+        run: shellcheck -x packaging/tvheadend/build-tvheadend.sh packaging/appimage/*.sh
 
   deb:
     needs: pins
@@ -226,3 +226,51 @@ jobs:
           files: release-assets/*
           fail_on_unmatched_files: true
           overwrite_files: false
+
+  appimage:
+    needs: pins
+    runs-on: ubuntu-24.04
+    # Built on the oldest supported Ubuntu, so it runs there and on anything newer.
+    container: ubuntu:24.04
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "label=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "label=ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install build dependencies
+        run: packaging/appimage/install-deps.sh
+
+      - name: Build AppImage
+        run: packaging/appimage/build-appimage.sh "${{ steps.version.outputs.label }}" release-assets
+
+      - name: Check AppImage
+        run: packaging/appimage/check-appimage.sh release-assets/*.AppImage
+
+      - name: Checksum
+        run: |
+          cd release-assets
+          for image in *.AppImage; do sha256sum "$image" > "$image.sha256"; done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: appimage-x86_64
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload to release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*

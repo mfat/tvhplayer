@@ -26,3 +26,6 @@ __pycache__/
 # Built-in Tvheadend sources and build output for the deb and rpm packages
 /packaging/tvheadend/sources/
 /packaging/tvheadend/work/
+
+# AppImage build work
+/build/appimage/
