@@ -3316,11 +3316,6 @@ class TVHeadendClient(QMainWindow):
             app.setApplicationDisplayName("TVHplayer")
             if not app.desktopFileName():
                 app.setDesktopFileName("io.github.mfat.tvhplayer")
-        # Fusion gives Linux, macOS and Windows the same base for the theme.
-        # High contrast keeps the system theme.
-        app.setStyle(NoDialogButtonIconsStyle('Fusion'))
-        if not prefers_high_contrast():
-            apply_theme(app)
         geometry = self.config['window_geometry']
         self.setGeometry(
             geometry['x'],
@@ -7308,6 +7303,12 @@ def main():
         app.setApplicationDisplayName("TVHplayer")
         app.setDesktopFileName("io.github.mfat.tvhplayer")
         app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
+        # Before any widget exists: a style change goes to every widget alive.
+        # Fusion gives Linux, macOS and Windows the same base for the theme;
+        # high contrast keeps the system theme.
+        app.setStyle(NoDialogButtonIconsStyle('Fusion'))
+        if not prefers_high_contrast():
+            apply_theme(app)
         player = TVHeadendClient(engine)
         player.show()
         sys.exit(app.exec())
