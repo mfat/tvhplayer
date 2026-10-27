@@ -14,7 +14,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.0.1
+Version:        4.1
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -127,6 +127,16 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Tue Oct 27 2026 mFat <newmfat@gmail.com> - 4.1-1
+- New AppImage for Linux: one file that runs on Ubuntu 24.04, Debian 13, Fedora 40 and newer
+- New Windows installer, and Windows plays with mpv without VLC or anything else to install
+- macOS builds for Apple Silicon and Intel play with mpv, without VLC or Homebrew
+- Recording to this computer works on Windows and macOS, with no console window on Windows and MP4 files that play after stopping
+- The app starts with mpv on Ubuntu 24.04, where Auto deinterlacing stopped it
+- Without VLC, the app plays with mpv on Linux X11 desktops too
+- The window shows the TVHplayer icon on Windows and macOS, and the app icons are sharp at every size
+- The Flatpak builds on ARM and no longer asks for access to the notification service
+
 * Tue Oct 27 2026 mFat <newmfat@gmail.com> - 4.0.1-1
 - Release 4.0.1
 

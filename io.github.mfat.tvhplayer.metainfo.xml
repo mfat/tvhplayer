@@ -33,6 +33,20 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.1" date="2026-10-27">
+      <description>
+        <ul>
+          <li>New AppImage for Linux: one file that runs on Ubuntu 24.04, Debian 13, Fedora 40 and newer</li>
+          <li>New Windows installer, and Windows plays with mpv without VLC or anything else to install</li>
+          <li>macOS builds for Apple Silicon and Intel play with mpv, without VLC or Homebrew</li>
+          <li>Recording to this computer works on Windows and macOS, with no console window on Windows and MP4 files that play after stopping</li>
+          <li>The app starts with mpv on Ubuntu 24.04, where Auto deinterlacing stopped it</li>
+          <li>Without VLC, the app plays with mpv on Linux X11 desktops too</li>
+          <li>The window shows the TVHplayer icon on Windows and macOS, and the app icons are sharp at every size</li>
+          <li>The Flatpak builds on ARM and no longer asks for access to the notification service</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.0.1" date="2026-10-27">
       <description>
         <p>The Flatpak starts with the mpv engine again, and runs on the current KDE 6.11 runtime.</p>
