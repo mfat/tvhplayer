@@ -345,7 +345,9 @@ class TitleBar(QMenuBar):
         color = self.palette().color(QPalette.ColorRole.WindowText)
         if not self._window.isActiveWindow():
             color.setAlphaF(0.55)
-        self.title.setStyleSheet(f'color: {color.name(QColor.NameFormat.HexArgb)};')
+        palette = self.title.palette()
+        palette.setColor(QPalette.ColorRole.WindowText, color)
+        self.title.setPalette(palette)
         self.title.show()
 
     def resizeEvent(self, event):

@@ -69,8 +69,6 @@ try:
     from .ui_theme import THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
     from .player_bar import (
         DOT_SVG,
-        PILL_DARK,
-        PILL_DARK_HOVER,
         RECORD_RED,
         FloatingBar,
         PlayerBar,
@@ -157,8 +155,6 @@ except ImportError:
     from ui_theme import THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
     from player_bar import (
         DOT_SVG,
-        PILL_DARK,
-        PILL_DARK_HOVER,
         RECORD_RED,
         FloatingBar,
         PlayerBar,
@@ -209,7 +205,6 @@ try:
         announce,
         announce_label,
         buddy_label,
-        button_stylesheet,
         describe,
         find_shortcut,
         prefers_high_contrast,
@@ -223,7 +218,6 @@ except ImportError:
         announce,
         announce_label,
         buddy_label,
-        button_stylesheet,
         describe,
         find_shortcut,
         prefers_high_contrast,
@@ -1456,7 +1450,6 @@ class RecordingDurationDialog(QDialog):
         self._clock.start(15000)
 
     def setup_ui(self):
-        contrast = prefers_high_contrast()
         self.setMinimumWidth(440)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 12)
@@ -1478,7 +1471,6 @@ class RecordingDurationDialog(QDialog):
             if self._event is not None:
                 until = datetime.fromtimestamp(self._event.stop).strftime('%H:%M')
                 now_label = QLabel(f"Now: {self._event.title} · until {until}")
-                _text_color(now_label, 'palette(placeholder-text)')
                 heading.addWidget(now_label)
             layout.addLayout(heading)
 
@@ -1488,18 +1480,9 @@ class RecordingDurationDialog(QDialog):
         choose.addWidget(record_for)
         segments = QFrame()
         segments.setObjectName("segments")
-        if not contrast:
-            segments.setStyleSheet(
-                "#segments { border: 1px solid palette(mid); border-radius: 4px; background: palette(base); }"
-                "#segments QPushButton { border: none; border-left: 1px solid palette(mid); "
-                "background: transparent; color: palette(text); min-height: 32px; padding: 0 6px; }"
-                "#segments QPushButton[first=\"true\"] { border-left: none; }"
-                "#segments QPushButton:checked { background: palette(highlight); color: palette(highlighted-text); font-weight: 600; }"
-                "#segments QPushButton:focus { border: 2px solid palette(highlight); }"
-            )
         segment_layout = QHBoxLayout(segments)
         segment_layout.setContentsMargins(0, 0, 0, 0)
-        segment_layout.setSpacing(0 if not contrast else 4)
+        segment_layout.setSpacing(4)
         self.preset_group = QButtonGroup(self)
         self.preset_group.setExclusive(True)
         self.preset_buttons = {}
@@ -1544,7 +1527,6 @@ class RecordingDurationDialog(QDialog):
         self.more_btn.clicked.connect(self.custom_spin.stepUp)
         self.custom_spin.valueChanged.connect(self._update_summary)
         steps = QLabel("steps of 15 min")
-        _text_color(steps, 'palette(placeholder-text)')
         custom_layout.addWidget(self.less_btn)
         custom_layout.addWidget(self.custom_spin)
         custom_layout.addWidget(self.more_btn)
@@ -1554,10 +1536,6 @@ class RecordingDurationDialog(QDialog):
 
         summary = QFrame()
         summary.setObjectName("summary")
-        if not contrast:
-            summary.setStyleSheet(
-                "#summary { background: palette(base); border: 1px solid palette(mid); border-radius: 4px; }"
-            )
         summary_layout = QHBoxLayout(summary)
         summary_layout.setContentsMargins(12, 10, 12, 10)
         summary_layout.setSpacing(8)
@@ -1573,20 +1551,13 @@ class RecordingDurationDialog(QDialog):
             self.folder_label = QLabel(f"Saved in {self._save_dir}")
             self.folder_label.setWordWrap(True)
             self.folder_label.setToolTip("Change the folder in Settings.")
-            _text_color(self.folder_label, 'palette(placeholder-text)')
             layout.addWidget(self.folder_label)
 
         buttons = QDialogButtonBox()
         cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
         self.record_btn = buttons.addButton(" &Record", QDialogButtonBox.ButtonRole.AcceptRole)
-        self.record_btn.setIcon(QIcon(status_dot('#ffffff' if not contrast else STATUS_UNREACHABLE, 10)))
+        self.record_btn.setIcon(QIcon(status_dot(STATUS_UNREACHABLE, 10)))
         self.record_btn.setDefault(True)
-        if not contrast:
-            self.record_btn.setStyleSheet(
-                "QPushButton { background: #3daee9; color: #ffffff; font-weight: 600; "
-                "border: 1px solid #2a95cf; border-radius: 3px; min-width: 96px; min-height: 28px; "
-                "padding: 0 10px; } QPushButton:focus { border: 2px solid palette(highlight); }"
-            )
         describe(cancel, "Cancel")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -1691,8 +1662,6 @@ STATUS_INVALID = '#f67400'
 STATUS_TESTING = '#3daee9'
 STATUS_UNKNOWN = '#bdc3c7'
 STATUS_STOPPED = '#7f8c8d'
-POSITIVE_TEXT = '#27ae60'
-NEGATIVE_TEXT = '#da4453'
 
 
 def validate_server_url(url):
@@ -1742,11 +1711,6 @@ def _smaller_font(font):
     elif small.pixelSize() > 0:
         small.setPixelSize(max(small.pixelSize() - 1, 8))
     return small
-
-
-def _text_color(label, color):
-    """Colour a label's text, or use the style's own colour."""
-    label.setStyleSheet(f"color: {color};" if color and not prefers_high_contrast() else "")
 
 
 class ServerListDelegate(QStyledItemDelegate):
@@ -2181,13 +2145,6 @@ class ServerDialog(QDialog):
         error = validate_server_url(server.get('url') or '')
         self.url_hint.setText(error or URL_HINT)
         describe(self.url_input, description=error or URL_HINT)
-        _text_color(self.url_hint, NEGATIVE_TEXT if error else self.palette().placeholderText().color().name())
-        if error and not prefers_high_contrast():
-            self.url_input.setStyleSheet(
-                f"QLineEdit {{ border: 1px solid {NEGATIVE_TEXT}; border-radius: 3px; padding: 2px 4px; }}"
-            )
-        else:
-            self.url_input.setStyleSheet("")
         htsp = (server.get('protocol') or PROTOCOL_HTTP).lower() == PROTOCOL_HTSP
         self.port_label.setVisible(htsp)
         self.htsp_port_input.setVisible(htsp)
@@ -2199,7 +2156,6 @@ class ServerDialog(QDialog):
         self.log_btn.setEnabled(not error)
 
     def _show_test_result(self, server, error, result):
-        color = None
         if error:
             text = "Fix the address to test this server."
         elif result is None:
@@ -2208,11 +2164,8 @@ class ServerDialog(QDialog):
             text = f"Connecting to {server.get('url')}…"
         elif result['ok']:
             text = f"Connected to Tvheadend in {result['ms']} ms."
-            color = POSITIVE_TEXT
         else:
             text = f"Could not connect: {result['error'].rstrip('.')}."
-            color = NEGATIVE_TEXT
-        _text_color(self.test_label, color)
         if self.test_label.text() != text:
             announce_label(self.test_label, text)
 
@@ -2658,13 +2611,11 @@ class PlaybackSpinner(QWidget):
         self._signal_words = ''
         self._problem = ''
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         if native:
             # The video surface is a native window; a plain widget would be drawn underneath it.
             self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
             self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setStyleSheet("background-color: black;")
         self.hide()
 
     def set_caption(self, text):
@@ -3668,11 +3619,6 @@ class TVHeadendClient(QMainWindow):
         server_layout.addWidget(buddy_label("&Server:", self.server_combo))
         server_layout.addWidget(self.server_combo)
         self.manage_servers_btn.setText("⚙️")  # Unicode settings icon
-        if not prefers_high_contrast():
-            self.manage_servers_btn.setStyleSheet(
-                "QToolButton { font-size: 18px; } "
-                "QToolButton:focus { border: 2px solid palette(highlight); }"
-            )
         describe(
             self.manage_servers_btn,
             "Manage servers",
@@ -3683,8 +3629,6 @@ class TVHeadendClient(QMainWindow):
         self.reload_channels_btn = QToolButton()
         self.reload_channels_btn.setText("Reload")
         self.reload_channels_btn.clicked.connect(lambda: self.fetch_channels(keep_place=True))
-        if not prefers_high_contrast():
-            self.reload_channels_btn.setStyleSheet("QToolButton:focus { border: 2px solid palette(highlight); }")
         describe(
             self.reload_channels_btn,
             "Reload channel list",
@@ -3695,8 +3639,6 @@ class TVHeadendClient(QMainWindow):
         self.guide_btn = QToolButton()
         self.guide_btn.setText("TV Guide")
         self.guide_btn.clicked.connect(lambda: self.show_guide())
-        if not prefers_high_contrast():
-            self.guide_btn.setStyleSheet("QToolButton:focus { border: 2px solid palette(highlight); }")
         describe(
             self.guide_btn,
             "TV guide",
@@ -3809,7 +3751,10 @@ class TVHeadendClient(QMainWindow):
         # image so Qt repaints do not flash the logo over live video.
         self.player_container = QWidget()
         self.player_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.player_container.setStyleSheet("background-color: black;")
+        black = QPalette(self.player_container.palette())
+        black.setColor(QPalette.ColorRole.Window, QColor(0, 0, 0))
+        self.player_container.setPalette(black)
+        self.player_container.setAutoFillBackground(True)
         player_layout = QVBoxLayout(self.player_container)
         player_layout.setContentsMargins(0, 0, 0, 0)
         player_layout.setSpacing(0)
@@ -3836,12 +3781,9 @@ class TVHeadendClient(QMainWindow):
         splash_path = Path(self.icons_dir) / 'playerbg.svg'
         self.idle_splash = QLabel(self.player_container)
         self.idle_splash.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.idle_splash.setStyleSheet(
-            f"background-color: black; "
-            f"background-image: url({splash_path.as_posix()}); "
-            "background-position: center; "
-            "background-repeat: no-repeat;"
-        )
+        self.idle_splash.setPalette(black)
+        self.idle_splash.setAutoFillBackground(True)
+        self.idle_splash.setPixmap(QPixmap(str(splash_path)))
         self.idle_splash.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.idle_splash.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         describe(self.idle_splash, "Nothing playing", "TVHplayer logo, shown when nothing is playing")
@@ -3946,20 +3888,11 @@ class TVHeadendClient(QMainWindow):
         self.recording_indicator = QLabel("")
         self.recording_indicator.setVisible(False)
         self.recording_indicator.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        if not prefers_high_contrast():
-            self.recording_indicator.setStyleSheet(
-                "QLabel { background-color: #7f1d1d; color: #ffffff; "
-                "font-weight: bold; padding: 1px 6px; border-radius: 8px; }"
-            )
         describe(self.recording_indicator, "Not recording", "Shown only while a recording is in progress")
         
         # Shown while the recordings folder runs low on space.
         self.space_warning = QLabel("")
         self.space_warning.setVisible(False)
-        if not prefers_high_contrast():
-            self.space_warning.setStyleSheet(
-                "QLabel { background-color: #78350f; color: #ffffff; padding: 1px 6px; border-radius: 8px; }"
-            )
 
         # Create status message label
         self.status_label = QLabel("Ready")
@@ -7340,18 +7273,11 @@ class EPGDialog(QDialog):
             info_label.setToolTip(description)
             info_label.setAccessibleDescription(description)
             item_layout.addWidget(info_label, stretch=1)
-            # The same dark pill with a red dot as Record in the player bar.
             record_btn = QPushButton(" Record")
             record_btn.setIcon(svg_icon(DOT_SVG, RECORD_RED, 12))
             record_btn.setIconSize(QSize(12, 12))
             record_btn.setFixedHeight(32)
             record_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            record_btn.setStyleSheet(button_stylesheet(
-                f"background: {PILL_DARK}; color: #ededed; font-weight: 500; border: none;"
-                " border-radius: 16px; padding: 0 12px; }"
-                f" QPushButton:hover {{ background: {PILL_DARK_HOVER};",
-                radius=16,
-            ))
             record_btn.setToolTip("Schedule Recording")
             describe(record_btn, f"Schedule recording for {title}", description)
             record_btn.clicked.connect(lambda checked, e=entry: self.schedule_recording(e))
