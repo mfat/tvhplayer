@@ -60,6 +60,9 @@ jobs:
           if (-not (Select-String -Path $log -Pattern 'Playback engine: mpv' -Quiet)) { throw 'mpv was not chosen' }
           if (-not (Select-String -Path $log -Pattern 'Media player created successfully' -Quiet)) { throw 'mpv did not start' }
           if (Select-String -Path $log -Pattern 'Error starting application' -Quiet) { throw 'The app reported a startup error' }
+          # The app runs ffmpeg by name; the build's own must come first.
+          $env:PATH = "$PWD\windows\build\dist\TVHplayer\_internal;$env:PATH"
+          (Get-Command ffmpeg).Source
 
       - name: Checksum
         shell: bash
