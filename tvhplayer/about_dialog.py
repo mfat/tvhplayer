@@ -15,6 +15,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+try:
+    from .a11y import button_stylesheet
+except ImportError:
+    from a11y import button_stylesheet
+
 WEBSITE = 'https://github.com/mfat/tvhplayer'
 GUIDE = 'https://github.com/mfat/tvhplayer/wiki/User-Guide'
 ISSUES = 'https://github.com/mfat/tvhplayer/issues'
@@ -91,6 +96,8 @@ class AboutDialog(QDialog):
         rows.addWidget(self._separator())
         self.license_btn = QPushButton('Show')
         self.license_btn.setFlat(True)
+        # A link-like button that still shows keyboard focus; high contrast keeps the system look.
+        self.license_btn.setStyleSheet(button_stylesheet('border: none; color: palette(link); padding: 0 4px; min-height: 0;', radius=3))
         self.license_btn.setAccessibleName('Show the license')
         license_value = QWidget()
         license_row = QHBoxLayout(license_value)
