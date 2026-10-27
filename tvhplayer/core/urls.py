@@ -1,4 +1,4 @@
-from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlsplit, urlunsplit
 
 from requests.auth import HTTPBasicAuth, HTTPDigestAuth
 
@@ -71,13 +71,17 @@ def http_auth(server):
 
 
 def insert_basic_auth(url, username, password):
-    """Embed user:pass in a URL for VLC/ffmpeg, which do not take an auth tuple."""
+    """Embed user:pass in a URL for VLC/ffmpeg, which do not take an auth tuple.
+
+    Both are percent-encoded: an ``@``, ``/``, ``#`` or ``?`` in them would
+    otherwise end the login early and send the rest as the host or path.
+    """
     if not username and not password:
         return url
     parsed = urlparse(url)
     host = parsed.hostname or ''
     port = f':{parsed.port}' if parsed.port else ''
-    creds = f'{username}:{password}@'
+    creds = f"{quote(username or '', safe='')}:{quote(password or '', safe='')}@"
     return parsed._replace(netloc=f'{creds}{host}{port}').geturl()
 
 
