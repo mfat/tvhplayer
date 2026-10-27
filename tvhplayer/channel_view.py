@@ -565,6 +565,8 @@ class LogoLoader(QObject):
         # Not cached and asked for without an address; a request with one still fetches.
         self._uncached = set()
         self._generation = 0
+        # After shutdown the pool takes no work; a late request is dropped.
+        self._closed = False
 
     def _cache_path(self, server_url, reference):
         digest = hashlib.sha1(f'{server_url}\n{reference}'.encode('utf-8')).hexdigest()
@@ -585,6 +587,8 @@ class LogoLoader(QObject):
         """
         key = (server.get('url') or '', reference)
         with self._lock:
+            if self._closed:
+                return
             if key in self._pending or key in self._failed or (not url and key in self._uncached):
                 return
             self._pending.add(key)
@@ -595,6 +599,8 @@ class LogoLoader(QObject):
         """Load a logo from a file on this computer, such as a picon."""
         key = ('', reference)
         with self._lock:
+            if self._closed:
+                return
             if key in self._pending or key in self._failed:
                 return
             self._pending.add(key)
@@ -611,6 +617,8 @@ class LogoLoader(QObject):
 
     def shutdown(self):
         self.forget()
+        with self._lock:
+            self._closed = True
         self._pool.shutdown(wait=False, cancel_futures=True)
 
     def _session(self, base):

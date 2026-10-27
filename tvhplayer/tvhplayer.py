@@ -6264,6 +6264,7 @@ class TVHeadendClient(QMainWindow):
         if guide is not None:
             guide.shutdown()
             guide.close()
+        self._visible_logo_timer.stop()
         self.logo_loader.shutdown()
         if self.picon_job is not None:
             self.picon_job.cancel()
