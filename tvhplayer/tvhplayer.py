@@ -52,7 +52,7 @@ try:
     from .core.errors import TvhAuthError, TvhError
     from .core.server_log import ServerLogFeed
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
-    from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
+    from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from .core import convert
     from .core.vlc_player import VlcPlayer
     from .core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for, startup_platform
@@ -140,7 +140,7 @@ except ImportError:
     from core.errors import TvhAuthError, TvhError
     from core.server_log import ServerLogFeed
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
-    from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
+    from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from core import convert
     from core.vlc_player import VlcPlayer
     from core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for, startup_platform
@@ -6090,8 +6090,9 @@ class TVHeadendClient(QMainWindow):
                 return
             duration = dialog.get_duration()
             event = dialog.programme_event()
-            file_path = os.path.join(
-                folder, local_recording_name(channel_name, datetime.now(), self.recording_format())
+            file_path = free_path(
+                os.path.join(folder, local_recording_name(channel_name, datetime.now(), self.recording_format())),
+                {job.recorder.file_path for job in self.local_jobs if job.is_running},
             )
 
             stream_url = self.get_backend().stream_url(channel)

@@ -92,6 +92,19 @@ def build_ffmpeg_command(stream_url, file_path, username='', password='', extra_
     return cmd
 
 
+def free_path(path, taken=()) -> str:
+    """``path``, or ``name_2.ext``, ``name_3.ext``... when it exists or is in ``taken``.
+
+    ffmpeg runs with ``-y``, so a new recording must never reuse a file name.
+    """
+    stem, ext = os.path.splitext(str(path))
+    candidate, number = str(path), 1
+    while os.path.lexists(candidate) or candidate in taken:
+        number += 1
+        candidate = f'{stem}_{number}{ext}'
+    return candidate
+
+
 def redact_command(cmd: List[str]) -> str:
     """Hide Basic-auth tokens and user:pass in URLs for logs."""
     redacted = []

@@ -3,7 +3,13 @@ import subprocess
 import threading
 import time
 
-from tvhplayer.core.recorder import LocalRecorder, build_ffmpeg_command, parse_ffmpeg_options, redact_command
+from tvhplayer.core.recorder import (
+    LocalRecorder,
+    build_ffmpeg_command,
+    free_path,
+    parse_ffmpeg_options,
+    redact_command,
+)
 
 
 def test_ts_command_copies_streams():
@@ -162,3 +168,12 @@ def test_stop_sends_sigterm_without_reading_the_pipe_itself(monkeypatch, tmp_pat
         if write_fd >= 0:
             os.close(write_fd)
         recorder.stop()
+
+
+def test_free_path_never_reuses_a_recording_name(tmp_path):
+    path = str(tmp_path / 'recording_News_20260101_120000.ts')
+    assert free_path(path) == path
+    (tmp_path / 'recording_News_20260101_120000.ts').write_bytes(b'x')
+    second = str(tmp_path / 'recording_News_20260101_120000_2.ts')
+    assert free_path(path) == second
+    assert free_path(path, {second}) == str(tmp_path / 'recording_News_20260101_120000_3.ts')
