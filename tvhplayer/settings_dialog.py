@@ -42,10 +42,6 @@ except ImportError:
 
 THEME_SHORT = "TVHplayer is the app's own look. The others are the styles Qt offers on this computer."
 SCHEME_SHORT = 'Follow System is light or dark as the desktop is set, and changes with it.'
-TITLE_BAR_SHORT = (
-    "A title bar in TVHplayer's theme, with the menus, a shadow and an outline, instead of Qt's plain one. "
-    'A change takes effect the next time TVHplayer starts.'
-)
 SCHEME_NAMES = {SCHEME_SYSTEM: 'Follow System', SCHEME_LIGHT: 'Light', SCHEME_DARK: 'Dark'}
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
@@ -372,26 +368,22 @@ class SettingsDialog(QDialog):
             index = next((i for i in range(self.theme_combo.count())
                           if str(self.theme_combo.itemData(i)).casefold() == chosen.casefold()), 0)
         self.theme_combo.setCurrentIndex(index)
-        describe(self.theme_combo, 'Theme', THEME_SHORT)
-        group.add_row(SettingRow('&Theme', THEME_SHORT, self.theme_combo))
+        describe(self.theme_combo, 'Application style', THEME_SHORT)
+        group.add_row(SettingRow('&Application style', THEME_SHORT, self.theme_combo))
         self.scheme_combo = QComboBox()
         self.scheme_combo.setMinimumWidth(170)
         for mode in SCHEME_CHOICES:
             self.scheme_combo.addItem(SCHEME_NAMES[mode], mode)
         self.scheme_combo.setCurrentIndex(max(0, self.scheme_combo.findData(host.color_scheme_choice())))
-        describe(self.scheme_combo, 'Light or dark', SCHEME_SHORT)
-        group.add_row(SettingRow('&Light or dark', SCHEME_SHORT, self.scheme_combo))
+        describe(self.scheme_combo, 'Theme', SCHEME_SHORT)
+        group.add_row(SettingRow('&Theme', SCHEME_SHORT, self.scheme_combo))
         self.title_bar_check = None
         # Only GNOME on Wayland leaves the title bar to the app.
         if host.can_draw_title_bar():
             self.title_bar_check = ToggleSwitch("Use TVHplayer's own title bar")
             self.title_bar_check.setChecked(host.draws_title_bar())
-            describe(self.title_bar_check, description=TITLE_BAR_SHORT)
-            group.add_row(SettingRow("Use TVHplayer's own title &bar", TITLE_BAR_SHORT, self.title_bar_check))
+            group.add_row(SettingRow("Use TVHplayer's own title &bar", control=self.title_bar_check))
             self.title_bar_check.toggled.connect(host.set_draws_title_bar)
-        strip = group.add_strip(StatusStrip())
-        self.theme_status = strip.label
-        self._show_theme()
         self.theme_combo.currentIndexChanged.connect(self._theme_chosen)
         self.scheme_combo.currentIndexChanged.connect(self._scheme_chosen)
         page.finish()
@@ -405,25 +397,10 @@ class SettingsDialog(QDialog):
 
     def _use_chosen_theme(self):
         self._host.set_theme_choice(self.theme_combo.currentData())
-        self._show_theme(announce=True)
 
     def _scheme_chosen(self, _index):
         # Once the list has closed, as for the theme: the new colors repaint every widget.
         QTimer.singleShot(0, lambda: self._host.set_color_scheme_choice(self.scheme_combo.currentData()))
-
-    def _show_theme(self, announce=False):
-        running = self._host.running_theme()
-        wanted = self.theme_combo.currentData()
-        if running is None:
-            text = 'High contrast is on, so TVHplayer uses the system look.'
-        elif str(running).casefold() == str(wanted).casefold():
-            text = f'Using {running}.'
-        else:
-            text = f'Using {running}; {wanted} is not available.'
-        if announce:
-            announce_label(self.theme_status, text)
-        else:
-            self.theme_status.setText(text)
 
     def _engine_chosen(self, _index):
         self._host.set_player_engine_choice(self.engine_combo.currentData())
