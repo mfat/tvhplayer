@@ -223,10 +223,12 @@ class BuiltinSupervisor(QObject):
         except RuntimeError:
             # The app closed while the server was being asked.
             return
-        if answered:
+        if answered and not self._stop_requested:
             # After the window has the server: a big playlist takes a while.
             changed = use_ffmpeg_starter(http_port, username, password)
-            if changed < 0:
+            # A server stopped meanwhile, as when the app quits right after
+            # starting, does not answer; the next start does the work.
+            if changed < 0 and not self._stop_requested:
                 log.warning('Could not update the ffmpeg command of playlist channels')
             elif changed:
                 log.info('Updated the ffmpeg command of %d playlist channels', changed)

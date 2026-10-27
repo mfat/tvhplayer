@@ -495,3 +495,27 @@ def test_server_cannot_start_again_once_the_app_quits(tmp_path):
     assert supervisor.status == 'stopped'
     assert not supervisor._child_alive()
     assert app is not None
+
+
+def test_a_server_stopped_while_playlist_commands_update_gives_no_warning(qapp, tmp_path, monkeypatch, caplog):
+    from tvhplayer import builtin_supervisor
+    from tvhplayer.builtin_supervisor import BuiltinSupervisor
+
+    supervisor = BuiltinSupervisor(tmp_path / 'tvheadend', tmp_path / 'config', 24115, 24116)
+    monkeypatch.setattr(builtin_supervisor, 'serverinfo_ok', lambda *a, **k: True)
+    monkeypatch.setattr(builtin_supervisor, 'apply_builtin_defaults', lambda *a, **k: [])
+
+    def quit_meanwhile(*_args, **_kwargs):
+        # The app quits: the server stops and no longer answers.
+        supervisor._stop_requested = True
+        return -1
+
+    monkeypatch.setattr(builtin_supervisor, 'use_ffmpeg_starter', quit_meanwhile)
+    supervisor._check_ready(supervisor._check_attempt, 24115, 'u', 'p', '', None)
+    assert 'ffmpeg command' not in caplog.text
+
+    # A server that keeps running and does not answer is still reported.
+    supervisor._stop_requested = False
+    monkeypatch.setattr(builtin_supervisor, 'use_ffmpeg_starter', lambda *a, **k: -1)
+    supervisor._check_ready(supervisor._check_attempt, 24115, 'u', 'p', '', None)
+    assert 'Could not update the ffmpeg command' in caplog.text
