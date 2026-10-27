@@ -73,7 +73,7 @@ QToolButton {{ padding: 4px 8px; background: {BASE}; border: 1px solid rgba(35,3
 QToolButton:hover {{ border-color: {ACCENT}; background: #f2f8fc; }}
 QToolButton:focus {{ border: 2px solid {ACCENT}; padding: 3px 7px; }}
 QTableView, QTreeView, QListView {{
-    background: {BASE}; border: 1px solid rgba(35,38,41,36); border-radius: 6px;
+    background: {BASE}; border: 1px solid rgba(35,38,41,64); border-radius: 6px;
     gridline-color: transparent; selection-background-color: transparent; selection-color: {INK};
     alternate-background-color: #f6f7f7; outline: 0;
 }}
@@ -98,7 +98,7 @@ QComboBox QAbstractItemView::item {{ padding: 6px 12px; }}
 QComboBox QAbstractItemView::item:selected {{ background: rgba(61,174,233,51); color: {INK}; border-radius: 4px; }}
 QHeaderView::section {{
     background: {WINDOW}; color: {MUTED}; font-weight: 600; padding: 6px 8px;
-    border: none; border-bottom: 1px solid rgba(35,38,41,36);
+    border: none; border-bottom: 1px solid rgba(35,38,41,64);
 }}
 QStatusBar {{ background: {WINDOW}; border-top: 1px solid rgba(35,38,41,31); color: {MUTED}; }}
 QStatusBar::item {{ border: none; }}
