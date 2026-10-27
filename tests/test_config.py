@@ -1,4 +1,7 @@
 import json
+import os
+
+import pytest
 
 from tvhplayer.core.config import ConfigStore, default_config
 
@@ -22,6 +25,59 @@ def test_corrupt_config_falls_back_to_defaults(tmp_path):
     store = ConfigStore(path)
     assert store.data['servers'] == []
     assert store.data['volume'] == default_config()['volume']
+    assert (tmp_path / 'tvhplayer.conf.broken').read_text(encoding='utf-8') == '{not json'
+    store.save()
+    assert (tmp_path / 'tvhplayer.conf.broken').read_text(encoding='utf-8') == '{not json'
+
+
+def test_config_that_is_not_text_falls_back_to_defaults(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    path.write_bytes(b'\xff\xfe{')
+    assert ConfigStore(path).data['servers'] == []
+    assert (tmp_path / 'tvhplayer.conf.broken').exists()
+
+
+def test_save_replaces_the_file_whole_and_owner_only(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    store = ConfigStore(path)
+    store.data['volume'] = 30
+    store.save()
+    assert json.loads(path.read_text())['volume'] == 30
+    assert [item.name for item in tmp_path.iterdir()] == ['tvhplayer.conf']
+    if os.name == 'posix':
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_failed_save_keeps_the_old_file(tmp_path, monkeypatch):
+    path = tmp_path / 'tvhplayer.conf'
+    store = ConfigStore(path)
+    store.data['volume'] = 30
+    store.save()
+
+    def full_disk(*args, **kwargs):
+        raise OSError(28, 'No space left on device')
+
+    monkeypatch.setattr(json, 'dump', full_disk)
+    store.data['volume'] = 70
+    with pytest.raises(OSError):
+        store.save()
+    assert json.loads(path.read_text())['volume'] == 30
+    assert [item.name for item in tmp_path.iterdir()] == ['tvhplayer.conf']
+
+
+def test_save_through_a_link_keeps_the_link(tmp_path):
+    if os.name != 'posix':
+        pytest.skip('symlinks')
+    real = tmp_path / 'dotfiles' / 'tvhplayer.conf'
+    real.parent.mkdir()
+    real.write_text('{}', encoding='utf-8')
+    link = tmp_path / 'tvhplayer.conf'
+    link.symlink_to(real)
+    store = ConfigStore(link)
+    store.data['volume'] = 30
+    store.save()
+    assert link.is_symlink()
+    assert json.loads(real.read_text())['volume'] == 30
 
 
 def test_missing_file_uses_defaults(tmp_path):

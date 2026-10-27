@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 from copy import deepcopy
 from pathlib import Path
 
@@ -201,17 +202,42 @@ class ConfigStore:
                     self.data = _normalize(json.load(handle))
             else:
                 self.data = default_config()
-        except (OSError, json.JSONDecodeError) as exc:
+        except OSError as exc:
             log.warning('Could not load config from %s: %s', self.path, exc)
+            self.data = default_config()
+        except ValueError as exc:
+            # Kept aside, so the next save does not replace the user's settings with defaults.
+            broken = self.path.with_name(self.path.name + '.broken')
+            try:
+                os.replace(self.path, broken)
+                log.warning('Config %s cannot be read (%s); moved it to %s', self.path, exc, broken)
+            except OSError:
+                log.warning('Config %s cannot be read: %s', self.path, exc)
             self.data = default_config()
         return self.data
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # A link is followed, so a config kept elsewhere stays there.
+        target = Path(os.path.realpath(self.path))
+        target.parent.mkdir(parents=True, exist_ok=True)
         payload = _normalize(self.data)
         on_disk = dict(payload, servers=without_builtin_secrets(payload['servers']))
-        with self.path.open('w', encoding='utf-8') as handle:
-            json.dump(on_disk, handle, indent=2)
+        # Written whole beside the old file, then swapped in: a crash or full
+        # disk midway leaves the old settings. mkstemp makes it owner-only,
+        # as it holds server passwords.
+        fd, temp = tempfile.mkstemp(prefix=f'.{target.name}.', suffix='.tmp', dir=target.parent)
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+                json.dump(on_disk, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp, target)
+        except BaseException:
+            try:
+                os.unlink(temp)
+            except OSError:
+                pass
+            raise
         self.data = payload
         return payload
 
