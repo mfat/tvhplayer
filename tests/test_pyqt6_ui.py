@@ -777,10 +777,7 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
             Qt.ItemDataRole.AccessibleDescriptionRole
         )
         assert _cell(window.channel_list, news_row, 2).text() == ""
-        colors = ui.row_emphasis('playing')
-        if colors is not None:
-            assert _cell(window.channel_list, sport_row, 1).background().color().name() == colors[0].name()
-            assert _cell(window.channel_list, sport_row, 0).foreground().color().name() == colors[1].name()
+        assert _cell(window.channel_list, sport_row, 1).data(Qt.ItemDataRole.BackgroundRole) is None
 
         window.channel_list.setCurrentCell(news_row, 1)
         app.processEvents()

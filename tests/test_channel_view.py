@@ -155,7 +155,6 @@ def test_channel_model_sorts_filters_and_keeps_the_current_channel():
 
 def test_channel_model_marks_playing_and_recording_rows_once():
     from PyQt6.QtCore import Qt
-    from PyQt6.QtGui import QColor
 
     from tvhplayer.channel_view import COL_NAME, COL_STATUS
     from tvhplayer.core.models import Channel
@@ -166,20 +165,19 @@ def test_channel_model_marks_playing_and_recording_rows_once():
     model.describe = lambda channel, playing, recording: f'{channel.name} {playing} {recording}'
     changes = []
     model.dataChanged.connect(lambda *args: changes.append(args))
-    colors = {'playing': (QColor('#1e3a8a'), QColor('#ffffff')), 'recording': None}
-
-    model.set_marks(sport, {'news'}, colors)
+    model.set_marks(sport, {'news'})
     assert model.index(1, COL_STATUS).data() == 'Playing'
     assert model.index(0, COL_STATUS).data() == 'Recording'
-    assert model.index(1, COL_NAME).data(Qt.ItemDataRole.BackgroundRole) == QColor('#1e3a8a')
-    assert model.index(0, COL_NAME).data(Qt.ItemDataRole.BackgroundRole) is None
+    # Rows keep the style's colors; the Status column and the descriptions say what is on.
+    assert model.index(1, COL_NAME).data(Qt.ItemDataRole.BackgroundRole) is None
+    assert model.index(1, COL_NAME).data(Qt.ItemDataRole.ForegroundRole) is None
     assert model.index(1, COL_NAME).data(Qt.ItemDataRole.AccessibleDescriptionRole) == 'Sport True False'
     assert model.index(1, COL_STATUS).data(Qt.ItemDataRole.AccessibleDescriptionRole) == 'Sport: playing'
     count = len(changes)
     assert count > 0
-    model.set_marks(Channel(uuid='sport', name='Sport', number=2), {'news'}, dict(colors))
+    model.set_marks(Channel(uuid='sport', name='Sport', number=2), {'news'})
     assert len(changes) == count
-    model.set_marks(None, set(), colors)
+    model.set_marks(None, set())
     assert model.index(1, COL_STATUS).data() == ''
     view.close()
 

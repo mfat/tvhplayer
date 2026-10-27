@@ -71,7 +71,6 @@ QSplitter::handle:horizontal {{ width: 1px; }}
 QToolButton {{ padding: 4px 8px; background: {BASE}; border: 1px solid rgba(35,38,41,64); border-radius: 4px; }}
 QToolButton:hover {{ border-color: {ACCENT}; background: #f2f8fc; }}
 QToolButton:focus {{ border: 2px solid {ACCENT}; padding: 3px 7px; }}
-/* No ::item rule for the views: one makes Qt drop the row colors for playing and recording. */
 QTableView, QTreeView, QListView {{
     background: {BASE}; border: 1px solid rgba(35,38,41,36); border-radius: 6px;
     gridline-color: transparent; selection-background-color: rgba(61,174,233,51); selection-color: {INK};

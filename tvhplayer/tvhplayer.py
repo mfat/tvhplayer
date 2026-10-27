@@ -211,7 +211,6 @@ try:
         prefers_high_contrast,
         quality_colors,
         quality_phrase,
-        row_emphasis,
         set_item_access,
     )
 except ImportError:
@@ -226,7 +225,6 @@ except ImportError:
         prefers_high_contrast,
         quality_colors,
         quality_phrase,
-        row_emphasis,
         set_item_access,
     )
 # or
@@ -443,17 +441,13 @@ class DVRStatusDialog(QDialog):
             if hasattr(parent, 'statusbar'):
                 parent.statusbar.showMessage("Recording stopped")
 
-    def _fill_row(self, table, row, values, entry, emphasis=None):
-        colors = row_emphasis(emphasis)
+    def _fill_row(self, table, row, values, entry):
         summary = ", ".join(str(value) for value in values if value)
         for col, value in enumerate(values):
             item = QTableWidgetItem(value)
             if col == 0:
                 item.setData(Qt.ItemDataRole.UserRole, entry)
                 set_item_access(item, summary)
-            if colors is not None:
-                item.setBackground(colors[0])
-                item.setForeground(colors[1])
             table.setItem(row, col, item)
 
     def _entry_key(self, entry):
@@ -513,7 +507,6 @@ class DVRStatusDialog(QDialog):
                         "Recording" if is_recording else "Scheduled",
                     ],
                     entry,
-                    'recording' if is_recording else None,
                 )
 
             finished.sort(key=lambda x: x[1], reverse=True)
@@ -544,7 +537,6 @@ class DVRStatusDialog(QDialog):
                         error,
                     ],
                     entry,
-                    'failed',
                 )
 
             self._restore_selection(self.tabs.currentWidget(), selected_key)
@@ -1287,15 +1279,11 @@ class TasksPanel(QFrame):
             f"{task['kind']}, {task['channel']}, {task['title']}, "
             f"{task['status']}, {task.get('size') or 'no file yet'}. {task['detail']}"
         )
-        colors = row_emphasis('recording' if task['bucket'] == 'recording' else None)
         icon_item = QTableWidgetItem()
         icon_item.setIcon(_task_status_icon(task['status']))
         icon_item.setData(Qt.ItemDataRole.UserRole, task)
         set_item_access(icon_item, summary, task['detail'])
         icon_item.setToolTip(task['status'])
-        if colors is not None:
-            icon_item.setBackground(colors[0])
-            icon_item.setForeground(colors[1])
         self.task_table.setItem(row, 0, icon_item)
         for offset, value in enumerate(values):
             col = offset + 1
@@ -1304,9 +1292,6 @@ class TasksPanel(QFrame):
             # has to be that full text; the row description would replace it.
             if value:
                 item.setToolTip(value)
-            if colors is not None:
-                item.setBackground(colors[0])
-                item.setForeground(colors[1])
             self.task_table.setItem(row, col, item)
 
     def _restore_selection(self, key):
@@ -4226,8 +4211,7 @@ class TVHeadendClient(QMainWindow):
             return
         playing = self._playing_channel()
         recording = self._recording_keys if self.channel_options['recording_status'] else set()
-        colors = {kind: row_emphasis(kind) for kind in ('playing', 'recording')}
-        self.channel_model.set_marks(playing, recording, colors)
+        self.channel_model.set_marks(playing, recording)
         if scroll and playing is not None:
             row = self.channel_model.find_row(lambda listed: self._channels_match(listed, playing))
             if row >= 0:

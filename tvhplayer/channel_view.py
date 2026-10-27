@@ -94,8 +94,6 @@ CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
 _DISPLAY = Qt.ItemDataRole.DisplayRole
 _DECORATION = Qt.ItemDataRole.DecorationRole
 _TOOLTIP = Qt.ItemDataRole.ToolTipRole
-_BACKGROUND = Qt.ItemDataRole.BackgroundRole
-_FOREGROUND = Qt.ItemDataRole.ForegroundRole
 _ACCESSIBLE_TEXT = Qt.ItemDataRole.AccessibleTextRole
 _ACCESSIBLE_DESCRIPTION = Qt.ItemDataRole.AccessibleDescriptionRole
 
@@ -144,7 +142,6 @@ class ChannelTableModel(QAbstractTableModel):
         self._members = None
         self._playing = None
         self._recording = frozenset()
-        self._colors = {}
         self._now_next = {}
         self._show_progress = True
         self._kinds = {}
@@ -174,11 +171,6 @@ class ChannelTableModel(QAbstractTableModel):
         column = index.column()
         if role == _DISPLAY:
             return self._display(position, column)
-        if role in (_BACKGROUND, _FOREGROUND):
-            colors = self._row_colors(position)
-            if colors is None:
-                return None
-            return colors[0] if role == _BACKGROUND else colors[1]
         if role == _DECORATION:
             if column == COL_NAME and self._logos:
                 return self._pixmaps.get(self._logo_refs[position]) or self._placeholder
@@ -231,18 +223,14 @@ class ChannelTableModel(QAbstractTableModel):
         self._members = members
         self._relayout()
 
-    def set_marks(self, playing, recording, colors):
-        """The channel that is on, the keys of channels being recorded, and their row colors.
-
-        ``colors`` maps 'playing' and 'recording' to (background, foreground), or None.
-        """
+    def set_marks(self, playing, recording):
+        """The channel that is on, and the keys of channels being recorded."""
         playing_id = (str(playing.uuid or ''), playing.htsp_id) if playing is not None else None
         recording = frozenset(recording)
-        if playing_id == self._playing and recording == self._recording and colors == self._colors:
+        if playing_id == self._playing and recording == self._recording:
             return
         self._playing = playing_id
         self._recording = recording
-        self._colors = dict(colors)
         self._changed(range(len(COLUMN_TITLES)))
 
     def set_programmes(self, now_next, show_progress):
@@ -309,13 +297,6 @@ class ChannelTableModel(QAbstractTableModel):
         if self._keys[position] in self._recording:
             parts.append('Recording')
         return ', '.join(parts)
-
-    def _row_colors(self, position):
-        if self.is_playing(self._channels[position]):
-            return self._colors.get('playing')
-        if self._keys[position] in self._recording:
-            return self._colors.get('recording')
-        return None
 
     def _programmes(self, position, now):
         """The programme on now, unless it ended, and the next one."""
