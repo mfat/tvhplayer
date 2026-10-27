@@ -3668,11 +3668,12 @@ class TVHeadendClient(QMainWindow):
         server_layout.addWidget(buddy_label("&Server:", self.server_combo))
         server_layout.addWidget(self.server_combo)
         self.manage_servers_btn.setText("⚙️")  # Unicode settings icon
+        # A font, not a style sheet: over the app's style, a style sheet drew the
+        # focused button as a square grey box. The style shows the focus itself.
         if not prefers_high_contrast():
-            self.manage_servers_btn.setStyleSheet(
-                "QToolButton { font-size: 18px; } "
-                "QToolButton:focus { border: 2px solid palette(highlight); }"
-            )
+            gear_font = self.manage_servers_btn.font()
+            gear_font.setPixelSize(18)
+            self.manage_servers_btn.setFont(gear_font)
         describe(
             self.manage_servers_btn,
             "Manage servers",
@@ -3683,8 +3684,6 @@ class TVHeadendClient(QMainWindow):
         self.reload_channels_btn = QToolButton()
         self.reload_channels_btn.setText("Reload")
         self.reload_channels_btn.clicked.connect(lambda: self.fetch_channels(keep_place=True))
-        if not prefers_high_contrast():
-            self.reload_channels_btn.setStyleSheet("QToolButton:focus { border: 2px solid palette(highlight); }")
         describe(
             self.reload_channels_btn,
             "Reload channel list",
@@ -3695,8 +3694,6 @@ class TVHeadendClient(QMainWindow):
         self.guide_btn = QToolButton()
         self.guide_btn.setText("TV Guide")
         self.guide_btn.clicked.connect(lambda: self.show_guide())
-        if not prefers_high_contrast():
-            self.guide_btn.setStyleSheet("QToolButton:focus { border: 2px solid palette(highlight); }")
         describe(
             self.guide_btn,
             "TV guide",
