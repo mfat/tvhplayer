@@ -1004,7 +1004,8 @@ class TasksPanel(QFrame):
         host = self._host
         server = host.current_server() if host is not None and hasattr(host, 'current_server') else None
         if not server or (hasattr(host, '_server_requests_ready') and not host._server_requests_ready()):
-            self._apply_server_entries([])
+            # Not an answer from the server: its recordings, when they come, are not new.
+            self._apply_server_entries([], answered=False)
             return
         if self._fetching:
             # Ask again once the running fetch is done, so a change just made shows.
@@ -1068,10 +1069,10 @@ class TasksPanel(QFrame):
         if self._fetch_again:
             self._fetch_server_tasks()
 
-    def _apply_server_entries(self, entries):
+    def _apply_server_entries(self, entries, answered=True):
         fetched = self._tasks_from_entries(entries)
         self._server_tasks = fetched
-        if not self._server_seen:
+        if answered and not self._server_seen:
             self._server_seen = True
             self._known_keys |= {task['key'] for task in fetched}
         self._set_error("")

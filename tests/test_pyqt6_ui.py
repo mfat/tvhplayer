@@ -3109,3 +3109,62 @@ def test_settings_leave_the_window_usable(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def _dvr_entry(category, htsp_id):
+    return types.SimpleNamespace(
+        category=lambda: category,
+        start=int(time.time()) - 7200,
+        duration=3600,
+        htsp_id=htsp_id,
+        uuid=None,
+        channel_name='One',
+        title=f'Show {htsp_id}',
+        raw={},
+    )
+
+
+def test_tasks_stay_hidden_when_the_server_starts_with_only_completed_recordings(monkeypatch, tmp_path):
+    # The built-in server is not ready on the first refresh, so the pane sees no
+    # recordings; its first real answer lists old recordings, which are not new.
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        ready = [False]
+        monkeypatch.setattr(window, 'current_server', lambda: {'name': 'Built-in'})
+        monkeypatch.setattr(window, '_server_requests_ready', lambda: ready[0])
+        pane = window.tasks_pane
+        pane.refresh()
+        ready[0] = True
+        pane._on_server_fetched(pane._generation, [_dvr_entry('finished', 1), _dvr_entry('finished', 2)], None)
+        app.processEvents()
+        assert not window.tasks_action.isChecked()
+        assert not pane.isVisibleTo(window)
+
+        # A recording scheduled later is new and opens the pane.
+        pane._on_server_fetched(
+            pane._generation,
+            [_dvr_entry('finished', 1), _dvr_entry('finished', 2), _dvr_entry('upcoming', 3)],
+            None,
+        )
+        app.processEvents()
+        assert window.tasks_action.isChecked()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_tasks_open_when_the_server_starts_with_a_scheduled_recording(monkeypatch, tmp_path):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        ready = [False]
+        monkeypatch.setattr(window, 'current_server', lambda: {'name': 'Built-in'})
+        monkeypatch.setattr(window, '_server_requests_ready', lambda: ready[0])
+        pane = window.tasks_pane
+        pane.refresh()
+        ready[0] = True
+        pane._on_server_fetched(pane._generation, [_dvr_entry('upcoming', 1)], None)
+        app.processEvents()
+        assert window.tasks_action.isChecked()
+    finally:
+        window.close()
+        app.processEvents()
