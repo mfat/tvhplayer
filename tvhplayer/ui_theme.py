@@ -75,8 +75,7 @@ QMenu {{ background: {BASE}; border: 1px solid rgba(35,38,41,51); border-radius:
 QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: 4px; }}
 QMenu::item:selected {{ background: rgba(61,174,233,51); color: {INK}; }}
 QMenu::separator {{ height: 1px; background: rgba(35,38,41,26); margin: 4px 8px; }}
-QSplitter::handle {{ background: rgba(35,38,41,31); }}
-QSplitter::handle:horizontal {{ width: 1px; }}
+QSplitter::handle {{ background: transparent; }}
 QToolButton {{ padding: 4px 8px; background: {BASE}; border: 1px solid rgba(35,38,41,64); border-radius: 4px; }}
 QToolButton:hover {{ border-color: {ACCENT}; background: #f2f8fc; }}
 QToolButton:focus {{ border: 2px solid {ACCENT}; padding: 3px 7px; }}
@@ -207,7 +206,7 @@ def _load_fonts():
 
 
 def polish_main_window(window):
-    """Flatten the raised side panes and give the splitter a hairline. Call after the UI is built."""
+    """Flatten the raised side panes and hide the splitter handle. Call after the UI is built."""
     from PyQt6.QtWidgets import QFrame
     for name in ('left_pane', 'right_pane'):
         pane = getattr(window, name, None)
@@ -216,7 +215,8 @@ def polish_main_window(window):
             pane.setObjectName(name)
     splitter = getattr(window, 'splitter', None)
     if splitter is not None:
-        splitter.setHandleWidth(1)
+        # Invisible, but wide enough to grab.
+        splitter.setHandleWidth(6)
 
 
 SELECTED_ROW = QColor(61, 174, 233, 51)
