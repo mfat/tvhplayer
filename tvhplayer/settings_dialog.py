@@ -28,14 +28,14 @@ from PyQt6.QtWidgets import (
 try:
     from .a11y import announce_label, describe
     from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
-    from .core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC, choose_engine
+    from .core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC
     from .core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
     from .ui_theme import style_names
     from .settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 except ImportError:
     from a11y import announce_label, describe
     from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
-    from core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC, choose_engine
+    from core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC
     from core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
     from ui_theme import style_names
     from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
@@ -53,12 +53,7 @@ ENGINE_HELP = (
     'With VLC on a Wayland desktop, the whole window runs through XWayland and can look soft when scaled. '
     'A change takes effect the next time TVHplayer starts.'
 )
-ENGINE_SHORT = 'Automatic plays with mpv when the desktop uses Wayland and with VLC on X11.'
-ENGINE_NOTE = (
-    'With VLC on a Wayland desktop, the whole window runs through XWayland and can look soft when scaled. '
-    'A change takes effect the next time TVHplayer starts.'
-)
-ENGINE_NAMES = {ENGINE_MPV: 'mpv', ENGINE_VLC: 'VLC'}
+ENGINE_SHORT = 'Requires restart.'
 FOLDER_HELP = 'Recording to this computer saves here without asking for a file name.'
 BUILTIN_FOLDER_HELP = ' The built-in server saves its recordings here too.'
 OPTIONS_HELP = (
@@ -203,13 +198,6 @@ class SettingsDialog(QDialog):
             self.engine_combo.setCurrentIndex(max(self.engine_combo.findData(host.player_engine_choice()), 0))
             describe(self.engine_combo, 'Playback engine', ENGINE_HELP)
             engine.add_row(SettingRow('Playback &engine', ENGINE_SHORT, self.engine_combo))
-            strip = engine.add_strip(StatusStrip())
-            self.engine_status = strip.label
-            note = QLabel(ENGINE_NOTE)
-            note.setObjectName('rowDesc')
-            note.setWordWrap(True)
-            strip.layout().addWidget(note)
-            self._show_engine()
             self.engine_combo.currentIndexChanged.connect(self._engine_chosen)
         page.finish()
         return page
@@ -405,25 +393,10 @@ class SettingsDialog(QDialog):
 
     def _engine_chosen(self, _index):
         self._host.set_player_engine_choice(self.engine_combo.currentData())
-        self._show_engine(announce=True)
         self._show_title_bar_row()
 
     def _show_title_bar_row(self):
         self._title_bar_group.set_row_visible(self._title_bar_row, self._host.can_draw_title_bar())
-
-    def _show_engine(self, announce=False):
-        running = self._host.engine
-        wanted, reason = choose_engine(preference=self.engine_combo.currentData())
-        if wanted == running:
-            text = f'Playing with {ENGINE_NAMES[running]}.'
-        else:
-            text = f'Playing with {ENGINE_NAMES[running]}. Restart TVHplayer to play with {ENGINE_NAMES[wanted]}.'
-        if wanted == ENGINE_VLC and self.engine_combo.currentData() == ENGINE_MPV:
-            text += f' mpv cannot be used: {reason}.'
-        if announce:
-            announce_label(self.engine_status, text)
-        else:
-            self.engine_status.setText(text)
 
     def _show_picons(self, text=None):
         count = self._host.picon_count()

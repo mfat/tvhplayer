@@ -584,11 +584,7 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
 
     import tvhplayer.settings_dialog as settings
 
-    # Automatic resolves to mpv here; a fixed choice wins.
     monkeypatch.setattr(settings.sys, 'platform', 'linux')
-    monkeypatch.setattr(
-        settings, 'choose_engine', lambda preference: ('vlc' if preference == 'vlc' else 'mpv', 'test')
-    )
     host = Host()
     dialog = SettingsDialog(host)
     # Appearance comes first and Settings opens on it.
@@ -599,11 +595,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog.title_bar_check.click()
     assert host.title_bar is True
     assert dialog.engine_combo.currentData() == 'auto'
-    assert dialog.engine_status.text() == 'Playing with mpv.'
     dialog.engine_combo.setCurrentIndex(dialog.engine_combo.findData('vlc'))
     assert host.engine_choice == 'vlc'
     assert not dialog.title_bar_check.isVisibleTo(dialog)
-    assert dialog.engine_status.text() == 'Playing with mpv. Restart TVHplayer to play with VLC.'
     dialog.engine_combo.setCurrentIndex(dialog.engine_combo.findData('mpv'))
     assert dialog.title_bar_check.isVisibleTo(dialog)
     dialog.engine_combo.setCurrentIndex(dialog.engine_combo.findData('vlc'))
