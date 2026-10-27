@@ -1,7 +1,8 @@
-# Intel macOS / Python 3.15 build environment.
-# Install with Python 3.15.0 and use VLC 3.0.24.
+# macOS build environment (Intel and Apple Silicon), Python 3.15.
+# Plays with Homebrew's libmpv; python-vlc lets an installed VLC serve as the fallback.
 PyInstaller==6.22.3
 PyQt6==6.10.2
+mpv==1.0.8
 python-vlc==3.0.21203
 requests==2.32.5
 psutil==7.2.2

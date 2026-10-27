@@ -8,7 +8,11 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-APP_NAME="${TVHPLAYER_APP_NAME:-TVHplayer-MacOS-Intel}"
+case "$(uname -m)" in
+  arm64) DEFAULT_NAME=TVHplayer-MacOS-AppleSilicon; VOLUME='TVHplayer Apple Silicon' ;;
+  *) DEFAULT_NAME=TVHplayer-MacOS-Intel; VOLUME='TVHplayer Intel' ;;
+esac
+APP_NAME="${TVHPLAYER_APP_NAME:-$DEFAULT_NAME}"
 APP="$ROOT/dist/$APP_NAME.app"
 OUTPUT="$ROOT/dist/$APP_NAME.dmg"
 
@@ -29,13 +33,13 @@ trap cleanup EXIT
 
 ditto "$APP" "$STAGE/$APP_NAME.app"
 ln -s /Applications "$STAGE/Applications"
-cat > "$STAGE/INSTALL.txt" <<'INSTRUCTIONS'
-TVHplayer — Intel macOS development build
+cat > "$STAGE/INSTALL.txt" <<INSTRUCTIONS
+TVHplayer for macOS
 
-1. Install VLC 3.0.24 for Intel macOS into /Applications/VLC.app first.
-   TVHplayer requires VLC's native playback libraries.
-2. Drag TVHplayer-MacOS-Intel.app onto the Applications shortcut.
-3. Launch the installed app from /Applications.
+1. Drag $APP_NAME.app onto the Applications shortcut.
+2. Launch the installed app from /Applications.
+
+It plays with mpv, which is inside the app; nothing else needs installing.
 
 The application is ad-hoc signed but not notarized by Apple.
 macOS may request approval via System Settings > Privacy & Security.
@@ -44,7 +48,7 @@ Do not upload application log files that contain private server information.
 INSTRUCTIONS
 
 rm -f "$OUTPUT"
-hdiutil create -volname 'TVHplayer Intel' \
+hdiutil create -volname "$VOLUME" \
   -srcfolder "$STAGE" -format UDZO -ov "$OUTPUT" >/dev/null
 
 hdiutil verify "$OUTPUT" >/dev/null

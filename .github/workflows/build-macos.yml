@@ -1,36 +1,51 @@
-name: Build TVHplayer (macOS Intel)
+name: macOS build
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
-      - build/macos-intel-reproducible
-      - test/macos-integration-build
-    paths:
-      - 'macos/**'
-      - 'tvhplayer/**'
-      - '.github/workflows/build-macos.yml'
+    tags:
+      - 'v*'
   pull_request:
     paths:
       - 'macos/**'
-      - 'tvhplayer/**'
       - '.github/workflows/build-macos.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: macos-intel-${{ github.ref }}
+  group: macos-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  macos-intel:
-    runs-on: macos-15-intel
-    timeout-minutes: 30
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Homebrew's libraries need the macOS they were built for or newer.
+          - runner: macos-15-intel
+            arch: x86_64
+            app: TVHplayer-MacOS-Intel
+          - runner: macos-14
+            arch: arm64
+            app: TVHplayer-MacOS-AppleSilicon
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    permissions:
+      contents: write
     steps:
       - name: Checkout source
         uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "label=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "label=ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Install verified Python 3.15.0 (official macOS package)
         shell: bash
@@ -50,48 +65,60 @@ jobs:
           /Library/Frameworks/Python.framework/Versions/3.15/bin/python3.15 -m venv "$RUNNER_TEMP/tvhplayer-venv"
           "$RUNNER_TEMP/tvhplayer-venv/bin/python" -m pip install -r macos/requirements-build.txt
           "$RUNNER_TEMP/tvhplayer-venv/bin/python" -m pip check
-          "$RUNNER_TEMP/tvhplayer-venv/bin/python" -c 'import ast, pathlib; ast.parse(pathlib.Path("tvhplayer/tvhplayer.py").read_text(encoding="utf-8"))'
           echo "$RUNNER_TEMP/tvhplayer-venv/bin" >> "$GITHUB_PATH"
 
-      - name: Download verified VLC 3.0.24 (Intel)
-        shell: bash
+      - name: Install mpv from Homebrew
         run: |
-          set -euo pipefail
-          curl --fail --location --retry 3 --retry-delay 2 \
-            -o "$RUNNER_TEMP/vlc-3.0.24-intel64.dmg" \
-            'https://get.videolan.org/vlc/3.0.24/macosx/vlc-3.0.24-intel64.dmg'
-          echo "1ef6c903e2dc026d4e58ddf7b2a9ed0eb6f8caf80a9a9f46f96490340b962707  $RUNNER_TEMP/vlc-3.0.24-intel64.dmg" | shasum -a 256 -c -
-          mkdir -p "$RUNNER_TEMP/vlc-mount"
-          hdiutil attach -readonly -nobrowse -mountpoint "$RUNNER_TEMP/vlc-mount" "$RUNNER_TEMP/vlc-3.0.24-intel64.dmg" >/dev/null
-          test -f "$RUNNER_TEMP/vlc-mount/VLC.app/Contents/MacOS/lib/libvlc.dylib"
-          # Ephemeral runner only: mirror the developer's tested VLC installation.
-          sudo rm -rf /Applications/VLC.app
-          sudo ditto "$RUNNER_TEMP/vlc-mount/VLC.app" /Applications/VLC.app
-          hdiutil detach "$RUNNER_TEMP/vlc-mount" >/dev/null
-          python -c 'import vlc; assert vlc.libvlc_get_version().decode().startswith("3.0.24")'
+          brew install mpv
+          brew list --versions mpv
 
-      - name: Build and inspect macOS application
+      - name: Build the application and disk image
         shell: bash
         run: |
           set -euo pipefail
           bash macos/build-macos.sh
-          APP='macos/dist/TVHplayer-MacOS-Intel.app'
-          file "$APP/Contents/MacOS/TVHplayer-MacOS-Intel"
-          test ! -e "$APP/Contents/Frameworks/vlc/plugins/plugins.dat"
+          APP='macos/dist/${{ matrix.app }}.app'
+          file "$APP/Contents/MacOS/${{ matrix.app }}"
           test -f "$APP/Contents/Frameworks/icons/play.svg"
           codesign --verify --deep --verbose=2 "$APP"
-          ditto -c -k --sequesterRsrc --keepParent "$APP" macos/dist/TVHplayer-MacOS-Intel.zip
           bash macos/package-dmg.sh
-          test -s macos/dist/TVHplayer-MacOS-Intel.dmg
-          test -s macos/dist/TVHplayer-MacOS-Intel.dmg.sha256
 
-      - name: Upload app archive
-        uses: actions/upload-artifact@v7
+      # Uninstall Homebrew's mpv first, so the app can only use the libmpv inside it.
+      - name: Start the app
+        shell: bash
+        run: |
+          set -u
+          brew uninstall --ignore-dependencies mpv >/dev/null
+          LOG="$HOME/Library/Logs/TVHplayer/app.log"
+          QT_QPA_PLATFORM=offscreen 'macos/dist/${{ matrix.app }}.app/Contents/MacOS/${{ matrix.app }}' &
+          pid=$!
+          sleep 25
+          running=yes
+          kill -0 "$pid" 2>/dev/null || running=no
+          kill "$pid" 2>/dev/null || true
+          cat "$LOG" || echo "No log at $LOG"
+          [ "$running" = yes ] || { echo "TVHplayer exited within 25 seconds"; exit 1; }
+          grep -q 'Playback engine: mpv' "$LOG" || { echo 'mpv was not chosen'; exit 1; }
+          grep -q 'Media player created successfully' "$LOG" || { echo 'mpv did not start'; exit 1; }
+          ! grep -q 'Error starting application' "$LOG" || { echo 'The app reported a startup error'; exit 1; }
+
+      - name: Name release files
+        run: |
+          mkdir -p release-assets
+          name="tvhplayer-${{ steps.version.outputs.label }}-macos-${{ matrix.arch }}.dmg"
+          cp 'macos/dist/${{ matrix.app }}.dmg' "release-assets/$name"
+          cd release-assets && shasum -a 256 "$name" > "$name.sha256"
+
+      - uses: actions/upload-artifact@v7
         with:
-          name: TVHplayer-MacOS-Intel-${{ github.sha }}
-          path: |
-            macos/dist/TVHplayer-MacOS-Intel.zip
-            macos/dist/TVHplayer-MacOS-Intel.dmg
-            macos/dist/TVHplayer-MacOS-Intel.dmg.sha256
+          name: macos-${{ matrix.arch }}
+          path: release-assets/*
           if-no-files-found: error
           retention-days: 14
+
+      - name: Upload to release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release-assets/*
