@@ -65,7 +65,11 @@ QScrollArea {{ border: none; background: transparent; }}
 QScrollBar:vertical {{ width: 10px; background: transparent; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: rgba(35,38,41,70); border-radius: 3px; min-height: 30px; }}
 QScrollBar::handle:vertical:hover {{ background: rgba(35,38,41,110); }}
-QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ height: 0; background: none; }}
+QScrollBar:horizontal {{ height: 10px; background: transparent; margin: 2px; }}
+QScrollBar::handle:horizontal {{ background: rgba(35,38,41,70); border-radius: 3px; min-width: 30px; }}
+QScrollBar::handle:horizontal:hover {{ background: rgba(35,38,41,110); }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; border: none; background: none; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 
 /* Main window */
 QMenuBar {{ background: {WINDOW}; border-bottom: 1px solid rgba(35,38,41,31); padding: 2px 6px; }}
@@ -208,7 +212,7 @@ def _load_fonts():
 def polish_main_window(window):
     """Flatten the raised side panes and hide the splitter handle. Call after the UI is built."""
     from PyQt6.QtWidgets import QFrame
-    for name in ('left_pane', 'right_pane'):
+    for name in ('left_pane', 'right_pane', 'tasks_pane'):
         pane = getattr(window, name, None)
         if pane is not None:
             pane.setFrameStyle(QFrame.Shape.NoFrame)
