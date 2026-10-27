@@ -9,6 +9,7 @@ the app runs. Under high contrast the system look stays in charge.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QObject, QRectF, QStandardPaths, Qt
@@ -198,6 +199,7 @@ _scheme = None
 _mode = SCHEME_SYSTEM
 _watching = False
 _polish = None
+_style = None
 _default_font = None
 _theme_font = None
 
@@ -409,8 +411,32 @@ def _follow_desktop(app, force=False):
     if hasattr(hints, 'setColorScheme'):
         desktop.note_pinned(scheme)
         hints.setColorScheme(scheme)
+    # KDE's styles read their scheme only when made, so the style is made again.
+    if _kde_color_scheme(app, scheme) and not _active and _style is not None:
+        app.setStyle(_style())
     if _active:
         _apply_colors(app, scheme == desktop.ColorScheme.Dark)
+
+
+def _kde_color_scheme(app, scheme):
+    """Give KDE's styles the light or dark Breeze color scheme; True if it changed.
+
+    Breeze and Oxygen paint the menu bar and other parts from a KDE color
+    scheme, not from Qt's palette, and outside KDE they find none and stay
+    light. KDE apps choose one with this property. On KDE, following the
+    desktop, the desktop's own scheme stays.
+    """
+    path = None
+    on_kde = 'KDE' in os.environ.get('XDG_CURRENT_DESKTOP', '').upper().split(':')
+    if not (on_kde and _mode == SCHEME_SYSTEM) and scheme != desktop.ColorScheme.Unknown:
+        name = 'BreezeDark' if scheme == desktop.ColorScheme.Dark else 'BreezeLight'
+        found = QStandardPaths.locate(QStandardPaths.StandardLocation.GenericDataLocation,
+                                      f'color-schemes/{name}.colors')
+        path = found or None
+    if app.property('KDE_COLOR_SCHEME_PATH') == path:
+        return False
+    app.setProperty('KDE_COLOR_SCHEME_PATH', path)
+    return True
 
 
 def _remove_polish(app):
@@ -448,7 +474,7 @@ def apply(app, theme, style_class=RowStyle):
     StyleChange, so widgets that set themselves up for a theme can follow;
     the main window's panes need polish_main_window() again.
     """
-    global _active, _polish, _default_font, _watching
+    global _active, _polish, _style, _default_font, _watching
     key = style_key(theme)
     if key is None:
         return False
@@ -471,7 +497,8 @@ def apply(app, theme, style_class=RowStyle):
         app.setPalette(QPalette())
         app.setFont(_default_font)
         _restore_grids(app)
-    app.setStyle(style_class(key))
+    _style = lambda: style_class(key)
+    app.setStyle(_style())
     app.setProperty('tvhplayer_theme', theme)
     _follow_desktop(app, force=True)
     if not _watching:

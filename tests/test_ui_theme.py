@@ -16,6 +16,7 @@ def _apply(monkeypatch, answers, theme, mode='system'):
     monkeypatch.setattr(ui_theme.desktop, 'watch', lambda _app, callback: callbacks.append(callback))
     monkeypatch.setattr(ui_theme, '_apply_colors', lambda _app, dark: applied.append(dark))
     monkeypatch.setattr(ui_theme, '_load_fonts', lambda: None)
+    monkeypatch.setattr(ui_theme, '_kde_color_scheme', lambda _app, _scheme: False)
     monkeypatch.setattr(ui_theme, '_ThemePolish', lambda _app: _NoFilter())
     monkeypatch.setattr(app.styleHints(), 'setColorScheme', pinned.append, raising=False)
     monkeypatch.setattr(app, 'setStyle', lambda style: styles.append(style.baseStyle().name()))
@@ -129,3 +130,23 @@ def test_light_or_dark_set_before_start_is_used_from_the_first_paint(monkeypatch
     _changed, applied, pinned, _styles = _apply(monkeypatch, [Qt.ColorScheme.Light], 'TVHplayer', mode='dark')
     assert applied == [True]
     assert pinned == [Qt.ColorScheme.Dark]
+
+
+def test_kde_styles_get_a_dark_scheme_outside_kde_but_kde_keeps_its_own(qapp, monkeypatch):
+    from tvhplayer import ui_theme
+
+    monkeypatch.setattr(ui_theme.QStandardPaths, 'locate', lambda _where, name: f'/schemes/{name}')
+    monkeypatch.setattr(qapp, 'setProperty', lambda _name, value: setattr(qapp, '_kde', value) or True)
+    monkeypatch.setattr(qapp, 'property', lambda _name: getattr(qapp, '_kde', None))
+    monkeypatch.setattr(qapp, '_kde', None, raising=False)
+    monkeypatch.setenv('XDG_CURRENT_DESKTOP', 'ubuntu:GNOME')
+    monkeypatch.setattr(ui_theme, '_mode', 'system')
+    assert ui_theme._kde_color_scheme(qapp, Qt.ColorScheme.Dark)
+    assert qapp._kde == '/schemes/color-schemes/BreezeDark.colors'
+    assert not ui_theme._kde_color_scheme(qapp, Qt.ColorScheme.Dark)  # No change, no new style.
+    monkeypatch.setenv('XDG_CURRENT_DESKTOP', 'KDE')
+    assert ui_theme._kde_color_scheme(qapp, Qt.ColorScheme.Dark)
+    assert qapp._kde is None
+    monkeypatch.setattr(ui_theme, '_mode', 'light')
+    ui_theme._kde_color_scheme(qapp, Qt.ColorScheme.Light)
+    assert qapp._kde == '/schemes/color-schemes/BreezeLight.colors'
