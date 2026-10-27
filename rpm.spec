@@ -9,6 +9,9 @@
 # Fedora does not package python-vlc. The Flatpak pins the same wheel.
 %global vlc_wheel python_vlc-3.0.21203-py3-none-any.whl
 %global vlc_wheel_sha256 1613451a31b692ec276296ceeae0c0ba82bfc2d094dabf9aceb70f58944a6320
+# Nor python-mpv; Fedora ships only libmpv (mpv-libs).
+%global mpv_wheel mpv-1.0.8-py3-none-any.whl
+%global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
 Version:        3.5.5
@@ -17,6 +20,7 @@ Summary:        Tvheadend desktop client with a built-in server
 
 # tvhplayer and Tvheadend: GPL-3.0-or-later. Scan tables: GPL-2.0-only and LGPL-2.1-or-later.
 # libdvbcsa: GPL-2.0-or-later. libhdhomerun and python-vlc: LGPL-2.1-or-later.
+# python-mpv: GPL-2.0-or-later OR LGPL-2.1-or-later.
 License:        GPL-3.0-or-later AND GPL-2.0-only AND GPL-2.0-or-later AND LGPL-2.1-or-later
 URL:            https://github.com/mfat/tvhplayer
 Source0:        %{name}-%{version}.tar.gz
@@ -25,6 +29,7 @@ Source2:        https://github.com/tvheadend/dtv-scan-tables/archive/%{scan_comm
 Source3:        https://download.videolan.org/pub/videolan/libdvbcsa/%{dvbcsa_version}/libdvbcsa-%{dvbcsa_version}.tar.gz
 Source4:        https://files.pythonhosted.org/packages/5b/ee/7d76eb3b50ccb1397621f32ede0fb4d17aa55a9aa2251bc34e6b9929fdce/%{vlc_wheel}
 Source5:        https://download.silicondust.com/hdhomerun/libhdhomerun_%{hdhomerun_version}.tgz
+Source6:        https://files.pythonhosted.org/packages/f4/cf/0d5f52753366ecf2c3d763e331dcda54b0f20a1a8e52b175feb9c625399d/%{mpv_wheel}
 
 BuildRequires:  gcc
 BuildRequires:  make
@@ -40,6 +45,8 @@ BuildRequires:  pkgconfig(dbus-1)
 BuildRequires:  desktop-file-utils
 # Tvheadend's configure finds its tools with which.
 BuildRequires:  which
+# Current config.guess and config.sub for libdvbcsa, whose own predate aarch64.
+BuildRequires:  redhat-rpm-config
 
 Requires:       python3
 Requires:       python3-pyqt6
@@ -50,12 +57,13 @@ Requires:       vlc-libs
 Requires:       vlc-plugins-base
 Requires:       /usr/bin/ffmpeg
 # On Wayland, libmpv draws the picture so the window is not run through XWayland.
-Requires:       python3-mpv
+Requires:       mpv-libs
 
 Provides:       bundled(tvheadend) = %{tvh_version}
 Provides:       bundled(libdvbcsa) = %{dvbcsa_version}
 Provides:       bundled(libhdhomerun) = %{hdhomerun_version}
 Provides:       bundled(python3dist(python-vlc)) = 3.0.21203
+Provides:       bundled(python3dist(mpv)) = 1.0.8
 
 %description
 A desktop client for Tvheadend for live TV playback and recording, with
@@ -69,6 +77,7 @@ the system.
 %prep
 %autosetup
 echo "%{vlc_wheel_sha256}  %{SOURCE4}" | sha256sum -c -
+echo "%{mpv_wheel_sha256}  %{SOURCE6}" | sha256sum -c -
 # build-tvheadend.sh reads its archives from one folder.
 mkdir tvheadend-sources
 cp -p %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE5} tvheadend-sources/
@@ -85,10 +94,12 @@ cp -a tvhplayer/. %{buildroot}%{_datadir}/%{name}/
 cp -a icons %{buildroot}%{_datadir}/%{name}/icons
 chmod 644 %{buildroot}%{_datadir}/%{name}/icons/*
 find %{buildroot}%{_datadir}/%{name} -type d -name __pycache__ -prune -exec rm -rf {} +
-# python-vlc is one module; tvhplayer.py imports it from its own folder.
+# python-vlc and python-mpv are one module each; tvhplayer.py imports them from its own folder.
 %{python3} -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract("vlc.py", sys.argv[2])' \
     %{SOURCE4} %{buildroot}%{_datadir}/%{name}
-sed -i '1{/^#!/d}' %{buildroot}%{_datadir}/%{name}/vlc.py
+%{python3} -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extract("mpv.py", sys.argv[2])' \
+    %{SOURCE6} %{buildroot}%{_datadir}/%{name}
+sed -i '1{/^#!/d}' %{buildroot}%{_datadir}/%{name}/vlc.py %{buildroot}%{_datadir}/%{name}/mpv.py
 
 mkdir -p %{buildroot}%{_bindir}
 cat > %{buildroot}%{_bindir}/%{name} << 'EOF'

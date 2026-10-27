@@ -93,3 +93,16 @@ def test_rpm_bundles_the_flatpak_python_vlc():
     assert wheel['url'].endswith('/' + spec['vlc_wheel'])
     assert wheel['sha256'] == spec['vlc_wheel_sha256']
     assert wheel['url'] in SPEC.read_text(encoding='utf-8').replace('%{vlc_wheel}', spec['vlc_wheel'])
+
+
+def test_rpm_bundles_the_flatpak_python_mpv():
+    spec = spec_globals()
+    modules = yaml.safe_load(PYPI_DEPENDENCIES.read_text(encoding='utf-8'))['modules']
+    wheel = next(
+        source
+        for module in modules if module['name'] == 'python3-mpv'
+        for source in module['sources']
+    )
+    assert wheel['url'].endswith('/' + spec['mpv_wheel'])
+    assert wheel['sha256'] == spec['mpv_wheel_sha256']
+    assert wheel['url'] in SPEC.read_text(encoding='utf-8').replace('%{mpv_wheel}', spec['mpv_wheel'])

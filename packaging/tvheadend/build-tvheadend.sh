@@ -82,6 +82,12 @@ cmd_build() {
         tar -xzf "$sources/$DVBCSA_ARCHIVE" -C "$work/libdvbcsa" --strip-components=1
         (
             cd "$work/libdvbcsa"
+            # Its config.guess (2009) predates aarch64; use the system's.
+            for f in config.guess config.sub; do
+                for d in /usr/share/misc /usr/lib/rpm/redhat; do
+                    [ -f "$d/$f" ] && { cp "$d/$f" "$f"; break; }
+                done
+            done
             ./configure --prefix="$work/dvbcsa" --disable-shared --enable-static --with-pic
             make -j"$jobs"
             make install

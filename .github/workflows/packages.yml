@@ -84,10 +84,11 @@ jobs:
             --tool 'apt-get -y --no-install-recommends' debian/control
 
       # debian/changelog is not kept in step with releases; stamp the version.
+      # -b: a test build's 0~ciN is lower than the last release in the changelog.
       - name: Set Debian package version
         run: |
           DEBFULLNAME="mFat" DEBEMAIL="newmfat@gmail.com" \
-            dch --newversion "${{ steps.version.outputs.version }}-1" \
+            dch -b --newversion "${{ steps.version.outputs.version }}-1" \
             --distribution unstable "Release ${{ steps.version.outputs.version }}"
 
       - name: Build package
