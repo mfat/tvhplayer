@@ -23,24 +23,25 @@ QWidget {{ color: {INK}; }}
 QWidget:disabled {{ color: rgba(35,38,41,110); }}
 QToolTip {{ background: {INK}; color: white; border: none; padding: 5px 8px; border-radius: 4px; }}
 
+/* Sizes come from padding, not min-height: a stylesheet min-height replaces a widget's fixed size. */
 QPushButton {{
-    min-height: 28px; padding: 0 14px;
+    padding: 4px 14px;
     background: {BASE}; border: 1px solid rgba(35,38,41,64); border-radius: 4px;
 }}
 QPushButton:hover {{ background: #f2f8fc; border-color: {ACCENT}; }}
 QPushButton:pressed {{ background: #e3f2fb; }}
-QPushButton:focus {{ border: 2px solid {ACCENT}; padding: 0 13px; }}
+QPushButton:focus {{ border: 2px solid {ACCENT}; padding: 3px 13px; }}
 QPushButton:disabled {{ color: rgba(35,38,41,110); border-color: rgba(35,38,41,36); background: {BASE}; }}
 QPushButton[primary="true"] {{ background: {ACCENT_STRONG}; border-color: #2478aa; color: white; }}
 QPushButton[primary="true"]:hover {{ background: #267fb4; }}
 QPushButton[primary="true"]:disabled {{ background: #9fcbe5; border-color: #9fcbe5; color: white; }}
 
 QLineEdit, QComboBox, QSpinBox {{
-    min-height: 28px; padding: 0 8px;
+    padding: 4px 8px;
     background: {BASE}; border: 1px solid rgba(35,38,41,64); border-radius: 4px;
     selection-background-color: {ACCENT}; selection-color: white;
 }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 2px solid {ACCENT}; padding: 0 7px; }}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border: 2px solid {ACCENT}; padding: 3px 7px; }}
 QLineEdit:read-only {{ background: #f3f4f5; }}
 QLineEdit[mono="true"] {{ font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace; }}
 QComboBox QAbstractItemView {{
@@ -48,14 +49,40 @@ QComboBox QAbstractItemView {{
     selection-background-color: rgba(61,174,233,51); selection-color: {INK}; outline: 0;
 }}
 
-QProgressBar {{ max-height: 4px; min-height: 4px; border: none; border-radius: 2px; background: rgba(35,38,41,31); }}
-QProgressBar::chunk {{ background: {ACCENT}; border-radius: 2px; }}
+QProgressBar[textVisible="false"] {{ max-height: 4px; min-height: 4px; border: none; border-radius: 2px; background: rgba(35,38,41,31); }}
+QProgressBar[textVisible="false"]::chunk {{ background: {ACCENT}; border-radius: 2px; }}
 
 QScrollArea {{ border: none; background: transparent; }}
 QScrollBar:vertical {{ width: 10px; background: transparent; margin: 2px; }}
 QScrollBar::handle:vertical {{ background: rgba(35,38,41,70); border-radius: 3px; min-height: 30px; }}
 QScrollBar::handle:vertical:hover {{ background: rgba(35,38,41,110); }}
 QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {{ height: 0; background: none; }}
+
+/* Main window */
+QMenuBar {{ background: {WINDOW}; border-bottom: 1px solid rgba(35,38,41,31); padding: 2px 6px; }}
+QMenuBar::item {{ padding: 5px 10px; border-radius: 4px; background: transparent; }}
+QMenuBar::item:selected {{ background: rgba(35,38,41,18); }}
+QMenu {{ background: {BASE}; border: 1px solid rgba(35,38,41,51); border-radius: 6px; padding: 4px; }}
+QMenu::item {{ padding: 6px 24px 6px 12px; border-radius: 4px; }}
+QMenu::item:selected {{ background: rgba(61,174,233,51); color: {INK}; }}
+QMenu::separator {{ height: 1px; background: rgba(35,38,41,26); margin: 4px 8px; }}
+QSplitter::handle {{ background: rgba(35,38,41,31); }}
+QSplitter::handle:horizontal {{ width: 1px; }}
+QToolButton {{ padding: 4px 8px; background: {BASE}; border: 1px solid rgba(35,38,41,64); border-radius: 4px; }}
+QToolButton:hover {{ border-color: {ACCENT}; background: #f2f8fc; }}
+QToolButton:focus {{ border: 2px solid {ACCENT}; padding: 3px 7px; }}
+QTableView, QTreeView, QListView {{
+    background: {BASE}; border: 1px solid rgba(35,38,41,36); border-radius: 6px;
+    gridline-color: transparent; selection-background-color: rgba(61,174,233,51); selection-color: {INK};
+    alternate-background-color: #f6f7f7; outline: 0;
+}}
+QTableView::item, QTreeView::item {{ padding: 4px 6px; border: none; }}
+QHeaderView::section {{
+    background: {WINDOW}; color: {MUTED}; font-weight: 600; padding: 6px 8px;
+    border: none; border-bottom: 1px solid rgba(35,38,41,36);
+}}
+QStatusBar {{ background: {WINDOW}; border-top: 1px solid rgba(35,38,41,31); color: {MUTED}; }}
+QStatusBar::item {{ border: none; }}
 
 /* Settings building blocks (settings_widgets.py) */
 QLabel#pageTitle {{ font-size: 15pt; font-weight: 600; }}
@@ -164,6 +191,19 @@ def _load_fonts():
     if 'Noto Sans' in QFontDatabase.families():
         return QFont('Noto Sans', 10)
     return None
+
+
+def polish_main_window(window):
+    """Flatten the raised side panes and give the splitter a hairline. Call after the UI is built."""
+    from PyQt6.QtWidgets import QFrame
+    for name in ('left_pane', 'right_pane'):
+        pane = getattr(window, name, None)
+        if pane is not None:
+            pane.setFrameStyle(QFrame.Shape.NoFrame)
+            pane.setObjectName(name)
+    splitter = getattr(window, 'splitter', None)
+    if splitter is not None:
+        splitter.setHandleWidth(1)
 
 
 def apply_theme(app):

@@ -64,7 +64,7 @@ try:
     )
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
-    from .ui_theme import apply_theme
+    from .ui_theme import apply_theme, polish_main_window
     from .player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -150,7 +150,7 @@ except ImportError:
     )
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
-    from ui_theme import apply_theme
+    from ui_theme import apply_theme, polish_main_window
     from player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -4018,6 +4018,8 @@ class TVHeadendClient(QMainWindow):
         search_layout.setSpacing(5)
 
         left_layout.addWidget(self.tag_row)
+        if not prefers_high_contrast():
+            polish_main_window(self)
         self._apply_channel_columns()
         self._apply_tab_order()
         self.tasks_pane.refresh()
