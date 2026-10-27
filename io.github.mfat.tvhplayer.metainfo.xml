@@ -25,18 +25,30 @@
   <launchable type="desktop-id">io.github.mfat.tvhplayer.desktop</launchable>
   <screenshots>
     <screenshot type="default">
-      <caption>TVHplayer main interface</caption>
-      <image>https://raw.githubusercontent.com/mfat/tvhplayer/0a6a8ae6b722e72ce661aa1694e56ac41c943f3c/Screenshots/Screenshot_3.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>TVHplayer user interface</caption>
-      <image>https://raw.githubusercontent.com/mfat/tvhplayer/0a6a8ae6b722e72ce661aa1694e56ac41c943f3c/Screenshots/Screenshot_2.png</image>
+      <caption>Channel list and player with the built-in server</caption>
+      <image>https://raw.githubusercontent.com/mfat/tvhplayer/f4f04fa1d39b3f92493d779bfe15f2cc2f4d5087/Screenshots/main.png</image>
     </screenshot>
   </screenshots>
   <url type="homepage">https://github.com/mfat/tvhplayer</url>
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.0" date="2026-10-27">
+      <description>
+        <p>A major release with its own built-in Tvheadend server.</p>
+        <ul>
+          <li>Built-in Tvheadend server that starts and stops with the app</li>
+          <li>Set up channels from USB, PCIe, SAT&gt;IP and HDHomeRun tuners</li>
+          <li>Import IPTV playlists with their TV guide, and choose which channels to add</li>
+          <li>New TV guide window with watch and record from the guide</li>
+          <li>Record to this computer without a save dialog, and convert recordings for editing</li>
+          <li>Native Wayland playback with the mpv engine</li>
+          <li>Themes with a dark mode, and a new About window</li>
+          <li>Channel lists with tens of thousands of channels stay responsive</li>
+          <li>The app says why a channel will not start or stops</li>
+        </ul>
+      </description>
+    </release>
     <release version="3.5.5" date="2025-03-08">
       <description>
         <p>Initial Flatpak release</p>

@@ -14,7 +14,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        3.5.5
+Version:        4.0
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -127,5 +127,8 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Tue Oct 27 2026 mFat <newmfat@gmail.com> - 4.0-1
+- Release 4.0
+
 * Fri Oct 23 2026 mFat <newmfat@gmail.com> - 3.5.5-1
 - Package the built-in Tvheadend server
