@@ -1,0 +1,79 @@
+name: Update Flathub
+
+# Opens a pull request on flathub/io.github.mfat.tvhplayer that brings the
+# manifest there in line with this repository's at a release tag. The manifest
+# here is the one that is maintained; Flathub's copy only adds the pinned tag.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag, e.g. v4.1'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      release_tag:
+        required: true
+        type: string
+    secrets:
+      FLATHUB_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check the Flathub token
+        env:
+          TOKEN: ${{ secrets.FLATHUB_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set the FLATHUB_TOKEN secret: a token that can push to flathub/io.github.mfat.tvhplayer."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+          path: app
+
+      - name: Resolve the tag's commit
+        id: commit
+        working-directory: app
+        run: echo "sha=$(git rev-parse 'HEAD^{commit}')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        with:
+          repository: flathub/io.github.mfat.tvhplayer
+          token: ${{ secrets.FLATHUB_TOKEN }}
+          path: flathub
+
+      - name: Copy the manifest and pin the release
+        env:
+          TAG: ${{ inputs.release_tag }}
+          SHA: ${{ steps.commit.outputs.sha }}
+        run: |
+          set -eu
+          cp app/io.github.mfat.tvhplayer.yml app/pypi-dependencies.yaml flathub/
+          mkdir -p flathub/packaging/tvheadend
+          cp app/packaging/tvheadend/build-libhdhomerun.sh flathub/packaging/tvheadend/
+          python3 app/packaging/release.py flathub-pin flathub/io.github.mfat.tvhplayer.yml "$TAG" "$SHA"
+          git -C flathub status --short
+
+      - name: Open the pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.FLATHUB_TOKEN }}
+          path: flathub
+          base: master
+          branch: update-${{ inputs.release_tag }}
+          delete-branch: true
+          commit-message: Update to ${{ inputs.release_tag }}
+          title: Update to ${{ inputs.release_tag }}
+          body: |
+            TVHplayer ${{ inputs.release_tag }}: https://github.com/mfat/tvhplayer/releases/tag/${{ inputs.release_tag }}
+
+            The manifest is copied from the TVHplayer repository at ${{ steps.commit.outputs.sha }}.

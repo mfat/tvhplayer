@@ -1,0 +1,138 @@
+name: Release
+
+# Actions → Release → Run workflow. Bumps the version on main, tags it, and
+# creates the GitHub release. The tag push builds the deb, rpm and AppImage
+# (packages.yml) and the Windows and macOS binaries (build.yml); this workflow
+# then opens the Flathub pull request (flathub.yml).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'New version, e.g. 4.1 or 4.1.2'
+        required: true
+        type: string
+      notes:
+        description: 'Release notes, one per line. Empty: the first sentence of each commit since the last release.'
+        required: false
+        type: string
+      prerelease:
+        description: 'Pre-release (no Flathub update)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      # A tag pushed with GITHUB_TOKEN does not start other workflows, so the
+      # packages would not build. Push with a personal access token instead.
+      - name: Check the release token
+        env:
+          TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Set the RELEASE_TOKEN secret: a token that can push to this repository."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          ref: main
+          fetch-depth: 0
+
+      - name: Check the version
+        id: check
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          VERSION=${VERSION#v}
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "::error::Tag v$VERSION already exists."
+            exit 1
+          fi
+          PREVIOUS=$(python3 packaging/release.py check "$VERSION")
+          echo "Releasing $PREVIOUS -> $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous=v$PREVIOUS" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble the release notes
+        env:
+          NOTES: ${{ inputs.notes }}
+          PREVIOUS: ${{ steps.check.outputs.previous }}
+        run: |
+          set -eu
+          if [ -n "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            printf '%s\n' "$NOTES" > "$RUNNER_TEMP/notes.txt"
+          else
+            # Commit subjects here are prose; the first sentence says what changed.
+            git log --no-merges --pretty=%s "$PREVIOUS..HEAD" \
+              | grep -vE '^(Update README|Merge |Revert )' \
+              | sed -E 's/\. .*/./' > "$RUNNER_TEMP/notes.txt" || true
+          fi
+          if [ ! -s "$RUNNER_TEMP/notes.txt" ]; then
+            echo "::error::No release notes given and no commits since $PREVIOUS."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.txt"
+
+      - name: Bump the version
+        run: |
+          set -eu
+          python3 packaging/release.py bump '${{ steps.check.outputs.version }}' "$(date -u +%F)" \
+            < "$RUNNER_TEMP/notes.txt"
+          sudo apt-get install -y --no-install-recommends appstream >/dev/null
+          appstreamcli validate --no-net io.github.mfat.tvhplayer.metainfo.xml
+          git diff --stat
+
+      - name: Commit, tag and push
+        run: |
+          set -eu
+          VERSION='${{ steps.check.outputs.version }}'
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git commit -am "TVHplayer $VERSION"
+          git tag -a "v$VERSION" -m "TVHplayer $VERSION" -m "$(cat "$RUNNER_TEMP/notes.txt")"
+          git push origin main
+          git push origin "v$VERSION"
+
+      # The package workflows may create the release first when they upload.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          TAG: ${{ steps.check.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -eu
+          sed 's/^/- /' "$RUNNER_TEMP/notes.txt" > "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            set -- release edit "$TAG"
+          else
+            set -- release create "$TAG" --verify-tag
+          fi
+          set -- "$@" --title "TVHplayer ${TAG#v}" --notes-file "$RUNNER_TEMP/notes.md"
+          if [ "$PRERELEASE" = true ]; then
+            set -- "$@" --prerelease --latest=false
+          fi
+          gh "$@"
+
+  flathub:
+    needs: release
+    if: ${{ !inputs.prerelease }}
+    uses: ./.github/workflows/flathub.yml
+    with:
+      release_tag: ${{ needs.release.outputs.tag }}
+    secrets:
+      FLATHUB_TOKEN: ${{ secrets.FLATHUB_TOKEN }}
