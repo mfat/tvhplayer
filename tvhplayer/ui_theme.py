@@ -345,6 +345,13 @@ class RowStyle(QProxyStyle):
             return
         super().drawPrimitive(element, option, painter, widget)
 
+    def styleHint(self, hint, option=None, widget=None, returnData=None):
+        # Fusion opens a dropdown like a menu, sized without the theme's padding, so the
+        # last item was cut off behind a scroll arrow; a plain list fits its items.
+        if _active and hint == QStyle.StyleHint.SH_ComboBox_Popup:
+            return 0
+        return super().styleHint(hint, option, widget, returnData)
+
 
 class _ThemePolish(QObject):
     """Widget settings a style sheet cannot make, applied as each widget is polished."""

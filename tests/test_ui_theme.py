@@ -150,3 +150,15 @@ def test_kde_styles_get_a_dark_scheme_outside_kde_but_kde_keeps_its_own(qapp, mo
     monkeypatch.setattr(ui_theme, '_mode', 'light')
     ui_theme._kde_color_scheme(qapp, Qt.ColorScheme.Light)
     assert qapp._kde == '/schemes/color-schemes/BreezeLight.colors'
+
+
+def test_tvhplayer_dropdowns_show_every_item_without_scrolling(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QComboBox, QStyle
+    from tvhplayer import ui_theme
+
+    style = ui_theme.RowStyle('Fusion')
+    monkeypatch.setattr(ui_theme, '_active', True)
+    assert style.styleHint(QStyle.StyleHint.SH_ComboBox_Popup, None, QComboBox()) == 0
+    monkeypatch.setattr(ui_theme, '_active', False)
+    assert style.styleHint(QStyle.StyleHint.SH_ComboBox_Popup, None, QComboBox()) == \
+        ui_theme.QStyleFactory.create('Fusion').styleHint(QStyle.StyleHint.SH_ComboBox_Popup, None, QComboBox())
