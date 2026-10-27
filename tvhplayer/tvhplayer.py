@@ -294,6 +294,8 @@ def fit_table_columns(table, stretch_columns):
         header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
     table.setWordWrap(False)
     table.setTextElideMode(Qt.TextElideMode.ElideRight)
+    # Qt's headers cut a title that does not fit at both ends; shorten it with … instead.
+    header.setTextElideMode(Qt.TextElideMode.ElideRight)
 
 
 class DVRStatusDialog(QDialog):
@@ -3729,6 +3731,7 @@ class TVHeadendClient(QMainWindow):
         header.setToolTip("Drag a column to move it. Right-click to choose columns.")
         self.channel_list.setWordWrap(False)
         self.channel_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        header.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.channel_list.setIconSize(LOGO_SIZE)
         self._progress_delegate = ProgressDelegate(self.channel_list)
         self.channel_list.setItemDelegateForColumn(COL_NOW, self._progress_delegate)

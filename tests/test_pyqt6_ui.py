@@ -972,6 +972,8 @@ def test_status_dialogs_fill_window_width(monkeypatch):
         assert dvr.failed_table.horizontalHeader().sectionResizeMode(3) == QHeaderView.ResizeMode.Stretch
         assert server.subscriptions_table.horizontalHeader().sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
         assert server.signal_table.horizontalHeader().sectionResizeMode(3) == QHeaderView.ResizeMode.Stretch
+        # A column title too wide for its column ends in … rather than being cut at both ends.
+        assert dvr.upcoming_table.horizontalHeader().textElideMode() == ui.Qt.TextElideMode.ElideRight
 
         for table in (
             dvr.upcoming_table,
@@ -2392,6 +2394,7 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         header = table.horizontalHeader()
         window.fetch_channels()
         _wait_for_channels(app, window)
+        assert header.textElideMode() == ui.Qt.TextElideMode.ElideRight
 
         # Defaults: number, name, now, and status show; disabled channels are left out.
         assert [_cell(table, row, ui.COL_NAME).text() for row in range(table.rowCount())] == ['News', 'Sport']
