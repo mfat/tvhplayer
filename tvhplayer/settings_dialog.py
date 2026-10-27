@@ -7,7 +7,6 @@ the widget attribute names are unchanged from the tabbed version.
 
 from __future__ import annotations
 
-import sys
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
@@ -49,7 +48,7 @@ HIDE_HELP = (
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
 ENGINE_HELP = (
-    'Automatic plays with mpv when the desktop uses Wayland and with VLC on X11. '
+    'Automatic plays with mpv, except on a Linux X11 desktop, where it plays with VLC. '
     'With VLC on a Wayland desktop, the whole window runs through XWayland and can look soft when scaled. '
     'A change takes effect the next time TVHplayer starts.'
 )
@@ -189,18 +188,15 @@ class SettingsDialog(QDialog):
         describe(self.play_check, description=PLAY_HELP)
         startup.add_row(SettingRow('&Play the last channel when TVHplayer starts', PLAY_HELP, self.play_check))
 
-        self.engine_combo = None
-        # libmpv is used only on Linux; elsewhere VLC is the only engine.
-        if sys.platform.startswith('linux'):
-            engine = page.add(SettingsGroup('Playback engine'))
-            self.engine_combo = QComboBox()
-            self.engine_combo.setMinimumWidth(170)
-            for label, choice in (('Automatic', ENGINE_AUTO), ('mpv', ENGINE_MPV), ('VLC', ENGINE_VLC)):
-                self.engine_combo.addItem(label, choice)
-            self.engine_combo.setCurrentIndex(max(self.engine_combo.findData(host.player_engine_choice()), 0))
-            describe(self.engine_combo, 'Playback engine', ENGINE_HELP)
-            engine.add_row(SettingRow('Playback &engine', ENGINE_SHORT, self.engine_combo))
-            self.engine_combo.currentIndexChanged.connect(self._engine_chosen)
+        engine = page.add(SettingsGroup('Playback engine'))
+        self.engine_combo = QComboBox()
+        self.engine_combo.setMinimumWidth(170)
+        for label, choice in (('Automatic', ENGINE_AUTO), ('mpv', ENGINE_MPV), ('VLC', ENGINE_VLC)):
+            self.engine_combo.addItem(label, choice)
+        self.engine_combo.setCurrentIndex(max(self.engine_combo.findData(host.player_engine_choice()), 0))
+        describe(self.engine_combo, 'Playback engine', ENGINE_HELP)
+        engine.add_row(SettingRow('Playback &engine', ENGINE_SHORT, self.engine_combo))
+        self.engine_combo.currentIndexChanged.connect(self._engine_chosen)
         page.finish()
         return page
 

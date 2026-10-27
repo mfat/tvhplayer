@@ -52,17 +52,19 @@ def choose_engine(environ=None, platform=None, missing=mpv_missing, preference=E
     """Return ``(engine, reason)``.
 
     ``preference`` is the Settings choice; the environment variable overrides it.
-    Without libvlc, as in the AppImage, mpv plays on X11 too.
+    Without libvlc, as in the AppImage, mpv plays on X11 too. Windows and
+    macOS play with mpv unless libmpv is missing.
     """
     environ = os.environ if environ is None else environ
     platform = sys.platform if platform is None else platform
-    if not platform.startswith('linux'):
-        return ENGINE_VLC, 'libmpv is used only on Linux'
+    linux = platform.startswith('linux')
     forced = environ.get(ENGINE_ENV, '').strip().lower()
     if forced in (ENGINE_VLC, ENGINE_MPV):
         wanted, why = forced, f'{ENGINE_ENV}={forced}'
     elif preference in (ENGINE_VLC, ENGINE_MPV):
         wanted, why = preference, 'chosen in Settings'
+    elif not linux:
+        wanted, why = ENGINE_MPV, f'default on {platform}'
     elif qt_runs_on_wayland(environ):
         wanted, why = ENGINE_MPV, 'Wayland session'
     else:

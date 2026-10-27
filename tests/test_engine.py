@@ -38,9 +38,18 @@ def test_with_neither_library_vlc_reports_the_failure():
     assert _choose(X11, missing='no libmpv', vlc_missing='no libvlc') == ENGINE_VLC
 
 
-def test_windows_and_macos_keep_vlc():
-    assert _choose(WAYLAND, 'win32', preference='mpv') == ENGINE_VLC
-    assert _choose(WAYLAND, 'darwin') == ENGINE_VLC
+def test_windows_and_macos_play_with_mpv():
+    for platform in ('win32', 'darwin'):
+        engine, reason = choose_engine({}, platform, lambda: '')
+        assert engine == ENGINE_MPV, reason
+        assert _choose({}, platform, preference='vlc') == ENGINE_VLC
+        assert _choose({'TVHPLAYER_ENGINE': 'vlc'}, platform) == ENGINE_VLC
+
+
+def test_windows_and_macos_fall_back_to_vlc_without_libmpv():
+    engine, reason = choose_engine({}, 'win32', lambda: 'Cannot find mpv-2.dll')
+    assert engine == ENGINE_VLC
+    assert 'Cannot find mpv-2.dll' in reason
 
 
 def test_the_setting_picks_one_engine_everywhere():

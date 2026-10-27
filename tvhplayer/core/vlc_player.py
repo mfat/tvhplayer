@@ -302,6 +302,9 @@ def _prepare_frozen_plugins():
         return
     base_path = sys._MEIPASS
     plugin_path = os.path.join(base_path, 'vlc', 'plugins')
+    # A build without VLC falls back to an installed VLC and its own plugins.
+    if not os.path.isdir(plugin_path):
+        return
     os.environ['VLC_PLUGIN_PATH'] = plugin_path
     if sys.platform.startswith('linux'):
         os.environ['LD_LIBRARY_PATH'] = base_path

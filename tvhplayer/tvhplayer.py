@@ -144,6 +144,7 @@ except ImportError:
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from core import convert
     from core.vlc_player import VlcPlayer
+    from core import frozen_libs
     from core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for, startup_platform
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, server_key
@@ -7451,6 +7452,8 @@ class NoDialogButtonIconsStyle(ThemeStyle):
 def main():
     """Main entry point for the application"""
     configure_logging()
+    # A Windows or macOS build carries its own libmpv.
+    frozen_libs.prepare()
     try:
         try:
             settings = ConfigStore().data

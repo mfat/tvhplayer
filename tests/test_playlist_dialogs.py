@@ -606,9 +606,6 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_player_engine_choice(self, choice):
             self.engine_choice = choice
 
-    import tvhplayer.settings_dialog as settings
-
-    monkeypatch.setattr(settings.sys, 'platform', 'linux')
     host = Host()
     dialog = SettingsDialog(host)
     # Appearance comes first and Settings opens on it.
