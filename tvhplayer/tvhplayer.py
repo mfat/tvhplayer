@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
     QInputDialog,
 )
+from PyQt6 import sip
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
     QIcon, QAction, QActionGroup, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
@@ -7325,7 +7326,11 @@ def main():
         print(f"Debug: Theme: {theme or 'system (high contrast)'}")
         player = TVHeadendClient(engine)
         player.show()
-        sys.exit(app.exec())
+        code = app.exec()
+        # PyQt deletes what Python still owns at exit while walking its own list,
+        # and crashes when one deletion frees another; the window goes first.
+        sip.delete(player)
+        sys.exit(code)
     except Exception as e:
         print(f"Error starting application: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
