@@ -46,10 +46,25 @@ def test_kwin_button_order_is_followed(tmp_path, monkeypatch):
     assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path)}) == 'close:minimize,maximize'
     # In Flatpak XDG_CONFIG_HOME is the sandbox's; the host's kwinrc is shared in ~/.config.
     monkeypatch.setattr(Path, 'home', lambda: tmp_path / 'home')
-    assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path / 'none')}) == ':minimize,maximize,close'
+    no_portal = lambda: None  # noqa: E731
+    assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path / 'none')}, no_portal) == ':minimize,maximize,close'
     (tmp_path / 'home' / '.config').mkdir(parents=True)
     (tmp_path / 'kwinrc').rename(tmp_path / 'home' / '.config' / 'kwinrc')
     assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path / 'sandbox')}) == 'close:minimize,maximize'
+
+
+def test_flatpak_on_kde_reads_the_button_order_from_the_portal(tmp_path, monkeypatch):
+    # The Flatpak cannot read kwinrc. Plasma's portal answers the GNOME key,
+    # which Plasma keeps in step with KWin's order.
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path / 'home')
+    sandbox = {'XDG_CONFIG_HOME': str(tmp_path / 'sandbox')}
+    assert kde_button_layout(sandbox, lambda: 'close:minimize,maximize') == 'close:minimize,maximize'
+    # A kwinrc that can be read wins: the app outside Flatpak.
+    (tmp_path / 'sandbox').mkdir()
+    (tmp_path / 'sandbox' / 'kwinrc').write_text(
+        '[org.kde.kdecoration2]\nButtonsOnLeft=\nButtonsOnRight=X\n', encoding='utf-8'
+    )
+    assert kde_button_layout(sandbox, lambda: 'close:minimize,maximize') == ':close'
 
 
 def test_button_layout_keeps_the_window_buttons_on_their_sides():

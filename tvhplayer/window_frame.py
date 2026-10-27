@@ -108,20 +108,22 @@ def kwin_button_layout(left='MS', right='HIAX'):
     return f'{names(left)}:{names(right)}'
 
 
-def kde_button_layout(environ=None):
-    """The window buttons as KWin places them, from kwinrc, or KWin's default.
+def kde_button_layout(environ=None, portal=None):
+    """The window buttons as KWin places them: from kwinrc, else the portal, else KWin's default.
 
-    Flatpak points XDG_CONFIG_HOME into the sandbox; the manifest shares the
-    host's kwinrc read-only, where it is on the host: ~/.config."""
+    The Flatpak cannot read kwinrc. Plasma's portal answers GNOME's
+    button-layout key, which Plasma keeps in step with KWin's order."""
     environ = os.environ if environ is None else environ
+    portal = portal_layout if portal is None else portal
     folders = [environ.get('XDG_CONFIG_HOME'), str(Path.home() / '.config')]
     paths = [Path(folder) / 'kwinrc' for folder in folders if folder]
     path = next((path for path in paths if path.is_file()), None)
+    if path is None:
+        return portal() or kwin_button_layout()
     parser = ConfigParser(interpolation=None, strict=False)
     parser.optionxform = str
     try:
-        if path is not None:
-            parser.read(path, encoding='utf-8')
+        parser.read(path, encoding='utf-8')
     except Exception:
         return kwin_button_layout()
     section = parser['org.kde.kdecoration2'] if parser.has_section('org.kde.kdecoration2') else {}
@@ -137,16 +139,21 @@ def desktop_button_layout(environ=None):
 
 def portal_button_layout():
     """The desktop's title bar button layout from the portal, or GNOME's default."""
+    return portal_layout() or DEFAULT_BUTTON_LAYOUT
+
+
+def portal_layout():
+    """GNOME's button-layout key from the desktop portal, or None."""
     try:
         from PyQt6.QtDBus import QDBusConnection, QDBusInterface
     except ImportError:
-        return DEFAULT_BUTTON_LAYOUT
+        return None
     bus = QDBusConnection.sessionBus()
     if not bus.isConnected():
-        return DEFAULT_BUTTON_LAYOUT
+        return None
     interface = QDBusInterface(PORTAL_SERVICE, PORTAL_PATH, PORTAL_SETTINGS_INTERFACE, bus)
     if not interface.isValid():
-        return DEFAULT_BUTTON_LAYOUT
+        return None
     for method in ('ReadOne', 'Read'):
         reply = interface.call(method, 'org.gnome.desktop.wm.preferences', 'button-layout')
         arguments = reply.arguments() if reply is not None else []
@@ -154,7 +161,7 @@ def portal_button_layout():
             value = _unwrap(arguments[0])
             if isinstance(value, str) and ':' in value:
                 return value
-    return DEFAULT_BUTTON_LAYOUT
+    return None
 
 
 def edges_at(pos, size, margins, grab=CORNER_GRAB):
