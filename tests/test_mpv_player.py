@@ -46,6 +46,10 @@ class _Mpv:
         self.track_list = []
         self.terminated = False
 
+    def option_info(self, name):
+        assert name == 'deinterlace'
+        return {'name': name, 'type': 'Choice', 'choices': ['no', 'yes', 'auto']}
+
     def register_event_callback(self, callback):
         self.callbacks.append(callback)
 
@@ -211,6 +215,32 @@ def test_tracks_volume_and_mute(engine):
     assert mpv.volume == 100
     player.set_muted(True)
     assert player.is_muted()
+
+
+class _Mpv037(_Mpv):
+    """libmpv before 0.38, as in Ubuntu 24.04: deinterlace is a flag, without auto."""
+
+    def __setattr__(self, name, value):
+        if name == 'deinterlace' and value not in ('yes', 'no', True, False):
+            raise TypeError('Tried to get/set mpv property using wrong format, or passed invalid value',
+                            -9, (None, b'deinterlace', str(value).encode()))
+        super().__setattr__(name, value)
+
+    def option_info(self, name):
+        return {'name': name, 'type': 'Flag'}
+
+
+def test_deinterlace_auto_on_an_mpv_without_it(engine, monkeypatch):
+    monkeypatch.setattr(sys.modules['mpv'], 'MPV', _Mpv037)
+    from tvhplayer.core.mpv_player import MpvPlayer
+
+    player = MpvPlayer()
+    player.set_deinterlace(DEINTERLACE_AUTO)
+    # With VA-API, 0.37's deinterlacer leaves progressive pictures alone, as auto does.
+    assert player._mpv.deinterlace == 'yes'
+    assert player.deinterlace() == DEINTERLACE_AUTO
+    player.set_deinterlace(DEINTERLACE_OFF)
+    assert player._mpv.deinterlace == 'no'
 
 
 def test_deinterlace_changes_the_running_picture(engine):

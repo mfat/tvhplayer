@@ -152,8 +152,20 @@ class MpvPlayer(Player):
         if mode not in DEINTERLACE_MODES:
             return True
         self._deinterlace = mode
-        self._mpv.deinterlace = DEINTERLACE_VALUES[mode]
+        value = DEINTERLACE_VALUES[mode]
+        if value == 'auto' and not self._has_deinterlace_auto():
+            # mpv before 0.38 (Ubuntu 24.04, the AppImage) has no auto. Its yes
+            # leaves progressive pictures alone when VA-API decodes, as auto does.
+            value = 'yes'
+        self._mpv.deinterlace = value
         return True
+
+    def _has_deinterlace_auto(self):
+        try:
+            choices = self._mpv.option_info('deinterlace').get('choices') or ()
+        except Exception:
+            return True
+        return 'auto' in choices
 
     def show_message(self, text: str, duration_ms: int = 3000):
         """mpv's on-screen text: drawn into the picture, so it shows in fullscreen too.
