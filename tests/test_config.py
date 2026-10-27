@@ -85,6 +85,13 @@ def test_every_setting_has_a_default_and_bad_values_are_replaced(tmp_path):
     assert default_config()['hide_dead_channels'] is True
 
 
+def test_own_title_bar_is_off_unless_chosen(tmp_path):
+    path = tmp_path / 'config.json'
+    assert default_config()['own_title_bar'] is False
+    path.write_text(json.dumps({'own_title_bar': True}), encoding='utf-8')
+    assert ConfigStore(path).data['own_title_bar'] is True
+
+
 def test_light_or_dark_choice_is_kept_and_unknown_values_follow_the_system(tmp_path):
     path = tmp_path / 'config.json'
     for saved, loaded in (('dark', 'dark'), ('light', 'light'), ('purple', 'system'), (None, 'system')):

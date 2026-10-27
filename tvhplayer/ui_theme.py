@@ -114,6 +114,7 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
 
 /* Main window */
 QMenuBar {{ background: {window}; border-bottom: 1px solid {rule}; padding: 2px 6px; }}
+QMenuBar[titlebar="true"] {{ background: transparent; border: none; }}
 QMenuBar::item {{ padding: 5px 10px; border-radius: 4px; background: transparent; }}
 QMenuBar::item:selected {{ background: {tint}; }}
 QMenu {{ background: {base}; border: 1px solid {menu_edge}; border-radius: 6px; padding: 4px; }}

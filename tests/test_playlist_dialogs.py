@@ -564,6 +564,17 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_color_scheme_choice(self, mode):
             self.color_scheme = mode
 
+        title_bar = False
+
+        def can_draw_title_bar(self):
+            return True
+
+        def draws_title_bar(self):
+            return self.title_bar
+
+        def set_draws_title_bar(self, on):
+            self.title_bar = on
+
         def player_engine_choice(self):
             return self.engine_choice
 
@@ -582,6 +593,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     # Appearance comes first and Settings opens on it.
     assert dialog.nav.item(0).text() == 'Appearance'
     assert dialog.pages.currentWidget().widget().findChild(QLabel, 'pageTitle').text() == 'Appearance'
+    assert not dialog.title_bar_check.isChecked()
+    dialog.title_bar_check.click()
+    assert host.title_bar is True
     assert dialog.engine_combo.currentData() == 'auto'
     assert dialog.engine_status.text() == 'Playing with mpv.'
     dialog.engine_combo.setCurrentIndex(dialog.engine_combo.findData('vlc'))

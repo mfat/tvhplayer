@@ -42,6 +42,10 @@ except ImportError:
 
 THEME_SHORT = "TVHplayer is the app's own look. The others are the styles Qt offers on this computer."
 SCHEME_SHORT = 'Follow System is light or dark as the desktop is set, and changes with it.'
+TITLE_BAR_SHORT = (
+    "A title bar in TVHplayer's theme, with the menus, a shadow and an outline, instead of Qt's plain one. "
+    'A change takes effect the next time TVHplayer starts.'
+)
 SCHEME_NAMES = {SCHEME_SYSTEM: 'Follow System', SCHEME_LIGHT: 'Light', SCHEME_DARK: 'Dark'}
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
@@ -377,6 +381,14 @@ class SettingsDialog(QDialog):
         self.scheme_combo.setCurrentIndex(max(0, self.scheme_combo.findData(host.color_scheme_choice())))
         describe(self.scheme_combo, 'Light or dark', SCHEME_SHORT)
         group.add_row(SettingRow('&Light or dark', SCHEME_SHORT, self.scheme_combo))
+        self.title_bar_check = None
+        # Only GNOME on Wayland leaves the title bar to the app.
+        if host.can_draw_title_bar():
+            self.title_bar_check = ToggleSwitch("Use TVHplayer's own title bar")
+            self.title_bar_check.setChecked(host.draws_title_bar())
+            describe(self.title_bar_check, description=TITLE_BAR_SHORT)
+            group.add_row(SettingRow("Use TVHplayer's own title &bar", TITLE_BAR_SHORT, self.title_bar_check))
+            self.title_bar_check.toggled.connect(host.set_draws_title_bar)
         strip = group.add_strip(StatusStrip())
         self.theme_status = strip.label
         self._show_theme()

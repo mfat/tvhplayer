@@ -87,6 +87,8 @@ def default_config():
         # TVHplayer's own look, or the name of a Qt style. Read before the window is built.
         'ui_theme': THEME_TVHPLAYER,
         'color_scheme': SCHEME_SYSTEM,
+        # On GNOME on Wayland, the app's own title bar instead of Qt's. Read before the window is built.
+        'own_title_bar': False,
         # Minutes the built-in server starts recordings early and ends them late.
         'builtin_padding_early': 2,
         'builtin_padding_late': 5,
@@ -138,7 +140,7 @@ def _normalize(data):
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
     for key in (
         'play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original',
-        'stay_awake_for_scheduled', 'setup_offered',
+        'stay_awake_for_scheduled', 'setup_offered', 'own_title_bar',
     ):
         cfg[key] = bool(cfg.get(key))
     for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options'):

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QDialog, QFormLayout, QLineEdit,
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
-    QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
+    QMenu, QMenuBar, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
     QInputDialog,
 )
@@ -64,6 +64,7 @@ try:
     )
     from .builtin_supervisor import BuiltinSupervisor
     from . import cursor_debug
+    from . import window_frame
     from .file_manager import show_in_file_manager
     from .ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
     from .player_bar import (
@@ -151,6 +152,7 @@ except ImportError:
     )
     from builtin_supervisor import BuiltinSupervisor
     import cursor_debug
+    import window_frame
     from file_manager import show_in_file_manager
     from ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
     from player_bar import (
@@ -3542,8 +3544,8 @@ class TVHeadendClient(QMainWindow):
             "Press F11 or F for fullscreen, Ctrl+F to search, and F1 for keyboard shortcuts."
         )
 
-        # Create menu bar
-        menubar = self.menuBar()
+        # Create menu bar. Where the desktop leaves the title bar to the app, it goes in ours.
+        menubar = QMenuBar(self)
         menubar.setAccessibleName("Main menu")
         file_menu = menubar.addMenu("&File")
         view_menu = menubar.addMenu("&View")
@@ -3623,6 +3625,7 @@ class TVHeadendClient(QMainWindow):
             exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        self.window_frame = window_frame.install(self, menubar, self.config['own_title_bar'])
         
         # Create main widget and layout
         main_widget = QWidget()
@@ -5434,7 +5437,7 @@ class TVHeadendClient(QMainWindow):
         }
         self.setUpdatesEnabled(False)
         try:
-            self.menuBar().hide()
+            self.menuWidget().hide()
             self.statusbar.hide()
             self.left_pane.hide()
             self.tasks_pane.hide()
@@ -5469,7 +5472,7 @@ class TVHeadendClient(QMainWindow):
                 self.restoreGeometry(geometry)
             else:
                 self.showNormal()
-            self.menuBar().show()
+            self.menuWidget().show()
             self.statusbar.show()
             self.left_pane.show()
             bar = self.floating_bar.release()
@@ -6627,6 +6630,17 @@ class TVHeadendClient(QMainWindow):
 
     def set_plays_on_start(self, on):
         self.config['play_on_start'] = bool(on)
+        self.save_config()
+
+    def can_draw_title_bar(self):
+        return window_frame.wants_own_title_bar(QApplication.platformName())
+
+    def draws_title_bar(self):
+        """The Settings choice; the window in use keeps its title bar until the next start."""
+        return self.config['own_title_bar']
+
+    def set_draws_title_bar(self, on):
+        self.config['own_title_bar'] = bool(on)
         self.save_config()
 
     def player_engine_choice(self):

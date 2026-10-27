@@ -37,6 +37,7 @@ sys.path.insert(0, str(APP_DIR))
 modules = [
     'tvhplayer', 'builtin_supervisor', 'a11y', 'file_manager', 'player_bar', 'settings_dialog', 'settings_widgets',
     'sleep_inhibit', 'setup_wizard', 'guide_dialogs', 'ui_theme', 'about_dialog', 'system_color_scheme', 'cursor_debug',
+    'window_frame',
 ]
 modules += [f'core.{path.stem}' for path in sorted((APP_DIR / 'core').glob('*.py')) if path.stem != '__init__']
 for name in modules:
