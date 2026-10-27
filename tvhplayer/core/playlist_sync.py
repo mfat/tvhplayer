@@ -343,8 +343,9 @@ def sync_playlist(
 ) -> SyncResult:
     """Create, update, and remove muxes so the network matches ``plans``.
 
-    With ``check`` a refresh tests every stream again and channels known not
-    to work are hidden; without it visibility is left alone.
+    With ``check`` a refresh tests the streams whose address changed and
+    hides channels known not to work; the others keep their last verdict
+    until the playlist is checked. Without it visibility is left alone.
     ``source`` is updated in place. ``checkpoint`` is called whenever its
     mux map changed, so a cancelled or failed import leaves the saved map
     matching the server.
