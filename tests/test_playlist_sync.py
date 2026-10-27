@@ -759,3 +759,20 @@ def test_sync_removes_channels_no_longer_chosen():
     result = sync_playlist(admin, source, chosen_plans(source, plans))
     assert result.removed == 3
     assert list(source.muxes) == ['id:a']
+
+
+def test_admin_grids_read_every_page(monkeypatch):
+    import tvhplayer.core.tvh_admin as tvh_admin
+
+    monkeypatch.setattr(tvh_admin, 'ADMIN_GRID_LIMIT', 2)
+    rows = [{'uuid': str(n), 'network_uuid': 'net'} for n in range(5)]
+    calls = []
+
+    def request(path, data=None, params=None):
+        calls.append((params['start'], params['limit']))
+        return {'total': 5, 'entries': rows[params['start']:params['start'] + params['limit']]}
+
+    with TvhAdmin({'url': 'http://127.0.0.1:9981'}) as admin:
+        monkeypatch.setattr(admin, '_request', request)
+        assert [row['uuid'] for row in admin.list_muxes('net')] == ['0', '1', '2', '3', '4']
+    assert calls == [(0, 2), (2, 2), (4, 2)]

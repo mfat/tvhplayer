@@ -73,8 +73,15 @@ class TvhAdmin:
         return self._request(path, data=data, params=params)
 
     def _grid(self, path, **params) -> List[dict]:
-        data = self._request(path, params=dict(params, limit=ADMIN_GRID_LIMIT))
-        return [row for row in data.get('entries') or [] if isinstance(row, dict)]
+        """Every row of a grid, ADMIN_GRID_LIMIT rows a request."""
+        entries = []
+        while True:
+            data = self._request(path, params=dict(params, start=len(entries), limit=ADMIN_GRID_LIMIT))
+            batch = data.get('entries') or []
+            entries.extend(batch)
+            total = data.get('total')
+            if len(batch) < ADMIN_GRID_LIMIT or not isinstance(total, int) or len(entries) >= total:
+                return [row for row in entries if isinstance(row, dict)]
 
     def check_admin(self) -> None:
         """Raise ``TvhAuthError`` when this login cannot change server settings."""
