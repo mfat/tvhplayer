@@ -126,7 +126,8 @@ class PlaylistJob(QObject):
 
     ``action`` is SYNC (import or refresh), REMOVE, CHECK (test every
     stream now and hide those that fail), or SHOW (show every channel again).
-    A sync tests the streams only when the host hides channels that fail.
+    A sync tests the streams only while the host hides channels that fail;
+    it stops waiting for the test once the host no longer does.
 
     ``checking`` is emitted once the channels and guide are written and only
     the server's stream test is left, which can take hours.
@@ -151,7 +152,6 @@ class PlaylistJob(QObject):
         self._ask_commands = ask_commands
         self._choose = choose
         self.action = action
-        self._hide_failed = host.hides_dead_channels()
         self._task = None
         self._playlist = None
         self._plans = []
@@ -197,6 +197,9 @@ class PlaylistJob(QObject):
                 signal.disconnect()
             except TypeError:
                 pass
+
+    def _hides_failed(self):
+        return self.action == self.CHECK or self._host.hides_dead_channels()
 
     def _release(self):
         self._busy = False
@@ -270,7 +273,7 @@ class PlaylistJob(QObject):
                 progress=task.progress.emit,
                 cancelled=lambda: self._cancelled,
                 checkpoint=lambda: task.checkpoint.emit(source.to_dict()),
-                check=self._hide_failed,
+                check=self._hides_failed(),
             )
             result.films = self._playlist.films
             # Removed duplicates and newly hidden channels are already gone from the server.
@@ -291,7 +294,7 @@ class PlaylistJob(QObject):
         if self.action == self.SYNC and not result.cancelled:
             guide_url = self._playlist.guide_url if self._playlist is not None else ''
             self._host.after_playlist_sync(self.server, self.source, guide_url, result)
-        if result.cancelled or not (self._hide_failed or self.action == self.CHECK):
+        if result.cancelled or not self._hides_failed():
             self._checked(result)
             return
         self._checking = True
@@ -306,7 +309,7 @@ class PlaylistJob(QObject):
                 self.source,
                 result,
                 progress=task.progress.emit,
-                cancelled=lambda: self._cancelled,
+                cancelled=lambda: self._cancelled or not self._hides_failed(),
                 changed=task.channels_changed.emit,
             )
         return result

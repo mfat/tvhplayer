@@ -414,6 +414,22 @@ def test_import_without_hiding_skips_the_check(app, tmp_path):
     assert events == ['Added 2 channels from news.']
 
 
+def test_an_import_stops_waiting_for_the_test_once_hiding_is_off(app, tmp_path, monkeypatch):
+    class SlowScan(FakeAdmin):
+        def create_mux(self, network_uuid, conf):
+            uuid = super().create_mux(network_uuid, conf)
+            self.muxes[uuid].update(scan_state=1, scan_result=0)
+            return uuid
+
+    monkeypatch.setattr(dialogs, 'TvhAdmin', SlowScan)
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
+    job = dialogs.PlaylistJob(host, source, BUILTIN, first_import=True)
+    job.checking.connect(lambda: setattr(host, 'hide_dead', False))
+    events = _finish(app, job)
+    assert events == ['checking', 'Added 2 channels from news. Channels that were not checked yet stay in the list.']
+
+
 def test_check_and_show_every_channel_of_an_imported_playlist(app, tmp_path):
     host = FakeHost([BUILTIN], current=BUILTIN)
     host.hide_dead = False
