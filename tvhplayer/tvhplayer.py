@@ -3318,6 +3318,12 @@ class TVHeadendClient(QMainWindow):
         # libmpv draws into an OpenGL widget; libvlc into a native window.
         self.engine = engine
         self.setup_paths()
+        # Windows and macOS take the title bar, taskbar and Dock icon from the window;
+        # Linux desktops take it from the desktop file, an AppImage without one from here.
+        app_icon = QIcon(str(self.icons_dir / 'tvhplayer.svg'))
+        if not app_icon.isNull():
+            QApplication.instance().setWindowIcon(app_icon)
+            self.setWindowIcon(app_icon)
         self.config_store = ConfigStore()
         self.config_file = str(self.config_store.path)
         self.config_dir = str(self.config_store.path.parent)

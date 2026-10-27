@@ -3168,3 +3168,14 @@ def test_tasks_open_when_the_server_starts_with_a_scheduled_recording(monkeypatc
     finally:
         window.close()
         app.processEvents()
+
+
+def test_the_window_carries_the_app_icon(monkeypatch, tmp_path):
+    # Windows and macOS take the title bar, taskbar and Dock icon from the window.
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        assert not window.windowIcon().isNull()
+        assert not app.windowIcon().isNull()
+        assert window.windowIcon().cacheKey() == app.windowIcon().cacheKey()
+    finally:
+        window.close()
