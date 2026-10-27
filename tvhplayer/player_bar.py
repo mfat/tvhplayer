@@ -340,10 +340,7 @@ class PlayerBar(QWidget):
         if self._floating:
             self.setStyleSheet("#player_bar { background: transparent; }")
         else:
-            self.setStyleSheet(
-                f"#player_bar {{ background: {BAR_BACKGROUND}; "
-                "border-bottom-left-radius: 4px; border-bottom-right-radius: 4px; }"
-            )
+            self.setStyleSheet(f"#player_bar {{ background: {BAR_BACKGROUND}; }}")
 
     def set_floating(self, floating):
         self._floating = bool(floating)

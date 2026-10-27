@@ -8,9 +8,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QObject, QStandardPaths
-from PyQt6.QtGui import QColor, QFont, QFontDatabase, QPalette
-from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QTableView
+from PyQt6.QtCore import QEvent, QObject, QRectF, QStandardPaths
+from PyQt6.QtGui import QColor, QFont, QFontDatabase, QPainter, QPalette
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QProxyStyle,
+    QStyle,
+    QStyledItemDelegate,
+    QTableView,
+    QTreeView,
+)
 
 INK = '#232629'
 MUTED = '#5d6166'
@@ -72,32 +80,18 @@ QSplitter::handle:horizontal {{ width: 1px; }}
 QToolButton {{ padding: 4px 8px; background: {BASE}; border: 1px solid rgba(35,38,41,64); border-radius: 4px; }}
 QToolButton:hover {{ border-color: {ACCENT}; background: #f2f8fc; }}
 QToolButton:focus {{ border: 2px solid {ACCENT}; padding: 3px 7px; }}
+/* Padding keeps the square header and rows inside the rounded border. Selected rows
+   are drawn by RowStyle, which knows the first and last visible column. */
 QTableView, QTreeView, QListView {{
-    background: {BASE}; border: 1px solid #bcbdbf;
-    gridline-color: transparent; selection-background-color: transparent; selection-color: {INK};
+    background: {BASE}; border: 1px solid #bcbdbf; border-radius: 6px; padding: 4px;
+    gridline-color: transparent; selection-background-color: transparent; selection-color: #124a6a;
     alternate-background-color: #f6f7f7; outline: 0;
-}}
-/* Selected rows as in the settings sidebar: a tint, rounded at the row's two ends,
-   kept off the list's border. */
-QTableView::item:first, QTreeView::item:first {{ margin-left: 4px; }}
-QTableView::item:last, QTreeView::item:last {{ margin-right: 4px; }}
-QTableView::item:only-one, QTreeView::item:only-one, QListView::item {{ margin: 0 4px; }}
-QTableView::item:selected, QTreeView::item:selected, QListView::item:selected {{
-    background: rgba(61,174,233,51); color: #124a6a;
-}}
-QTableView::item:selected:first, QTreeView::item:selected:first {{
-    border-top-left-radius: 4px; border-bottom-left-radius: 4px;
-}}
-QTableView::item:selected:last, QTreeView::item:selected:last {{
-    border-top-right-radius: 4px; border-bottom-right-radius: 4px;
-}}
-QTableView::item:selected:only-one, QTreeView::item:selected:only-one, QListView::item:selected {{
-    border-radius: 4px;
 }}
 QComboBox QAbstractItemView::item {{ padding: 6px 12px; }}
 QComboBox QAbstractItemView::item:selected {{ background: rgba(61,174,233,51); color: {INK}; border-radius: 4px; }}
+QHeaderView {{ background: transparent; }}
 QHeaderView::section {{
-    background: {WINDOW}; color: {MUTED}; font-weight: 600; padding: 6px 8px;
+    background: transparent; color: {MUTED}; font-weight: 600; padding: 6px 8px;
     border: none; border-bottom: 1px solid rgba(35,38,41,64);
 }}
 QStatusBar {{ background: {WINDOW}; border-top: 1px solid rgba(35,38,41,31); color: {MUTED}; }}
@@ -225,6 +219,52 @@ def polish_main_window(window):
         splitter.setHandleWidth(1)
 
 
+SELECTED_ROW = QColor(61, 174, 233, 51)
+_rounded_rows = False
+
+
+def _row_ends(view, index):
+    """Whether ``index`` is in the first and the last visible column of its row."""
+    if isinstance(view, QTableView):
+        header = view.horizontalHeader()
+    elif isinstance(view, QTreeView):
+        header = view.header()
+    else:
+        return True, True
+    shown = [header.logicalIndex(v) for v in range(header.count()) if not header.isSectionHidden(header.logicalIndex(v))]
+    if not shown:
+        return True, True
+    return index.column() == shown[0], index.column() == shown[-1]
+
+
+class RowStyle(QProxyStyle):
+    """With the theme on, a selected row is one tint rounded at its two ends, as in the settings sidebar.
+
+    Style sheet ::item:first and :last cannot do it: a table counts hidden columns,
+    so with the first column hidden no visible cell starts the row.
+    """
+
+    def drawPrimitive(self, element, option, painter, widget=None):
+        if (_rounded_rows and element == QStyle.PrimitiveElement.PE_PanelItemViewItem
+                and option.state & QStyle.StateFlag.State_Selected and isinstance(widget, QAbstractItemView)):
+            first, last = _row_ends(widget, option.index)
+            rect = QRectF(option.rect)
+            # The rounded shape runs past the cell on a side that joins another cell, then is cut off.
+            if not first:
+                rect.setLeft(rect.left() - 8)
+            if not last:
+                rect.setRight(rect.right() + 8)
+            painter.save()
+            painter.setClipRect(option.rect)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QColor(0, 0, 0, 0))
+            painter.setBrush(SELECTED_ROW)
+            painter.drawRoundedRect(rect, 4, 4)
+            painter.restore()
+            return
+        super().drawPrimitive(element, option, painter, widget)
+
+
 class _ThemePolish(QObject):
     """Widget settings a style sheet cannot make, applied as each widget is polished."""
 
@@ -240,6 +280,8 @@ class _ThemePolish(QObject):
 
 
 def apply_theme(app):
+    global _rounded_rows
+    _rounded_rows = True
     app.installEventFilter(_ThemePolish(app))
     app.setPalette(_palette())
     font = _load_fonts()

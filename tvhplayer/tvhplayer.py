@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
-    QInputDialog, QProxyStyle,
+    QInputDialog,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
@@ -64,7 +64,7 @@ try:
     )
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
-    from .ui_theme import apply_theme, polish_main_window
+    from .ui_theme import RowStyle, apply_theme, polish_main_window
     from .player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -150,7 +150,7 @@ except ImportError:
     )
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
-    from ui_theme import apply_theme, polish_main_window
+    from ui_theme import RowStyle, apply_theme, polish_main_window
     from player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -7258,7 +7258,7 @@ class EPGDialog(QDialog):
                 f"Failed to schedule recording: {str(e)}"
             )
 
-class NoDialogButtonIconsStyle(QProxyStyle):
+class NoDialogButtonIconsStyle(RowStyle):
     """The desktop style, without icons on dialog buttons (OK, Cancel, Yes, No...)."""
 
     def styleHint(self, hint, option=None, widget=None, returnData=None):
