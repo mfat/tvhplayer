@@ -173,6 +173,8 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
 
     store = ConfigStore(tmp_path / 'tvhplayer.conf')
     monkeypatch.setattr(ui, 'ConfigStore', lambda *a, **k: store)
+    # Not the picon pack on this computer: each window read its tens of thousands of logos.
+    monkeypatch.setattr(ui, 'default_picon_dir', lambda: tmp_path / 'picons')
     if prepare is None:
         monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
     else:

@@ -579,8 +579,12 @@ def _first_bytes(port, channel_uuid, size=188 * 200):
 
 
 @pytest.mark.skipif(not (FFMPEG and TVHEADEND), reason='needs ffmpeg and a Tvheadend build')
-def test_import_plays_refreshes_and_removes(tvheadend, media):
+def test_import_plays_refreshes_and_removes(tvheadend, media, monkeypatch):
     port = tvheadend
+    # The server ends the test of a working stream only when its tables are all in,
+    # and ffmpeg's lack a few (CAT, NIT, TDT): each waited the full 30 s. The
+    # streams here are local and answer at once.
+    monkeypatch.setitem(NETWORK_CONF, 'max_timeout', 5)
     text = (
         '#EXTM3U\n'
         f'#EXTINF:-1 tvg-id="a" tvg-chno="7" group-title="News",Pattern\n{media}/a.ts\n'
