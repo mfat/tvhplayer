@@ -20,6 +20,19 @@ from PyQt6.QtWidgets import (
     QWidget,
 )  # QCheckBox is the base of ToggleSwitch
 
+try:
+    from .ui_theme import is_active as theme_is_active
+except ImportError:
+    from ui_theme import is_active as theme_is_active
+
+
+def _bold(label, scale=1.0):
+    """Headings without the TVHplayer theme, whose style sheet sets them otherwise."""
+    font = QFont(label.font())
+    font.setWeight(QFont.Weight.DemiBold)
+    if scale != 1.0:
+        font.setPointSizeF(font.pointSizeF() * scale)
+    label.setFont(font)
 
 
 def _alpha(color, alpha):
@@ -30,7 +43,10 @@ def _alpha(color, alpha):
 
 
 class ToggleSwitch(QCheckBox):
-    """A QCheckBox drawn as a switch. ``text`` becomes the accessible name; the row shows the label."""
+    """A QCheckBox drawn as a switch. ``text`` becomes the accessible name; the row shows the label.
+
+    With a Qt style instead of the TVHplayer theme it is that style's checkbox.
+    """
 
     def __init__(self, text='', parent=None):
         super().__init__(parent)
@@ -44,6 +60,8 @@ class ToggleSwitch(QCheckBox):
         self.toggled.connect(self._move)
 
     def sizeHint(self):
+        if not theme_is_active():
+            return super().sizeHint()
         return QSize(40, 24)
 
     def hitButton(self, pos):
@@ -72,7 +90,10 @@ class ToggleSwitch(QCheckBox):
         self._set_offset(1.0 if self.isChecked() else 0.0)
         super().showEvent(event)
 
-    def paintEvent(self, _event):
+    def paintEvent(self, event):
+        if not theme_is_active():
+            super().paintEvent(event)
+            return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         track = QRectF(2, (self.height() - 20) / 2, 36, 20)
@@ -193,9 +214,14 @@ class SettingsGroup(QWidget):
         if title:
             heading = QLabel(title)
             heading.setObjectName('groupTitle')
+            if not theme_is_active():
+                _bold(heading)
             outer.addWidget(heading)
         self.card = QFrame()
         self.card.setObjectName('groupCard')
+        if not theme_is_active():
+            # The TVHplayer theme draws the card; a Qt style draws its own panel.
+            self.card.setFrameShape(QFrame.Shape.StyledPanel)
         self._rows = QVBoxLayout(self.card)
         self._rows.setContentsMargins(0, 0, 0, 0)
         self._rows.setSpacing(0)
@@ -205,7 +231,11 @@ class SettingsGroup(QWidget):
         if self._rows.count():
             line = QFrame()
             line.setObjectName('rowSeparator')
-            line.setFixedHeight(1)
+            if theme_is_active():
+                line.setFixedHeight(1)
+            else:
+                line.setFrameShape(QFrame.Shape.HLine)
+                line.setFrameShadow(QFrame.Shadow.Sunken)
             self._rows.addWidget(line)
         self._rows.addWidget(row)
         return row
@@ -230,6 +260,8 @@ class SettingsPage(QScrollArea):
         self.layout_.setSpacing(22)
         heading = QLabel(title)
         heading.setObjectName('pageTitle')
+        if not theme_is_active():
+            _bold(heading, 1.4)
         heading.setAccessibleName(title)
         self.layout_.addWidget(heading)
         if intro:
@@ -262,7 +294,13 @@ class _NavDelegate(QStyledItemDelegate):
         hover = bool(option.state & QStyle.StateFlag.State_MouseOver)
         ink = option.palette.color(QPalette.ColorRole.Text)
         p.setPen(Qt.PenStyle.NoPen)
-        if selected:
+        if not theme_is_active():
+            # A Qt style draws the selection and hover as in its other lists.
+            style = option.widget.style() if option.widget is not None else QApplication.style()
+            style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, option, p, option.widget)
+            if selected:
+                ink = option.palette.color(QPalette.ColorRole.HighlightedText)
+        elif selected:
             # The app's highlight: the theme gives lists a clear one, as RowStyle draws their selection.
             p.setBrush(_alpha(QApplication.palette().color(QPalette.ColorRole.Highlight), 56))
             p.drawRoundedRect(r, 6, 6)

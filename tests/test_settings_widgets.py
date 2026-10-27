@@ -50,3 +50,25 @@ def test_rows_and_strips_show_what_they_have(qapp):
     empty.label.setText('')
     assert not empty.isVisible()
     group.hide()
+
+
+def test_a_qt_style_draws_switches_and_cards_its_own_way(qapp, monkeypatch):
+    from PyQt6.QtWidgets import QCheckBox, QFrame
+    from tvhplayer import ui_theme
+
+    monkeypatch.setattr(ui_theme, '_active', False)
+    group = SettingsGroup('Group')
+    switch = ToggleSwitch()
+    assert switch.sizeHint() == QCheckBox().sizeHint()
+    assert group.card.frameShape() == QFrame.Shape.StyledPanel
+
+
+def test_the_tvhplayer_theme_draws_switches_and_cards(qapp, monkeypatch):
+    from PyQt6.QtCore import QSize
+    from PyQt6.QtWidgets import QFrame
+    from tvhplayer import ui_theme
+
+    monkeypatch.setattr(ui_theme, '_active', True)
+    group = SettingsGroup('Group')
+    assert ToggleSwitch().sizeHint() == QSize(40, 24)
+    assert group.card.frameShape() == QFrame.Shape.NoFrame
