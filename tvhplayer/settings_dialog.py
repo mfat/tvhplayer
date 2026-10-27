@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -43,7 +44,6 @@ THEME_SHORT = (
     "TVHplayer is the app's own look, light or dark as the desktop is set. "
     'The others are the styles Qt offers on this computer.'
 )
-THEME_NOTE = 'A change takes effect the next time TVHplayer starts.'
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
     'Channels that fail are hidden and come back once a later test finds them working.'
@@ -369,14 +369,10 @@ class SettingsDialog(QDialog):
             index = next((i for i in range(self.theme_combo.count())
                           if str(self.theme_combo.itemData(i)).casefold() == chosen.casefold()), 0)
         self.theme_combo.setCurrentIndex(index)
-        describe(self.theme_combo, 'Theme', f'{THEME_SHORT} {THEME_NOTE}')
+        describe(self.theme_combo, 'Theme', THEME_SHORT)
         group.add_row(SettingRow('&Theme', THEME_SHORT, self.theme_combo))
         strip = group.add_strip(StatusStrip())
         self.theme_status = strip.label
-        note = QLabel(THEME_NOTE)
-        note.setObjectName('rowDesc')
-        note.setWordWrap(True)
-        strip.layout().addWidget(note)
         self._show_theme()
         self.theme_combo.currentIndexChanged.connect(self._theme_chosen)
         page.finish()
@@ -385,6 +381,10 @@ class SettingsDialog(QDialog):
     # Behaviour (unchanged from the tabbed dialog) --------------------------
 
     def _theme_chosen(self, _index):
+        # Once the list has closed: a theme change restyles every widget, the list's too.
+        QTimer.singleShot(0, self._use_chosen_theme)
+
+    def _use_chosen_theme(self):
         self._host.set_theme_choice(self.theme_combo.currentData())
         self._show_theme(announce=True)
 
@@ -396,7 +396,7 @@ class SettingsDialog(QDialog):
         elif str(running).casefold() == str(wanted).casefold():
             text = f'Using {running}.'
         else:
-            text = f'Using {running}. Restart TVHplayer to use {wanted}.'
+            text = f'Using {running}; {wanted} is not available.'
         if announce:
             announce_label(self.theme_status, text)
         else:

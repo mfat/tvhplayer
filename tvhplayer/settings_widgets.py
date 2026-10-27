@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt, pyqtProperty
+from PyQt6.QtCore import QEasingCurve, QEvent, QPropertyAnimation, QRectF, QSize, Qt, pyqtProperty
 from PyQt6.QtGui import QColor, QFont, QPainter, QPalette
 from PyQt6.QtWidgets import (
     QApplication,
@@ -26,13 +26,26 @@ except ImportError:
     from ui_theme import is_active as theme_is_active
 
 
-def _bold(label, scale=1.0):
-    """Headings without the TVHplayer theme, whose style sheet sets them otherwise."""
-    font = QFont(label.font())
+# QWIDGETSIZE_MAX, the maximum size of a widget with none set.
+QWIDGETSIZE_MAX = (1 << 24) - 1
+
+
+def _heading_font(label, scale=1.0):
+    """The TVHplayer theme's style sheet sets headings; with a Qt style they are bold in its font."""
+    if theme_is_active():
+        if label.property('tvhplayer_font'):
+            label.setProperty('tvhplayer_font', None)
+            # An empty font sets nothing; polished again, the label takes the style sheet's.
+            label.setFont(QFont())
+            label.style().unpolish(label)
+            label.style().polish(label)
+        return
+    font = QApplication.font()
     font.setWeight(QFont.Weight.DemiBold)
     if scale != 1.0:
         font.setPointSizeF(font.pointSizeF() * scale)
     label.setFont(font)
+    label.setProperty('tvhplayer_font', True)
 
 
 def _alpha(color, alpha):
@@ -89,6 +102,12 @@ class ToggleSwitch(QCheckBox):
     def showEvent(self, event):
         self._set_offset(1.0 if self.isChecked() else 0.0)
         super().showEvent(event)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.StyleChange:
+            # A switch with the TVHplayer theme, the style's checkbox otherwise: another size.
+            self.updateGeometry()
+        super().changeEvent(event)
 
     def paintEvent(self, event):
         if not theme_is_active():
@@ -211,31 +230,51 @@ class SettingsGroup(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(8)
+        self._heading = None
         if title:
-            heading = QLabel(title)
-            heading.setObjectName('groupTitle')
-            if not theme_is_active():
-                _bold(heading)
-            outer.addWidget(heading)
+            self._heading = QLabel(title)
+            self._heading.setObjectName('groupTitle')
+            outer.addWidget(self._heading)
         self.card = QFrame()
         self.card.setObjectName('groupCard')
-        if not theme_is_active():
-            # The TVHplayer theme draws the card; a Qt style draws its own panel.
-            self.card.setFrameShape(QFrame.Shape.StyledPanel)
         self._rows = QVBoxLayout(self.card)
         self._rows.setContentsMargins(0, 0, 0, 0)
         self._rows.setSpacing(0)
+        self._lines = []
         outer.addWidget(self.card)
+        self._restyle()
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.StyleChange:
+            self._restyle()
+        super().changeEvent(event)
+
+    def _restyle(self):
+        """The TVHplayer theme draws the card and its hairlines; a Qt style draws its own panel and lines."""
+        if self._heading is not None:
+            _heading_font(self._heading)
+        active = theme_is_active()
+        self.card.setFrameShape(QFrame.Shape.NoFrame if active else QFrame.Shape.StyledPanel)
+        for line in self._lines:
+            self._restyle_line(line, active)
+
+    @staticmethod
+    def _restyle_line(line, active):
+        if active:
+            line.setFrameShape(QFrame.Shape.NoFrame)
+            line.setFixedHeight(1)
+        else:
+            line.setFrameShape(QFrame.Shape.HLine)
+            line.setFrameShadow(QFrame.Shadow.Sunken)
+            line.setMinimumHeight(0)
+            line.setMaximumHeight(QWIDGETSIZE_MAX)
 
     def add_row(self, row):
         if self._rows.count():
             line = QFrame()
             line.setObjectName('rowSeparator')
-            if theme_is_active():
-                line.setFixedHeight(1)
-            else:
-                line.setFrameShape(QFrame.Shape.HLine)
-                line.setFrameShadow(QFrame.Shadow.Sunken)
+            self._restyle_line(line, theme_is_active())
+            self._lines.append(line)
             self._rows.addWidget(line)
         self._rows.addWidget(row)
         return row
@@ -258,18 +297,22 @@ class SettingsPage(QScrollArea):
         self.layout_ = QVBoxLayout(body)
         self.layout_.setContentsMargins(28, 24, 28, 32)
         self.layout_.setSpacing(22)
-        heading = QLabel(title)
-        heading.setObjectName('pageTitle')
-        if not theme_is_active():
-            _bold(heading, 1.4)
-        heading.setAccessibleName(title)
-        self.layout_.addWidget(heading)
+        self._heading = QLabel(title)
+        self._heading.setObjectName('pageTitle')
+        _heading_font(self._heading, 1.4)
+        self._heading.setAccessibleName(title)
+        self.layout_.addWidget(self._heading)
         if intro:
             text = QLabel(intro)
             text.setObjectName('pageIntro')
             text.setWordWrap(True)
             self.layout_.addWidget(text)
         self.setWidget(body)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.StyleChange:
+            _heading_font(self._heading, 1.4)
+        super().changeEvent(event)
 
     def add(self, widget):
         self.layout_.addWidget(widget)

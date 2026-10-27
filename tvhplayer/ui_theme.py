@@ -3,7 +3,8 @@
 The TVHplayer theme is Fusion with a palette and one stylesheet, built from a
 light or a dark set of colors. Any other theme is a Qt style used as it is.
 Every theme follows the desktop's light or dark setting while the app runs.
-Under high contrast the system look stays in charge.
+A theme can be changed while the app runs too. Under high contrast the system
+look stays in charge.
 """
 
 from __future__ import annotations
@@ -191,6 +192,13 @@ UP = 'M2 6.5 5 3.5 8 6.5'
 # The colors in use, and whether the TVHplayer theme is on.
 colors = LIGHT
 _active = False
+# Kept by apply(): the desktop's scheme, whether it is watched, the polish filter,
+# the app's font before the theme's, and the theme's font.
+_scheme = None
+_watching = False
+_polish = None
+_default_font = None
+_theme_font = None
 
 
 def is_active():
@@ -263,27 +271,33 @@ def color(name):
 
 def _load_fonts():
     """Use bundled Noto Sans if it ships in fonts/, otherwise the system copy or the default."""
+    global _theme_font
+    if _theme_font is not None:
+        return _theme_font
     fonts = Path(__file__).resolve().parent / 'fonts'
     if fonts.is_dir():
         for file in fonts.glob('*.ttf'):
             QFontDatabase.addApplicationFont(str(file))
     if 'Noto Sans' in QFontDatabase.families():
-        return QFont('Noto Sans', 10)
-    return None
+        _theme_font = QFont('Noto Sans', 10)
+    return _theme_font
 
 
 def polish_main_window(window):
-    """Flatten the raised side panes and hide the splitter handle. Call after the UI is built."""
+    """With the TVHplayer theme, flatten the raised side panes and hide the splitter handle;
+    without it, put them back. Call after the UI is built and after each theme change."""
     from PyQt6.QtWidgets import QFrame
     for name in ('left_pane', 'right_pane', 'tasks_pane'):
         pane = getattr(window, name, None)
         if pane is not None:
-            pane.setFrameStyle(QFrame.Shape.NoFrame)
+            if pane.property('tvhplayer_frame') is None:
+                pane.setProperty('tvhplayer_frame', pane.frameStyle())
+            pane.setFrameStyle(QFrame.Shape.NoFrame if _active else pane.property('tvhplayer_frame'))
             pane.setObjectName(name)
     splitter = getattr(window, 'splitter', None)
     if splitter is not None:
-        # Invisible, but wide enough to grab.
-        splitter.setHandleWidth(6)
+        # Invisible, but wide enough to grab; -1 is the style's own width.
+        splitter.setHandleWidth(6 if _active else -1)
 
 
 def _row_ends(view, index):
@@ -333,13 +347,19 @@ class _ThemePolish(QObject):
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.Polish:
-            if isinstance(obj, QTableView):
-                # The theme hides grid lines, which left a gap between cells.
-                obj.setShowGrid(False)
-            elif isinstance(obj, QComboBox) and not isinstance(obj.itemDelegate(), QStyledItemDelegate):
-                # Qt's own popup delegate draws items as menu items and ignores ::item rules.
-                obj.setItemDelegate(QStyledItemDelegate(obj))
+            self.polish(obj)
         return False
+
+    @staticmethod
+    def polish(obj):
+        if isinstance(obj, QTableView):
+            # The theme hides grid lines, which left a gap between cells.
+            if obj.property('tvhplayer_grid') is None:
+                obj.setProperty('tvhplayer_grid', obj.showGrid())
+            obj.setShowGrid(False)
+        elif isinstance(obj, QComboBox) and not isinstance(obj.itemDelegate(), QStyledItemDelegate):
+            # Qt's own popup delegate draws items as menu items and ignores ::item rules.
+            obj.setItemDelegate(QStyledItemDelegate(obj))
 
 
 def style_names():
@@ -364,40 +384,80 @@ def _apply_colors(app, dark):
     app.setStyleSheet(STYLESHEET.format(**colors) + _arrow_rules(colors, dark))
 
 
-def follow_desktop(app, use_theme):
-    """Light or dark as the desktop is, now and whenever it changes.
+def _follow_desktop(app, force=False):
+    """Light or dark as the desktop is; ``force`` applies it again after a theme change.
 
     Qt is told the scheme too, which reaches Qt styles and the title bar Qt
-    draws on GNOME. With ``use_theme`` the TVHplayer colors follow as well.
+    draws on GNOME. With the TVHplayer theme its colors follow as well.
     """
-    global _active
-    state = {'scheme': None}
+    global _scheme
+    scheme = desktop.system_color_scheme(app)
+    # Unknown after the first answer is the app's own pin read back: no change.
+    if scheme == desktop.ColorScheme.Unknown and _scheme is not None:
+        scheme = _scheme
+    if scheme == _scheme and not force:
+        return
+    _scheme = scheme
+    hints = app.styleHints()
+    # Qt 6.8 and later; older Qt keeps its own idea, and only the TVHplayer colors follow.
+    if hasattr(hints, 'setColorScheme'):
+        desktop.note_pinned(scheme)
+        hints.setColorScheme(scheme)
+    if _active:
+        _apply_colors(app, scheme == desktop.ColorScheme.Dark)
 
-    schemes = desktop.ColorScheme
 
-    def update():
-        scheme = desktop.system_color_scheme(app)
-        # Unknown after the first answer is the app's own pin read back: no change.
-        if scheme == state['scheme'] or (scheme == schemes.Unknown and state['scheme'] is not None):
-            return
-        state['scheme'] = scheme
-        hints = app.styleHints()
-        # Qt 6.8 and later; older Qt keeps its own idea, and only the TVHplayer colors follow.
-        if hasattr(hints, 'setColorScheme'):
-            desktop.note_pinned(scheme)
-            hints.setColorScheme(scheme)
-        if use_theme:
-            _apply_colors(app, scheme == schemes.Dark)
+def _remove_polish(app):
+    global _polish
+    if _polish is not None:
+        app.removeEventFilter(_polish)
+        _polish = None
 
-    if use_theme:
-        _active = True
-        polish = _ThemePolish(app)
-        app.installEventFilter(polish)
+
+def _restore_grids(app):
+    for widget in app.allWidgets():
+        if isinstance(widget, QTableView) and widget.property('tvhplayer_grid') is not None:
+            widget.setShowGrid(widget.property('tvhplayer_grid'))
+            widget.setProperty('tvhplayer_grid', None)
+
+
+def apply(app, theme, style_class=RowStyle):
+    """Use ``theme``, TVHplayer or a Qt style's name, at startup or while the app runs.
+
+    Returns False when there is no such style. Qt sends every widget a
+    StyleChange, so widgets that set themselves up for a theme can follow;
+    the main window's panes need polish_main_window() again.
+    """
+    global _active, _polish, _default_font, _watching
+    key = style_key(theme)
+    if key is None:
+        return False
+    if _default_font is None:
+        _default_font = app.font()
+    _active = theme == THEME_TVHPLAYER
+    if _active:
+        if _polish is None:
+            _polish = _ThemePolish(app)
+            app.installEventFilter(_polish)
+            # Widgets already shown were polished before the filter was there.
+            for widget in app.allWidgets():
+                _polish.polish(widget)
+        app.setFont(_load_fonts() or _default_font)
+    else:
+        _remove_polish(app)
+        # Qt keeps the style sheet and the palette set by the app across a style
+        # change, so the TVHplayer theme's are taken off; QPalette() is the style's own.
+        app.setStyleSheet('')
+        app.setPalette(QPalette())
+        app.setFont(_default_font)
+        _restore_grids(app)
+    app.setStyle(style_class(key))
+    app.setProperty('tvhplayer_theme', theme)
+    _follow_desktop(app, force=True)
+    if not _watching:
+        _watching = True
+        desktop.watch(app, lambda: _follow_desktop(app))
         # Off before PyQt's exit cleanup: events from the objects it deletes would
-        # run Python here while it walks the objects it still has to delete.
-        app.aboutToQuit.connect(lambda: app.removeEventFilter(polish))
-        font = _load_fonts()
-        if font is not None:
-            app.setFont(font)
-    update()
-    desktop.watch(app, update)
+        # run Python in the filter while it walks the objects it still has to delete.
+        app.aboutToQuit.connect(lambda: _remove_polish(app))
+    return True

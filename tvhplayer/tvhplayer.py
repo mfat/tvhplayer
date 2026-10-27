@@ -65,7 +65,7 @@ try:
     from .builtin_supervisor import BuiltinSupervisor
     from . import cursor_debug
     from .file_manager import show_in_file_manager
-    from .ui_theme import THEME_TVHPLAYER, RowStyle, follow_desktop, is_active as theme_is_active, polish_main_window, style_key
+    from .ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, style_key
     from .player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -152,7 +152,7 @@ except ImportError:
     from builtin_supervisor import BuiltinSupervisor
     import cursor_debug
     from file_manager import show_in_file_manager
-    from ui_theme import THEME_TVHPLAYER, RowStyle, follow_desktop, is_active as theme_is_active, polish_main_window, style_key
+    from ui_theme import THEME_TVHPLAYER, RowStyle, apply as apply_theme, polish_main_window, style_key
     from player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -4007,8 +4007,7 @@ class TVHeadendClient(QMainWindow):
         search_layout.setSpacing(5)
 
         left_layout.addWidget(self.tag_row)
-        if theme_is_active():
-            polish_main_window(self)
+        polish_main_window(self)
         self._apply_channel_columns()
         self._apply_tab_order()
         self.tasks_pane.refresh()
@@ -6640,15 +6639,22 @@ class TVHeadendClient(QMainWindow):
             self.save_config()
 
     def theme_choice(self):
-        """The Settings choice: TVHplayer or a Qt style. It takes effect at the next start."""
+        """The Settings choice: TVHplayer or a Qt style."""
         return self.config['ui_theme']
 
     def set_theme_choice(self, theme):
+        """Save the choice and use it now, unless high contrast keeps the system look."""
         self.config['ui_theme'] = theme
         self.save_config()
+        app = QApplication.instance()
+        running = self.running_theme()
+        if running is None or theme == running:
+            return
+        if apply_theme(app, theme, NoDialogButtonIconsStyle):
+            polish_main_window(self)
 
     def running_theme(self):
-        """The theme this run started with; None when high contrast kept the system look."""
+        """The theme in use; None when high contrast kept the system look."""
         app = QApplication.instance()
         return app.property('tvhplayer_theme') if app is not None else None
 
@@ -7323,9 +7329,7 @@ def main():
             print(f"Debug: Theme {theme!r} is not available here; using {THEME_TVHPLAYER}")
             theme = THEME_TVHPLAYER
         if theme is not None:
-            app.setStyle(NoDialogButtonIconsStyle(style_key(theme)))
-            app.setProperty('tvhplayer_theme', theme)
-            follow_desktop(app, use_theme=theme == THEME_TVHPLAYER)
+            apply_theme(app, theme, NoDialogButtonIconsStyle)
         print(f"Debug: Theme: {theme or 'system (high contrast)'}")
         player = TVHeadendClient(engine)
         player.show()
