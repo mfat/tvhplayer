@@ -41,7 +41,7 @@ except ImportError:
     from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 
 THEME_SHORT = "TVHplayer is the app's own look. The others are the styles Qt offers on this computer."
-SCHEME_SHORT = 'Follow System is light or dark as the desktop is set, and changes with it.'
+SCHEME_SHORT = 'Follow system theme, or set Light/Dark theme manually'
 SCHEME_NAMES = {SCHEME_SYSTEM: 'Follow System', SCHEME_LIGHT: 'Light', SCHEME_DARK: 'Dark'}
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
@@ -378,7 +378,7 @@ class SettingsDialog(QDialog):
         describe(self.scheme_combo, 'Theme', SCHEME_SHORT)
         group.add_row(SettingRow('&Theme', SCHEME_SHORT, self.scheme_combo))
         self.title_bar_check = None
-        # Only GNOME on Wayland leaves the title bar to the app.
+        # GNOME and KDE; on X11 only while a compositor can show the shadow.
         if host.can_draw_title_bar():
             self.title_bar_check = ToggleSwitch("Use TVHplayer's own title bar")
             self.title_bar_check.setChecked(host.draws_title_bar())
