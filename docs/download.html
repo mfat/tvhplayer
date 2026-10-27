@@ -38,7 +38,16 @@
           const asset = release.assets.find(candidate => pattern.test(candidate.name));
           if (!asset) throw new Error('No matching file was published');
           status.textContent = `Downloading ${asset.name}…`;
-          location.replace(asset.browser_download_url);
+
+          // Download in a hidden frame so this tab can return to the README
+          // instead of ending up on GitHub's release-asset response.
+          const frame = document.createElement('iframe');
+          frame.hidden = true;
+          frame.src = asset.browser_download_url;
+          document.body.append(frame);
+          setTimeout(() => {
+            location.replace('https://github.com/mfat/tvhplayer#download');
+          }, 1000);
         })
         .catch(error => {
           status.textContent = `The download could not be started: ${error.message}. `;
