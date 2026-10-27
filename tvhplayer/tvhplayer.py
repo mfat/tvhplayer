@@ -3408,7 +3408,9 @@ class TVHeadendClient(QMainWindow):
         self.picons = None
         self.picon_job = None
         if default_picon_dir().is_dir():
-            self._start_picon_job(None)
+            # Once the window is up: reading a pack's tens of thousands of logos
+            # beside the window being built held it up by half a second.
+            QTimer.singleShot(0, self._read_picons)
         self._now_next_timer = QTimer(self)
         self._now_next_timer.timeout.connect(self._tick_now_next)
         self._now_next_timer.start(NOW_NEXT_TICK_MS)
@@ -6420,6 +6422,10 @@ class TVHeadendClient(QMainWindow):
         shutil.rmtree(default_picon_dir(), ignore_errors=True)
         self.picons = None
         self._picons_changed()
+
+    def _read_picons(self):
+        if self.picon_job is None:
+            self._start_picon_job(None)
 
     def _start_picon_job(self, style):
         job = PiconJob(default_picon_dir(), style, self)

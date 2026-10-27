@@ -2988,6 +2988,31 @@ def test_conflict_dialog_makes_the_chosen_recording_important(monkeypatch, tmp_p
         app.processEvents()
 
 
+def test_picons_are_read_once_the_window_is_up(monkeypatch, tmp_path):
+    # Reading a pack beside the window being built held the window up by half a second.
+    (tmp_path / 'picons').mkdir()
+    (tmp_path / 'picons' / 'bbcone.png').write_bytes(b'png')
+    started = []
+
+    def prepare(ui):
+        monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
+        real_start = ui.PiconJob.start
+        monkeypatch.setattr(ui.PiconJob, 'start', lambda self: (started.append(self), real_start(self)))
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path, prepare)
+    try:
+        assert started == []
+        deadline = time.monotonic() + 5
+        while window.picons is None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert len(started) == 1
+        assert window.picon_count() == 1
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_channels_without_a_logo_use_a_picon(monkeypatch, tmp_path):
     from PyQt6.QtCore import QBuffer, QIODevice
     from PyQt6.QtGui import QColor, QPixmap
