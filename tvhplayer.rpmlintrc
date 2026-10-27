@@ -5,3 +5,5 @@ addFilter("zero-length /usr/share/tvhplayer/tvheadend/")
 addFilter("incorrect-fsf-address /usr/share/tvhplayer/")
 # python-vlc loads libvlc with ctypes, so rpm cannot find that dependency itself.
 addFilter("explicit-lib-dependency vlc-libs")
+# python-mpv loads libmpv with ctypes, likewise.
+addFilter("explicit-lib-dependency mpv-libs")
