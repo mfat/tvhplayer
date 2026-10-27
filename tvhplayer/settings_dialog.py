@@ -377,13 +377,14 @@ class SettingsDialog(QDialog):
         self.scheme_combo.setCurrentIndex(max(0, self.scheme_combo.findData(host.color_scheme_choice())))
         describe(self.scheme_combo, 'Theme', SCHEME_SHORT)
         group.add_row(SettingRow('&Theme', SCHEME_SHORT, self.scheme_combo))
-        self.title_bar_check = None
-        # GNOME and KDE; on X11 only while a compositor can show the shadow.
-        if host.can_draw_title_bar():
-            self.title_bar_check = ToggleSwitch("Use TVHplayer's own title bar")
-            self.title_bar_check.setChecked(host.draws_title_bar())
-            group.add_row(SettingRow("Use TVHplayer's own title &bar", control=self.title_bar_check))
-            self.title_bar_check.toggled.connect(host.set_draws_title_bar)
+        # GNOME and KDE; on X11 only while a compositor can show the shadow. Shown
+        # as the next start will be, since the engine chosen decides Wayland or X11.
+        self.title_bar_check = ToggleSwitch("Use TVHplayer's own title bar")
+        self.title_bar_check.setChecked(host.draws_title_bar())
+        self._title_bar_group = group
+        self._title_bar_row = group.add_row(SettingRow("Use TVHplayer's own title &bar", control=self.title_bar_check))
+        self.title_bar_check.toggled.connect(host.set_draws_title_bar)
+        self._show_title_bar_row()
         self.theme_combo.currentIndexChanged.connect(self._theme_chosen)
         self.scheme_combo.currentIndexChanged.connect(self._scheme_chosen)
         page.finish()
@@ -405,6 +406,10 @@ class SettingsDialog(QDialog):
     def _engine_chosen(self, _index):
         self._host.set_player_engine_choice(self.engine_combo.currentData())
         self._show_engine(announce=True)
+        self._show_title_bar_row()
+
+    def _show_title_bar_row(self):
+        self._title_bar_group.set_row_visible(self._title_bar_row, self._host.can_draw_title_bar())
 
     def _show_engine(self, announce=False):
         running = self._host.engine

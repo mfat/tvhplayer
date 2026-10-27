@@ -64,6 +64,24 @@ def choose_engine(environ=None, platform=None, missing=mpv_missing, preference=E
     return ENGINE_MPV, why
 
 
+def startup_platform(engine, environ=None, platform=None):
+    """The Qt platform the app starts on with ``engine``: "wayland", "xcb" or
+    another ``QT_QPA_PLATFORM`` name, or None outside Linux, where Qt picks.
+
+    ``environ`` is the environment before the app forced X11 for VLC."""
+    environ = os.environ if environ is None else environ
+    platform = sys.platform if platform is None else platform
+    if not platform.startswith('linux'):
+        return None
+    forced = qt_platform_for(engine, environ, platform)
+    if forced:
+        return forced
+    value = environ.get('QT_QPA_PLATFORM', '').split(';')[0].strip()
+    if value:
+        return value
+    return 'wayland' if environ.get('WAYLAND_DISPLAY') else 'xcb'
+
+
 def qt_platform_for(engine, environ=None, platform=None):
     """The ``QT_QPA_PLATFORM`` to set before ``QApplication``, or None to leave it.
 

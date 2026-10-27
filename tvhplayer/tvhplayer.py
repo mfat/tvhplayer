@@ -55,7 +55,7 @@ try:
     from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from .core import convert
     from .core.vlc_player import VlcPlayer
-    from .core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for
+    from .core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for, startup_platform
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from .core.playlist_sync import PlaylistSource, server_key
     from .core.playback_status import (
@@ -143,7 +143,7 @@ except ImportError:
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, parse_ffmpeg_options
     from core import convert
     from core.vlc_player import VlcPlayer
-    from core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for
+    from core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for, startup_platform
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, server_key
     from core.playback_status import (
@@ -3276,6 +3276,10 @@ class ServerLogDialog(QDialog):
         self._watch.stop()
         self._watch.note.disconnect(self.show_note)
         self._watch.lines.disconnect(self.add_lines)
+
+
+# The environment as the app was started, before it forced X11 for VLC.
+LAUNCH_ENVIRON = {}
 
 
 class TVHeadendClient(QMainWindow):
@@ -6633,7 +6637,12 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
 
     def can_draw_title_bar(self):
-        return window_frame.wants_own_title_bar(QApplication.platformName())
+        """Whether the title bar switch applies at the next start, which may
+        run on another platform: VLC always runs on X11, mpv on Wayland."""
+        environ = LAUNCH_ENVIRON or os.environ
+        engine, _reason = choose_engine(environ, preference=self.config['player_engine'])
+        platform = startup_platform(engine, environ) or QApplication.platformName()
+        return window_frame.wants_own_title_bar(platform, environ)
 
     def draws_title_bar(self):
         """The Settings choice; the window in use keeps its title bar until the next start."""
@@ -7334,6 +7343,7 @@ def main():
             scheme = None
         engine, reason = choose_engine(preference=preference)
         print(f"Debug: Playback engine: {engine} ({reason})")
+        LAUNCH_ENVIRON.update(os.environ)
         qt_platform = qt_platform_for(engine)
         if qt_platform:
             os.environ["QT_QPA_PLATFORM"] = qt_platform

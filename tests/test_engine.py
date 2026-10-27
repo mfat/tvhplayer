@@ -50,3 +50,12 @@ def test_vlc_gets_x11_even_where_qt_would_pick_wayland():
 
 def test_mpv_leaves_the_platform_to_qt():
     assert qt_platform_for(ENGINE_MPV, WAYLAND, 'linux') is None
+
+
+def test_startup_platform_is_the_one_the_engine_will_get():
+    from tvhplayer.core.engine import startup_platform
+    assert startup_platform(ENGINE_VLC, WAYLAND, 'linux') == 'xcb'
+    assert startup_platform(ENGINE_MPV, WAYLAND, 'linux') == 'wayland'
+    assert startup_platform(ENGINE_MPV, {}, 'linux') == 'xcb'
+    assert startup_platform(ENGINE_MPV, {**WAYLAND, 'QT_QPA_PLATFORM': 'xcb'}, 'linux') == 'xcb'
+    assert startup_platform(ENGINE_VLC, {}, 'darwin') is None

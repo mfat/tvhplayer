@@ -241,6 +241,7 @@ class SettingsGroup(QWidget):
         self._rows.setContentsMargins(0, 0, 0, 0)
         self._rows.setSpacing(0)
         self._lines = []
+        self._line_above = {}
         outer.addWidget(self.card)
         self._restyle()
 
@@ -276,8 +277,16 @@ class SettingsGroup(QWidget):
             self._restyle_line(line, theme_is_active())
             self._lines.append(line)
             self._rows.addWidget(line)
+            self._line_above[row] = line
         self._rows.addWidget(row)
         return row
+
+    def set_row_visible(self, row, visible):
+        """Show or hide a row with the line above it."""
+        row.setVisible(visible)
+        line = self._line_above.get(row)
+        if line is not None:
+            line.setVisible(visible)
 
     def add_strip(self, strip):
         self._rows.addWidget(strip)

@@ -567,7 +567,8 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         title_bar = False
 
         def can_draw_title_bar(self):
-            return True
+            # As on GNOME, where VLC's X11 window gets GNOME's title bar.
+            return self.engine_choice != 'vlc'
 
         def draws_title_bar(self):
             return self.title_bar
@@ -593,6 +594,7 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     # Appearance comes first and Settings opens on it.
     assert dialog.nav.item(0).text() == 'Appearance'
     assert dialog.pages.currentWidget().widget().findChild(QLabel, 'pageTitle').text() == 'Appearance'
+    assert dialog.title_bar_check.isVisibleTo(dialog)
     assert not dialog.title_bar_check.isChecked()
     dialog.title_bar_check.click()
     assert host.title_bar is True
@@ -600,7 +602,11 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert dialog.engine_status.text() == 'Playing with mpv.'
     dialog.engine_combo.setCurrentIndex(dialog.engine_combo.findData('vlc'))
     assert host.engine_choice == 'vlc'
+    assert not dialog.title_bar_check.isVisibleTo(dialog)
     assert dialog.engine_status.text() == 'Playing with mpv. Restart TVHplayer to play with VLC.'
+    dialog.engine_combo.setCurrentIndex(dialog.engine_combo.findData('mpv'))
+    assert dialog.title_bar_check.isVisibleTo(dialog)
+    dialog.engine_combo.setCurrentIndex(dialog.engine_combo.findData('vlc'))
     assert dialog.hide_check.isChecked()
     assert not dialog.play_check.isChecked()
     dialog.play_check.click()
