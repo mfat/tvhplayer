@@ -1,9 +1,9 @@
 app-id: io.github.mfat.tvhplayer
 runtime: org.kde.Platform
-runtime-version: '6.8'
+runtime-version: '6.11'
 sdk: org.kde.Sdk
 base: com.riverbankcomputing.PyQt.BaseApp
-base-version: '6.8'
+base-version: '6.11'
 command: tvhplayer
 separate-locales: false
 cleanup-commands:
@@ -21,7 +21,7 @@ finish-args:
   - --talk-name=org.freedesktop.Notifications
   # KWin's title bar button order, for TVHplayer's own title bar on KDE.
   - --filesystem=xdg-config/kwinrc:ro
-  - --env=PYTHONPATH=/app/lib/python3.12/site-packages:/app/share/tvhplayer
+  - --env=PYTHONPATH=/app/lib/python3.13/site-packages:/app/share/tvhplayer
 
 
 modules:
@@ -143,7 +143,7 @@ modules:
       - --enable-libmpeg2
       # No keyring: the app passes its own credentials. 3.0.24 finds libsecret.pc but not its headers.
       - --disable-secret
-    cleanup-commands:
+    post-install:
       - /app/lib/vlc/vlc-cache-gen /app/lib/vlc/plugins
     sources:
       - type: archive
