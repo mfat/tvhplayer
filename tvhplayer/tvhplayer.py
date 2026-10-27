@@ -76,6 +76,7 @@ try:
     )
     from .playlist_dialogs import ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from .guide_dialogs import GuideJob, GuideSourcesDialog
+    from .about_dialog import AboutDialog
     from .settings_dialog import SettingsDialog
     from .setup_wizard import SetupWizard
     from .sleep_inhibit import SleepInhibitor
@@ -161,6 +162,7 @@ except ImportError:
     )
     from playlist_dialogs import ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from guide_dialogs import GuideJob, GuideSourcesDialog
+    from about_dialog import AboutDialog
     from settings_dialog import SettingsDialog
     from setup_wizard import SetupWizard
     from sleep_inhibit import SleepInhibitor
@@ -237,6 +239,8 @@ from pathlib import Path
 import logging
 import platform
 
+# Shown in About; the release notes in the metainfo file give the same version.
+APP_VERSION = "3.5.5"
 CHANNEL_RELOAD_SECONDS = 30
 # A reload of a big list freezes the window a while: space them by a second per this many channels.
 CHANNELS_PER_RELOAD_SECOND = 100
@@ -5900,40 +5904,7 @@ class TVHeadendClient(QMainWindow):
     def show_about(self):
         """Show the about dialog"""
         print("Debug: Showing about dialog")
-        about_text = (
-            "<div style='text-align: center;'>"
-            "<h2>TVHplayer</h2>"
-            "<p>Version 3.5.5</p>"
-            "<p>A powerful and user-friendly TVHeadend client application.</p>"
-            "<p style='margin-top: 20px;'><b>Created by:</b><br>mFat</p>"
-            "<p style='margin-top: 20px;'><b>Built with:</b><br>"
-            "Python, PyQt6, and VLC</p>"
-            "<p style='margin-top: 20px;'>"
-            "<a href='https://github.com/mfat/tvhplayer'>Project Website</a>"
-            "</p>"
-            "<p style='margin-top: 20px; font-size: 11px;'>"
-            "This program is free software: you can redistribute it and/or modify "
-            "it under the terms of the GNU General Public License as published by "
-            "the Free Software Foundation, either version 3 of the License, or "
-            "(at your option) any later version.<br><br>"
-            "This program is distributed in the hope that it will be useful, "
-            "but WITHOUT ANY WARRANTY; without even the implied warranty of "
-            "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the "
-            "GNU General Public License for more details.<br><br>"
-            "You should have received a copy of the GNU General Public License "
-            "along with this program. If not, see "
-            "<a href='https://www.gnu.org/licenses/'>https://www.gnu.org/licenses/</a>."
-            "</p>"
-            "</div>"
-        )
-        msg = QMessageBox()
-        msg.setWindowTitle("About TVHplayer")
-        msg.setAccessibleName("About TVHplayer")
-        msg.setAccessibleDescription("TVHplayer version 3.5.5, created by mFat.")
-        msg.setText(about_text)
-        msg.setTextFormat(Qt.TextFormat.RichText)
-        msg.setMinimumWidth(400)  # Make dialog wider to prevent text wrapping
-        msg.exec()
+        AboutDialog(APP_VERSION, str(self.icons_dir / 'tvhplayer.svg'), self.engine, self).exec()
 
     def show_user_guide(self):
         """Open the user guide documentation"""
