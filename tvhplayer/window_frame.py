@@ -109,13 +109,19 @@ def kwin_button_layout(left='MS', right='HIAX'):
 
 
 def kde_button_layout(environ=None):
-    """The window buttons as KWin places them, from kwinrc, or KWin's default."""
+    """The window buttons as KWin places them, from kwinrc, or KWin's default.
+
+    Flatpak points XDG_CONFIG_HOME into the sandbox; the manifest shares the
+    host's kwinrc read-only, where it is on the host: ~/.config."""
     environ = os.environ if environ is None else environ
-    config_home = environ.get('XDG_CONFIG_HOME') or str(Path.home() / '.config')
+    folders = [environ.get('XDG_CONFIG_HOME'), str(Path.home() / '.config')]
+    paths = [Path(folder) / 'kwinrc' for folder in folders if folder]
+    path = next((path for path in paths if path.is_file()), None)
     parser = ConfigParser(interpolation=None, strict=False)
     parser.optionxform = str
     try:
-        parser.read(Path(config_home) / 'kwinrc', encoding='utf-8')
+        if path is not None:
+            parser.read(path, encoding='utf-8')
     except Exception:
         return kwin_button_layout()
     section = parser['org.kde.kdecoration2'] if parser.has_section('org.kde.kdecoration2') else {}

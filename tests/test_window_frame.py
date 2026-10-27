@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PyQt6.QtCore import QMargins, QPoint, QSize, Qt
 from PyQt6.QtWidgets import QMainWindow, QMenuBar, QWidget
 
@@ -35,14 +37,19 @@ def test_kde_on_x11_needs_a_compositor_for_the_shadow():
     assert wants_own_title_bar('xcb', {**KDE, 'WAYLAND_DISPLAY': 'wayland-0'}, compositing=False)
 
 
-def test_kwin_button_order_is_followed(tmp_path):
+def test_kwin_button_order_is_followed(tmp_path, monkeypatch):
     assert kwin_button_layout() == ':minimize,maximize,close'
     assert parse_button_layout(kwin_button_layout('XAI', 'M')) == (['close', 'maximize', 'minimize'], [])
     (tmp_path / 'kwinrc').write_text(
         '[org.kde.kdecoration2]\nButtonsOnLeft=X\nButtonsOnRight=IA\n', encoding='utf-8'
     )
     assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path)}) == 'close:minimize,maximize'
+    # In Flatpak XDG_CONFIG_HOME is the sandbox's; the host's kwinrc is shared in ~/.config.
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path / 'home')
     assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path / 'none')}) == ':minimize,maximize,close'
+    (tmp_path / 'home' / '.config').mkdir(parents=True)
+    (tmp_path / 'kwinrc').rename(tmp_path / 'home' / '.config' / 'kwinrc')
+    assert kde_button_layout({'XDG_CONFIG_HOME': str(tmp_path / 'sandbox')}) == 'close:minimize,maximize'
 
 
 def test_button_layout_keeps_the_window_buttons_on_their_sides():

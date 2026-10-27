@@ -59,3 +59,6 @@ def test_startup_platform_is_the_one_the_engine_will_get():
     assert startup_platform(ENGINE_MPV, {}, 'linux') == 'xcb'
     assert startup_platform(ENGINE_MPV, {**WAYLAND, 'QT_QPA_PLATFORM': 'xcb'}, 'linux') == 'xcb'
     assert startup_platform(ENGINE_VLC, {}, 'darwin') is None
+    # Platform arguments are not part of the name.
+    assert startup_platform(ENGINE_MPV, {'QT_QPA_PLATFORM': 'xcb:display=:1'}, 'linux') == 'xcb'
+    assert startup_platform(ENGINE_MPV, {'QT_QPA_PLATFORM': 'wayland:foo;xcb'}, 'linux') == 'wayland'

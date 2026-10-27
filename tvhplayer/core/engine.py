@@ -76,7 +76,8 @@ def startup_platform(engine, environ=None, platform=None):
     forced = qt_platform_for(engine, environ, platform)
     if forced:
         return forced
-    value = environ.get('QT_QPA_PLATFORM', '').split(';')[0].strip()
+    # The first choice, without its arguments: "xcb:display=:1" is xcb.
+    value = environ.get('QT_QPA_PLATFORM', '').split(';')[0].split(':')[0].strip()
     if value:
         return value
     return 'wayland' if environ.get('WAYLAND_DISPLAY') else 'xcb'
