@@ -64,6 +64,7 @@ try:
     )
     from .builtin_supervisor import BuiltinSupervisor
     from .file_manager import show_in_file_manager
+    from .ui_theme import apply_theme
     from .player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -148,6 +149,7 @@ except ImportError:
     )
     from builtin_supervisor import BuiltinSupervisor
     from file_manager import show_in_file_manager
+    from ui_theme import apply_theme
     from player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -3310,7 +3312,11 @@ class TVHeadendClient(QMainWindow):
             app.setApplicationDisplayName("TVHplayer")
             if not app.desktopFileName():
                 app.setDesktopFileName("io.github.mfat.tvhplayer")
-        app.setStyle(NoDialogButtonIconsStyle(app.style().name()))
+        # Fusion gives Linux, macOS and Windows the same base for the theme.
+        # High contrast keeps the system theme.
+        app.setStyle(NoDialogButtonIconsStyle('Fusion'))
+        if not prefers_high_contrast():
+            apply_theme(app)
         geometry = self.config['window_geometry']
         self.setGeometry(
             geometry['x'],

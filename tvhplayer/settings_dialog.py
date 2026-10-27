@@ -1,24 +1,26 @@
-"""The Settings window: playback at startup, where recordings go, and imported channels that do not work."""
+"""The Settings window: playback at startup, where recordings go, and imported channels that do not work.
+
+Layout: a sidebar of five pages (Playback, Channels, Recordings, Conversion, Sleep). Every setting is a
+row with its name and description on the left and the control on the right. The settings logic and
+the widget attribute names are unchanged from the tabbed version.
+"""
 
 from __future__ import annotations
 
 import sys
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QFileDialog,
-    QGridLayout,
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QProgressBar,
     QPushButton,
     QSpinBox,
-    QTabWidget,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -27,10 +29,12 @@ try:
     from .a11y import announce_label, describe
     from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
     from .core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC, choose_engine
+    from .settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 except ImportError:
     from a11y import announce_label, describe
     from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
     from core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC, choose_engine
+    from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
@@ -39,6 +43,11 @@ HIDE_HELP = (
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
 ENGINE_HELP = (
     'Automatic plays with mpv when the desktop uses Wayland and with VLC on X11. '
+    'With VLC on a Wayland desktop, the whole window runs through XWayland and can look soft when scaled. '
+    'A change takes effect the next time TVHplayer starts.'
+)
+ENGINE_SHORT = 'Automatic plays with mpv when the desktop uses Wayland and with VLC on X11.'
+ENGINE_NOTE = (
     'With VLC on a Wayland desktop, the whole window runs through XWayland and can look soft when scaled. '
     'A change takes effect the next time TVHplayer starts.'
 )
@@ -54,6 +63,10 @@ CONVERT_HELP = (
     'so video editors seek through it smoothly. The frame rate is taken from the recording; '
     'the options choose the encoder and quality. Any recording can also be converted by '
     'right-clicking it in Tasks.'
+)
+CONVERT_INTRO = (
+    'Makes an MP4 next to each new recording with a constant frame rate and a keyframe every second, '
+    'so video editors seek through it smoothly. Any recording can also be converted by right-clicking it in Tasks.'
 )
 AWAKE_HELP = (
     'The computer never sleeps while it is recording. With this on, it also stays awake while a '
@@ -71,10 +84,19 @@ PICON_HELP = (
 )
 LOGOS_HELP = "Each channel's logo is shown next to its name in the channel list and the guide."
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
+DELETE_HELP = 'Only after a successful conversion. Recordings converted by hand are always kept.'
 
 
 class SettingsDialog(QDialog):
     """``host`` is the main window: it keeps the setting and runs the checks."""
+
+    PAGES = (
+        ('Playback', 'Startup, engine'),
+        ('Channels', 'Logos, imported playlists'),
+        ('Recordings', 'Folder, format, padding'),
+        ('Conversion', 'Edit-friendly copies'),
+        ('Sleep', 'Scheduled recordings'),
+    )
 
     def __init__(self, host, parent=None):
         super().__init__(parent)
@@ -82,232 +104,51 @@ class SettingsDialog(QDialog):
         self._jobs = []
         self.setWindowTitle('Settings')
         self.setModal(True)
-        self.setMinimumWidth(480)
         self.setAccessibleName('Settings')
+        self.setMinimumSize(720, 520)
+        self.resize(860, 640)
+        has_builtin = getattr(host, 'builtin', None) is not None
+
+        pages = [
+            self._playback_page(host),
+            self._channels_page(host),
+            self._recordings_page(host, has_builtin),
+            self._conversion_page(host),
+            self._sleep_page(host),
+        ]
+
+        self.nav = SettingsNav()
+        self.pages = QStackedWidget()
+        for (title, subtitle), page in zip(self.PAGES, pages):
+            self.nav.add_page(title, subtitle)
+            self.pages.addWidget(page)
+        self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.nav.setCurrentRow(0)
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        body.addWidget(self.nav)
+        body.addWidget(self.pages, 1)
+
+        footer = QFrame()
+        footer.setObjectName('dialogFooter')
+        footer_row = QHBoxLayout(footer)
+        footer_row.setContentsMargins(20, 10, 16, 10)
+        note = QLabel('Changes are saved as you make them.')
+        note.setObjectName('footerNote')
+        close = QPushButton('Close')
+        close.setDefault(True)
+        close.clicked.connect(self.reject)
+        footer_row.addWidget(note)
+        footer_row.addStretch(1)
+        footer_row.addWidget(close)
+
         layout = QVBoxLayout(self)
-        self.tabs = QTabWidget()
-        general_page = QWidget()
-        general = QVBoxLayout(general_page)
-        recordings_page = QWidget()
-        recording_tab = QVBoxLayout(recordings_page)
-
-        playback = QGroupBox('Playback')
-        playback_layout = QVBoxLayout(playback)
-        self.play_check = QCheckBox('&Play the last channel when TVHplayer starts')
-        self.play_check.setChecked(host.plays_on_start())
-        describe(self.play_check, description=PLAY_HELP)
-        playback_layout.addWidget(self.play_check)
-        play_help = QLabel(PLAY_HELP)
-        play_help.setWordWrap(True)
-        play_help.setContentsMargins(24, 0, 0, 0)
-        playback_layout.addWidget(play_help)
-        self.engine_combo = None
-        # libmpv is used only on Linux; elsewhere VLC is the only engine.
-        if sys.platform.startswith('linux'):
-            engine_row = QHBoxLayout()
-            engine_label = QLabel('Playback &engine:')
-            self.engine_combo = QComboBox()
-            for label, choice in (('Automatic', ENGINE_AUTO), ('mpv', ENGINE_MPV), ('VLC', ENGINE_VLC)):
-                self.engine_combo.addItem(label, choice)
-            self.engine_combo.setCurrentIndex(max(self.engine_combo.findData(host.player_engine_choice()), 0))
-            describe(self.engine_combo, 'Playback engine', ENGINE_HELP)
-            engine_label.setBuddy(self.engine_combo)
-            engine_row.addWidget(engine_label)
-            engine_row.addWidget(self.engine_combo)
-            engine_row.addStretch(1)
-            playback_layout.addLayout(engine_row)
-            engine_help = QLabel(ENGINE_HELP)
-            engine_help.setWordWrap(True)
-            playback_layout.addWidget(engine_help)
-            self.engine_status = QLabel('')
-            self.engine_status.setWordWrap(True)
-            playback_layout.addWidget(self.engine_status)
-            self._show_engine()
-            self.engine_combo.currentIndexChanged.connect(self._engine_chosen)
-        general.addWidget(playback)
-
-        recordings = QGroupBox('Recordings')
-        recordings_layout = QVBoxLayout(recordings)
-        folder_label = QLabel('&Save recordings in:')
-        recordings_layout.addWidget(folder_label)
-        folder_row = QHBoxLayout()
-        self.folder_edit = QLineEdit(host.local_recording_dir())
-        self.folder_edit.setReadOnly(True)
-        self.folder_edit.setPlaceholderText('Chosen the first time you record')
-        folder_text = FOLDER_HELP + (BUILTIN_FOLDER_HELP if getattr(host, 'builtin', None) is not None else '')
-        describe(self.folder_edit, 'Recordings folder', folder_text)
-        folder_label.setBuddy(self.folder_edit)
-        folder_row.addWidget(self.folder_edit, 1)
-        self.folder_btn = QPushButton('&Browse…')
-        describe(self.folder_btn, 'Browse', 'Choose the folder for recordings.')
-        folder_row.addWidget(self.folder_btn)
-        recordings_layout.addLayout(folder_row)
-        folder_help = QLabel(folder_text)
-        folder_help.setWordWrap(True)
-        recordings_layout.addWidget(folder_help)
-
-        form = QGridLayout()
-        form.setColumnStretch(1, 1)
-        self.format_combo = QComboBox()
-        for key, (label, _description, _options) in RECORDING_FORMATS.items():
-            self.format_combo.addItem(label, key)
-        self.format_combo.setCurrentIndex(max(self.format_combo.findData(host.recording_format()), 0))
-        describe(self.format_combo, 'Format', 'The file format of recordings to this computer.')
-        format_label = QLabel('&Format:')
-        format_label.setBuddy(self.format_combo)
-        form.addWidget(format_label, 0, 0)
-        form.addWidget(self.format_combo, 0, 1)
-        self.options_edit = QLineEdit(host.recording_ffmpeg_options())
-        self.options_edit.setPlaceholderText('None')
-        describe(self.options_edit, 'Extra ffmpeg options', OPTIONS_HELP)
-        self.options_edit.setToolTip(OPTIONS_HELP)
-        options_label = QLabel('Extra ffmpeg &options:')
-        options_label.setBuddy(self.options_edit)
-        form.addWidget(options_label, 1, 0)
-        form.addWidget(self.options_edit, 1, 1)
-        recordings_layout.addLayout(form)
-        self.format_help = QLabel('')
-        self.format_help.setWordWrap(True)
-        recordings_layout.addWidget(self.format_help)
-        self._show_format_help()
-        options_help = QLabel(OPTIONS_HELP)
-        options_help.setWordWrap(True)
-        recordings_layout.addWidget(options_help)
-
-        space_row = QHBoxLayout()
-        space_label = QLabel('&Warn when free space is below:')
-        self.space_spin = QSpinBox()
-        self.space_spin.setRange(0, 10000)
-        self.space_spin.setSuffix(' GB')
-        self.space_spin.setSpecialValueText('Never')
-        self.space_spin.setValue(host.low_space_gb())
-        describe(self.space_spin, 'Warn when free space is below', SPACE_HELP)
-        self.space_spin.setToolTip(SPACE_HELP)
-        space_label.setBuddy(self.space_spin)
-        space_row.addWidget(space_label)
-        space_row.addWidget(self.space_spin)
-        space_row.addStretch(1)
-        recordings_layout.addLayout(space_row)
-
-        self.early_spin = self.late_spin = None
-        if getattr(host, 'builtin', None) is not None:
-            early, late = host.recording_padding()
-            padding_row = QHBoxLayout()
-            early_label = QLabel('Built-in server: start &early by')
-            self.early_spin = self._minutes_spin(early, 'Start recordings early by', early_label)
-            late_label = QLabel('and end &late by')
-            self.late_spin = self._minutes_spin(late, 'End recordings late by', late_label)
-            for widget in (early_label, self.early_spin, late_label, self.late_spin):
-                padding_row.addWidget(widget)
-            padding_row.addStretch(1)
-            recordings_layout.addLayout(padding_row)
-            padding_help = QLabel(PADDING_HELP)
-            padding_help.setWordWrap(True)
-            recordings_layout.addWidget(padding_help)
-        self.options_status = QLabel('')
-        self.options_status.setWordWrap(True)
-        recordings_layout.addWidget(self.options_status)
-        recording_tab.addWidget(recordings)
-
-        power = QGroupBox('Sleep')
-        power_layout = QVBoxLayout(power)
-        self.awake_check = QCheckBox('&Keep the computer awake for scheduled recordings')
-        self.awake_check.setChecked(host.stays_awake_for_scheduled())
-        describe(self.awake_check, description=AWAKE_HELP)
-        power_layout.addWidget(self.awake_check)
-        awake_help = QLabel(AWAKE_HELP)
-        awake_help.setWordWrap(True)
-        awake_help.setContentsMargins(24, 0, 0, 0)
-        power_layout.addWidget(awake_help)
-        recording_tab.addWidget(power)
-
-        editing = QGroupBox('Converting for editing')
-        editing_layout = QVBoxLayout(editing)
-        self.convert_check = QCheckBox('Con&vert recordings for editing when they finish')
-        self.convert_check.setChecked(host.converts_after_recording())
-        describe(self.convert_check, description=CONVERT_HELP)
-        editing_layout.addWidget(self.convert_check)
-        convert_row = QHBoxLayout()
-        convert_label = QLabel('Conversion op&tions:')
-        self.convert_edit = QLineEdit(host.convert_options())
-        convert_label.setBuddy(self.convert_edit)
-        describe(self.convert_edit, 'Conversion options', 'ffmpeg options for the edit-friendly copy.')
-        convert_row.addWidget(convert_label)
-        convert_row.addWidget(self.convert_edit, 1)
-        editing_layout.addLayout(convert_row)
-        self.delete_check = QCheckBox('&Delete the original once a new recording is converted')
-        self.delete_check.setChecked(host.deletes_converted_original())
-        describe(
-            self.delete_check,
-            description='Only after a successful conversion. Recordings converted by hand are always kept.',
-        )
-        editing_layout.addWidget(self.delete_check)
-        convert_help = QLabel(CONVERT_HELP)
-        convert_help.setWordWrap(True)
-        editing_layout.addWidget(convert_help)
-        self.convert_status = QLabel('')
-        self.convert_status.setWordWrap(True)
-        editing_layout.addWidget(self.convert_status)
-        recording_tab.addWidget(editing)
-        recording_tab.addStretch(1)
-
-        logos = QGroupBox('Channel logos')
-        logos_layout = QVBoxLayout(logos)
-        self.logos_check = QCheckBox('Show channel &logos')
-        self.logos_check.setChecked(host.shows_channel_logos())
-        describe(self.logos_check, description=LOGOS_HELP)
-        logos_layout.addWidget(self.logos_check)
-        logos_help = QLabel(PICON_HELP)
-        logos_help.setWordWrap(True)
-        logos_layout.addWidget(logos_help)
-        picon_row = QHBoxLayout()
-        self.picon_btn = QPushButton('&Download Picons')
-        describe(self.picon_btn, 'Download Picons', PICON_HELP)
-        self.picon_remove_btn = QPushButton('Remo&ve Picons')
-        describe(self.picon_remove_btn, 'Remove Picons', 'Delete the downloaded picons.')
-        picon_row.addWidget(self.picon_btn)
-        picon_row.addWidget(self.picon_remove_btn)
-        picon_row.addStretch(1)
-        logos_layout.addLayout(picon_row)
-        self.picon_progress = QProgressBar()
-        self.picon_progress.setAccessibleName('Picon download')
-        self.picon_progress.hide()
-        logos_layout.addWidget(self.picon_progress)
-        self.picon_status = QLabel('')
-        self.picon_status.setWordWrap(True)
-        logos_layout.addWidget(self.picon_status)
-        general.addWidget(logos)
-
-        group = QGroupBox('Imported channels')
-        group_layout = QVBoxLayout(group)
-        self.hide_check = QCheckBox('&Hide channels that do not work')
-        self.hide_check.setChecked(host.hides_dead_channels())
-        describe(self.hide_check, description=HIDE_HELP)
-        group_layout.addWidget(self.hide_check)
-        hide_help = QLabel(HIDE_HELP)
-        hide_help.setWordWrap(True)
-        hide_help.setContentsMargins(24, 0, 0, 0)
-        group_layout.addWidget(hide_help)
-
-        row = QHBoxLayout()
-        self.check_btn = QPushButton('&Check Channels Now')
-        describe(self.check_btn, 'Check Channels Now', CHECK_HELP)
-        self.check_btn.setToolTip(CHECK_HELP)
-        row.addWidget(self.check_btn)
-        row.addStretch(1)
-        group_layout.addLayout(row)
-        self.status_label = QLabel('')
-        self.status_label.setWordWrap(True)
-        group_layout.addWidget(self.status_label)
-        general.addWidget(group)
-        general.addStretch(1)
-        self.tabs.addTab(general_page, '&General')
-        self.tabs.addTab(recordings_page, '&Recordings')
-        layout.addWidget(self.tabs)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addLayout(body, 1)
+        layout.addWidget(footer)
 
         self.play_check.toggled.connect(host.set_plays_on_start)
         self.folder_btn.clicked.connect(self._choose_folder)
@@ -326,17 +167,185 @@ class SettingsDialog(QDialog):
         if job is not None and job.is_download():
             self._follow_picon_job(job)
         self._show_picons()
-        self.delete_check.setEnabled(self.convert_check.isChecked())
+        self._delete_row.setEnabled(self.convert_check.isChecked())
         self._show_convert_problem(self.convert_edit.text())
         self.hide_check.toggled.connect(self._toggled)
         self.check_btn.clicked.connect(self._check)
         self._sync()
-        # Qt opens the window at its guessed minimum height, too low for the
-        # wrapped help text, and squashes the rows. Size it for its width.
-        width = max(self.minimumWidth(), self.sizeHint().width())
-        height = layout.totalHeightForWidth(width)
-        self.setMinimumHeight(height)
-        self.resize(width, height)
+
+    # Pages ---------------------------------------------------------------
+
+    def _playback_page(self, host):
+        page = SettingsPage('Playback')
+        startup = page.add(SettingsGroup('Startup'))
+        self.play_check = ToggleSwitch('Play the last channel when TVHplayer starts')
+        self.play_check.setChecked(host.plays_on_start())
+        describe(self.play_check, description=PLAY_HELP)
+        startup.add_row(SettingRow('&Play the last channel when TVHplayer starts', PLAY_HELP, self.play_check))
+
+        self.engine_combo = None
+        # libmpv is used only on Linux; elsewhere VLC is the only engine.
+        if sys.platform.startswith('linux'):
+            engine = page.add(SettingsGroup('Playback engine'))
+            self.engine_combo = QComboBox()
+            self.engine_combo.setMinimumWidth(170)
+            for label, choice in (('Automatic', ENGINE_AUTO), ('mpv', ENGINE_MPV), ('VLC', ENGINE_VLC)):
+                self.engine_combo.addItem(label, choice)
+            self.engine_combo.setCurrentIndex(max(self.engine_combo.findData(host.player_engine_choice()), 0))
+            describe(self.engine_combo, 'Playback engine', ENGINE_HELP)
+            engine.add_row(SettingRow('Playback &engine', ENGINE_SHORT, self.engine_combo))
+            strip = engine.add_strip(StatusStrip())
+            self.engine_status = strip.label
+            note = QLabel(ENGINE_NOTE)
+            note.setObjectName('rowDesc')
+            note.setWordWrap(True)
+            strip.layout().addWidget(note)
+            self._show_engine()
+            self.engine_combo.currentIndexChanged.connect(self._engine_chosen)
+        page.finish()
+        return page
+
+    def _channels_page(self, host):
+        page = SettingsPage('Channels')
+        logos = page.add(SettingsGroup('Channel logos'))
+        self.logos_check = ToggleSwitch('Show channel logos')
+        self.logos_check.setChecked(host.shows_channel_logos())
+        describe(self.logos_check, description=LOGOS_HELP)
+        logos.add_row(SettingRow('Show channel &logos', LOGOS_HELP, self.logos_check))
+
+        buttons = QWidget()
+        button_row = QHBoxLayout(buttons)
+        button_row.setContentsMargins(0, 0, 0, 0)
+        button_row.setSpacing(8)
+        self.picon_remove_btn = QPushButton('Remo&ve')
+        describe(self.picon_remove_btn, 'Remove Picons', 'Delete the downloaded picons.')
+        self.picon_btn = QPushButton('&Download Picons')
+        self.picon_btn.setProperty('primary', True)
+        describe(self.picon_btn, 'Download Picons', PICON_HELP)
+        button_row.addWidget(self.picon_remove_btn)
+        button_row.addWidget(self.picon_btn)
+        logos.add_row(SettingRow('Picons', PICON_HELP, buttons))
+        strip = logos.add_strip(StatusStrip(progress=True))
+        self._picon_strip = strip
+        self.picon_progress = strip.progress
+        self.picon_progress.setAccessibleName('Picon download')
+        self.picon_status = strip.label
+
+        imported = page.add(SettingsGroup('Imported channels'))
+        self.hide_check = ToggleSwitch('Hide channels that do not work')
+        self.hide_check.setChecked(host.hides_dead_channels())
+        describe(self.hide_check, description=HIDE_HELP)
+        imported.add_row(SettingRow('&Hide channels that do not work', HIDE_HELP, self.hide_check))
+        self.check_btn = QPushButton('&Check Now')
+        describe(self.check_btn, 'Check Channels Now', CHECK_HELP)
+        self.check_btn.setToolTip(CHECK_HELP)
+        imported.add_row(SettingRow('Check channels now', CHECK_HELP, self.check_btn))
+        self.status_label = imported.add_strip(StatusStrip()).label
+        page.finish()
+        return page
+
+    def _recordings_page(self, host, has_builtin):
+        page = SettingsPage('Recordings')
+        storage = page.add(SettingsGroup('Storage'))
+        folder = QWidget()
+        folder_row = QHBoxLayout(folder)
+        folder_row.setContentsMargins(0, 0, 0, 0)
+        folder_row.setSpacing(8)
+        self.folder_edit = QLineEdit(host.local_recording_dir())
+        self.folder_edit.setReadOnly(True)
+        self.folder_edit.setPlaceholderText('Chosen the first time you record')
+        folder_text = FOLDER_HELP + (BUILTIN_FOLDER_HELP if has_builtin else '')
+        describe(self.folder_edit, 'Recordings folder', folder_text)
+        self.folder_btn = QPushButton('&Browse…')
+        describe(self.folder_btn, 'Browse', 'Choose the folder for recordings.')
+        folder_row.addWidget(self.folder_edit, 1)
+        folder_row.addWidget(self.folder_btn)
+        storage.add_row(SettingRow('&Save recordings in', folder_text, folder, stacked=True))
+        self.space_spin = QSpinBox()
+        self.space_spin.setRange(0, 10000)
+        self.space_spin.setSuffix(' GB')
+        self.space_spin.setSpecialValueText('Never')
+        self.space_spin.setValue(host.low_space_gb())
+        self.space_spin.setMinimumWidth(110)
+        describe(self.space_spin, 'Warn when free space is below', SPACE_HELP)
+        self.space_spin.setToolTip(SPACE_HELP)
+        storage.add_row(SettingRow('&Warn when free space is below', SPACE_HELP, self.space_spin))
+
+        fmt = page.add(SettingsGroup('File format'))
+        self.format_combo = QComboBox()
+        self.format_combo.setMinimumWidth(170)
+        for key, (label, _description, _options) in RECORDING_FORMATS.items():
+            self.format_combo.addItem(label, key)
+        self.format_combo.setCurrentIndex(max(self.format_combo.findData(host.recording_format()), 0))
+        describe(self.format_combo, 'Format', 'The file format of recordings to this computer.')
+        format_row = fmt.add_row(SettingRow('&Format', ' ', self.format_combo))
+        self.format_help = format_row.description
+        self._show_format_help()
+        self.options_edit = QLineEdit(host.recording_ffmpeg_options())
+        self.options_edit.setPlaceholderText('None')
+        self.options_edit.setProperty('mono', True)
+        describe(self.options_edit, 'Extra ffmpeg options', OPTIONS_HELP)
+        self.options_edit.setToolTip(OPTIONS_HELP)
+        fmt.add_row(SettingRow('Extra ffmpeg &options', OPTIONS_HELP, self.options_edit, stacked=True))
+        self.options_status = fmt.add_strip(StatusStrip()).label
+
+        self.early_spin = self.late_spin = None
+        if has_builtin:
+            early, late = host.recording_padding()
+            padding = page.add(SettingsGroup('Built-in server'))
+            early_label = QLabel('Start &early by')
+            self.early_spin = self._minutes_spin(early, 'Start recordings early by', early_label)
+            padding.add_row(SettingRow(early_label, '', self.early_spin))
+            late_label = QLabel('End &late by')
+            self.late_spin = self._minutes_spin(late, 'End recordings late by', late_label)
+            padding.add_row(SettingRow(late_label, '', self.late_spin))
+            padding.add_strip(StatusStrip(PADDING_HELP))
+        page.finish()
+        return page
+
+    def _conversion_page(self, host):
+        page = SettingsPage('Converting for editing', CONVERT_INTRO)
+        group = page.add(SettingsGroup())
+        self.convert_check = ToggleSwitch('Convert recordings for editing when they finish')
+        self.convert_check.setChecked(host.converts_after_recording())
+        describe(self.convert_check, description=CONVERT_HELP)
+        group.add_row(SettingRow('Con&vert recordings when they finish',
+                                 'The frame rate is taken from the recording.', self.convert_check))
+        self.convert_edit = QLineEdit(host.convert_options())
+        self.convert_edit.setProperty('mono', True)
+        describe(self.convert_edit, 'Conversion options', 'ffmpeg options for the edit-friendly copy.')
+        group.add_row(SettingRow('Conversion op&tions',
+                                 'ffmpeg options for the edit-friendly copy: the encoder and quality. '
+                                 'Leave empty to restore the defaults.', self.convert_edit, stacked=True))
+        self.delete_check = ToggleSwitch('Delete the original once a new recording is converted')
+        self.delete_check.setChecked(host.deletes_converted_original())
+        describe(self.delete_check, description=DELETE_HELP)
+        self._delete_row = group.add_row(
+            SettingRow('&Delete the original once a new recording is converted', DELETE_HELP, self.delete_check))
+        self.convert_status = group.add_strip(StatusStrip()).label
+        page.finish()
+        return page
+
+    def _sleep_page(self, host):
+        page = SettingsPage('Sleep')
+        group = page.add(SettingsGroup())
+        self.awake_check = ToggleSwitch('Keep the computer awake for scheduled recordings')
+        self.awake_check.setChecked(host.stays_awake_for_scheduled())
+        describe(self.awake_check, description=AWAKE_HELP)
+        group.add_row(SettingRow(
+            '&Keep the computer awake for scheduled recordings',
+            'Also stays awake while a recording is scheduled on the built-in server or another server '
+            'on this computer, so the recording is not missed.',
+            self.awake_check,
+        ))
+        group.add_strip(StatusStrip(
+            'The computer never sleeps while it is recording. '
+            'TVHplayer has to be open for the built-in server to record.'
+        ))
+        page.finish()
+        return page
+
+    # Behaviour (unchanged from the tabbed dialog) --------------------------
 
     def _engine_chosen(self, _index):
         self._host.set_player_engine_choice(self.engine_combo.currentData())
@@ -366,6 +375,7 @@ class SettingsDialog(QDialog):
             text = (f'{count:,} picons are ready. Channels without a logo from the server use them.'
                     if count else 'No picons downloaded.')
         announce_label(self.picon_status, text)
+        self._picon_strip.refresh()
 
     def _download_picons(self):
         self._follow_picon_job(self._host.download_picons())
@@ -400,6 +410,7 @@ class SettingsDialog(QDialog):
         spin.setRange(0, 240)
         spin.setSuffix(' min')
         spin.setValue(value)
+        spin.setMinimumWidth(110)
         describe(spin, name, PADDING_HELP)
         spin.setToolTip(PADDING_HELP)
         label.setBuddy(spin)
@@ -443,7 +454,7 @@ class SettingsDialog(QDialog):
 
     def _convert_toggled(self, on):
         self._host.set_converts_after_recording(on)
-        self.delete_check.setEnabled(on)
+        self._delete_row.setEnabled(on)
 
     def _show_convert_problem(self, text):
         problem = self._host.conversion_problem(text)

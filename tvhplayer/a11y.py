@@ -107,7 +107,8 @@ def button_stylesheet(body, radius=None):
     focus = "border: 2px solid palette(highlight);"
     if radius is not None:
         focus += f" border-radius: {int(radius)}px;"
-    return f"QPushButton {{ {body} }} QPushButton:focus {{ {focus} }}"
+    # The app theme pads every button; these are styled whole, often round and icon-only.
+    return f"QPushButton {{ padding: 0; {body} }} QPushButton:focus {{ {focus} }}"
 
 
 def announce(widget, message):
