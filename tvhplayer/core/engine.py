@@ -30,6 +30,15 @@ def mpv_missing() -> str:
     return ''
 
 
+def vlc_missing() -> str:
+    """Why libvlc cannot be used here, or an empty string when it can."""
+    try:
+        import vlc  # noqa: F401  (loads libvlc)
+    except Exception as exc:
+        return str(exc) or type(exc).__name__
+    return ''
+
+
 def qt_runs_on_wayland(environ) -> bool:
     """True when Qt will pick Wayland unless the app forces X11."""
     platform = environ.get('QT_QPA_PLATFORM', '')
@@ -38,10 +47,12 @@ def qt_runs_on_wayland(environ) -> bool:
     return bool(environ.get('WAYLAND_DISPLAY'))
 
 
-def choose_engine(environ=None, platform=None, missing=mpv_missing, preference=ENGINE_AUTO):
+def choose_engine(environ=None, platform=None, missing=mpv_missing, preference=ENGINE_AUTO,
+                  vlc_missing=vlc_missing):
     """Return ``(engine, reason)``.
 
     ``preference`` is the Settings choice; the environment variable overrides it.
+    Without libvlc, as in the AppImage, mpv plays on X11 too.
     """
     environ = os.environ if environ is None else environ
     platform = sys.platform if platform is None else platform
@@ -57,6 +68,9 @@ def choose_engine(environ=None, platform=None, missing=mpv_missing, preference=E
     else:
         wanted, why = ENGINE_VLC, 'X11 session'
     if wanted == ENGINE_VLC:
+        problem = vlc_missing()
+        if problem and not missing():
+            return ENGINE_MPV, f'libvlc is not available: {problem}'
         return ENGINE_VLC, why
     problem = missing()
     if problem:

@@ -4,8 +4,8 @@ WAYLAND = {'WAYLAND_DISPLAY': 'wayland-0'}
 X11 = {'DISPLAY': ':0'}
 
 
-def _choose(environ, platform='linux', missing='', preference='auto'):
-    return choose_engine(environ, platform, lambda: missing, preference)[0]
+def _choose(environ, platform='linux', missing='', preference='auto', vlc_missing=''):
+    return choose_engine(environ, platform, lambda: missing, preference, lambda: vlc_missing)[0]
 
 
 def test_wayland_session_uses_mpv():
@@ -23,6 +23,19 @@ def test_missing_libmpv_falls_back_to_vlc_and_says_why():
     engine, reason = choose_engine(WAYLAND, 'linux', lambda: 'Cannot find libmpv')
     assert engine == ENGINE_VLC
     assert 'Cannot find libmpv' in reason
+
+
+def test_missing_libvlc_uses_mpv_and_says_why():
+    # The AppImage carries libmpv only.
+    engine, reason = choose_engine(X11, 'linux', lambda: '', vlc_missing=lambda: 'Cannot find libvlc')
+    assert engine == ENGINE_MPV
+    assert 'Cannot find libvlc' in reason
+    assert _choose(WAYLAND, preference='vlc', vlc_missing='no libvlc') == ENGINE_MPV
+    assert _choose({**X11, 'TVHPLAYER_ENGINE': 'vlc'}, vlc_missing='no libvlc') == ENGINE_MPV
+
+
+def test_with_neither_library_vlc_reports_the_failure():
+    assert _choose(X11, missing='no libmpv', vlc_missing='no libvlc') == ENGINE_VLC
 
 
 def test_windows_and_macos_keep_vlc():
