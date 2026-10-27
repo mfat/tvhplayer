@@ -137,9 +137,11 @@ class SyncResult:
     guide_failed: bool = False
     # Films and series episodes the playlist lists, which are not imported.
     films: int = 0
-    # Channels whose stream passed the server's scan, and names of those that failed.
+    # Channels whose stream passed the server's scan, names of those that failed,
+    # and how many the server finished without a verdict.
     working: int = 0
     not_working: List[str] = field(default_factory=list)
+    untested: int = 0
     check_stopped: bool = False
 
 
@@ -270,9 +272,10 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
 def check_message(name: str, result: SyncResult) -> str:
     """What a check of every channel, started from Settings, found."""
     failed = len(result.not_working)
+    untested = result.untested
     if result.check_stopped:
         message = f'Stopped checking the channels from {name}.'
-    elif failed:
+    elif failed or untested:
         message = f'Checked the channels from {name}: {result.working} working.'
     else:
         return f'Checked the channels from {name}: all {result.working} are working.'
@@ -280,6 +283,11 @@ def check_message(name: str, result: SyncResult) -> str:
         message += (
             ' 1 is hidden because it is not working.' if failed == 1
             else f' {failed} are hidden because they are not working.'
+        )
+    if untested:
+        message += (
+            ' 1 could not be tested and stays in the list.' if untested == 1
+            else f' {untested} could not be tested and stay in the list.'
         )
     return message
 
@@ -523,7 +531,9 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
     A mux not scanned yet is shown; one being scanned again follows its last
     verdict until the new one arrives. Without ``hide_failed`` every channel
     is shown. Returns (checked, total, names that failed, number of channels
-    shown or hidden).
+    shown or hidden, number checked without a verdict). A mux the server is
+    done with but never scanned, such as a disabled one, counts as checked
+    without a verdict.
     """
     ours = set(source.muxes.values())
     rows = [
@@ -532,6 +542,7 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
     ]
     wanted = {}
     checked = 0
+    untested = 0
     failed = []
     for row in rows:
         result = row.get('scan_result', SCAN_NONE)
@@ -542,6 +553,8 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
         checked += 1
         if dead:
             failed.append(row.get('name') or row.get('iptv_sname') or '')
+        elif result == SCAN_NONE:
+            untested += 1
     changes = []
     for service in admin.list_services(wanted, fields=CHECK_SERVICE_FIELDS):
         want = wanted.get(service.get('multiplex_uuid'))
@@ -549,7 +562,7 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
             changes.append({'uuid': service['uuid'], 'enabled': want})
     if changes:
         admin.save(changes)
-    return checked, len(rows), failed, len(changes)
+    return checked, len(rows), failed, len(changes), untested
 
 
 def wait_for_checks(
@@ -569,7 +582,7 @@ def wait_for_checks(
     cancelled = cancelled or (lambda: False)
     changed = changed or (lambda: None)
     while True:
-        checked, total, failed, shown_or_hidden = apply_checks(admin, source)
+        checked, total, failed, shown_or_hidden, untested = apply_checks(admin, source)
         if shown_or_hidden:
             _map_without_bouquet(admin, source)
             changed()
@@ -581,8 +594,9 @@ def wait_for_checks(
             sleep(CHECK_POLL_SECONDS)
             waited += CHECK_POLL_SECONDS
     result.check_stopped = checked < total
-    result.working = checked - len(failed)
+    result.working = checked - len(failed) - untested
     result.not_working = failed
+    result.untested = untested
     result.skipped.extend(SkippedEntry(name, NOT_WORKING) for name in failed)
 
 

@@ -324,6 +324,8 @@ class PlaylistJob(QObject):
             admin.check_admin()
             if not admin.network_exists(self.source.network_uuid):
                 raise PlaylistError(NETWORK_GONE)
+            # The server declines to scan the muxes of a switched-off network.
+            admin.update_network(self.source.network_uuid, {'enabled': True})
             admin.scan_network(self.source.network_uuid)
         return SyncResult()
 

@@ -299,6 +299,17 @@ def test_stopping_the_check_keeps_unchecked_channels_shown():
     assert admin.visible() == ['A', 'B']
 
 
+def test_a_mux_the_server_never_scanned_is_not_counted_as_working():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST))
+    # A disabled mux: Tvheadend declines to scan it, so it stays idle without a verdict.
+    admin.muxes[source.muxes['id:a']]['scan_state'] = 0
+    wait_for_checks(admin, source, result, sleep=lambda _s: admin.finish_scans())
+    assert (result.working, result.not_working, result.untested) == (0, ['B'], 1)
+    assert admin.visible() == ['A']
+
+
 def test_without_checks_a_refresh_tests_nothing_and_hides_nothing():
     admin = FakeAdmin(dead={'B'})
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
@@ -650,6 +661,13 @@ def test_check_messages_read_naturally():
     )
     assert check_message('ir', SyncResult(working=1, not_working=['b', 'c'], check_stopped=True)) == (
         'Stopped checking the channels from ir. 2 are hidden because they are not working.'
+    )
+    assert check_message('ir', SyncResult(working=3, untested=1)) == (
+        'Checked the channels from ir: 3 working. 1 could not be tested and stays in the list.'
+    )
+    assert check_message('ir', SyncResult(working=0, not_working=['b'], untested=2)) == (
+        'Checked the channels from ir: 0 working. 1 is hidden because it is not working.'
+        ' 2 could not be tested and stay in the list.'
     )
 
 
