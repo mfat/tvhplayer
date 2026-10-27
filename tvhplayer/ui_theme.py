@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QStandardPaths
+from PyQt6.QtCore import QEvent, QObject, QStandardPaths
 from PyQt6.QtGui import QColor, QFont, QFontDatabase, QPalette
+from PyQt6.QtWidgets import QComboBox, QStyledItemDelegate, QTableView
 
 INK = '#232629'
 MUTED = '#5d6166'
@@ -73,9 +74,28 @@ QToolButton:hover {{ border-color: {ACCENT}; background: #f2f8fc; }}
 QToolButton:focus {{ border: 2px solid {ACCENT}; padding: 3px 7px; }}
 QTableView, QTreeView, QListView {{
     background: {BASE}; border: 1px solid rgba(35,38,41,36); border-radius: 6px;
-    gridline-color: transparent; selection-background-color: rgba(61,174,233,51); selection-color: {INK};
+    gridline-color: transparent; selection-background-color: transparent; selection-color: {INK};
     alternate-background-color: #f6f7f7; outline: 0;
 }}
+/* Selected rows as in the settings sidebar: a tint, rounded at the row's two ends,
+   kept off the list's border. */
+QTableView::item:first, QTreeView::item:first {{ margin-left: 4px; }}
+QTableView::item:last, QTreeView::item:last {{ margin-right: 4px; }}
+QTableView::item:only-one, QTreeView::item:only-one, QListView::item {{ margin: 0 4px; }}
+QTableView::item:selected, QTreeView::item:selected, QListView::item:selected {{
+    background: rgba(61,174,233,51); color: #124a6a;
+}}
+QTableView::item:selected:first, QTreeView::item:selected:first {{
+    border-top-left-radius: 4px; border-bottom-left-radius: 4px;
+}}
+QTableView::item:selected:last, QTreeView::item:selected:last {{
+    border-top-right-radius: 4px; border-bottom-right-radius: 4px;
+}}
+QTableView::item:selected:only-one, QTreeView::item:selected:only-one, QListView::item:selected {{
+    border-radius: 4px;
+}}
+QComboBox QAbstractItemView::item {{ padding: 6px 12px; }}
+QComboBox QAbstractItemView::item:selected {{ background: rgba(61,174,233,51); color: {INK}; border-radius: 4px; }}
 QHeaderView::section {{
     background: {WINDOW}; color: {MUTED}; font-weight: 600; padding: 6px 8px;
     border: none; border-bottom: 1px solid rgba(35,38,41,36);
@@ -205,7 +225,22 @@ def polish_main_window(window):
         splitter.setHandleWidth(1)
 
 
+class _ThemePolish(QObject):
+    """Widget settings a style sheet cannot make, applied as each widget is polished."""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Polish:
+            if isinstance(obj, QTableView):
+                # The theme hides grid lines, which left a gap between cells.
+                obj.setShowGrid(False)
+            elif isinstance(obj, QComboBox) and not isinstance(obj.itemDelegate(), QStyledItemDelegate):
+                # Qt's own popup delegate draws items as menu items and ignores ::item rules.
+                obj.setItemDelegate(QStyledItemDelegate(obj))
+        return False
+
+
 def apply_theme(app):
+    app.installEventFilter(_ThemePolish(app))
     app.setPalette(_palette())
     font = _load_fonts()
     if font is not None:
