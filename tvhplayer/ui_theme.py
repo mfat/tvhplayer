@@ -391,7 +391,11 @@ def follow_desktop(app, use_theme):
 
     if use_theme:
         _active = True
-        app.installEventFilter(_ThemePolish(app))
+        polish = _ThemePolish(app)
+        app.installEventFilter(polish)
+        # Off before PyQt's exit cleanup: events from the objects it deletes would
+        # run Python here while it walks the objects it still has to delete.
+        app.aboutToQuit.connect(lambda: app.removeEventFilter(polish))
         font = _load_fonts()
         if font is not None:
             app.setFont(font)
