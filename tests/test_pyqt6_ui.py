@@ -857,6 +857,62 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def test_go_to_playing_channel_switches_to_its_server(monkeypatch, tmp_path):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        lineups = {
+            'http://home.example:9981': [
+                ui.Channel(uuid='news', name='News', number=1),
+                ui.Channel(uuid='sport', name='Sport', number=2),
+            ],
+            'http://away.example:9981': [ui.Channel(uuid='sport', name='Movies', number=1)],
+        }
+
+        class Backend:
+            def __init__(self, server):
+                self.server = server
+
+            def get_channels(self):
+                return lineups[self.server['url']]
+
+            def stream_url(self, channel):
+                return f'{self.server["url"]}/stream/{channel.uuid}'
+
+        window.get_backend = lambda: Backend(window.current_server())
+        window._open_channel_backend = Backend
+        window.servers = [
+            {'name': 'Home', 'url': 'http://home.example:9981', 'protocol': 'http'},
+            {'name': 'Away', 'url': 'http://away.example:9981', 'protocol': 'http'},
+        ]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('Home')
+        window.server_combo.addItem('Away')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+
+        monkeypatch.undo()
+        window.fetch_channels()
+        _wait_for_channels(app, window)
+        window.play_channel_by_data(lineups['http://home.example:9981'][1])
+        app.processEvents()
+
+        window.server_combo.setCurrentIndex(1)
+        _wait_for_channels(app, window)
+        # A channel on the other server with the same UUID is not the one playing.
+        assert _cell(window.channel_list, _channel_row(window.channel_list, 'Movies'), 2).text() == ""
+
+        window.go_to_playing_action.trigger()
+        _wait_for_channels(app, window)
+        app.processEvents()
+        assert window.server_combo.currentIndex() == 0
+        sport_row = _channel_row(window.channel_list, 'Sport')
+        assert window.channel_list.currentRow() == sport_row
+        assert _cell(window.channel_list, sport_row, 2).text() == "Playing"
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     monkeypatch.setitem(

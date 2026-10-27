@@ -3435,6 +3435,8 @@ class TVHeadendClient(QMainWindow):
         self._playback_active = False
         self._awaiting_playback = False
         self._playback_channel = None
+        self._playback_server = None
+        self._show_playing_on_load = False
         self._video_menu = None
 
         
@@ -4231,14 +4233,20 @@ class TVHeadendClient(QMainWindow):
             return
         playing = self._playing_channel()
         recording = self._recording_keys if self.channel_options['recording_status'] else set()
-        self.channel_model.set_marks(playing, recording)
-        if scroll and playing is not None:
+        listed = playing if self._playing_listed_here() else None
+        self.channel_model.set_marks(listed, recording)
+        if scroll and listed is not None:
             row = self.channel_model.find_row(lambda listed: self._channels_match(listed, playing))
             if row >= 0:
                 index = self.channel_model.index(row, COL_NAME)
                 table.scrollTo(index)
                 table.setCurrentIndex(index)
         self._sync_window_title(playing)
+
+    def _playing_listed_here(self):
+        """Whether the channel list shows the server the playing channel is from."""
+        server = getattr(self, '_playback_server', None)
+        return server is None or server == self._channels_server
 
     def _sync_window_title(self, playing):
         """Put the channel that is on in the title bar, so the taskbar shows it too."""
@@ -4252,7 +4260,19 @@ class TVHeadendClient(QMainWindow):
         if playing is None:
             self.statusbar.showMessage("Nothing is playing")
             return
-        self.show_channel_in_list(playing)
+        if self._playing_listed_here():
+            self.show_channel_in_list(playing)
+            return
+        # It plays from another server: list that server's channels, then show it.
+        for index, server in enumerate(self.servers):
+            if server_key(server) == self._playback_server:
+                self._show_playing_on_load = True
+                if self.server_combo.currentIndex() != index:
+                    self.server_combo.setCurrentIndex(index)
+                elif self._channel_fetch is None:
+                    self.fetch_channels()
+                return
+        self.statusbar.showMessage(f"The server {playing.name} plays from is no longer in the server list")
 
     def show_channel_in_list(self, channel=None, matches=None):
         """Select a channel in the list and move focus there.
@@ -4870,6 +4890,10 @@ class TVHeadendClient(QMainWindow):
         self.statusbar.showMessage("Channels loaded successfully")
         self._guide_channels_changed()
         self._channel_list_settled()
+        if self._show_playing_on_load:
+            self._show_playing_on_load = False
+            if fetch.key == self._playback_server:
+                self.show_playing_channel()
         if self._play_on_start:
             self._play_on_start = False
             self._play_last_channel(fetch.key)
@@ -4888,6 +4912,7 @@ class TVHeadendClient(QMainWindow):
         if fetch is not self._channel_fetch:
             return
         self._channel_fetch = None
+        self._show_playing_on_load = False
         self.channel_busy.hide()
         name = fetch.server.get('name') or 'the server'
         if self._channels and self._channels_server == fetch.key:
@@ -7243,6 +7268,7 @@ class TVHeadendClient(QMainWindow):
             else:
                 channel = Channel.from_raw(channel_data)
             self._playback_channel = channel
+            self._playback_server = self._channels_server
             self._remember_channel(channel)
             stream_url = self.get_backend().stream_url(channel)
             print(f"Debug: Stream URL: {stream_url}")
