@@ -1,4 +1,5 @@
 import ctypes.util
+import os
 import sys
 
 import pytest
@@ -36,3 +37,19 @@ def test_a_source_run_is_left_alone(tmp_path, monkeypatch):
     monkeypatch.setattr(ctypes.util, 'find_library', lambda name: f'system:{name}')
     frozen_libs.prepare()
     assert ctypes.util.find_library('mpv') == 'system:mpv'
+
+
+@pytest.mark.parametrize('platform, program', [('win32', 'ffmpeg.exe'), ('darwin', 'ffmpeg')])
+def test_a_packaged_build_runs_its_own_ffmpeg(frozen, monkeypatch, platform, program):
+    monkeypatch.setattr(sys, 'platform', platform)
+    monkeypatch.setenv('PATH', '/usr/bin')
+    (frozen / program).write_bytes(b'')
+    frozen_libs.prepare()
+    assert os.environ['PATH'].split(os.pathsep)[0] == str(frozen)
+
+
+def test_without_a_bundled_ffmpeg_path_is_left_alone(frozen, monkeypatch):
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    monkeypatch.setenv('PATH', '/usr/bin')
+    frozen_libs.prepare()
+    assert os.environ['PATH'] == '/usr/bin'
