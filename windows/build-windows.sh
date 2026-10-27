@@ -3,8 +3,14 @@
 #
 #   windows/build-windows.sh VERSION
 #
+# VERSION is a release tag (v4.0.2) or a test build label (ci12). Needs Inno
+# Setup 6 for the installer (choco install innosetup).
+#
 # Plays with mpv: libmpv-2.dll (FFmpeg built in) from the pinned shinchiro
-# build that mpv.io links, and ffmpeg and ffprobe from BtbN's FFmpeg build. Writes windows/dist/tvhplayer-VERSION-windows-x86_64.zip.
+# build that mpv.io links, and ffmpeg and ffprobe from BtbN's FFmpeg build.
+# Writes windows/dist/tvhplayer-VERSION-windows-x86_64-setup.exe, the
+# installer, and windows/dist/tvhplayer-VERSION-windows-x86_64.zip, the same
+# app to unpack and run.
 set -euo pipefail
 
 # Windows paths (D:/a/...): PyInstaller is a Windows program and does not
@@ -45,11 +51,16 @@ test -f "$WORK/ffmpeg/ffmpeg.exe" && test -f "$WORK/ffmpeg/ffprobe.exe"
 echo "==> Python packages"
 "$PYTHON" -m pip install --quiet -r "$HERE/requirements-build.txt"
 
+echo "==> Icon"
+icon="$WORK/tvhplayer.ico"
+"$PYTHON" -c 'import sys; from PIL import Image; Image.open(sys.argv[1]).save(sys.argv[2], sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])' \
+  "$ROOT/icons/tvhplayer.png" "$icon"
+
 echo "==> PyInstaller"
 "$PYTHON" -m PyInstaller \
   --noconfirm --clean --onedir --windowed \
   --name TVHplayer \
-  --icon "$ROOT/icons/tvhplayer.png" \
+  --icon "$icon" \
   --paths "$ROOT/tvhplayer" \
   --collect-submodules core \
   --hidden-import resources_rc \
@@ -70,6 +81,19 @@ test -f "$app/TVHplayer.exe"
 test -f "$app/_internal/libmpv-2.dll"
 test -f "$app/_internal/vulkan-1.dll"
 "$app/_internal/ffmpeg.exe" -hide_banner -version | head -n 1
+
+echo "==> Installer"
+# A test build has no release number; it takes the app's own.
+case "$VERSION" in
+  v[0-9]*) app_version=${VERSION#v} ;;
+  *) app_version=$(sed -n 's/^APP_VERSION = "\(.*\)"$/\1/p' "$ROOT/tvhplayer/tvhplayer.py") ;;
+esac
+iscc="${ISCC:-C:/Program Files (x86)/Inno Setup 6/ISCC.exe}"
+"$iscc" -Q \
+  "-DAppVersion=$app_version" "-DVersionLabel=$VERSION" \
+  "-DRepoRoot=$ROOT" "-DBundleDir=$app" "-DOutputDir=$DIST" "-DIconFile=$icon" \
+  "$HERE/tvhplayer.iss"
+test -f "$DIST/tvhplayer-$VERSION-windows-x86_64-setup.exe"
 
 echo "==> Zip"
 zip="$DIST/tvhplayer-$VERSION-windows-x86_64.zip"

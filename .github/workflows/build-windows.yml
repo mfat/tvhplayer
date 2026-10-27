@@ -40,17 +40,25 @@ jobs:
             echo "label=ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
       - name: Build
         shell: bash
         run: windows/build-windows.sh "${{ steps.version.outputs.label }}"
 
-      # Start the app without a screen and read its log: mpv must load and the
-      # window must come up without an error.
-      - name: Start the app
+      # Install with the installer, start the installed app without a screen,
+      # and read its log: mpv must load and the window come up without an error.
+      - name: Install and start the app
         shell: pwsh
         run: |
+          $setup = Get-ChildItem windows\dist\*-setup.exe | Select-Object -First 1
+          $install = Start-Process -FilePath $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/CURRENTUSER', '/NORESTART' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "The installer failed with code $($install.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\TVHplayer\TVHplayer.exe'
+          if (-not (Test-Path $exe)) { throw "Not installed at $exe" }
           $env:QT_QPA_PLATFORM = 'offscreen'
-          $app = Start-Process -FilePath windows\build\dist\TVHplayer\TVHplayer.exe -PassThru
+          $app = Start-Process -FilePath $exe -PassThru
           Start-Sleep -Seconds 25
           $running = -not $app.HasExited
           if ($running) { Stop-Process -Id $app.Id -Force }
@@ -60,15 +68,12 @@ jobs:
           if (-not (Select-String -Path $log -Pattern 'Playback engine: mpv' -Quiet)) { throw 'mpv was not chosen' }
           if (-not (Select-String -Path $log -Pattern 'Media player created successfully' -Quiet)) { throw 'mpv did not start' }
           if (Select-String -Path $log -Pattern 'Error starting application' -Quiet) { throw 'The app reported a startup error' }
-          # The app runs ffmpeg by name; the build's own must come first.
-          $env:PATH = "$PWD\windows\build\dist\TVHplayer\_internal;$env:PATH"
-          (Get-Command ffmpeg).Source
 
       - name: Checksum
         shell: bash
         run: |
           cd windows/dist
-          for file in *.zip; do sha256sum "$file" > "$file.sha256"; done
+          for file in *.exe *.zip; do sha256sum "$file" > "$file.sha256"; done
 
       - uses: actions/upload-artifact@v7
         with:
