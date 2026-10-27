@@ -74,6 +74,7 @@ try:
         RECORD_RED,
         FloatingBar,
         PlayerBar,
+        file_icon,
         svg_icon,
     )
     from .playlist_dialogs import ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
@@ -162,6 +163,7 @@ except ImportError:
         RECORD_RED,
         FloatingBar,
         PlayerBar,
+        file_icon,
         svg_icon,
     )
     from playlist_dialogs import ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
@@ -2774,6 +2776,25 @@ class PlaybackSpinner(QWidget):
         painter.drawText(QRectF(left + dot + gap, top, width + 1, metrics.height()), Qt.AlignmentFlag.AlignLeft, text)
 
 
+class IconToolButton(QToolButton):
+    """A tool button that draws an icon file in its text color, again when the palette changes."""
+
+    def __init__(self, path, size, parent=None):
+        super().__init__(parent)
+        self._path = path
+        self.setIconSize(QSize(size, size))
+        self._paint_icon()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.PaletteChange:
+            self._paint_icon()
+
+    def _paint_icon(self):
+        color = self.palette().color(QPalette.ColorRole.ButtonText).name()
+        self.setIcon(file_icon(self._path, color, self.iconSize().width()))
+
+
 class BusyRing(QWidget):
     """Small spinning ring in the theme's text color. It only turns while shown."""
 
@@ -3663,18 +3684,11 @@ class TVHeadendClient(QMainWindow):
         self.server_combo.currentIndexChanged.connect(self.on_server_changed)
         describe(self.server_combo, description="TVHeadend server used for the channel list")
         
-        self.manage_servers_btn = QToolButton()
+        self.manage_servers_btn = IconToolButton(self.icons_dir / 'gear.svg', 18)
         self.manage_servers_btn.clicked.connect(self.manage_servers)
         
         server_layout.addWidget(buddy_label("&Server:", self.server_combo))
         server_layout.addWidget(self.server_combo)
-        self.manage_servers_btn.setText("⚙️")  # Unicode settings icon
-        # A font, not a style sheet: over the app's style, a style sheet drew the
-        # focused button as a square grey box. The style shows the focus itself.
-        if not prefers_high_contrast():
-            gear_font = self.manage_servers_btn.font()
-            gear_font.setPixelSize(18)
-            self.manage_servers_btn.setFont(gear_font)
         describe(
             self.manage_servers_btn,
             "Manage servers",
@@ -3858,7 +3872,7 @@ class TVHeadendClient(QMainWindow):
         
         # Player controls, joined to the bottom of the picture.
         self.right_layout.setSpacing(0)
-        self.controls_bar = PlayerBar()
+        self.controls_bar = PlayerBar(self.icons_dir)
         bar = self.controls_bar
         self.play_btn = bar.play_btn
         self.play_btn.clicked.connect(self.toggle_playback)
@@ -5605,7 +5619,10 @@ class TVHeadendClient(QMainWindow):
         record_action.setEnabled(channel is not None)
         record_action.triggered.connect(self.start_recording)
 
-        local_action = menu.addAction(QIcon(f"{self.icons_dir}/reclocal.svg"), "Record Locally")
+        local_action = menu.addAction(
+            file_icon(self.icons_dir / 'save.svg', menu.palette().color(QPalette.ColorRole.WindowText).name(), 16),
+            "Record Locally",
+        )
         local_action.setEnabled(channel is not None)
         local_action.triggered.connect(lambda: self.start_local_recording(channel))
 

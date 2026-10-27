@@ -7,6 +7,9 @@ child widgets cannot cover.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 from PyQt6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
@@ -43,11 +46,6 @@ CHEVRON_SVG = (
 )
 DOT_SVG = '<svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="6" fill="{c}"/></svg>'
 SQUARE_SVG = '<svg viewBox="0 0 10 10"><rect width="10" height="10" rx="1" fill="{c}"/></svg>'
-LOCAL_SVG = (
-    '<svg viewBox="0 0 48 48"><path d="M 16 24 L 24 32 L 32 24 M 24 30 L 24 14 M 16 32 '
-    'C 16 34 17 36 19 36 L 29 36 C 31 36 32 34 32 32" stroke="{c}" stroke-width="2.8" '
-    'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-)
 SPEAKER_SVG = (
     '<svg viewBox="0 0 48 48"><path d="M 16 20 h 4 l 8 -6 v 20 l -8 -6 h -4 z" fill="{c}"/>'
     '<path d="M 31 19 c 1.5 1 1.5 9 0 10 M 35 17 c 2 2 2 12 0 14" stroke="{c}" '
@@ -72,7 +70,6 @@ EXIT_FULLSCREEN_SVG = (
 # Menu icons share one square so the dot, the square and the arrow line up.
 MENU_DOT_SVG = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="5" fill="{c}"/></svg>'
 MENU_SQUARE_SVG = '<svg viewBox="0 0 18 18"><rect x="4" y="4" width="10" height="10" rx="1" fill="{c}"/></svg>'
-MENU_LOCAL_SVG = LOCAL_SVG.replace('viewBox="0 0 48 48"', 'viewBox="9 9 30 30"')
 
 # How long the fullscreen bar stays after the pointer last moved.
 FLOATING_HIDE_MS = 3000
@@ -94,6 +91,24 @@ def svg_icon(markup, color, size):
     )
     pixmap.setDevicePixelRatio(2)
     return QIcon(pixmap)
+
+
+def file_icon(path, color, size, pad=0):
+    """Draw an icon file in ``color``, which takes the place of its currentColor.
+
+    ``pad`` widens the viewBox by that many units on each side, so the
+    picture sits smaller in its square.
+    """
+    try:
+        markup = Path(path).read_text(encoding='utf-8')
+    except OSError:
+        return QIcon()
+    if pad:
+        def padded(match):
+            x, y, w, h = (float(n) for n in match.group(1).split())
+            return f'viewBox="{x - pad} {y - pad} {w + 2 * pad} {h + 2 * pad}"'
+        markup = re.sub(r'viewBox="([^"]+)"', padded, markup, count=1)
+    return svg_icon(markup.replace('currentColor', '{c}'), color, size)
 
 
 def _icon_label(markup, color, size):
@@ -126,7 +141,7 @@ class PlayerBar(QWidget):
     set_playing(), set_recording(), set_muted() and set_fullscreen().
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, icons_dir, parent=None):
         super().__init__(parent)
         self.setObjectName("player_bar")
         self.setAccessibleName("Player controls")
@@ -238,6 +253,10 @@ class PlayerBar(QWidget):
         self.recording_group.hide()
         layout.addWidget(self.recording_group)
 
+        # The save icon is as wide as the menu's dot and square.
+        local_icon = file_icon(
+            Path(icons_dir) / 'save.svg', '#ededed' if not self._contrast else '#000000', 18, pad=6
+        )
         self.record_menu = QMenu(self)
         self.record_menu.setAccessibleName("Record")
         self.record_menu.setStyleSheet(_menu_stylesheet())
@@ -245,7 +264,7 @@ class PlayerBar(QWidget):
             svg_icon(MENU_DOT_SVG, RECORD_RED, 18), "Record on server…\tCtrl+R"
         )
         self.record_local_action = self.record_menu.addAction(
-            svg_icon(MENU_LOCAL_SVG, '#ededed' if not self._contrast else '#000000', 18),
+            local_icon,
             "Record on this computer\tCtrl+Shift+R",
         )
 
@@ -272,7 +291,7 @@ class PlayerBar(QWidget):
             svg_icon(MENU_DOT_SVG, RECORD_RED, 18), "Stop server recording\tCtrl+E"
         )
         self.stop_local_action = self.stop_menu.addAction(
-            svg_icon(MENU_LOCAL_SVG, '#ededed' if not self._contrast else '#000000', 18),
+            local_icon,
             "Stop local recording\tCtrl+Shift+E",
         )
         self.stop_both_action = self.stop_menu.addAction(
@@ -509,4 +528,4 @@ class FloatingBar(QWidget):
         painter.end()
 
 
-__all__ = ['PlayerBar', 'FloatingBar', 'svg_icon']
+__all__ = ['PlayerBar', 'FloatingBar', 'file_icon', 'svg_icon']
