@@ -3058,3 +3058,29 @@ def test_mpv_engine_uses_plain_widgets_qt_keeps_painting(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_settings_leave_the_window_usable(monkeypatch, tmp_path):
+    # A modal dialog makes GNOME keep the pointer off the window on Wayland,
+    # where it then keeps the resize arrow of the dialog's edge.
+    from PyQt6.QtCore import Qt
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        dialog = window.show_settings()
+        app.processEvents()
+        assert dialog.isVisible()
+        assert dialog.windowModality() == Qt.WindowModality.NonModal
+        assert window.show_settings() is dialog
+        # The folder chosen when recording first goes to this computer shows in Settings.
+        window.set_local_recording_dir(str(tmp_path))
+        assert dialog.folder_edit.text() == str(tmp_path)
+        # Quitting closes Settings first, which saves an edit still being typed.
+        dialog.convert_edit.setText('-c:v libx264')
+        monkeypatch.setattr(window, '_confirm_quit', lambda: True)
+        window.close()
+        app.processEvents()
+        assert window.config['convert_options'] == '-c:v libx264'
+    finally:
+        window.close()
+        app.processEvents()

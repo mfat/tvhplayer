@@ -106,7 +106,9 @@ class SettingsDialog(QDialog):
         self._host = host
         self._jobs = []
         self.setWindowTitle('Settings')
-        self.setModal(True)
+        # Not modal: on Wayland GNOME keeps the pointer off the window behind a
+        # modal dialog, where it then keeps the resize arrow of the dialog's edge.
+        self.setModal(False)
         self.setAccessibleName('Settings')
         self.setMinimumSize(720, 520)
         self.resize(860, 640)

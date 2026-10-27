@@ -3348,6 +3348,7 @@ class TVHeadendClient(QMainWindow):
         self._guide_timer.timeout.connect(self._update_due_guides)
         self._guide_timer.start(GUIDE_CHECK_MS)
         self._closing = False
+        self._settings_dialog = None
         # A playlist check shows and hides channels for hours; reload the list at most this often.
         self._channel_reload_timer = QTimer(self)
         self._channel_reload_timer.setSingleShot(True)
@@ -6237,6 +6238,9 @@ class TVHeadendClient(QMainWindow):
             event.ignore()
             return
         self._closing = True
+        # Closing Settings saves an edit still being typed there.
+        if self._settings_dialog is not None:
+            self._settings_dialog.close()
         # Stopping the built-in server and background work takes seconds; out of
         # sight, the desktop does not offer to force quit a window that stopped answering.
         self.hide()
@@ -6495,7 +6499,19 @@ class TVHeadendClient(QMainWindow):
             job.dispose()
 
     def show_settings(self):
-        SettingsDialog(self, self).exec()
+        dialog = self._settings_dialog
+        if dialog is None:
+            dialog = SettingsDialog(self, self)
+            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            dialog.finished.connect(self._settings_closed)
+            self._settings_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        return dialog
+
+    def _settings_closed(self, _result):
+        self._settings_dialog = None
 
     # Programme guides for servers on this computer -----------------------
 
@@ -6762,6 +6778,8 @@ class TVHeadendClient(QMainWindow):
     def set_local_recording_dir(self, folder):
         self.config['local_recording_dir'] = folder
         self.save_config()
+        if self._settings_dialog is not None:
+            self._settings_dialog.folder_edit.setText(folder)
         if self.builtin is not None and not self.builtin.set_recordings_dir(folder):
             self.statusbar.showMessage("The built-in server keeps its old recordings folder until it starts again.")
         self._check_disk_space()
