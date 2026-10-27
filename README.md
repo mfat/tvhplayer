@@ -42,7 +42,7 @@ A desktop app for watching and recording live TV, with its own built-in Tvheaden
 - Keyboard shortcuts for everything (F1 lists them) and screen reader support
 
 ## Download
-- **Flatpak:** · [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer)
+- **Flatpak:** [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer)
 - **AppImage:** [x86_64](https://mfat.github.io/tvhplayer/download.html?format=appimage-x86_64)
 - **deb** (Debian, Ubuntu): [x86_64](https://mfat.github.io/tvhplayer/download.html?format=deb-amd64) · [arm64](https://mfat.github.io/tvhplayer/download.html?format=deb-arm64)
 - **rpm** (Fedora): [x86_64](https://mfat.github.io/tvhplayer/download.html?format=rpm-x86_64) · [arm64](https://mfat.github.io/tvhplayer/download.html?format=rpm-aarch64)
