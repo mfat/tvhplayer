@@ -18,7 +18,6 @@ finish-args:
   - --socket=fallback-x11
   - --device=all
   - --socket=pulseaudio
-  - --talk-name=org.freedesktop.Notifications
   # KWin's title bar button order, for TVHplayer's own title bar on KDE.
   - --filesystem=xdg-config/kwinrc:ro
   - --env=PYTHONPATH=/app/lib/python3.13/site-packages:/app/share/tvhplayer
