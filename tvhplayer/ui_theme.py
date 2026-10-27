@@ -73,7 +73,7 @@ QToolButton {{ padding: 4px 8px; background: {BASE}; border: 1px solid rgba(35,3
 QToolButton:hover {{ border-color: {ACCENT}; background: #f2f8fc; }}
 QToolButton:focus {{ border: 2px solid {ACCENT}; padding: 3px 7px; }}
 QTableView, QTreeView, QListView {{
-    background: {BASE}; border: 1px solid rgba(35,38,41,64); border-radius: 6px;
+    background: {BASE}; border: 1px solid #bcbdbf;
     gridline-color: transparent; selection-background-color: transparent; selection-color: {INK};
     alternate-background-color: #f6f7f7; outline: 0;
 }}
