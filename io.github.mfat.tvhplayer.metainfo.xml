@@ -7,19 +7,20 @@
   <project_license>GPL-3.0+</project_license>
   <description>
     <p>
-      TVHplayer is a desktop client for Tvheadend, allowing you to watch and record TV channels from your Tvheadend server.
+      TVHplayer is a desktop app for watching and recording live TV. It comes with its own built-in Tvheadend server, and also connects to any Tvheadend server you already run.
     </p>
     <p>Features include:</p>
     <ul>
-      <li>Watch live TV</li>
-      <li>Record TV shows directly on the server</li>
-      <li>Record streams locally to your computer</li>
+      <li>Watch live TV and radio, with sound track, subtitle and deinterlace choices</li>
+      <li>Built-in Tvheadend server that starts and stops with the app</li>
+      <li>Scan for channels with USB, PCIe, SAT&gt;IP and HDHomeRun tuners</li>
+      <li>Import IPTV channels from M3U playlists, with TV guide data from XMLTV</li>
       <li>TV guide showing every channel on a timeline, with watch and record from the guide</li>
-      <li>Monitor server status and signal quality</li>
-      <li>Support for multiple TVHeadend servers</li>
-      <li>Cross-platform: runs on GNU/Linux, Windows and MacOS</li>
+      <li>Record on the server or on this computer, and convert recordings for video editing</li>
+      <li>Customizable channel list with logos, now and next, groups and favourites</li>
+      <li>Light and dark themes, keyboard shortcuts and screen reader support</li>
+      <li>Support for multiple Tvheadend servers over HTSP or HTTP</li>
     </ul>
-    <p>For more information, and instructions for setting up your own server please visit Tvheadend official website.</p>
   </description>
   <launchable type="desktop-id">io.github.mfat.tvhplayer.desktop</launchable>
   <screenshots>

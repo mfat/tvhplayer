@@ -1,35 +1,29 @@
-# TVHPlayer Documentation
+# TVHplayer User Guide
 
-Welcome to the TVHPlayer help documentation. This guide will help you understand how to use the TVHPlayer app effectively.
-
-## Overview
-
-TVHPlayer is a user-friendly application designed to provide seamless streaming of TV content. It integrates with TVHeadend, a popular open-source TV streaming server, to deliver live TV and recorded content to your devices.
-
-## Features
-
-- Stream live TV channels
-- View Electronic Program Guide (EPG)
-- Schedule recordings
-- Record locally on your computer
-- User-friendly interface
-
+TVHplayer is a desktop app for watching and recording live TV. It plays channels from Tvheadend, the open-source TV streaming server: either the built-in server that comes with TVHplayer on Linux, or any Tvheadend server you already run.
 
 ## Getting Started
 
 ### Installation
 
-To install TVHPlayer, download the app from the official website or Flathub.
+Install TVHplayer from [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer), or download the deb, rpm, macOS or Windows build from the [Releases](https://github.com/mfat/tvhplayer/releases) page. The Flatpak, deb and rpm include the built-in server.
 
-### Connecting to TVHeadend
+### The built-in server
 
-To connect TVHPlayer to your TVHeadend server:
+On Linux, TVHplayer runs its own Tvheadend. It starts when TVHplayer starts and stops when TVHplayer quits, and it is kept apart from any Tvheadend already installed on the computer. Its channels, recordings and settings stay between sessions. It is listed as **Built-in server** in the server picker above the channel list.
 
-1. Open the TVHPlayer app.
-2. Click the small cog icon above channel list to add your server
-3. Enter the IP address and port number of your TVHeadend server (includibg http:// or https://)
-4. Enter your TVHeadend username and password.
-5. Save the settings and test the connection.
+Click the gear button (**Manage servers**) beside the server picker to see its status, start it, open its web interface (**Open Web Interface**), or read its log (**Server Log**).
+
+### Connecting to your own Tvheadend server
+
+1. Click the gear button (**Manage servers**) above the channel list.
+2. Click **Add Server…**.
+3. Enter a name and the server address, including `http://` or `https://` and the port, for example `http://192.168.1.10:9981`.
+4. Choose the protocol. **HTSP** (port 9982) is the default and gets channel and recording changes as they happen; **HTTP JSON API** works where HTSP is blocked.
+5. Enter your Tvheadend username and password, if the server asks for one.
+6. Click **Test Connection**, then save.
+
+Each server in the list shows whether it can be reached. Pick a server in the picker above the channel list to load its channels; TVHplayer starts on the server you used last.
 
 ### Setting up channels
 
@@ -40,9 +34,21 @@ The first time the built-in server starts without channels, **Set Up Channels** 
 
 ## Using TVHPlayer
 
-### Streaming Live TV
+### Watching live TV
 
-Press the play button or double-click a channel on the channel list to start playback.
+Double-click a channel, press Enter on it, or press the round play button under the picture. The same button, or P, stops playback. The bar under the picture also has the volume, mute, fullscreen and Record buttons.
+
+While a channel starts, a spinner shows what the server is doing. For tuner channels it also shows the reception, for example **Signal weak (SNR 11 dB)**. If a channel will not start or stops, the reason the server gives, such as **No free adapter**, shows on the picture and in the status bar.
+
+Press F or F11 for fullscreen and Escape to leave it. Right-click the picture for playback, recording and channel options. **View → Go to Playing Channel** (Ctrl+J) selects the playing channel in the list.
+
+To start the channel you watched last whenever TVHplayer starts, turn on **Settings → Playback → Play the last channel when TVHplayer starts**.
+
+### The TV guide
+
+**View → TV Guide** (Ctrl+G), the **TV Guide** button above the channel list, or **Show in TV Guide** on a channel's right-click menu opens the guide: every channel against time, at the selected channel and the time now. Double-click a programme or press Enter to watch its channel. Use its Record button or Ctrl+R to record a programme, or to cancel its recording. Home goes back to what is on now.
+
+**Show EPG** on a channel's right-click menu lists that one channel's programmes.
 
 ### Sound, subtitles, and picture
 
@@ -62,7 +68,7 @@ Your choices are saved and used the next time TVHplayer starts. The program and 
 
 ### Channel logos
 
-Channels show the logo the server has for them. For channels without one, download the picons project's logos under **Settings → General → Channel logos** (about 25 MB, light or dark to suit your theme). TVHplayer then picks each missing logo by the channel's name. **Update Picons** fetches the newest pack and **Remove Picons** deletes it.
+Channels show the logo the server has for them. For channels without one, download the picons project's logos under **Settings → Channels → Channel logos** (about 25 MB, light or dark to suit your theme). TVHplayer then picks each missing logo by the channel's name. **Update Picons** fetches the newest pack and **Remove Picons** deletes it. **Show channel logos** turns logos on or off, like **View → Channel List → Channel Logos**.
 
 ### Editing channels
 
@@ -106,31 +112,83 @@ A channel takes the guide whose channel has the same ID. **Match Channels…** s
 
 A server on another computer cannot take a guide from TVHplayer. Its own guide grabbers are set up in its web interface.
 
-### Schedule recordings
+### Recording
 
-1. To record a live program using Tvheaden's DVR function, click the record button below the player. Recordings will be stored on the server.
-2. To schedule recording a show, right-click on the channel name and select "Show EPG". From the EPG window you can schedule recordings
-3. To record live TV locally on your computer press the local record button (the downward arrow)
+The **Record** button under the picture records the playing channel:
 
-The built-in server starts each recording 2 minutes early and ends it 5 minutes late, in case the broadcast runs early or late; change the margins under **Settings → Recordings**. The status bar warns when the recordings folder has less than 5 GB free; the amount is set there too.
+- **Record on server…** (Ctrl+R) records on the Tvheadend server, for as long as you choose. The file stays on the server.
+- **Record on this computer** (Ctrl+Shift+R) records with ffmpeg into your recordings folder, for as long as you choose. Several channels can record at once.
+
+While recording, the button turns into Stop: Ctrl+E stops the server recording and Ctrl+Shift+E the one on this computer.
+
+To schedule a programme, open the TV guide or **Show EPG** and record it from there. Recordings on the built-in server go into the same recordings folder as recordings on this computer.
+
+### Recording settings
+
+**Settings → Recordings**:
+
+- **Save recordings in** sets the recordings folder, your Videos folder by default.
+- **Warn when free space is below** makes the status bar warn when the folder is nearly full (5 GB by default; 0 turns it off).
+- **Format** chooses MPEG-TS (the default), MP4 or Matroska for recordings on this computer. **Extra ffmpeg options** are added after the format's own.
+- **Built-in server**: the built-in server starts each recording 2 minutes early and ends it 5 minutes late, in case the broadcast runs early or late. Change the margins here.
+
+**Settings → Conversion** makes an MP4 copy that video editors seek through smoothly: a constant frame rate, a keyframe every second and AAC sound. **Convert recordings when they finish** does this for every new recording, and can delete the original once the copy is made. Any recording can also be converted from its right-click menu in Tasks.
+
+### Tasks
+
+**View → Tasks** shows the recordings on the server and on this computer, with their state, channel, time and size. It opens by itself when a recording starts or is scheduled. Choose **Active** (recording and scheduled), **All**, **Recording**, **Scheduled** or **Completed** to filter the list. Right-click a task to stop it, convert it, show a local recording in the file manager, or go to its channel.
+
+**View → Server Status** shows the server's tuners and signal, and **View → DVR Status** its recordings.
+
+### Overlapping recordings
 
 When scheduled recordings overlap on more channels than the server has tuners, TVHplayer says so once and lets you choose the recording that must not be missed; the server then records that one first. Channels on one multiplex share a tuner, and IPTV channels need none. This needs a login that may read the server's settings.
 
-While this computer is recording, TVHplayer keeps it from going to sleep. It also stays awake while a recording is scheduled on the built-in server or another server on this computer; turn that off under **Settings → Recordings → Sleep**. TVHplayer has to stay open for the built-in server to record.
+### Sleep
+
+While this computer is recording, TVHplayer keeps it from going to sleep. It also stays awake while a recording is scheduled on the built-in server or another server on this computer; turn that off under **Settings → Sleep**. TVHplayer has to stay open for the built-in server to record, so it asks before quitting while it records to this computer or has recordings scheduled on the built-in server.
+
+## Appearance
+
+**Settings → Appearance**:
+
+- **Application style**: TVHplayer, the app's own look, or any style Qt offers on your computer, such as Breeze or Fusion.
+- **Theme**: Follow System, Light or Dark.
+- **Use TVHplayer's own title bar** (GNOME and KDE on Wayland, and KDE on X11): a title bar drawn by TVHplayer in place of the desktop's.
+
+## Playback engine
+
+On Linux, **Settings → Playback → Playback engine** chooses the player: **Automatic** plays with mpv on a Wayland desktop and with VLC on X11. With VLC on Wayland, the whole window runs through XWayland and can look soft when scaled. The change takes effect the next time TVHplayer starts. macOS and Windows always use VLC.
+
+## Keyboard shortcuts
+
+Press F1 (**Help → Keyboard Shortcuts**) for the full list. The most used ones:
+
+| Key | Action |
+|---|---|
+| Enter | Play the selected channel |
+| P | Play or stop |
+| M | Mute or unmute |
+| Ctrl+Up / Ctrl+Down | Volume |
+| F or F11, Escape | Fullscreen, leave fullscreen |
+| Ctrl+F or S | Search channels |
+| Ctrl+J | Go to the playing channel |
+| F5 | Reload the channel list |
+| Ctrl+G | TV guide |
+| Ctrl+R, Ctrl+E | Record on the server, stop it |
+| Ctrl+Shift+R, Ctrl+Shift+E | Record on this computer, stop it |
+| Ctrl+I | Import a playlist |
+| Ctrl+, | Settings |
 
 ## Troubleshooting
 
-If you encounter any issues while using TVHPlayer, try the following steps:
+- **A channel will not start**: read the reason on the picture or in the status bar. **No free adapter** means every tuner is busy; a weak signal shows while the channel starts.
+- **Cannot connect to a server**: check that Tvheadend is running and reachable, and that the address includes `http://` and the port. **Test Connection** in Manage servers says what went wrong.
+- **Built-in server problems**: open its log from Manage servers → **Server Log**.
+- **Imported channels are missing**: channels that fail the stream test are hidden. Turn off **Settings → Channels → Hide channels that do not work** to see them all, or **Check channels now** to test them again.
 
-1. Ensure your TVHeadend server is running and accessible.
-2. Check your network connection.
-3. Verify that you have entered the correct IP address, port number, username, and password in the app settings.
-4. Restart the TVHPlayer app and your device.
+**Help → Open Log Folder** opens the folder with `app.log` (TVHplayer) and `tvheadend.log` (the built-in server). Please attach both when you [report a bug](https://github.com/mfat/tvhplayer/issues/new).
 
 ## Additional Resources
 
-For more information and support, refer to the official TVHeadend documentation:
-
-- [TVHeadend Official Documentation](https://docs.tvheadend.org/documentation)
-
-Thank you for using TVHPlayer.
+- [Tvheadend documentation](https://docs.tvheadend.org/documentation)
