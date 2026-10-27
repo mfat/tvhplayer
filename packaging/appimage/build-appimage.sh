@@ -163,7 +163,7 @@ echo "==> Libraries"
 find "$APPDIR/usr/bin" "$APPDIR/usr/lib/libmpv.so.2" "$APPDIR/usr/lib/python$pyver/lib-dynload" \
     "$site" -path "$site/PyQt6" -prune -o -type f \( -perm -u+x -o -name '*.so*' \) -print |
     while read -r elf; do
-        file -b "$elf" | grep -q '^ELF' && echo "$elf"
+        if file -b "$elf" | grep -q '^ELF'; then echo "$elf"; fi
     done > "$work/elf-files"
 # shellcheck disable=SC2046 # one file per line, no spaces in the AppDir paths
 python3 "$HERE/bundle_libs.py" "$excludelist" "$APPDIR/usr/lib" --link $(cat "$work/elf-files")
