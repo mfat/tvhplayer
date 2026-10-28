@@ -469,14 +469,13 @@ class FloatingBar(QWidget):
     MARGIN_BOTTOM = 18
     RADIUS = 26
 
-    def __init__(self, window, overlay=True):
+    def __init__(self, window):
         # Child of the main window over the OpenGL video widget. A separate
         # Tool window cannot place itself on Wayland.
         super().__init__(window)
         # A child shows with its window; the bar waits for fullscreen.
         self.hide()
         self._window = window
-        self._overlay = overlay
         self._bar = None
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)

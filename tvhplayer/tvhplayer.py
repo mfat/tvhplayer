@@ -3964,7 +3964,7 @@ class TVHeadendClient(QMainWindow):
         self.fullscreen_btn.setToolTip("Fullscreen (F11)")
         self.right_layout.addWidget(self.controls_bar)
         # In fullscreen the bar is a child overlay on the picture.
-        self.floating_bar = FloatingBar(self, overlay=True)
+        self.floating_bar = FloatingBar(self)
         
         # Add panes to splitter instead of layout
         self.tasks_pane = TasksPanel(self)

@@ -46,7 +46,7 @@ class AboutDialog(QDialog):
     def __init__(self, version, icon_path, engine=None, parent=None):
         super().__init__(parent)
         self._version = version
-        self._engine = 'mpv' if (engine or 'mpv') == 'mpv' else (engine or 'mpv')
+        self._engine = engine or 'mpv'
         self.setWindowTitle('About TVHplayer')
         self.setAccessibleName('About TVHplayer')
         self.setAccessibleDescription(f'TVHplayer version {version}, created by mFat.')

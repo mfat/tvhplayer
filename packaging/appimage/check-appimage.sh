@@ -29,9 +29,9 @@ import pychromecast, psutil, requests, xdg  # noqa: F401
 from pathlib import Path
 from core.builtin_server import find_bundled_binary
 from core.chromecast import CastManager
-from core.engine import ENGINE_MPV, choose_engine
+from core.engine import mpv_missing
 assert find_bundled_binary().name == "tvheadend", find_bundled_binary()
-assert choose_engine({"DISPLAY": ":0"})[0] == ENGINE_MPV
+assert mpv_missing() == "", f"mpv missing: {mpv_missing()}"
 assert Path("icons/chromecast.svg").is_file(), "chromecast.svg missing from the AppImage"
 assert CastManager(None).available, CastManager(None).unavailable_reason
 print("AppImage check passed")
