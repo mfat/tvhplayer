@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.1
+Version:        4.2.0
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,15 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Wed Oct 28 2026 mFat <newmfat@gmail.com> - 4.2.0-1
+- Play with libmpv only on every platform; VLC is gone
+- Cast live channels to Chromecast from the player bar
+- Ship Chromecast with every packaged build
+- Show channel logos when the TVHeadend server has none
+- Show which Chromecast is playing under the player logo
+- Flatpak title-bar button order follows Plasma without reading the host's kwinrc
+- Use the TVHplayer app bundle name on macOS
+
 * Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.1-1
 - Plays with mpv only; VLC is no longer a playback engine or package dependency
 - New AppImage for Linux: one file that runs on Ubuntu 24.04, Debian 13, Fedora 40 and newer

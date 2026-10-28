@@ -34,6 +34,19 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.2.0" date="2026-10-28">
+      <description>
+        <ul>
+          <li>Play with libmpv only on every platform; VLC is gone</li>
+          <li>Cast live channels to Chromecast from the player bar</li>
+          <li>Ship Chromecast with every packaged build</li>
+          <li>Show channel logos when the TVHeadend server has none</li>
+          <li>Show which Chromecast is playing under the player logo</li>
+          <li>Flatpak title-bar button order follows Plasma without reading the host's kwinrc</li>
+          <li>Use the TVHplayer app bundle name on macOS</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.1" date="2026-10-27">
       <description>
         <ul>

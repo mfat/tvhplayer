@@ -250,7 +250,7 @@ import logging
 import platform
 
 # Shown in About; the release notes in the metainfo file give the same version.
-APP_VERSION = "4.1"
+APP_VERSION = "4.2.0"
 CHANNEL_RELOAD_SECONDS = 30
 # A reload of a big list freezes the window a while: space them by a second per this many channels.
 CHANNELS_PER_RELOAD_SECOND = 100
