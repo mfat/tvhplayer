@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from uuid import UUID
 import ipaddress
+import logging
 import threading
 from urllib.parse import urlsplit
 
@@ -12,6 +13,10 @@ from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
 from .cast_relay import CastRelay, media_type
 from .cast_profiles import AUTO_PROFILE, profile_media_type, ranked_cast_profiles
+
+# Fixed name: a source run loads this as core.chromecast, a package import as
+# tvhplayer.core.chromecast. Terminal Cast logging keys off this one name.
+log = logging.getLogger('tvhplayer.core.chromecast')
 
 try:
     import pychromecast as _pychromecast
@@ -115,6 +120,7 @@ class CastManager(QObject):
         self._connection = self._request = 0
         self._expected_url = ''
         self._session_id = None
+        self._logged_state = ''
         self._volume = 50
         self._working_profiles = dict(known_profiles or {})
         self._auto_context = None
@@ -187,6 +193,7 @@ class CastManager(QObject):
         if self._discovering or (self._devices and not force):
             return
         self._discovering = True
+        log.info('Searching for Chromecast devices')
         self._submit(self._discover)
 
     def _discover(self):
@@ -206,10 +213,13 @@ class CastManager(QObject):
     def _discovered(self, devices):
         self._discovering = False
         self._devices = sorted(devices, key=lambda device: device.name.casefold())
+        found = ', '.join(f'{device.name} at {device.host}' for device in self._devices)
+        log.info('Found %s', found or 'no Chromecast video receivers')
         self.devices_changed.emit(self.devices)
 
     def _discovery_error(self, message):
         self._discovering = False
+        log.info('%s', message)
         self.discovery_failed.emit(message)
 
     def connect_to(self, uuid):
@@ -233,6 +243,7 @@ class CastManager(QObject):
         old = self._cast
         self._cast = self._device = None
         self._cancel_load()
+        log.info('Connecting to %s at %s', device.name or device.host, device.host)
         self._submit(self._connect, connection, device, old)
 
     def _connect(self, connection, device, old):
@@ -265,7 +276,8 @@ class CastManager(QObject):
             cast.register_connection_listener(receiver)
             self._post(lambda: self._connected(connection, cast, device),
                        lambda: self._release(cast))
-        except Exception:
+        except Exception as exc:
+            log.info('Connection to %s failed: %s', device.name or device.host, exc)
             if cast is not None:
                 self._release(cast)
             self._post(lambda: self._connect_failed(connection, device.name))
@@ -282,6 +294,7 @@ class CastManager(QObject):
             self._submit(self._release, cast)
             return
         self._cast, self._device = cast, device
+        log.info('Connected to %s at %s', device.name, device.host)
         status = cast.status
         self._audio_status(connection, int(round(status.volume_level * 100)), status.volume_muted)
         self.connected.emit(device.uuid, device.name)
@@ -362,6 +375,7 @@ class CastManager(QObject):
     def _profile_chosen(self, connection, request, name, context=None):
         if self._current(connection, request):
             self._auto_context = context
+            log.info('Using stream profile %s', name)
             self.profile_selected.emit(name)
 
     def _current(self, connection, request):
@@ -399,6 +413,7 @@ class CastManager(QObject):
             return
         self._relay = relay
         self._expected_url = relay.url
+        log.info('Loading %s as %s from %s', title, kind, relay.url)
         self._submit(self._send_load, connection, request, cast, relay.url, kind, title)
 
     def _send_load(self, connection, request, cast, url, kind, title):
@@ -406,7 +421,9 @@ class CastManager(QObject):
             return
 
         def loaded(sent, response):
-            if not sent or (response or {}).get('type') in ('LOAD_FAILED', 'INVALID_REQUEST'):
+            reply = (response or {}).get('type', '')
+            if not sent or reply in ('LOAD_FAILED', 'INVALID_REQUEST'):
+                log.info('Load rejected: %s', reply or 'not sent')
                 self._post(lambda: self._load_failed(connection, request,
                            'The Chromecast could not load this stream. Try a compatible stream profile.'))
 
@@ -427,6 +444,10 @@ class CastManager(QObject):
         if self._session_id is not None and session is not None and session != self._session_id:
             return
         state = (status.player_state or '').upper()
+        if state and state != self._logged_state:
+            self._logged_state = state
+            reason = (status.idle_reason or '').upper()
+            log.info('Player %s%s', state, f' ({reason})' if reason else '')
         if state in ('PLAYING', 'PAUSED'):
             first = not self._playing
             self._playing = True
@@ -453,6 +474,7 @@ class CastManager(QObject):
 
     def _load_failed(self, connection, request, message):
         if self._current(connection, request) and self._expected_url:
+            log.info('%s', message)
             cast = self._cast
             context = self._auto_context
             self._cancel_load()
@@ -473,6 +495,7 @@ class CastManager(QObject):
         self._playing = False
         self._expected_url = ''
         self._session_id = None
+        self._logged_state = ''
         self._auto_context = None
         relay, self._relay = self._relay, None
         if relay is not None:
@@ -529,11 +552,14 @@ class CastManager(QObject):
 
     def _connection_lost(self, connection):
         if connection == self._connection and self.is_connected:
+            log.info('Connection lost')
             self.disconnect()
             self.operation_failed.emit('The Chromecast connection was lost.')
 
     def disconnect(self):
         self._connection += 1
+        if self._cast is not None:
+            log.info('Disconnecting from %s', self.connected_name)
         self._cancel_load()
         cast, self._cast = self._cast, None
         self._device = None

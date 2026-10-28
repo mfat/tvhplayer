@@ -89,7 +89,8 @@ def test_cast_media_types_cover_live_and_adaptive_streams():
     assert cast_media_type('https://tv/video.mp4') == 'video/mp4'
 
 
-def test_manager_discovers_video_devices_and_controls_one(qapp):
+def test_manager_discovers_video_devices_and_controls_one(qapp, caplog):
+    caplog.set_level('INFO', logger='tvhplayer.core.chromecast')
     ident = '00000000-0000-0000-0000-000000000001'
     living = FakeCast(ident, 'Living room')
     kitchen = FakeCast('00000000-0000-0000-0000-000000000002', 'Kitchen display', model='Nest Hub')
@@ -134,6 +135,14 @@ def test_manager_discovers_video_devices_and_controls_one(qapp):
     assert living.media_controller.stops == 1
     manager.disconnect()
     assert living.disconnected is True
+    text = caplog.text
+    assert 'Searching for Chromecast devices' in text
+    assert 'Living room at 192.168.1.30' in text
+    assert 'Connecting to Living room at 192.168.1.30' in text
+    assert 'Connected to Living room at 192.168.1.30' in text
+    assert 'Loading News as video/mp2t from http://192.168.1.2:40000/token/' in text
+    assert 'Player PLAYING' in text
+    assert 'Disconnecting from Living room' in text
     manager.close()
     assert browser.stopped is True
 
