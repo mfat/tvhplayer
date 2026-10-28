@@ -1123,6 +1123,9 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.channel_model.headerData(0, Qt.Orientation.Horizontal) == "Number"
         assert window.channel_model.headerData(2, Qt.Orientation.Horizontal) == "Status"
         assert window.splitter.accessibleName() == "Channels, player, and tasks"
+        from PyQt6.QtCore import QT_VERSION_STR
+        from tvhplayer.video_widget import live_splitter_keeps_up
+        assert window.splitter.opaqueResize() is live_splitter_keeps_up(QT_VERSION_STR)
         assert window.splitter.handle(2).accessibleName() == "Resize player and tasks"
         assert window.tasks_pane.accessibleName() == "Tasks"
         assert window.tasks_pane.search_box.accessibleName() == "Filter tasks"

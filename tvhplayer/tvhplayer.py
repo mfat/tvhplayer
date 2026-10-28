@@ -3733,7 +3733,15 @@ class TVHeadendClient(QMainWindow):
         
         # Create splitter for resizable panes
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        
+        # Qt 6.10 live-resizes the mpv OpenGL widget on every handle move and
+        # falls behind the pointer; Qt 6.11 (AppImage, Flatpak, venv) keeps up.
+        try:
+            from .video_widget import live_splitter_keeps_up
+        except ImportError:
+            from video_widget import live_splitter_keeps_up
+        if not live_splitter_keeps_up():
+            self.splitter.setOpaqueResize(False)
+
         # Left pane
         self.left_pane = QFrame()
         self.left_pane.setFrameStyle(QFrame.Shape.Panel | QFrame.Shadow.Raised)

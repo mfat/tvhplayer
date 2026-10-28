@@ -9,11 +9,33 @@ from __future__ import annotations
 
 import ctypes
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QT_VERSION_STR, Qt, pyqtSignal
 from PyQt6.QtGui import QGuiApplication, QOpenGLContext
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 
 GL_COLOR_BUFFER_BIT = 0x4000
+# Opaque splitter resize of this widget stays with the pointer from Qt 6.11
+# (AppImage, Flatpak, PyPI wheels). Qt 6.10 on the host falls behind while mpv paints.
+_LIVE_SPLITTER_QT = (6, 11, 0)
+
+
+def live_splitter_keeps_up(qt_version=None):
+    """True when live (opaque) splitter resize of the video widget stays responsive."""
+    text = QT_VERSION_STR if qt_version is None else qt_version
+    parts = []
+    for piece in str(text).split('.'):
+        digits = []
+        for char in piece:
+            if char.isdigit():
+                digits.append(char)
+            else:
+                break
+        if not digits:
+            break
+        parts.append(int(''.join(digits)))
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3]) >= _LIVE_SPLITTER_QT
 
 
 class MpvVideoWidget(QOpenGLWidget):
