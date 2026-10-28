@@ -2,7 +2,7 @@
 
 `TvhBackend` is the Python API a UI calls for live TV. `create_backend(server)` returns an HTTP or HTSP implementation of the same methods. Recordings, series timers, and time timers are documented in [dvr-backend.md](dvr-backend.md). This page is the rest of the player surface: channels, tags, the guide, stream profiles, images, and server status.
 
-Playback is always an HTTP URL. VLC and ffmpeg do not demux HTSP `muxpkt`, so neither backend subscribes to the HTSP stream. Pass `stream_url` or `image_url` to the player as returned. Both already contain basic auth when the server config has a username or password.
+Playback is always an HTTP URL. mpv and ffmpeg do not demux HTSP `muxpkt`, so neither backend subscribes to the HTSP stream. Pass `stream_url` or `image_url` to the player as returned. Both already contain basic auth when the server config has a username or password.
 
 ```python
 from tvhplayer.core import (

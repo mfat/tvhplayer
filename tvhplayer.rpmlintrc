@@ -3,7 +3,5 @@
 # Upstream Tvheadend and scan-table files, shipped as they are.
 addFilter("zero-length /usr/share/tvhplayer/tvheadend/")
 addFilter("incorrect-fsf-address /usr/share/tvhplayer/")
-# python-vlc loads libvlc with ctypes, so rpm cannot find that dependency itself.
-addFilter("explicit-lib-dependency vlc-libs")
-# python-mpv loads libmpv with ctypes, likewise.
+# python-mpv loads libmpv with ctypes, so rpm cannot find that dependency itself.
 addFilter("explicit-lib-dependency mpv-libs")

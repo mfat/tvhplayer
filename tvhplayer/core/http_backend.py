@@ -340,7 +340,7 @@ class HttpBackend(TvhBackend):
     def _ticket_stream_url(self, channel: Channel) -> str:
         """Stream URL carrying a ticket from ``/playlist/ticket``, or '' without one.
 
-        A ticket replaces the login, so digest-only servers work in VLC. Only
+        A ticket replaces the login, so digest-only servers work in the player. Only
         the path and ticket are kept: the playlist also adds ``profile=pass``,
         which would override the user's default profile.
         """

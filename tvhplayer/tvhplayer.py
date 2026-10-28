@@ -5168,7 +5168,7 @@ class TVHeadendClient(QMainWindow):
         self.statusbar.showMessage("Playback stopped")
 
     def _set_idle_splash(self, visible):
-        """Show the logo overlay only when VLC is not drawing video."""
+        """Show the logo overlay only when nothing is playing."""
         if not hasattr(self, 'idle_splash'):
             return
         if visible:
@@ -6059,7 +6059,7 @@ class TVHeadendClient(QMainWindow):
             menu.setAttribute(Qt.WidgetAttribute.WA_X11DoNotAcceptFocus, True)
         self._video_menu = menu
         # popup() avoids exec()'s modal loop, which deactivates the window
-        # and can make VLC tear down its output.
+        # and can interrupt the OpenGL video surface.
         menu.popup(self.video_frame.mapToGlobal(position))
 
     def manage_servers(self):

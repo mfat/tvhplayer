@@ -60,7 +60,7 @@ def htsp_host_port(url, htsp_port=None):
 def http_auth(server):
     """Return requests auth for the HTTP API, or None when no credentials are set.
 
-    Playback URLs still use ``insert_basic_auth``. VLC and ffmpeg receive a
+    Playback URLs still use ``insert_basic_auth``. mpv and ffmpeg receive a
     URL, not this handler.
     """
     username = server.get('username') or ''
@@ -71,7 +71,7 @@ def http_auth(server):
 
 
 def insert_basic_auth(url, username, password):
-    """Embed user:pass in a URL for VLC/ffmpeg, which do not take an auth tuple.
+    """Embed user:pass in a URL for mpv/ffmpeg, which do not take an auth tuple.
 
     Both are percent-encoded: an ``@``, ``/``, ``#`` or ``?`` in them would
     otherwise end the login early and send the rest as the host or path.

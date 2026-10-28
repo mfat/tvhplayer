@@ -160,7 +160,7 @@ class BuiltinSupervisor(QObject):
         program, args = launch_command(command_args(self.binary, self.config_dir, self.http_port, self.htsp_port))
         self._set_status('starting')
         self._deadline = time.monotonic() + self.startup_timeout
-        # VLC's http_proxy is hidden from this process. Tvheadend's own fetches keep it.
+        # Process http_proxy is hidden for the player; Tvheadend's own fetches keep it.
         environment = QProcessEnvironment()
         for key, value in child_env(None).items():
             environment.insert(key, value)

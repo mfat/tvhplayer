@@ -37,7 +37,7 @@ Both transports raise `TvhError` (or `TvhAuthError` / `TvhConnectionError`) when
 | `set_dvr_prevrec(entry, action)` | `set`, `unset`, or `toggle`. Set marks the timer completed and flags the file deleted. Unset creates a new timer. | `dvr/entry/prevrec/<action>` with `uuid` | Same path through `api` |
 | `update_dvr_entry` | Replace only the fields set on `DvrEntryUpdate`. | `idnode/save` | `updateDvrEntry` |
 | `move_dvr_entry(entry, category)` | `finished` or `failed`. Reclassifies the row. The file stays where it is. | `dvr/entry/move/<category>` | Same path through `api` |
-| `recording_url` | HTTP URL for VLC. Basic auth is embedded when credentials are set. | Entry `url`, or `dvrfile/<uuid>` | `getTicket` (`dvrId`); `ticket` is appended to the returned path |
+| `recording_url` | HTTP URL for the player. Basic auth is embedded when credentials are set. | Entry `url`, or `dvrfile/<uuid>` | `getTicket` (`dvrId`); `ticket` is appended to the returned path |
 | `open_recording` | `read` / `seek` / `stat` / `close`, also a context manager. | HTTP Range against the dvrfile URL | `fileOpen` `/dvrfile/<id>`, then `fileRead`, `fileSeek`, `fileStat`, `fileClose` |
 | `get_dvr_cutpoints` | Cut, mute, scene, and commercial-break markers. | Raises `TvhError`. The JSON API does not document cutpoints. | `getDvrCutpoints` |
 | `notify_dvr_file_moved(src, dst)` | Tell the server a file was relocated. Admin privilege. | `dvr/entry/filemoved` | Same path through `api` |
@@ -50,7 +50,7 @@ Each call takes one entry. The server also accepts a JSON list of uuids on some 
 
 ## Playback
 
-`recording_url` is the URL to hand to VLC. `open_recording` is for reading bytes:
+`recording_url` is the URL to hand to the player. `open_recording` is for reading bytes:
 
 * `read(size, offset=None)` is portable. `offset` is an absolute byte position. Omit it to continue after the previous read.
 * HTTP `seek` uses a signed offset. `SEEK_END` with a negative offset moves backward from the end and needs a known `size`.

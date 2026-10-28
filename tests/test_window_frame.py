@@ -33,7 +33,7 @@ def test_gnome_and_kde_can_have_the_apps_title_bar():
 def test_kde_on_x11_needs_a_compositor_for_the_shadow():
     assert wants_own_title_bar('xcb', KDE, compositing=True)
     assert not wants_own_title_bar('xcb', KDE, compositing=False)
-    # Under XWayland, as with VLC in a Wayland session, the compositor is always there.
+    # Under XWayland the compositor is always there.
     assert wants_own_title_bar('xcb', {**KDE, 'WAYLAND_DISPLAY': 'wayland-0'}, compositing=False)
 
 

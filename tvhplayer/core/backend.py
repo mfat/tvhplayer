@@ -241,7 +241,7 @@ class TvhBackend(ABC):
 
     @abstractmethod
     def recording_url(self, entry: DvrEntry) -> str:
-        """HTTP URL VLC can play for a stored recording.
+        """HTTP URL the player can open for a stored recording.
 
         HTTP uses the entry ``url`` (``dvrfile/<uuid>``) and embeds basic
         auth when credentials are configured. HTSP calls ``getTicket`` with
@@ -412,7 +412,7 @@ class TvhBackend(ABC):
 
     @abstractmethod
     def stream_url(self, channel: Channel, profile: Optional[str] = None) -> str:
-        """HTTP URL VLC/ffmpeg can play (HTSP muxpkt is not used).
+        """HTTP URL mpv/ffmpeg can play (HTSP muxpkt is not used).
 
         HTTP uses ``/stream/channel/{uuid}``. HTSP uses the
         ``/stream/channelid/{id}`` path and ticket from ``getTicket``, so

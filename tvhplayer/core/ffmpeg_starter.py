@@ -3,7 +3,7 @@
 Most HLS addresses name a list of qualities. Before it sends anything, ffmpeg
 opens every quality on the list and reads a piece of video from each. On a
 slow site that takes longer than the server waits for a stream (the network's
-max_timeout), and the channel fails although VLC, which opens one quality,
+max_timeout), and the channel fails although a player that opens one quality
 plays it. The stand-in reads the list first and gives ffmpeg only the best
 quality, the one ffmpeg would have played.
 

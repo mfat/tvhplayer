@@ -426,7 +426,7 @@ def apply_builtin_defaults(
     """Settings that make the built-in server ready to use; returns those that failed.
 
     * Accept a plain login as well as digest. Tvheadend defaults to digest
-      only, and VLC sends the login in the stream URL as plain (Basic), so
+      only, and the player sends the login in the stream URL as plain (Basic), so
       playback failed with 401. The server listens on 127.0.0.1 only and keeps
       its generated password, so this opens it to no one else.
     * Turn off the first-run setup wizard, so the web interface opens on its

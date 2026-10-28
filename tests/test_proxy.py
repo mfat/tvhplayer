@@ -15,7 +15,7 @@ DEAD_PROXY = 'http://127.0.0.1:9'
 
 @pytest.fixture
 def proxied_env(monkeypatch):
-    """An http_proxy that goes nowhere, with VLC not yet started."""
+    """An http_proxy that goes nowhere, before the player hides it."""
     monkeypatch.setattr(proxy, '_saved_http_proxy', proxy._HIDDEN)
     monkeypatch.setenv('http_proxy', DEAD_PROXY)
     monkeypatch.delenv('HTTP_PROXY', raising=False)

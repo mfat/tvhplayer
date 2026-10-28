@@ -2,7 +2,7 @@
 
 Kodi pvr.hts uses HTSP for metadata/DVR and optionally HTTP
 `/stream/channelid/{id}` for playback (`GetChannelStreamProperties`).
-TVHplayer always uses that HTTP path because VLC cannot demux HTSP muxpkt.
+TVHplayer always uses that HTTP path because mpv/ffmpeg cannot demux HTSP muxpkt.
 """
 
 from __future__ import annotations
@@ -587,7 +587,7 @@ class HtspBackend(TvhBackend):
 
     def _ticket_auth(self, url, reply):
         # A ticket stands in for the login. Basic auth beside it gets a 401
-        # from a digest-only server, and VLC cannot answer digest.
+        # from a digest-only server, and the player cannot answer digest.
         if reply.get('ticket'):
             return url
         return insert_basic_auth(url, self.server.username, self.server.password)

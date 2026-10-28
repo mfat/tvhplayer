@@ -60,7 +60,7 @@ def test_configure_writes_app_and_server_logs(tmp_path, restore_logging):
 
 
 def test_everything_the_process_writes_is_logged_and_hidden(tmp_path):
-    """print(), a C library writing to fd 2 (like VLC), and a child program."""
+    """print(), a C library writing to fd 2 (like libmpv), and a child program."""
     import subprocess
     from pathlib import Path
 

@@ -5,7 +5,7 @@ which is ``~/.local/state/tvhplayer`` by default. Flatpak points
 ``XDG_STATE_HOME`` inside the app's sandbox folder.
 
 ``app.log`` has the app's messages and everything the process writes to its
-terminal, including VLC and Qt. ``tvheadend.log``
+terminal, including mpv and Qt. ``tvheadend.log``
 has the built-in server's output. Both rotate at 10 MB and keep 5 old files.
 """
 
@@ -77,7 +77,7 @@ def _file_handler(path: Path) -> logging.Handler:
 class _FdCapture:
     """Route a file descriptor through a pipe.
 
-    Everything written to it, by Python, VLC, Qt, or a child program, reaches
+    Everything written to it, by Python, mpv, Qt, or a child program, reaches
     the terminal with secrets hidden, and each line goes to app.log.
     """
 
