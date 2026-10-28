@@ -4,6 +4,7 @@ PyInstaller==6.22.3
 PyQt6==6.10.2
 mpv==1.0.8
 python-vlc==3.0.21203
+PyChromecast==14.1.0
 requests==2.32.5
 psutil==7.2.2
 urllib3==2.6.3

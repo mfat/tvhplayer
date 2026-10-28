@@ -2,6 +2,7 @@
 PyQt6==6.11.0
 PyQt6-Qt6==6.11.2
 PyQt6_sip==13.13.0
+PyChromecast==14.1.0
 mpv==1.0.8
 requests==2.34.2
 urllib3==2.8.0

@@ -44,6 +44,8 @@ try:
         upcoming_recordings,
     )
     from .core.config import ConfigStore, default_cache_dir
+    from .core.chromecast import CastManager
+    from .core.cast_profiles import AUTO_PROFILE
     from .core.guide_feeds import GuideCache, GuideSource
     from .core.guide_match import Choice
     from .core.xmltv import is_local_server
@@ -133,6 +135,8 @@ except ImportError:
         upcoming_recordings,
     )
     from core.config import ConfigStore, default_cache_dir
+    from core.chromecast import CastManager
+    from core.cast_profiles import AUTO_PROFILE
     from core.guide_feeds import GuideCache, GuideSource
     from core.guide_match import Choice
     from core.xmltv import is_local_server
@@ -3470,6 +3474,7 @@ class TVHeadendClient(QMainWindow):
         self._playback_server = None
         self._show_playing_on_load = False
         self._video_menu = None
+        self.cast_manager = CastManager(self, known_profiles=self.config.get('cast_auto_profiles'))
 
         
         # Add recording indicator variables
@@ -3490,6 +3495,7 @@ class TVHeadendClient(QMainWindow):
 
         # Then setup UI
         self.setup_ui()
+        self._bind_chromecast()
         self._bind_playback_splash()
         self._check_disk_space()
 
@@ -3898,6 +3904,8 @@ class TVHeadendClient(QMainWindow):
         bar.stop_local_action.triggered.connect(self.stop_local_recording)
         bar.stop_both_action.triggered.connect(self.stop_both_recordings)
 
+        self.cast_btn = bar.cast_btn
+
         self.mute_btn = bar.mute_btn
         self.mute_btn.clicked.connect(self.toggle_mute)
         describe(self.mute_btn, "Mute", "Turn sound off. Keyboard: M. The button stays pressed while muted.")
@@ -4063,6 +4071,7 @@ class TVHeadendClient(QMainWindow):
             self.record_btn,
             self.stop_record_btn,
             self.record_more_btn,
+            self.cast_btn,
             self.mute_btn,
             self.volume_slider,
             self.fullscreen_btn,
@@ -5111,7 +5120,10 @@ class TVHeadendClient(QMainWindow):
         self._mark_playing_channel()
         self._set_playback_spinner(False)
         self._sync_play_button()
-        self.player.stop()
+        if self.cast_manager.is_connected:
+            self.cast_manager.stop()
+        else:
+            self.player.stop()
         self._protect_video_surface(False)
         self.statusbar.showMessage("Playback stopped")
 
@@ -5225,21 +5237,28 @@ class TVHeadendClient(QMainWindow):
         if hasattr(self, '_splash_idle_timer'):
             self._splash_idle_timer.stop()
         waiting = bool(getattr(self, '_awaiting_playback', False))
-        self._set_idle_splash((not playing) or waiting)
+        casting = self.cast_manager.is_connected
+        self._set_idle_splash(casting or (not playing) or waiting)
         if waiting:
             self._set_playback_spinner(True)
         if hasattr(self, 'video_frame') and self.engine != ENGINE_MPV:
-            self.video_frame.setUpdatesEnabled(not playing and not waiting)
+            self.video_frame.setUpdatesEnabled(casting or (not playing and not waiting))
 
     def _show_on_picture(self, text):
         """Repeat a status message over the video, where it shows in fullscreen too.
 
         Only while a picture is on screen; the status bar keeps the message for screen readers.
         """
-        if getattr(self, '_playback_active', False) and getattr(self, 'player', None) is not None:
+        if (
+            getattr(self, '_playback_active', False)
+            and getattr(self, 'player', None) is not None
+            and not self.cast_manager.is_connected
+        ):
             self.player.show_message(text)
 
-    def _on_playback_started(self):
+    def _on_playback_started(self, casting=False):
+        if self.cast_manager.is_connected and not casting:
+            return
         stream = getattr(self, '_stream', None)
         if stream is not None:
             stream['started'] = True
@@ -5248,16 +5267,19 @@ class TVHeadendClient(QMainWindow):
         self._set_playback_spinner(False)
         self._protect_video_surface(True)
         self._mark_playing_channel()
-        for name, delay in (('hw_check_timer', 3000), ('hw_check_late_timer', 30000)):
-            timer = getattr(self, name, None)
-            if timer is not None:
-                timer.start(delay)
+        if not self.cast_manager.is_connected:
+            for name, delay in (('hw_check_timer', 3000), ('hw_check_late_timer', 30000)):
+                timer = getattr(self, name, None)
+                if timer is not None:
+                    timer.start(delay)
         channel = getattr(self, '_playback_channel', None)
         if channel is not None:
             self.statusbar.showMessage(f"Playing: {channel.name}")
             self._show_on_picture(f"{channel.number}  {channel.name}" if channel.number else channel.name)
 
-    def _on_playback_failed(self):
+    def _on_playback_failed(self, casting=False):
+        if self.cast_manager.is_connected and not casting:
+            return
         if not self._awaiting_playback and not self._playback_active:
             # Already stopped, for example by the server's reason; keep that message.
             return
@@ -5351,6 +5373,8 @@ class TVHeadendClient(QMainWindow):
     def _show_splash_if_idle(self):
         if self._playback_active or self._awaiting_playback:
             return
+        if self.cast_manager.is_connected and self.cast_manager.is_playing:
+            return
         if self.player and self.player.is_playing():
             return
         self._protect_video_surface(False)
@@ -5373,6 +5397,226 @@ class TVHeadendClient(QMainWindow):
         except ImportError:
             from video_widget import MpvVideoWidget
         return MpvVideoWidget()
+
+    def _bind_chromecast(self):
+        """Connect the player-bar Cast menu to background discovery and playback."""
+        self.cast_menu = QMenu(self)
+        self.cast_menu.setAccessibleName("Chromecast devices")
+        self.cast_btn.clicked.connect(self._show_cast_menu)
+        manager = self.cast_manager
+        manager.devices_changed.connect(self._cast_devices_changed)
+        manager.discovery_failed.connect(self._on_cast_discovery_failed)
+        manager.connected.connect(self._on_cast_connected)
+        manager.disconnected.connect(self._on_cast_disconnected)
+        manager.playing.connect(self._on_cast_playing)
+        manager.stopped.connect(self._on_cast_stopped)
+        manager.failed.connect(self._on_cast_failed)
+        manager.operation_failed.connect(self._on_cast_operation_failed)
+        manager.audio_changed.connect(self._on_cast_audio_changed)
+        manager.profiles_ready.connect(self._on_cast_profiles)
+        manager.profile_selected.connect(self._on_cast_profile_selected)
+        manager.automatic_profile_worked.connect(self._on_cast_profile_worked)
+        self._cast_target = False
+        self._cast_saved_audio = None
+        if not manager.available:
+            self.cast_btn.setEnabled(False)
+            self.cast_btn.setToolTip(manager.unavailable_reason)
+            describe(self.cast_btn, "Cast unavailable", manager.unavailable_reason)
+
+    def _show_cast_menu(self):
+        manager = self.cast_manager
+        self.controls_bar.set_casting(manager.is_connected, manager.connected_name)
+        if not manager.available:
+            self.statusbar.showMessage(manager.unavailable_reason)
+            return
+        if not manager.devices and not manager.discovering:
+            manager.discover()
+        self._fill_cast_menu()
+        self.controls_bar.popup_above(self.cast_menu, self.cast_btn)
+
+    def _fill_cast_menu(self):
+        menu = self.cast_menu
+        menu.clear()
+        manager = self.cast_manager
+        if manager.is_connected:
+            action = menu.addAction(f"Disconnect from {manager.connected_name}")
+            action.triggered.connect(self._disconnect_cast)
+            menu.addSeparator()
+        for device in manager.devices:
+            label = device.name + (f" — {device.model}" if device.model else '')
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(manager.is_connected and device.uuid == manager.connected_uuid)
+            action.triggered.connect(
+                lambda _checked=False, uuid=device.uuid: self._select_cast_device(uuid)
+            )
+        if not manager.devices:
+            waiting = menu.addAction("Searching…" if manager.discovering else "No devices found")
+            waiting.setEnabled(False)
+        menu.addSeparator()
+        refresh = menu.addAction("Search again")
+        refresh.triggered.connect(lambda: self._refresh_cast_devices())
+        address = menu.addAction("Connect by IP address…")
+        address.triggered.connect(self._cast_by_address)
+        profile = menu.addAction("Stream profile…")
+        profile.setEnabled(self.current_server() is not None)
+        profile.triggered.connect(self._choose_cast_profile)
+
+    def _cast_by_address(self):
+        host, accepted = QInputDialog.getText(self, "Connect to Chromecast", "Receiver IP address:")
+        if accepted and host.strip():
+            self.statusbar.showMessage("Connecting to Chromecast…")
+            self.cast_manager.connect_host(host)
+
+    def _choose_cast_profile(self):
+        server = self.current_server()
+        if server is not None:
+            self.statusbar.showMessage("Reading stream profiles…")
+            self.cast_manager.request_profiles(dict(server), server_key(server))
+
+    def _on_cast_profiles(self, key, profiles, error):
+        if self._closing or self.current_server() is None or server_key(self.current_server()) != key:
+            return
+        if error:
+            self.statusbar.showMessage(error)
+            return
+        labels = ["Automatic (recommended)", "Server default"] + [f"{item.name} ({item.uuid})" for item in profiles]
+        values = [AUTO_PROFILE, ''] + [item.uuid or item.name for item in profiles]
+        selected = self.config.get('cast_profiles', {}).get(key, AUTO_PROFILE)
+        index = values.index(selected) if selected in values else 0
+        label, accepted = QInputDialog.getItem(
+            self, "Chromecast stream profile",
+            "Choose a server profile compatible with this receiver (usually H.264 video and AAC audio):",
+            labels, index, False,
+        )
+        if accepted:
+            self.config.setdefault('cast_profiles', {})[key] = values[labels.index(label)]
+            self.save_config()
+            self.statusbar.showMessage("Chromecast stream profile saved; it applies to the next channel")
+
+    def _on_cast_profile_selected(self, name):
+        if self._awaiting_playback and self.cast_manager.is_connected:
+            self.statusbar.showMessage(f"Starting on {self.cast_manager.connected_name} using {name}")
+
+    def _on_cast_profile_worked(self, key, profile):
+        self.config.setdefault('cast_auto_profiles', {})[key] = profile
+
+    def _refresh_cast_devices(self):
+        self.statusbar.showMessage("Searching for Chromecast devices…")
+        self.cast_manager.discover(force=True)
+        self._fill_cast_menu()
+
+    def _cast_devices_changed(self, devices):
+        if self.cast_menu.isVisible():
+            self._fill_cast_menu()
+        count = len(devices)
+        if count:
+            self.statusbar.showMessage(f"Found {count} Cast device{'s' if count != 1 else ''}")
+        else:
+            self.statusbar.showMessage("No Chromecast devices found on this network")
+
+    def _on_cast_discovery_failed(self, message):
+        if self.cast_menu.isVisible():
+            self._fill_cast_menu()
+        self.statusbar.showMessage(message)
+
+    def _select_cast_device(self, uuid):
+        if self.cast_manager.connected_uuid == uuid:
+            return
+        device = next((item for item in self.cast_manager.devices if item.uuid == uuid), None)
+        if device is not None:
+            self.statusbar.showMessage(f"Connecting to {device.name}…")
+        self.cast_manager.connect_to(uuid)
+
+    def _on_cast_connected(self, _uuid, name):
+        manager = self.cast_manager
+        if not self._cast_target:
+            self._cast_saved_audio = (self.config['volume'], self.player.is_muted())
+        self._cast_target = True
+        self.controls_bar.set_casting(True, name)
+        self._on_cast_audio_changed(manager.volume, manager.is_muted)
+        channel = self._playback_channel if (self._playback_active or self._awaiting_playback) else None
+        if channel is not None:
+            self.play_channel_by_data(channel)
+        else:
+            self.statusbar.showMessage(f"Connected to {name}; the next channel will play there")
+
+    def _disconnect_cast(self):
+        name = self.cast_manager.connected_name
+        if self._playback_active or self._awaiting_playback:
+            self.stop_playback()
+        self.cast_manager.disconnect()
+        if name:
+            self.statusbar.showMessage(f"Disconnecting from {name}…")
+
+    def _on_cast_disconnected(self):
+        if self._cast_target:
+            self._clear_cast_playback("Chromecast disconnected")
+        self._cast_target = False
+        self.controls_bar.set_casting(False)
+        if self._cast_saved_audio is not None:
+            volume, muted = self._cast_saved_audio
+            self._cast_saved_audio = None
+            self.volume_slider.blockSignals(True)
+            self.volume_slider.setValue(volume)
+            self.volume_slider.blockSignals(False)
+            self.player.set_volume(volume)
+            self.player.set_muted(muted)
+            self._update_mute_button(muted)
+        self.statusbar.showMessage("Chromecast disconnected")
+
+    def _on_cast_audio_changed(self, volume, muted):
+        if not self.cast_manager.is_connected:
+            return
+        self.volume_slider.blockSignals(True)
+        self.volume_slider.setValue(volume)
+        self.volume_slider.blockSignals(False)
+        self._update_mute_button(muted)
+
+    def _update_mute_button(self, muted):
+        self.controls_bar.set_muted(muted)
+        label = "Unmute" if muted else "Mute"
+        describe(self.mute_btn, label, "Turn sound on or off. Keyboard: M.")
+        self.mute_btn.setToolTip(f"{label} (M)")
+
+    def _on_cast_operation_failed(self, message):
+        self.statusbar.showMessage(f"Chromecast: {message}")
+
+    def _on_cast_playing(self):
+        if not self.cast_manager.is_connected or not self._awaiting_playback:
+            return
+        self._on_playback_started(casting=True)
+        self._set_idle_splash(True)
+        name = self.cast_manager.connected_name
+        channel = self._playback_channel
+        if hasattr(self, 'idle_splash'):
+            self.idle_splash.setAccessibleName(f"Casting to {name}" if name else "Casting")
+        if channel is not None:
+            self.statusbar.showMessage(f"Casting {channel.name} to {name}")
+
+    def _clear_cast_playback(self, message):
+        self._stream = None
+        self._stop_start_watch()
+        self._awaiting_playback = False
+        self._playback_active = False
+        self._playback_channel = None
+        self._mark_playing_channel()
+        self._set_playback_spinner(False)
+        self._sync_play_button()
+        self._protect_video_surface(False)
+        self.statusbar.showMessage(message)
+
+    def _on_cast_stopped(self):
+        if self._playback_active or self._awaiting_playback:
+            self._clear_cast_playback("Chromecast playback stopped")
+
+    def _on_cast_failed(self, message):
+        text = f"Chromecast: {message}"
+        if self._playback_active or self._awaiting_playback:
+            self._on_playback_failed(casting=True)
+            self._show_playback_problem(text)
+        else:
+            self.statusbar.showMessage(text)
 
     def _bind_playback_splash(self):
         """Keep the splash in sync if playback starts or stops on its own."""
@@ -5656,6 +5900,9 @@ class TVHeadendClient(QMainWindow):
         """Audio Track, Subtitles, and Deinterlace submenus for the stream playing now."""
         if menu is getattr(self, 'playback_menu', None):
             menu.clear()
+        if self.cast_manager.is_connected:
+            menu.addAction("Use the Cast menu to choose a stream profile").setEnabled(False)
+            return
         player = getattr(self, 'player', None)
         audio = menu.addMenu("&Audio Track")
         tracks = player.audio_tracks() if player is not None else []
@@ -5799,8 +6046,11 @@ class TVHeadendClient(QMainWindow):
 
     def on_volume_changed(self, value):
         print(f"Debug: Volume changed to {value}")
-        self.player.set_volume(value)
-        self.config['volume'] = value
+        if self.cast_manager.is_connected:
+            self.cast_manager.set_volume(value)
+        else:
+            self.player.set_volume(value)
+            self.config['volume'] = value
         self._show_on_picture(f"Volume {value}")
 
     def eventFilter(self, obj, event):
@@ -5938,8 +6188,12 @@ class TVHeadendClient(QMainWindow):
     def toggle_mute(self):
         """Toggle audio mute state"""
         print("Debug: Toggling mute")
-        is_muted = self.player.is_muted()
-        self.player.set_muted(not is_muted)
+        casting = self.cast_manager.is_connected
+        is_muted = self.cast_manager.is_muted if casting else self.player.is_muted()
+        if casting:
+            self.cast_manager.set_muted(not is_muted)
+        else:
+            self.player.set_muted(not is_muted)
         
         self.controls_bar.set_muted(not is_muted)
         if not is_muted:  # Switching to muted
@@ -6305,6 +6559,8 @@ class TVHeadendClient(QMainWindow):
         if self.picon_job is not None:
             self.picon_job.cancel()
         self.close_backend()
+        if getattr(self, 'cast_manager', None) is not None:
+            self.cast_manager.close()
         if getattr(self, 'player', None) is not None:
             self.player.close()
         super().closeEvent(event)
@@ -7316,15 +7572,31 @@ class TVHeadendClient(QMainWindow):
             self._playback_channel = channel
             self._playback_server = self._channels_server
             self._remember_channel(channel)
-            stream_url = self.get_backend().stream_url(channel)
-            print(f"Debug: Stream URL: {stream_url}")
-            self._watch_stream_log()
-            self._stream = {'path': stream_path(stream_url), 'name': channel.name, 'started': False,
-                            'scrambled': '', 'failed_at': None}
+            server = self.current_server()
+            profiles = self.config.get('cast_profiles', {})
+            casting = self.cast_manager.is_connected
+            profile = profiles.get(server_key(server), AUTO_PROFILE) if server and casting else ''
+            if casting:
+                self._stream = None
+            else:
+                stream_url = self.get_backend().stream_url(channel)
+                self._watch_stream_log()
+                self._stream = {'path': stream_path(stream_url), 'name': channel.name, 'started': False,
+                                'scrambled': '', 'failed_at': None}
             self._show_playback_wait()
+            if self.cast_manager.is_connected:
+                self._stop_start_watch()
             self._mark_playing_channel(scroll=True)
-            self.player.play(stream_url)
-            self.statusbar.showMessage(f"Starting: {channel.name}")
+            if self.cast_manager.is_connected:
+                self.player.stop()
+                if not self.cast_manager.play_channel(server, channel, profile):
+                    return
+                self.statusbar.showMessage(
+                    f"Starting {channel.name} on {self.cast_manager.connected_name}"
+                )
+            else:
+                self.player.play(stream_url)
+                self.statusbar.showMessage(f"Starting: {channel.name}")
         except Exception as e:
             print(f"Debug: Error in play_channel: {str(e)}")
             if self._awaiting_playback:

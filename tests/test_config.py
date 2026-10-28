@@ -87,6 +87,17 @@ def test_missing_file_uses_defaults(tmp_path):
     assert json.loads((tmp_path / 'missing.conf').read_text())['volume'] == 50
 
 
+def test_cast_automatic_and_manual_choices_roundtrip_separately(tmp_path):
+    path = tmp_path / 'settings.json'
+    store = ConfigStore(path)
+    store.data['cast_profiles'] = {'local': 'auto', 'other': 'manual-profile'}
+    store.data['cast_auto_profiles'] = {'receiver|local': 'webm-profile'}
+    store.save()
+    loaded = ConfigStore(path)
+    assert loaded.data['cast_profiles'] == {'local': 'auto', 'other': 'manual-profile'}
+    assert loaded.data['cast_auto_profiles'] == {'receiver|local': 'webm-profile'}
+
+
 def test_theme_defaults_to_tvhplayer_and_keeps_a_qt_style_name(tmp_path):
     path = tmp_path / 'tvhplayer.conf'
     for saved, loaded in ((None, 'TVHplayer'), ('', 'TVHplayer'), (3, 'TVHplayer'), ('Breeze', 'Breeze')):

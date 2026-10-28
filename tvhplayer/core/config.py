@@ -71,6 +71,8 @@ def default_config():
         'channel_list': channel_list_options(None),
         'play_on_start': False,
         'last_channel': {},
+        'cast_profiles': {},
+        'cast_auto_profiles': {},
         'hide_dead_channels': True,
         # Empty until chosen: the Videos folder, or asked the first time where that cannot be written.
         'local_recording_dir': '',
@@ -159,6 +161,10 @@ def _normalize(data):
         cfg['local_recording_format'] = DEFAULT_FORMAT
     if not isinstance(cfg.get('last_channel'), dict):
         cfg['last_channel'] = {}
+    for field in ('cast_profiles', 'cast_auto_profiles'):
+        profiles = cfg.get(field)
+        cfg[field] = {key: value for key, value in profiles.items()
+                      if isinstance(key, str) and isinstance(value, str)} if isinstance(profiles, dict) else {}
     for key in ('builtin_http_port', 'builtin_htsp_port'):
         try:
             cfg[key] = int(cfg.get(key) or 0)

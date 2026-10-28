@@ -56,6 +56,13 @@ MUTED_SVG = (
     '<path d="M 31 21 l 6 6 M 37 21 l -6 6" stroke="{c}" stroke-width="2.5" '
     'stroke-linecap="round"/></svg>'
 )
+CAST_SVG = (
+    '<svg viewBox="0 0 48 48"><path d="M 13 14 h 23 v 20 h -12" stroke="{c}" '
+    'stroke-width="2.5" stroke-linejoin="round" fill="none"/>'
+    '<path d="M 13 31 a 4 4 0 0 1 4 4 M 13 25 a 10 10 0 0 1 10 10 M 13 19 '
+    'a 16 16 0 0 1 16 16" stroke="{c}" stroke-width="2.5" stroke-linecap="round" '
+    'fill="none"/></svg>'
+)
 FULLSCREEN_SVG = (
     '<svg viewBox="0 0 48 48"><path d="M 14 20 L 14 14 L 20 14 M 28 14 L 34 14 L 34 20 '
     'M 14 28 L 14 34 L 20 34 M 28 34 L 34 34 L 34 28" stroke="{c}" stroke-width="2.5" '
@@ -307,6 +314,18 @@ class PlayerBar(QWidget):
 
         layout.addStretch(1)
 
+        self.cast_btn = QPushButton()
+        self.cast_btn.setFixedSize(32, 32)
+        self.cast_btn.setIconSize(QSize(24, 24))
+        self.cast_btn.setCheckable(True)
+        self.cast_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cast_btn.setStyleSheet(button_stylesheet(
+            "background: transparent; border: none; border-radius: 6px; }"
+            " QPushButton:hover { background: rgba(255,255,255,20);",
+            radius=6,
+        ))
+        layout.addWidget(self.cast_btn)
+
         self.mute_btn = QPushButton()
         self.mute_btn.setFixedSize(32, 32)
         self.mute_btn.setIconSize(QSize(24, 24))
@@ -346,6 +365,7 @@ class PlayerBar(QWidget):
         layout.addWidget(self.fullscreen_btn)
 
         self.set_playing(False)
+        self.set_casting(False)
         self.set_muted(False)
         self.set_fullscreen(False)
         self._apply_background()
@@ -425,6 +445,19 @@ class PlayerBar(QWidget):
     def set_muted(self, muted):
         self.mute_btn.setChecked(bool(muted))
         self.mute_btn.setIcon(svg_icon(MUTED_SVG if muted else SPEAKER_SVG, self._icon_color(), 24))
+
+    def set_casting(self, casting, name=''):
+        casting = bool(casting)
+        self.cast_btn.setChecked(casting)
+        color = '#ffffff' if casting and not self._contrast else self._icon_color()
+        self.cast_btn.setIcon(svg_icon(CAST_SVG, color, 24))
+        if casting:
+            label = f'Casting to {name}' if name else 'Casting'
+            describe(self.cast_btn, label, 'Choose another Chromecast or disconnect.')
+            self.cast_btn.setToolTip(label)
+        else:
+            describe(self.cast_btn, 'Cast', 'Play channels on a Chromecast or Cast-enabled television.')
+            self.cast_btn.setToolTip('Cast to a device')
 
     def set_fullscreen(self, fullscreen):
         self.fullscreen_btn.setChecked(bool(fullscreen))

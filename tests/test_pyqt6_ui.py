@@ -2859,6 +2859,119 @@ def test_player_bar_play_stop_and_record_controls(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QObject, pyqtSignal
+
+    class FakeCastManager(QObject):
+        devices_changed = pyqtSignal(object)
+        discovery_failed = pyqtSignal(str)
+        connected = pyqtSignal(str, str)
+        disconnected = pyqtSignal()
+        playing = pyqtSignal()
+        stopped = pyqtSignal()
+        failed = pyqtSignal(str)
+        operation_failed = pyqtSignal(str)
+        audio_changed = pyqtSignal(int, bool)
+        profiles_ready = pyqtSignal(str, object, str)
+        profile_selected = pyqtSignal(str)
+        automatic_profile_worked = pyqtSignal(str, str)
+
+        def __init__(self, parent=None, known_profiles=None):
+            super().__init__(parent)
+            self.available = True
+            self.unavailable_reason = ''
+            self.devices = []
+            self.discovering = False
+            self.is_connected = False
+            self.connected_name = ''
+            self.connected_uuid = ''
+            self.is_playing = False
+            self.is_muted = False
+            self.volume = 50
+            self.played = []
+            self.volumes = []
+            self.mutes = []
+            self.stops = 0
+
+        def play(self, url, title):
+            self.played.append((url, title))
+            return True
+
+        def play_channel(self, server, channel, profile='auto'):
+            url = window.get_backend().stream_url(channel, profile=None if profile == 'auto' else profile)
+            return self.play(url, channel.name)
+
+        def stop(self):
+            self.stops += 1
+
+        def set_volume(self, value):
+            self.volumes.append(value)
+
+        def set_muted(self, muted):
+            self.is_muted = muted
+            self.mutes.append(muted)
+
+        def close(self):
+            pass
+
+    def prepare(ui):
+        monkeypatch.setattr(ui, 'CastManager', FakeCastManager)
+        monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
+
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path, prepare)
+    try:
+        manager = window.cast_manager
+        manager.is_connected = True
+        manager.connected_name = 'Living room'
+        manager.connected_uuid = 'living'
+        manager.connected.emit('living', 'Living room')
+        assert window.cast_btn.isChecked()
+        assert window.cast_btn.accessibleName() == 'Casting to Living room'
+
+        channel = ui.Channel(uuid='news', name='News')
+        window._remember_channel = lambda _channel: None
+        window._server_requests_ready = lambda: True
+        window.get_backend = lambda: types.SimpleNamespace(
+            stream_url=lambda _channel, profile=None: 'http://tv.local/live.ts?ticket=one'
+        )
+        window.play_channel_by_data(channel)
+        assert manager.played == [('http://tv.local/live.ts?ticket=one', 'News')]
+        window._on_playback_started()
+        assert window._awaiting_playback
+        manager.playing.emit()
+        assert not window._awaiting_playback
+        assert window._playback_active
+
+        before = list(manager.volumes)
+        manager.audio_changed.emit(27, True)
+        assert window.volume_slider.value() == 27
+        assert window.mute_btn.isChecked()
+        assert manager.volumes == before
+
+        from tvhplayer.core.models import StreamProfile
+        profile = StreamProfile(uuid='cast-h264', name='Chromecast')
+        monkeypatch.setattr(ui.QInputDialog, 'getItem', lambda *args: ('Chromecast (cast-h264)', True))
+        key = ui.server_key(window.current_server())
+        window._on_cast_profiles(key, [profile], '')
+        requested = []
+        window.get_backend = lambda: types.SimpleNamespace(
+            stream_url=lambda _channel, profile=None: requested.append(profile) or 'http://tv.local/live.ts'
+        )
+        window.play_channel_by_data(channel)
+        assert requested == ['cast-h264']
+
+        window.on_volume_changed(37)
+        window.toggle_mute()
+        assert manager.volumes[-1] == 37
+        assert manager.mutes[-1] is True
+
+        window.stop_playback()
+        assert manager.stops == 1
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_tv_guide_opens_from_the_view_menu_at_the_selected_channel(monkeypatch, tmp_path):
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
     try:

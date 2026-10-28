@@ -12,6 +12,8 @@ setup(
         'python-vlc>=3.0.12122',
         # On Wayland, libmpv draws the picture so the window is not run through XWayland.
         'mpv>=1.0.4',
+        'PyChromecast>=14.1.0; python_version >= "3.11"',
+        'PyChromecast>=13.1.0,<14; python_version < "3.11"',
         'requests>=2.25.1',
         'python-dateutil>=2.8.2',
     ],
