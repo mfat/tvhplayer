@@ -2950,9 +2950,9 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
 
         from tvhplayer.core.models import StreamProfile
         profile = StreamProfile(uuid='cast-h264', name='Chromecast')
-        monkeypatch.setattr(ui.QInputDialog, 'getItem', lambda *args: ('Chromecast (cast-h264)', True))
         key = ui.server_key(window.current_server())
         window._on_cast_profiles(key, [profile], '')
+        window._set_cast_profile('cast-h264')
         requested = []
         window.get_backend = lambda: types.SimpleNamespace(
             stream_url=lambda _channel, profile=None: requested.append(profile) or 'http://tv.local/live.ts'

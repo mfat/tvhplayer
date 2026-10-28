@@ -5418,6 +5418,8 @@ class TVHeadendClient(QMainWindow):
         manager.automatic_profile_worked.connect(self._on_cast_profile_worked)
         self._cast_target = False
         self._cast_saved_audio = None
+        self._cast_profiles_cache = {}
+        self._cast_profiles_loading = None
         if not manager.available:
             self.cast_btn.setEnabled(False)
             self.cast_btn.setToolTip(manager.unavailable_reason)
@@ -5431,6 +5433,8 @@ class TVHeadendClient(QMainWindow):
             return
         if not manager.devices and not manager.discovering:
             manager.discover()
+        if self.current_server() is not None:
+            self._prefetch_cast_profiles()
         self._fill_cast_menu()
         self.controls_bar.popup_above(self.cast_menu, self.cast_btn)
 
@@ -5458,9 +5462,14 @@ class TVHeadendClient(QMainWindow):
         refresh.triggered.connect(lambda: self._refresh_cast_devices())
         address = menu.addAction("Connect by IP address…")
         address.triggered.connect(self._cast_by_address)
-        profile = menu.addAction("Stream profile…")
-        profile.setEnabled(self.current_server() is not None)
-        profile.triggered.connect(self._choose_cast_profile)
+        self._cast_profile_menu = menu.addMenu("Stream profile")
+        self._cast_profile_menu.setEnabled(self.current_server() is not None)
+        try:
+            self._cast_profile_menu.aboutToShow.disconnect(self._on_cast_profile_menu_about_to_show)
+        except TypeError:
+            pass
+        self._cast_profile_menu.aboutToShow.connect(self._on_cast_profile_menu_about_to_show)
+        self._fill_cast_profile_menu(self._cast_profile_menu)
 
     def _cast_by_address(self):
         host, accepted = QInputDialog.getText(self, "Connect to Chromecast", "Receiver IP address:")
@@ -5468,31 +5477,69 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage("Connecting to Chromecast…")
             self.cast_manager.connect_host(host)
 
-    def _choose_cast_profile(self):
+    def _prefetch_cast_profiles(self, force=False):
         server = self.current_server()
-        if server is not None:
-            self.statusbar.showMessage("Reading stream profiles…")
-            self.cast_manager.request_profiles(dict(server), server_key(server))
+        if server is None:
+            return
+        key = server_key(server)
+        if self._cast_profiles_loading == key:
+            return
+        if not force and key in self._cast_profiles_cache:
+            return
+        self._cast_profiles_loading = key
+        self.cast_manager.request_profiles(dict(server), key)
+
+    def _on_cast_profile_menu_about_to_show(self):
+        self._prefetch_cast_profiles(force=True)
+        menu = getattr(self, '_cast_profile_menu', None)
+        if menu is not None:
+            self._fill_cast_profile_menu(menu)
+
+    def _fill_cast_profile_menu(self, menu):
+        menu.clear()
+        server = self.current_server()
+        if server is None:
+            return
+        key = server_key(server)
+        selected = self.config.get('cast_profiles', {}).get(key, AUTO_PROFILE)
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        choices = [(AUTO_PROFILE, 'Automatic (recommended)'), ('', 'Server default')]
+        for item in self._cast_profiles_cache.get(key, []):
+            choices.append((item.uuid or item.name, f'{item.name} ({item.uuid})'))
+        for value, label in choices:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(value == selected)
+            group.addAction(action)
+            action.triggered.connect(lambda _checked=False, value=value: self._set_cast_profile(value))
+        if self._cast_profiles_loading == key:
+            waiting = menu.addAction('Loading profiles…')
+            waiting.setEnabled(False)
+
+    def _set_cast_profile(self, value):
+        server = self.current_server()
+        if server is None:
+            return
+        key = server_key(server)
+        self.config.setdefault('cast_profiles', {})[key] = value
+        self.save_config()
+        self.statusbar.showMessage('Chromecast stream profile saved; it applies to the next channel')
 
     def _on_cast_profiles(self, key, profiles, error):
         if self._closing or self.current_server() is None or server_key(self.current_server()) != key:
             return
+        self._cast_profiles_loading = None
         if error:
             self.statusbar.showMessage(error)
+            menu = getattr(self, '_cast_profile_menu', None)
+            if menu is not None and (menu.isVisible() or self.cast_menu.isVisible()):
+                self._fill_cast_profile_menu(menu)
             return
-        labels = ["Automatic (recommended)", "Server default"] + [f"{item.name} ({item.uuid})" for item in profiles]
-        values = [AUTO_PROFILE, ''] + [item.uuid or item.name for item in profiles]
-        selected = self.config.get('cast_profiles', {}).get(key, AUTO_PROFILE)
-        index = values.index(selected) if selected in values else 0
-        label, accepted = QInputDialog.getItem(
-            self, "Chromecast stream profile",
-            "Choose a server profile compatible with this receiver (usually H.264 video and AAC audio):",
-            labels, index, False,
-        )
-        if accepted:
-            self.config.setdefault('cast_profiles', {})[key] = values[labels.index(label)]
-            self.save_config()
-            self.statusbar.showMessage("Chromecast stream profile saved; it applies to the next channel")
+        self._cast_profiles_cache[key] = profiles
+        menu = getattr(self, '_cast_profile_menu', None)
+        if menu is not None and (menu.isVisible() or self.cast_menu.isVisible()):
+            self._fill_cast_profile_menu(menu)
 
     def _on_cast_profile_selected(self, name):
         if self._awaiting_playback and self.cast_manager.is_connected:
