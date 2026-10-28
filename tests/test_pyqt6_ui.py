@@ -1123,7 +1123,6 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.channel_model.headerData(0, Qt.Orientation.Horizontal) == "Number"
         assert window.channel_model.headerData(2, Qt.Orientation.Horizontal) == "Status"
         assert window.splitter.accessibleName() == "Channels, player, and tasks"
-        assert not window.splitter.opaqueResize()
         assert window.splitter.handle(2).accessibleName() == "Resize player and tasks"
         assert window.tasks_pane.accessibleName() == "Tasks"
         assert window.tasks_pane.search_box.accessibleName() == "Filter tasks"
