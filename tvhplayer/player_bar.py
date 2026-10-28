@@ -56,13 +56,6 @@ MUTED_SVG = (
     '<path d="M 31 21 l 6 6 M 37 21 l -6 6" stroke="{c}" stroke-width="2.5" '
     'stroke-linecap="round"/></svg>'
 )
-CAST_SVG = (
-    '<svg viewBox="0 0 48 48"><path d="M 13 14 h 23 v 20 h -12" stroke="{c}" '
-    'stroke-width="2.5" stroke-linejoin="round" fill="none"/>'
-    '<path d="M 13 31 a 4 4 0 0 1 4 4 M 13 25 a 10 10 0 0 1 10 10 M 13 19 '
-    'a 16 16 0 0 1 16 16" stroke="{c}" stroke-width="2.5" stroke-linecap="round" '
-    'fill="none"/></svg>'
-)
 FULLSCREEN_SVG = (
     '<svg viewBox="0 0 48 48"><path d="M 14 20 L 14 14 L 20 14 M 28 14 L 34 14 L 34 20 '
     'M 14 28 L 14 34 L 20 34 M 28 34 L 34 34 L 34 28" stroke="{c}" stroke-width="2.5" '
@@ -150,6 +143,7 @@ class PlayerBar(QWidget):
 
     def __init__(self, icons_dir, parent=None):
         super().__init__(parent)
+        self._icons_dir = Path(icons_dir)
         self.setObjectName("player_bar")
         self.setAccessibleName("Player controls")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -450,7 +444,7 @@ class PlayerBar(QWidget):
         casting = bool(casting)
         self.cast_btn.setChecked(casting)
         color = '#ffffff' if casting and not self._contrast else self._icon_color()
-        self.cast_btn.setIcon(svg_icon(CAST_SVG, color, 24))
+        self.cast_btn.setIcon(file_icon(self._icons_dir / 'chromecast.svg', color, 24))
         if casting:
             label = f'Casting to {name}' if name else 'Casting'
             describe(self.cast_btn, label, 'Choose another Chromecast or disconnect.')
