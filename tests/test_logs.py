@@ -39,13 +39,11 @@ def restore_logging():
             root.removeHandler(handler)
             handler.close()
     root.setLevel(level)
-    for name in (logs.SERVER_LOGGER, logs.OUTPUT_LOGGER, 'pychromecast',
-                 'pychromecast.controllers.heartbeat', 'tvhplayer.core.chromecast'):
+    for name in (logs.SERVER_LOGGER, logs.OUTPUT_LOGGER):
         logger = logging.getLogger(name)
         for handler in list(logger.handlers):
             logger.removeHandler(handler)
             handler.close()
-        logger.setLevel(logging.NOTSET)
 
 
 def test_configure_writes_app_and_server_logs(tmp_path, restore_logging):
@@ -94,72 +92,6 @@ def test_everything_the_process_writes_is_logged_and_hidden(tmp_path):
     for text in ('Debug: Stream URL: http://tvhplayer:***@', 'HTTP 401 error', 'child says hello'):
         assert text in app_log
     assert app_log.count('a warning') == 1
-
-
-def test_source_run_prints_chromecast_traffic_and_hides_heartbeats(tmp_path):
-    import subprocess
-    from pathlib import Path
-
-    script = (
-        'import logging\n'
-        'from tvhplayer.core import logs\n'
-        f'logs.configure_logging({str(tmp_path / "logs")!r})\n'
-        'logging.getLogger("pychromecast.socket_client").debug('
-        '"[TV(192.168.1.8):8009] Sending: http://user:s3cret@tv/stream")\n'
-        'logging.getLogger("pychromecast.socket_client").debug('
-        '"[TV(192.168.1.8):8009] Received: Message urn:x-cast:com.google.cast.tp.heartbeat '
-        'from receiver-0 to sender-0: {\'type\': \'PONG\'}")\n'
-        'logging.getLogger("pychromecast.controllers.heartbeat").debug("ping")\n'
-        'logging.getLogger("tvhplayer.core.chromecast").info('
-        '"Connected to Living room at 192.168.1.8")\n'
-        'logging.getLogger("tvhplayer.test").warning("a warning")\n'
-    )
-    done = subprocess.run(
-        [sys.executable, '-c', script],
-        cwd=str(Path(__file__).resolve().parents[1]),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert done.returncode == 0, done.stderr
-    terminal = done.stdout + done.stderr
-    assert 's3cret' not in terminal
-    assert 'Sending: http://user:***@tv/stream' in terminal
-    assert 'Debug: tvhplayer.core.chromecast: Connected to Living room at 192.168.1.8' in terminal
-    assert 'heartbeat' not in terminal
-    assert 'ping' not in terminal
-    assert terminal.count('a warning') == 1
-    app_log = (tmp_path / 'logs' / logs.APP_LOG).read_text(encoding='utf-8')
-    assert 'Sending: http://user:***@tv/stream' in app_log
-    assert 'Connected to Living room at 192.168.1.8' in app_log
-
-
-def test_packaged_run_keeps_chromecast_traffic_in_the_log_file(tmp_path):
-    import subprocess
-    from pathlib import Path
-
-    script = (
-        'import logging, sys\n'
-        'sys.frozen = True\n'
-        'from tvhplayer.core import logs\n'
-        f'logs.configure_logging({str(tmp_path / "logs")!r})\n'
-        'logging.getLogger("pychromecast.socket_client").debug("[TV] Sending: LOAD")\n'
-        'logging.getLogger("tvhplayer.core.chromecast").info("Connected to Living room")\n'
-    )
-    done = subprocess.run(
-        [sys.executable, '-c', script],
-        cwd=str(Path(__file__).resolve().parents[1]),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert done.returncode == 0, done.stderr
-    terminal = done.stdout + done.stderr
-    assert 'Sending: LOAD' not in terminal
-    assert 'Connected to Living room' not in terminal
-    app_log = (tmp_path / 'logs' / logs.APP_LOG).read_text(encoding='utf-8')
-    assert 'Sending: LOAD' in app_log
-    assert 'Connected to Living room' in app_log
 
 
 def test_unwritable_folder_keeps_the_console(tmp_path, restore_logging):

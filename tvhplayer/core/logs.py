@@ -208,65 +208,12 @@ def _capture(output):
     return _captures[2].terminal
 
 
-_CAST_LOGGERS = ('pychromecast', 'tvhplayer.core.chromecast')
-_HEARTBEAT_LOGGER = 'pychromecast.controllers.heartbeat'
-_HEARTBEAT_TEXT = re.compile(r'cast\.tp\.heartbeat|\b(?:PING|PONG)\b')
-
-
-class _BelowWarning(logging.Filter):
-    """Let the root console handler own warnings, so a line is not printed twice."""
-
-    def filter(self, record):
-        return record.levelno < logging.WARNING
-
-
-class _CastNoise(logging.Filter):
-    """Drop keep-alive traffic. PyChromecast logs PING/PONG on the socket client."""
-
-    def filter(self, record):
-        try:
-            message = record.getMessage()
-        except Exception:
-            message = str(record.msg)
-        return _HEARTBEAT_TEXT.search(message) is None
-
-
-def _detach_cast_terminal(logger):
-    for handler in list(logger.handlers):
-        if getattr(handler, '_tvhplayer_cast', False):
-            logger.removeHandler(handler)
-            handler.close()
-
-
-def _cast_terminal(stream, enabled):
-    """Show Chromecast protocol traffic on the terminal during a source run.
-
-    A packaged build keeps it in app.log only. Heartbeats stay quiet on the
-    terminal; they still reach app.log when the file handler is at DEBUG.
-    """
-    logging.getLogger(_HEARTBEAT_LOGGER).setLevel(logging.INFO if enabled else logging.NOTSET)
-    for name in _CAST_LOGGERS:
-        logger = logging.getLogger(name)
-        _detach_cast_terminal(logger)
-        logger.setLevel(logging.DEBUG if enabled else logging.NOTSET)
-        if not enabled:
-            continue
-        handler = logging.StreamHandler(stream)
-        handler.setLevel(logging.DEBUG)
-        handler.addFilter(_BelowWarning())
-        handler.addFilter(_CastNoise())
-        handler.setFormatter(SanitizingFormatter('Debug: %(name)s: %(message)s'))
-        handler._tvhplayer_cast = True
-        logger.addHandler(handler)
-
-
 def configure_logging(directory=None, capture_output=True) -> Path:
     """Write app.log and tvheadend.log; return the folder.
 
     ``capture_output`` copies the process's stdout and stderr into app.log
     while they still reach the terminal, with secrets hidden in both. A
     folder that cannot be created leaves logging on the console only.
-    A source run also prints Chromecast connection and protocol lines.
     """
     directory = Path(directory) if directory is not None else log_dir()
     try:
@@ -309,6 +256,5 @@ def configure_logging(directory=None, capture_output=True) -> Path:
     console.setFormatter(SanitizingFormatter('%(levelname)s: %(name)s: %(message)s'))
     console._tvhplayer_managed = True
     root.addHandler(console)
-    _cast_terminal(stream, enabled=not getattr(sys, 'frozen', False))
     logging.getLogger('tvhplayer').info('Logging to %s', directory)
     return directory
