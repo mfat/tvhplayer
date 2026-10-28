@@ -3733,6 +3733,11 @@ class TVHeadendClient(QMainWindow):
         
         # Create splitter for resizable panes
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Repainting a playing video (or the 60 fps startup spinner) while the
+        # handle moves makes some host Qt/graphics stacks fall badly behind the
+        # pointer.  Keep the lightweight rubber band responsive and resize the
+        # expensive player surface once, when the drag ends.
+        self.splitter.setOpaqueResize(False)
         
         # Left pane
         self.left_pane = QFrame()
