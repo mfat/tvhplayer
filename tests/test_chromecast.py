@@ -39,6 +39,17 @@ class FakeMediaController:
         self.stops += 1
 
 
+class FakeDefaultMediaReceiver:
+    def __init__(self):
+        self.played = []
+
+    def play_media(self, url, content_type, **options):
+        self.played.append((url, content_type, options))
+        callback = options.get('callback_function')
+        if callback is not None:
+            callback(True, {'type': 'MEDIA_STATUS'})
+
+
 class FakeCast:
     def __init__(self, uuid, name, cast_type='cast', model='TV'):
         self.cast_info = SimpleNamespace(
@@ -56,6 +67,7 @@ class FakeCast:
         self.disconnected = False
         self.volumes = []
         self.mutes = []
+        self.handlers = []
 
     def wait(self, timeout=None):
         self.waited = timeout
@@ -71,6 +83,9 @@ class FakeCast:
 
     def register_connection_listener(self, listener):
         self.connection_listener = listener
+
+    def register_handler(self, handler):
+        self.handlers.append(handler)
 
     def disconnect(self, timeout=None):
         self.disconnected = True
@@ -409,4 +424,33 @@ def test_manual_cast_profile_is_respected_without_automatic_fallback(casting, mo
     manager.play_channel({'url': 'http://localhost:9981'}, Channel(uuid='c', name='TV'), 'chosen')
     assert requested == ['chosen']
     assert len(errors) == 1
+
+
+def test_load_uses_default_media_receiver_instead_of_active_cast_app(qapp):
+    # YouTube and similar apps expose the media namespace; without forcing the
+    # Default Media Receiver, LOAD would target that app instead of CC1AD845.
+    living = FakeCast('00000000-0000-0000-0000-000000000001', 'Living room')
+    backend = SimpleNamespace(
+        discovery=SimpleNamespace(discover_chromecasts=lambda **_kwargs: ([living.cast_info], FakeBrowser())),
+        get_chromecast_from_host=lambda *_args, **_kwargs: living,
+        controllers=SimpleNamespace(media=SimpleNamespace(
+            DefaultMediaReceiverController=FakeDefaultMediaReceiver)),
+        config=SimpleNamespace(APP_MEDIA_RECEIVER='CC1AD845'),
+    )
+    manager = CastManager(backend=backend, executor=ImmediateExecutor(), relay_factory=FakeRelay)
+    manager.discover()
+    manager.connect_to(living.cast_info.uuid)
+
+    assert manager.play('http://tv.local/live.ts?ticket=one', 'News') is True
+
+    assert len(living.handlers) == 1
+    dmr = living.handlers[0]
+    assert isinstance(dmr, FakeDefaultMediaReceiver)
+    assert living._tvhplayer_dmr is dmr
+    assert dmr.played[0][0] == manager._expected_url
+    assert dmr.played[0][1] == 'video/mp2t'
+    assert dmr.played[0][2]['title'] == 'News'
+    assert dmr.played[0][2]['stream_type'] == 'LIVE'
+    assert living.media_controller.played == []
+    manager.close()
 
