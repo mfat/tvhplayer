@@ -2649,6 +2649,61 @@ SIGNAL_COLORS = {
 }
 
 
+class IdleSplash(QWidget):
+    """Logo on the black player, and a line under it while a Cast device is playing."""
+
+    def __init__(self, logo_path, parent=None):
+        super().__init__(parent)
+        self.setObjectName('idle_splash')
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        logo = Path(logo_path).as_posix()
+        self.setStyleSheet(
+            "#idle_splash { background-color: black; }"
+            "#idle_logo {"
+            "background-color: transparent;"
+            f"background-image: url(\"{logo}\");"
+            "background-position: center;"
+            "background-repeat: no-repeat;"
+            "}"
+            "#idle_cast_caption {"
+            "color: rgba(255, 255, 255, 230);"
+            "background: transparent;"
+            "font-size: 11pt;"
+            "}"
+        )
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(12)
+        layout.addStretch(1)
+        self.logo = QLabel(self)
+        self.logo.setObjectName('idle_logo')
+        self.logo.setFixedSize(240, 240)
+        self.logo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.caption = QLabel(self)
+        self.caption.setObjectName('idle_cast_caption')
+        self.caption.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self.caption.setWordWrap(True)
+        self.caption.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.caption.hide()
+        layout.addWidget(self.caption)
+        layout.addStretch(1)
+        self.clear_caption()
+
+    def set_playing_on(self, name):
+        text = f"Playing on {name}" if name else "Playing on Chromecast"
+        self.caption.setText(text)
+        self.caption.show()
+        describe(self, text, "The channel is playing on this Chromecast.")
+
+    def clear_caption(self):
+        self.caption.hide()
+        self.caption.clear()
+        describe(self, "Nothing playing", "TVHplayer logo, shown when nothing is playing")
+
+
 class PlaybackSpinner(QWidget):
     """Ring drawn over the player until the first picture arrives.
 
@@ -3862,17 +3917,7 @@ class TVHeadendClient(QMainWindow):
             self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
         splash_path = Path(self.icons_dir) / 'playerbg.svg'
-        self.idle_splash = QLabel(self.player_container)
-        self.idle_splash.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.idle_splash.setStyleSheet(
-            f"background-color: black; "
-            f"background-image: url({splash_path.as_posix()}); "
-            "background-position: center; "
-            "background-repeat: no-repeat;"
-        )
-        self.idle_splash.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.idle_splash.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        describe(self.idle_splash, "Nothing playing", "TVHplayer logo, shown when nothing is playing")
+        self.idle_splash = IdleSplash(splash_path, self.player_container)
 
         self.playback_spinner = PlaybackSpinner(self.player_container, native=self.engine != ENGINE_MPV)
         describe(
@@ -5133,15 +5178,33 @@ class TVHeadendClient(QMainWindow):
             return
         if visible:
             self.idle_splash.setGeometry(self.player_container.rect())
-            self.idle_splash.setAccessibleName("Nothing playing")
+            self._sync_cast_caption()
             self.idle_splash.show()
             self.idle_splash.raise_()
             spinner = getattr(self, 'playback_spinner', None)
             if spinner is not None and spinner.isVisible():
                 spinner.raise_()
         else:
+            self.idle_splash.clear_caption()
             self.idle_splash.setAccessibleName("")
             self.idle_splash.hide()
+
+    def _sync_cast_caption(self):
+        """Name the receiver under the logo once it is actually playing."""
+        splash = getattr(self, 'idle_splash', None)
+        if splash is None:
+            return
+        manager = getattr(self, 'cast_manager', None)
+        playing_on = (
+            manager is not None
+            and manager.is_connected
+            and getattr(self, '_playback_active', False)
+            and not getattr(self, '_awaiting_playback', False)
+        )
+        if playing_on:
+            splash.set_playing_on(manager.connected_name)
+        else:
+            splash.clear_caption()
 
     def _set_playback_spinner(self, visible):
         """Show a spinner from the play request until the picture starts."""
@@ -5640,8 +5703,6 @@ class TVHeadendClient(QMainWindow):
         self._set_idle_splash(True)
         name = self.cast_manager.connected_name
         channel = self._playback_channel
-        if hasattr(self, 'idle_splash'):
-            self.idle_splash.setAccessibleName(f"Casting to {name}" if name else "Casting")
         if channel is not None:
             self.statusbar.showMessage(f"Casting {channel.name} to {name}")
 

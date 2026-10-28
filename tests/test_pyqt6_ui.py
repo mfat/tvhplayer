@@ -2927,6 +2927,7 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
         manager.connected.emit('living', 'Living room')
         assert window.cast_btn.isChecked()
         assert window.cast_btn.accessibleName() == 'Casting to Living room'
+        assert window.idle_splash.caption.isHidden()
 
         channel = ui.Channel(uuid='news', name='News')
         window._remember_channel = lambda _channel: None
@@ -2941,6 +2942,12 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
         manager.playing.emit()
         assert not window._awaiting_playback
         assert window._playback_active
+        assert window.idle_splash.caption.text() == 'Playing on Living room'
+        assert not window.idle_splash.caption.isHidden()
+        assert window.idle_splash.accessibleName() == 'Playing on Living room'
+        window.show()
+        app.processEvents()
+        assert window.idle_splash.caption.geometry().top() >= window.idle_splash.logo.geometry().bottom()
 
         before = list(manager.volumes)
         manager.audio_changed.emit(27, True)
@@ -2987,6 +2994,8 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
 
         window.stop_playback()
         assert manager.stops == 1
+        assert window.idle_splash.caption.isHidden()
+        assert window.idle_splash.accessibleName() == 'Nothing playing'
     finally:
         window.close()
         app.processEvents()
