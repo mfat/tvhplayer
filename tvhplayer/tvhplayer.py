@@ -4453,9 +4453,10 @@ class TVHeadendClient(QMainWindow):
         if options['hide_disabled']:
             shown = [channel for channel in shown if channel.enabled]
         model = self.channel_model
-        # Blank space keeps names lined up, but only when some channel has a logo.
-        logos = options['logos'] and any(channel_icon_reference(channel) for channel in shown)
-        references = [self.channel_logo_reference(channel) for channel in shown] if logos else None
+        # Blank space keeps names lined up, but only when some channel has a logo
+        # (from the server or a matching picon).
+        references = [self.channel_logo_reference(channel) for channel in shown] if options['logos'] else None
+        logos = bool(references) and any(references)
         model.set_logos(logos, self._logo_pixmaps, self._logo_placeholder() if logos else None)
         model.set_kinds(self._channel_kinds)
         model.set_programmes(self._now_next, options['now_progress'])

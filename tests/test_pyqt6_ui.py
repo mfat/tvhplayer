@@ -3216,6 +3216,12 @@ def test_channels_without_a_logo_use_a_picon(monkeypatch, tmp_path):
         served = Channel(uuid='2', name='BBC One', icon='imagecache/7')
         assert window.channel_logo_reference(served) == 'imagecache/7'
         assert window.channel_logo_reference(Channel(uuid='3', name='Nothing')) == ''
+        # A list with no server logos still shows the picon column.
+        window.channel_options['logos'] = True
+        window._channels = [plain, Channel(uuid='3', name='Nothing')]
+        window._fill_channel_rows()
+        assert window.channel_model._logos is True
+        assert window.channel_model.logo_reference_at(0) == reference
         window.picons = None
         assert window.channel_logo_reference(plain) == ''
     finally:
