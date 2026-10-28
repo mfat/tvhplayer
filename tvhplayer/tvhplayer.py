@@ -5546,7 +5546,11 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage(f"Starting on {self.cast_manager.connected_name} using {name}")
 
     def _on_cast_profile_worked(self, key, profile):
-        self.config.setdefault('cast_auto_profiles', {})[key] = profile
+        profiles = self.config.setdefault('cast_auto_profiles', {})
+        if profiles.get(key) == profile:
+            return
+        profiles[key] = profile
+        self.save_config()
 
     def _refresh_cast_devices(self):
         self.statusbar.showMessage("Searching for Chromecast devices…")

@@ -2960,6 +2960,26 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
         window.play_channel_by_data(channel)
         assert requested == ['cast-h264']
 
+        learned = f'living|{key}'
+        writes = []
+        original_save = window.save_config
+
+        def counting_save():
+            writes.append(1)
+            original_save()
+
+        window.save_config = counting_save
+        window._on_cast_profile_worked(learned, 'webm-profile')
+        assert window.config['cast_auto_profiles'][learned] == 'webm-profile'
+        saved = json.loads((tmp_path / 'tvhplayer.conf').read_text(encoding='utf-8'))
+        assert saved['cast_auto_profiles'][learned] == 'webm-profile'
+        window._on_cast_profile_worked(learned, 'webm-profile')
+        assert writes == [1]
+        window._on_cast_profile_worked(learned, 'pass-profile')
+        saved = json.loads((tmp_path / 'tvhplayer.conf').read_text(encoding='utf-8'))
+        assert saved['cast_auto_profiles'][learned] == 'pass-profile'
+        assert writes == [1, 1]
+
         window.on_volume_changed(37)
         window.toggle_mute()
         assert manager.volumes[-1] == 37
