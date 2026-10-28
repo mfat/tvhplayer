@@ -417,7 +417,7 @@ class CastManager(QObject):
         except AttributeError:
             return 'CC1AD845'
 
-    def _default_media_player(self, cast):
+    def _default_media_player(self, cast, connection):
         # MediaController uses app_must_match=False, so LOAD goes into YouTube
         # (and similar) when they already expose the media namespace. Prefer the
         # Default Media Receiver controller, which launches CC1AD845 first.
@@ -426,7 +426,25 @@ class CastManager(QObject):
             return player
         dmr_cls = self._default_media_receiver_class()
         if dmr_cls is not None and hasattr(cast, 'register_handler'):
-            player = dmr_cls()
+            manager = self
+
+            class ScopedReceiver(dmr_cls):
+                def send_message_nocheck(self, data, **options):
+                    # PyChromecast may defer this send until LAUNCH completes.
+                    # Check the unique relay URL here, not just before play_media:
+                    # Stop, a new channel, or disconnect can arrive in between.
+                    if data.get('type') == 'LOAD' and (
+                        manager._closed or connection != manager._connection
+                        or cast is not manager._cast
+                        or data.get('media', {}).get('contentId') != manager._expected_url
+                    ):
+                        callback = options.get('callback_function')
+                        if callback is not None:
+                            callback(False, None)
+                        return
+                    return super().send_message_nocheck(data, **options)
+
+            player = ScopedReceiver()
             cast.register_handler(player)
             cast._tvhplayer_dmr = player
             return player
@@ -446,7 +464,11 @@ class CastManager(QObject):
                            'The Chromecast could not load this stream. Try a compatible stream profile.'))
 
         try:
-            self._default_media_player(cast).play_media(
+            player = self._default_media_player(cast, connection)
+            # The compatibility path can synchronously launch the receiver.
+            if not self._current(connection, request):
+                return
+            player.play_media(
                 url, kind, title=title, stream_type='LIVE', callback_function=loaded)
         except Exception:
             self._post(lambda: self._load_failed(connection, request, 'Could not send the stream to Chromecast.'))

@@ -445,3 +445,54 @@ def test_load_uses_default_media_receiver_instead_of_active_cast_app(qapp):
     assert living.media_controller.played == []
     manager.close()
 
+
+@pytest.mark.parametrize('action', ['stop', 'replace', 'disconnect', 'close'])
+def test_deferred_receiver_launch_cannot_send_a_cancelled_load(casting, action):
+    # Use the real controller's launch chaining: a fake that sends immediately
+    # cannot expose the race between play_media() returning and LAUNCH finishing.
+    pychromecast = pytest.importorskip('pychromecast')
+    manager, clients = casting
+    manager._backend = pychromecast
+    cast = clients[-1]
+    launches = []
+    sent = []
+    receiver = SimpleNamespace(
+        app_id='YouTube',
+        launch_app=lambda _app_id, **options: launches.append(options['callback_function']),
+    )
+    socket = SimpleNamespace(
+        receiver_controller=receiver,
+        app_namespaces={'urn:x-cast:com.google.cast.media'},
+        send_app_message=lambda _namespace, data, **_options: sent.append(data),
+    )
+    cast.register_handler = lambda handler: handler.registered(socket)
+    failures = []
+    manager.failed.connect(failures.append)
+    manager.play('http://localhost/one', 'One')
+    old_url = manager._expected_url
+    assert len(launches) == 1
+    assert not sent
+
+    if action == 'replace':
+        manager.play('http://localhost/two', 'Two')
+        current_url = manager._expected_url
+    else:
+        getattr(manager, action)()
+
+    # The TV finishes the launch after the user has already cancelled the load.
+    launches[0](True, {})
+    assert not sent
+    assert not failures
+    if action == 'replace':
+        launches[1](True, {})
+        assert [message['media']['contentId'] for message in sent] == [current_url]
+        assert current_url != old_url
+
+
+def test_cancel_during_legacy_blocking_launch_does_not_send_load(casting):
+    manager, clients = casting
+    cast = clients[-1]
+    cast.start_app = lambda _app_id: manager.stop()
+    manager.play('http://localhost/live', 'News')
+    assert not cast.media_controller.played
+

@@ -3002,6 +3002,44 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
         app.processEvents()
 
 
+def test_cast_profile_request_finishes_after_switching_away_and_can_refresh_again(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    requests = []
+    current = [{'url': 'http://server-a:9981'}]
+    monkeypatch.setattr(window, 'current_server', lambda: current[0])
+    monkeypatch.setattr(window.cast_manager, 'request_profiles',
+                        lambda _server, key: requests.append(key))
+    try:
+        window._prefetch_cast_profiles()
+        current[0] = {'url': 'http://server-b:9981'}
+        window._on_cast_profiles('http://server-a:9981', [], '')
+        assert window._cast_profiles_loading is None
+        current[0] = {'url': 'http://server-a:9981'}
+        window._prefetch_cast_profiles(force=True)
+        assert requests == ['http://server-a:9981', 'http://server-a:9981']
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_stale_cast_profile_response_does_not_clear_newer_server_request(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    current = [{'url': 'http://server-a:9981'}]
+    monkeypatch.setattr(window, 'current_server', lambda: current[0])
+    monkeypatch.setattr(window.cast_manager, 'request_profiles', lambda *_args: None)
+    try:
+        window._prefetch_cast_profiles()
+        current[0] = {'url': 'http://server-b:9981'}
+        window._prefetch_cast_profiles()
+        window._on_cast_profiles('http://server-a:9981', [], '')
+        assert window._cast_profiles_loading == 'http://server-b:9981'
+        window._on_cast_profiles('http://server-b:9981', [], '')
+        assert window._cast_profiles_loading is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_tv_guide_opens_from_the_view_menu_at_the_selected_channel(monkeypatch, tmp_path):
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
     try:

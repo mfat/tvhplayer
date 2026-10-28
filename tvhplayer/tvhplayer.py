@@ -5595,9 +5595,12 @@ class TVHeadendClient(QMainWindow):
         self.statusbar.showMessage('Chromecast stream profile saved; it applies to the next channel')
 
     def _on_cast_profiles(self, key, profiles, error):
+        # A response for a server we have since left still completes its request.
+        # Do not clear a newer request for another server, however.
+        if self._cast_profiles_loading == key:
+            self._cast_profiles_loading = None
         if self._closing or self.current_server() is None or server_key(self.current_server()) != key:
             return
-        self._cast_profiles_loading = None
         if error:
             self.statusbar.showMessage(error)
             menu = getattr(self, '_cast_profile_menu', None)
