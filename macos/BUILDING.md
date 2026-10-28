@@ -39,7 +39,7 @@ The log is in `~/Library/Logs/TVHplayer/app.log`.
 
 ## Playback engine
 
-The app plays with mpv. When an installed VLC is present at `/Applications/VLC.app`, it can be chosen in Settings > Playback instead, and the app uses it if libmpv cannot be loaded.
+The app plays with mpv only.
 
 ## GitHub Actions
 

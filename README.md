@@ -50,7 +50,7 @@ A desktop app for watching and recording live TV, with its own built-in Tvheaden
 - **macOS:** [Apple silicon](https://mfat.github.io/tvhplayer/download.html?format=macos-arm64) · [Intel](https://mfat.github.io/tvhplayer/download.html?format=macos-x86_64)
 - **Windows:** [installer](https://mfat.github.io/tvhplayer/download.html?format=windows-setup) · [portable zip](https://mfat.github.io/tvhplayer/download.html?format=windows-zip)
 
-The download links automatically get the latest version. The Flatpak, AppImage, deb and rpm include the built-in server, VLC, mpv and ffmpeg, or pull them in as dependencies. The macOS and Windows builds connect to an existing Tvheadend server; the built-in server is part of the Linux packages only. You can also [browse all releases](https://github.com/mfat/tvhplayer/releases).
+The download links automatically get the latest version. The Flatpak, AppImage, deb and rpm include the built-in server, mpv and ffmpeg, or pull them in as dependencies. The macOS and Windows builds connect to an existing Tvheadend server; the built-in server is part of the Linux packages only. You can also [browse all releases](https://github.com/mfat/tvhplayer/releases).
 
 ## Getting started
 - **Built-in server**: on first start with no channels, TVHplayer opens **Set Up Channels**. Choose a TV tuner or an IPTV playlist and follow the steps.
@@ -64,7 +64,7 @@ See the [User Guide](https://github.com/mfat/tvhplayer/wiki/User-Guide) (Help �
 - Help → Open Log Folder shows the app's log (`app.log`) and the built-in server's log (`tvheadend.log`). Please attach them to bug reports.
 
 ## Run from source
-You need Python 3, VLC, ffmpeg and, on Wayland, libmpv.
+You need Python 3, libmpv and ffmpeg.
 
 ```bash
 git clone https://github.com/mfat/tvhplayer.git
@@ -79,7 +79,7 @@ Run the tests with `python3 -m pytest tests`.
 
 ## Technical information
 - Talks to Tvheadend over HTSP or its HTTP JSON API
-- Plays with libmpv on Wayland and libvlc on X11, macOS and Windows; choose under Settings → Playback → Playback engine
+- Plays with libmpv (OpenGL into the window on Wayland and X11)
 - Records and converts with ffmpeg
 - Built with PyQt6
 

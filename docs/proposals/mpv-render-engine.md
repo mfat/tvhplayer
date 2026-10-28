@@ -1,6 +1,6 @@
 # Proposal: mpv render engine for Wayland playback
 
-- **Status:** Implemented. libmpv is a required dependency on Linux.
+- **Status:** Superseded. libmpv is now the only playback engine on every platform; VLC was removed.
 - **Date:** October 2026
 
 ## Problem

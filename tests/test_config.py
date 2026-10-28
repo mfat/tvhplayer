@@ -159,6 +159,14 @@ def test_own_title_bar_is_off_unless_chosen(tmp_path):
     assert ConfigStore(path).data['own_title_bar'] is True
 
 
+def test_legacy_player_engine_choice_is_dropped(tmp_path):
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'player_engine': 'vlc', 'volume': 40}), encoding='utf-8')
+    data = ConfigStore(path).data
+    assert 'player_engine' not in data
+    assert data['volume'] == 40
+
+
 def test_light_or_dark_choice_is_kept_and_unknown_values_follow_the_system(tmp_path):
     path = tmp_path / 'config.json'
     for saved, loaded in (('dark', 'dark'), ('light', 'light'), ('purple', 'system'), (None, 'system')):

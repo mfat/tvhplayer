@@ -1,5 +1,4 @@
 PyQt6>=6.4.0
-python-vlc>=3.0.12122
 mpv>=1.0.4
 PyChromecast>=14.1.0; python_version >= "3.11"
 PyChromecast>=13.1.0,<14; python_version < "3.11"

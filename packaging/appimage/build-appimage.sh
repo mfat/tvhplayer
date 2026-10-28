@@ -5,7 +5,7 @@
 #
 # Writes OUTDIR/tvhplayer-VERSION-x86_64.AppImage.
 # It carries Python, PyQt6, libmpv with FFmpeg, the ffmpeg command, and the
-# built-in Tvheadend. It has no libvlc: the app plays with mpv everywhere.
+# built-in Tvheadend. Playback is libmpv.
 # Needs the packages that install-deps.sh installs, and network access for the
 # Tvheadend sources, the Python packages and appimagetool.
 set -eu

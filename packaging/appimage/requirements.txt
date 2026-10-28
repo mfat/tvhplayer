@@ -1,4 +1,4 @@
-# The Python packages the AppImage carries. No python-vlc: it plays with mpv.
+# The Python packages the AppImage carries. Playback is libmpv.
 PyQt6==6.11.0
 PyQt6-Qt6==6.11.2
 PyQt6_sip==13.13.0

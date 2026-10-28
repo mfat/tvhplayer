@@ -56,13 +56,13 @@ def test_loopback_hosts():
     assert not proxy.is_loopback_url('')
 
 
-def test_vlc_loses_http_proxy_but_its_value_is_kept(proxied_env):
+def test_process_loses_http_proxy_but_its_value_is_kept(proxied_env):
     import os
 
-    proxy.hide_http_proxy_from_vlc()
+    proxy.hide_http_proxy()
     assert 'http_proxy' not in os.environ
     assert proxy.http_proxy() == DEAD_PROXY
-    proxy.hide_http_proxy_from_vlc()
+    proxy.hide_http_proxy()
     assert proxy.http_proxy() == DEAD_PROXY
 
 
@@ -78,7 +78,7 @@ def test_local_server_lists_skip_the_proxy(proxied_env, local_server):
 
 
 def test_remote_server_lists_keep_the_saved_proxy(proxied_env, monkeypatch):
-    proxy.hide_http_proxy_from_vlc()
+    proxy.hide_http_proxy()
     session = requests.Session()
     proxy.configure_session(session, 'http://nas.example:9981')
     assert session.trust_env is True
@@ -90,14 +90,14 @@ def test_remote_server_lists_keep_the_saved_proxy(proxied_env, monkeypatch):
 
 
 def test_children_get_the_proxy_only_for_remote_streams(proxied_env):
-    proxy.hide_http_proxy_from_vlc()
+    proxy.hide_http_proxy()
     assert 'http_proxy' not in proxy.child_env('http://127.0.0.1:24111/stream/channel/1')
     assert proxy.child_env('http://nas.example:9981/stream/channel/1')['http_proxy'] == DEAD_PROXY
     assert proxy.child_env(None)['http_proxy'] == DEAD_PROXY
 
 
 def test_local_recording_of_the_builtin_server_skips_the_proxy(proxied_env, monkeypatch, tmp_path):
-    proxy.hide_http_proxy_from_vlc()
+    proxy.hide_http_proxy()
     seen = {}
 
     class _Done:
@@ -122,7 +122,7 @@ def test_local_recording_of_the_builtin_server_skips_the_proxy(proxied_env, monk
 
 
 def test_mpv_gets_the_proxy_only_for_remote_streams(proxied_env, monkeypatch):
-    proxy.hide_http_proxy_from_vlc()
+    proxy.hide_http_proxy()
     assert proxy.stream_proxy('http://127.0.0.1:24111/stream/channel/1') == ''
     assert proxy.stream_proxy('http://nas.example:9981/stream/channel/1') == DEAD_PROXY
     monkeypatch.setenv('no_proxy', 'nas.example')

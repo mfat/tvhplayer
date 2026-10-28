@@ -82,19 +82,6 @@ def test_rpm_builds_the_pinned_tvheadend():
     assert spec['tvh_version'] == pins['TVHEADEND_VERSION'].replace('-', '^').replace('~', '.')
 
 
-def test_rpm_bundles_the_flatpak_python_vlc():
-    spec = spec_globals()
-    modules = yaml.safe_load(PYPI_DEPENDENCIES.read_text(encoding='utf-8'))['modules']
-    wheel = next(
-        source
-        for module in modules if module['name'] == 'python3-python-vlc'
-        for source in module['sources']
-    )
-    assert wheel['url'].endswith('/' + spec['vlc_wheel'])
-    assert wheel['sha256'] == spec['vlc_wheel_sha256']
-    assert wheel['url'] in SPEC.read_text(encoding='utf-8').replace('%{vlc_wheel}', spec['vlc_wheel'])
-
-
 def test_rpm_bundles_the_flatpak_python_mpv():
     spec = spec_globals()
     modules = yaml.safe_load(PYPI_DEPENDENCIES.read_text(encoding='utf-8'))['modules']
@@ -106,3 +93,12 @@ def test_rpm_bundles_the_flatpak_python_mpv():
     assert wheel['url'].endswith('/' + spec['mpv_wheel'])
     assert wheel['sha256'] == spec['mpv_wheel_sha256']
     assert wheel['url'] in SPEC.read_text(encoding='utf-8').replace('%{mpv_wheel}', spec['mpv_wheel'])
+
+
+def test_flatpak_does_not_build_libvlc():
+    manifest = yaml.safe_load(MANIFEST.read_text(encoding='utf-8'))
+    names = [module['name'] for module in manifest['modules'] if isinstance(module, dict)]
+    assert 'libvlc' not in names
+    assert 'libdvbpsi' not in names
+    assert 'libmpeg2' not in names
+    assert 'libmpv' in names

@@ -27,14 +27,12 @@ from PyQt6.QtWidgets import (
 try:
     from .a11y import announce_label, describe
     from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
-    from .core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC
     from .core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
     from .ui_theme import style_names
     from .settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 except ImportError:
     from a11y import announce_label, describe
     from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
-    from core.engine import ENGINE_AUTO, ENGINE_MPV, ENGINE_VLC
     from core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
     from ui_theme import style_names
     from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
@@ -47,12 +45,6 @@ HIDE_HELP = (
     'Channels that fail are hidden and come back once a later test finds them working.'
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
-ENGINE_HELP = (
-    'Automatic plays with mpv, except on a Linux X11 desktop, where it plays with VLC. '
-    'With VLC on a Wayland desktop, the whole window runs through XWayland and can look soft when scaled. '
-    'A change takes effect the next time TVHplayer starts.'
-)
-ENGINE_SHORT = 'Requires restart.'
 FOLDER_HELP = 'Recording to this computer saves here without asking for a file name.'
 BUILTIN_FOLDER_HELP = ' The built-in server saves its recordings here too.'
 OPTIONS_HELP = (
@@ -187,16 +179,6 @@ class SettingsDialog(QDialog):
         self.play_check.setChecked(host.plays_on_start())
         describe(self.play_check, description=PLAY_HELP)
         startup.add_row(SettingRow('&Play the last channel when TVHplayer starts', PLAY_HELP, self.play_check))
-
-        engine = page.add(SettingsGroup('Playback engine'))
-        self.engine_combo = QComboBox()
-        self.engine_combo.setMinimumWidth(170)
-        for label, choice in (('Automatic', ENGINE_AUTO), ('mpv', ENGINE_MPV), ('VLC', ENGINE_VLC)):
-            self.engine_combo.addItem(label, choice)
-        self.engine_combo.setCurrentIndex(max(self.engine_combo.findData(host.player_engine_choice()), 0))
-        describe(self.engine_combo, 'Playback engine', ENGINE_HELP)
-        engine.add_row(SettingRow('Playback &engine', ENGINE_SHORT, self.engine_combo))
-        self.engine_combo.currentIndexChanged.connect(self._engine_chosen)
         page.finish()
         return page
 
@@ -388,10 +370,6 @@ class SettingsDialog(QDialog):
     def _scheme_chosen(self, _index):
         # Once the list has closed, as for the theme: the new colors repaint every widget.
         QTimer.singleShot(0, lambda: self._host.set_color_scheme_choice(self.scheme_combo.currentData()))
-
-    def _engine_chosen(self, _index):
-        self._host.set_player_engine_choice(self.engine_combo.currentData())
-        self._show_title_bar_row()
 
     def _show_title_bar_row(self):
         self._title_bar_group.set_row_visible(self._title_bar_row, self._host.can_draw_title_bar())

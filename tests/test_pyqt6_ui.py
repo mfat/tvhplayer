@@ -19,11 +19,6 @@ def test_ui_module_parses():
 
 def test_ui_module_uses_pyqt6(monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    monkeypatch.setitem(
-        sys.modules,
-        'vlc',
-        types.SimpleNamespace(Instance=lambda *a, **k: None, MediaStats=object, __version__='stub'),
-    )
     sys.modules.pop('tvhplayer.tvhplayer', None)
 
     import tvhplayer.tvhplayer as ui
@@ -61,111 +56,113 @@ class _FakeEvents:
     def __init__(self):
         self.handlers = {}
 
-    def event_attach(self, event_type, callback):
-        self.handlers[event_type] = callback
 
+class _FakePlayer:
+    """Stand-in for MpvPlayer: the window's Player interface plus event hooks for tests."""
 
-class _FakeVlcPlayer:
     def __init__(self):
-        self.key_input = None
-        self.mouse_input = None
-        self._muted = 0
+        self.key_input = False
+        self.mouse_input = False
+        self._muted = False
         self._volume = -1
         self._playing = False
+        self.attached = None
+        self._on_playing = None
+        self._on_stopped = None
+        self._on_error = None
+        self._schedule = lambda fn: fn()
         self._events = _FakeEvents()
+        self.audio = []
+        self.audio_id = -1
+        self.spu = []
+        self.spu_id = -1
+        self._deinterlace = 'auto'
 
-    def event_manager(self):
-        return self._events
+    def set_handlers(self, on_playing=None, on_stopped=None, schedule=None, on_error=None):
+        self._on_playing = on_playing
+        self._on_stopped = on_stopped
+        self._on_error = on_error
+        if schedule is not None:
+            self._schedule = schedule
+        self._events.handlers['playing'] = lambda _e: self._schedule(
+            lambda: self._on_playing and self._on_playing()
+        )
+        self._events.handlers['stopped'] = lambda _e: self._schedule(
+            lambda: self._on_stopped and self._on_stopped()
+        )
+        self._events.handlers['ended'] = self._events.handlers['stopped']
+        self._events.handlers['error'] = lambda _e: self._schedule(
+            lambda: self._on_error and self._on_error()
+        )
 
-    def set_xwindow(self, handle):
-        return None
+    def attach(self, surface):
+        self.attached = surface
 
-    def set_hwnd(self, handle):
-        return None
-
-    def set_nsobject(self, handle):
-        return None
-
-    def set_hardware_decoding(self, value):
-        return None
-
-    def video_set_key_input(self, value):
-        self.key_input = value
-
-    def video_set_mouse_input(self, value):
-        self.mouse_input = value
-
-    def audio_get_mute(self):
-        return self._muted
-
-    def audio_set_mute(self, value):
-        self._muted = value
-
-    def audio_get_volume(self):
-        return self._volume
-
-    def audio_set_volume(self, value):
-        self._volume = value
-
-    def is_playing(self):
-        return self._playing
-
-    def audio_get_track_description(self):
-        return getattr(self, 'audio', [])
-
-    def audio_get_track(self):
-        return getattr(self, 'audio_id', -1)
-
-    def audio_set_track(self, track_id):
-        self.audio_id = track_id
-
-    def video_get_spu_description(self):
-        return getattr(self, 'spu', [])
-
-    def video_get_spu(self):
-        return getattr(self, 'spu_id', -1)
-
-    def video_set_spu(self, track_id):
-        self.spu_id = track_id
-
-    def video_set_deinterlace(self, mode):
-        self.deinterlace = mode
+    def play(self, url):
+        self._playing = True
 
     def stop(self):
         self._playing = False
 
-    def play(self):
-        self._playing = True
+    def is_playing(self):
+        return self._playing
 
-    def set_media(self, media):
+    def set_volume(self, value):
+        self._volume = int(value)
+
+    def is_muted(self):
+        return bool(self._muted)
+
+    def set_muted(self, muted):
+        self._muted = bool(muted)
+
+    def audio_tracks(self):
+        return [(int(i), n.decode() if isinstance(n, bytes) else str(n))
+                for i, n in self.audio if int(i) != -1]
+
+    def audio_track(self):
+        return int(self.audio_id)
+
+    def set_audio_track(self, track_id):
+        self.audio_id = int(track_id)
+
+    def subtitle_tracks(self):
+        return [(int(i), n.decode() if isinstance(n, bytes) else str(n))
+                for i, n in self.spu if int(i) != -1]
+
+    def subtitle_track(self):
+        return int(self.spu_id)
+
+    def set_subtitle_track(self, track_id):
+        self.spu_id = int(track_id)
+
+    def deinterlace(self):
+        return self._deinterlace
+
+    def set_deinterlace(self, mode):
+        self._deinterlace = mode
+        return True
+
+    def show_message(self, text, duration_ms=3000):
         return None
 
-    def get_media(self):
+    def log_stats(self):
         return None
+
+    def close(self):
+        self._playing = False
+
+    # Compat names some tests still call on the stand-in.
+    def audio_get_mute(self):
+        return self._muted
+
+    def audio_get_volume(self):
+        return self._volume
 
 
 def _make_player(monkeypatch, tmp_path, prepare=None):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    fake_player = _FakeVlcPlayer()
-    fake_instance = types.SimpleNamespace(
-        media_player_new=lambda: fake_player,
-        media_new=lambda url: object(),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        'vlc',
-        types.SimpleNamespace(
-            Instance=lambda *a, **k: fake_instance,
-            MediaStats=object,
-            EventType=types.SimpleNamespace(
-                MediaPlayerPlaying='playing',
-                MediaPlayerStopped='stopped',
-                MediaPlayerEndReached='ended',
-                MediaPlayerEncounteredError='error',
-            ),
-            __version__='stub',
-        ),
-    )
+    fake_player = _FakePlayer()
     sys.modules.pop('tvhplayer.tvhplayer', None)
     import tvhplayer.tvhplayer as ui
 
@@ -175,6 +172,7 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
     monkeypatch.setattr(ui, 'ConfigStore', lambda *a, **k: store)
     # Not the picon pack on this computer: each window read its tens of thousands of logos.
     monkeypatch.setattr(ui, 'default_picon_dir', lambda: tmp_path / 'picons')
+    monkeypatch.setattr(ui.TVHeadendClient, '_new_player', lambda self: fake_player)
     if prepare is None:
         monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
     else:
@@ -262,8 +260,9 @@ def test_same_window_fullscreen_hides_chrome(monkeypatch, tmp_path):
         assert window.idle_splash.isVisible()
         assert not window.left_pane.isVisible()
         assert not window.tasks_pane.isVisible()
-        # The controls float over the picture, in a window of their own.
+        # The controls float over the picture as an in-window overlay.
         assert window.floating_bar.bar is window.controls_bar
+        assert not window.floating_bar.isWindow()
         window.floating_bar.poke()
         app.processEvents()
         assert window.controls_bar.isVisible()
@@ -394,19 +393,20 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
         window._protect_video_surface(True)
         app.processEvents()
         assert not window.idle_splash.isVisible()
-        assert not window.video_frame.updatesEnabled()
+        assert window.video_frame.updatesEnabled()
         window.toggle_fullscreen()
         app.processEvents()
         assert not window.idle_splash.isVisible()
-        assert not window.video_frame.updatesEnabled()
+        assert window.video_frame.updatesEnabled()
     finally:
         window.close()
         app.processEvents()
 
 
 def test_playback_surface_ignores_transient_stop_and_qt_paints(monkeypatch, tmp_path):
-    from PyQt6.QtCore import QPoint, QRect, Qt
+    from PyQt6.QtCore import QPoint, Qt
     from PyQt6.QtGui import QPaintEvent
+    from PyQt6.QtCore import QRect
 
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
     try:
@@ -416,10 +416,11 @@ def test_playback_surface_ignores_transient_stop_and_qt_paints(monkeypatch, tmp_
         window._protect_video_surface(True)
         assert window._playback_active
         assert not window.idle_splash.isVisible()
-        assert not window.video_frame.updatesEnabled()
+        assert window.video_frame.updatesEnabled()
 
         paint = QPaintEvent(QRect(0, 0, 10, 10))
-        assert window.eventFilter(window.video_frame, paint) is True
+        # OpenGL video widget paints itself; the filter does not swallow paints.
+        assert window.eventFilter(window.video_frame, paint) is False
 
         fake_player._events.handlers['stopped'](None)
         app.processEvents()
@@ -917,11 +918,6 @@ def test_go_to_playing_channel_switches_to_its_server(monkeypatch, tmp_path):
 
 def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    monkeypatch.setitem(
-        sys.modules,
-        'vlc',
-        types.SimpleNamespace(Instance=lambda *a, **k: None, MediaStats=object, __version__='stub'),
-    )
     sys.modules.pop('tvhplayer.tvhplayer', None)
 
     import tvhplayer.tvhplayer as ui
@@ -1012,11 +1008,6 @@ def _column_widths_fill_viewport(table):
 
 def test_status_dialogs_fill_window_width(monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    monkeypatch.setitem(
-        sys.modules,
-        'vlc',
-        types.SimpleNamespace(Instance=lambda *a, **k: None, MediaStats=object, __version__='stub'),
-    )
     sys.modules.pop('tvhplayer.tvhplayer', None)
     import tvhplayer.tvhplayer as ui
     from PyQt6.QtWidgets import QApplication, QHeaderView
@@ -2297,7 +2288,7 @@ def test_spinner_sits_above_the_video_and_shows_the_server_status(monkeypatch, t
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
     try:
         spinner = window.playback_spinner
-        assert spinner.testAttribute(ui.Qt.WidgetAttribute.WA_NativeWindow)
+        assert not spinner.testAttribute(ui.Qt.WidgetAttribute.WA_NativeWindow)
         assert not window.player_container.testAttribute(ui.Qt.WidgetAttribute.WA_NativeWindow)
 
         states = iter(['Testing', 'Bad', 'Testing'])
@@ -3107,9 +3098,9 @@ def test_playback_menu_lists_tracks_and_deinterlace(monkeypatch, tmp_path):
         assert [a.isChecked() for a in deinterlace.actions()] == [True, False, False]
         deinterlace.actions()[1].trigger()
         assert window.config['deinterlace'] == 'on'
-        assert fake_player.deinterlace == 'yadif2x'
+        assert fake_player.deinterlace() == 'on'
         deinterlace.actions()[2].trigger()
-        assert fake_player.deinterlace == ''
+        assert fake_player.deinterlace() == 'off'
         # Filled again when it opens, so the list follows the stream.
         window._fill_playback_menu(menu)
         assert len(menu.actions()) == 3
@@ -3236,22 +3227,11 @@ def test_mpv_engine_uses_plain_widgets_qt_keeps_painting(monkeypatch, tmp_path):
     from PyQt6.QtCore import Qt
 
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
-    window.close()
-    attached = []
-
-    def fake_mpv_player(self):
-        # The stub libvlc player, attached to the OpenGL widget instead of a window id.
-        player = ui.VlcPlayer()
-        player.attach = attached.append
-        return player
-
-    monkeypatch.setattr(ui.TVHeadendClient, '_new_player', fake_mpv_player)
-    window = ui.TVHeadendClient(ui.ENGINE_MPV)
     try:
         from tvhplayer.video_widget import MpvVideoWidget
 
         assert isinstance(window.video_frame, MpvVideoWidget)
-        assert attached == [window.video_frame]
+        assert fake_player.attached is window.video_frame
         assert not window.video_frame.testAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         assert not window.playback_spinner.testAttribute(Qt.WidgetAttribute.WA_NativeWindow)
         assert not window.floating_bar.isWindow()

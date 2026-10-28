@@ -25,9 +25,9 @@ from .models import (
     TimerecEntry,
     TimerecSpec,
 )
+from .mpv_player import MpvPlayer
 from .player import Player
 from .recorder import LocalRecorder
-from .vlc_player import VlcPlayer
 
 __all__ = [
     'TvhBackend',
@@ -35,7 +35,7 @@ __all__ = [
     'ConfigStore',
     'LocalRecorder',
     'Player',
-    'VlcPlayer',
+    'MpvPlayer',
     'RecordingFile',
     'TvhError',
     'TvhAuthError',

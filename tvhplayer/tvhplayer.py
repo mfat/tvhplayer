@@ -56,8 +56,9 @@ try:
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
     from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from .core import convert
-    from .core.vlc_player import VlcPlayer
-    from .core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for, startup_platform
+    from .core import frozen_libs
+    from .core.engine import mpv_missing
+    from .core.mpv_player import MpvPlayer
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from .core.playlist_sync import PlaylistSource, server_key
     from .core.playback_status import (
@@ -147,9 +148,9 @@ except ImportError:
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from core import convert
-    from core.vlc_player import VlcPlayer
     from core import frozen_libs
-    from core.engine import ENGINE_CHOICES, ENGINE_MPV, ENGINE_VLC, choose_engine, qt_platform_for, startup_platform
+    from core.engine import mpv_missing
+    from core.mpv_player import MpvPlayer
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
     from core.playlist_sync import PlaylistSource, server_key
     from core.playback_status import (
@@ -2710,7 +2711,7 @@ class PlaybackSpinner(QWidget):
     When the channel fails, it stays up without the ring to show why.
     """
 
-    def __init__(self, parent=None, native=True):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self._angle = 0
         self._timer = QTimer(self)
@@ -2722,10 +2723,6 @@ class PlaybackSpinner(QWidget):
         self._problem = ''
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        if native:
-            # The video surface is a native window; a plain widget would be drawn underneath it.
-            self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
-            self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setStyleSheet("background-color: black;")
         self.hide()
@@ -3362,7 +3359,7 @@ class ServerLogDialog(QDialog):
         self._watch.lines.disconnect(self.add_lines)
 
 
-# The environment as the app was started, before it forced X11 for VLC.
+# The environment as the app was started (before any Qt platform tweaks).
 LAUNCH_ENVIRON = {}
 
 
@@ -3372,10 +3369,9 @@ class TVHeadendClient(QMainWindow):
     # Player callbacks. The engine calls from its own threads; a signal runs them on this one.
     _player_callback = pyqtSignal(object)
 
-    def __init__(self, engine=ENGINE_VLC):
+    def __init__(self):
         super().__init__()
-        # libmpv draws into an OpenGL widget; libvlc into a native window.
-        self.engine = engine
+        self.engine = 'mpv'
         self.setup_paths()
         # Windows and macOS take the title bar, taskbar and Dock icon from the window;
         # Linux desktops take it from the desktop file, an AppImage without one from here.
@@ -3558,10 +3554,7 @@ class TVHeadendClient(QMainWindow):
             self.builtin.start()
 
         try:
-            if self.engine == ENGINE_MPV:
-                self.player.attach(self.video_frame)
-            else:
-                self.player.attach(self.video_frame.winId().__int__())
+            self.player.attach(self.video_frame)
             # Started by each new picture: the stats say little before a stream has run a moment.
             self.hw_check_timer = QTimer(self)
             self.hw_check_timer.setSingleShot(True)
@@ -3896,8 +3889,7 @@ class TVHeadendClient(QMainWindow):
         self.right_layout = QVBoxLayout(self.right_pane)
         self.right_layout.setObjectName("right_layout")
         
-        # VLC draws into video_frame. Keep that surface free of the splash
-        # image so Qt repaints do not flash the logo over live video.
+        # libmpv draws into the OpenGL video widget; splash and spinner sit on top as siblings.
         self.player_container = QWidget()
         self.player_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.player_container.setStyleSheet("background-color: black;")
@@ -3918,16 +3910,11 @@ class TVHeadendClient(QMainWindow):
         )
         self.video_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.video_frame.customContextMenuRequested.connect(self.show_video_context_menu)
-        if self.engine != ENGINE_MPV:
-            self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
-            self.video_frame.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
-            self.video_frame.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
-            self.video_frame.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
         splash_path = Path(self.icons_dir) / 'playerbg.svg'
         self.idle_splash = IdleSplash(splash_path, self.player_container)
 
-        self.playback_spinner = PlaybackSpinner(self.player_container, native=self.engine != ENGINE_MPV)
+        self.playback_spinner = PlaybackSpinner(self.player_container)
         describe(
             self.playback_spinner,
             "Starting playback",
@@ -3976,8 +3963,8 @@ class TVHeadendClient(QMainWindow):
         describe(self.fullscreen_btn, "Fullscreen", "Fill the screen with the picture. Keyboard: F11 or F. Escape leaves fullscreen.")
         self.fullscreen_btn.setToolTip("Fullscreen (F11)")
         self.right_layout.addWidget(self.controls_bar)
-        # In fullscreen the bar moves into this window, over the picture.
-        self.floating_bar = FloatingBar(self, overlay=self.engine == ENGINE_MPV)
+        # In fullscreen the bar is a child overlay on the picture.
+        self.floating_bar = FloatingBar(self, overlay=True)
         
         # Add panes to splitter instead of layout
         self.tasks_pane = TasksPanel(self)
@@ -5230,7 +5217,7 @@ class TVHeadendClient(QMainWindow):
             spinner.setAccessibleName("")
 
     def _show_playback_wait(self):
-        """Cover the player until VLC reports that playback has started."""
+        """Cover the player until mpv reports that playback has started."""
         self._awaiting_playback = True
         if hasattr(self, '_splash_idle_timer'):
             self._splash_idle_timer.stop()
@@ -5241,8 +5228,6 @@ class TVHeadendClient(QMainWindow):
         self._set_playback_spinner(True)
         self._sync_play_button()
         self._watch_start()
-        if hasattr(self, 'video_frame') and self.engine != ENGINE_MPV:
-            self.video_frame.setUpdatesEnabled(False)
 
     def _watch_start(self):
         """Show what the server says about the channel while it starts."""
@@ -5302,7 +5287,7 @@ class TVHeadendClient(QMainWindow):
             self._show_playback_problem(f"{name} is not working right now. Try another channel.")
 
     def _protect_video_surface(self, playing):
-        """While a channel is on, do not let Qt paint or flash the splash."""
+        """While a channel is on, keep the splash and spinner in sync with the picture."""
         self._playback_active = playing
         self._sync_play_button()
         if hasattr(self, '_splash_idle_timer'):
@@ -5312,8 +5297,6 @@ class TVHeadendClient(QMainWindow):
         self._set_idle_splash(casting or (not playing) or waiting)
         if waiting:
             self._set_playback_spinner(True)
-        if hasattr(self, 'video_frame') and self.engine != ENGINE_MPV:
-            self.video_frame.setUpdatesEnabled(casting or (not playing and not waiting))
 
     def _show_on_picture(self, text):
         """Repeat a status message over the video, where it shows in fullscreen too.
@@ -5451,18 +5434,9 @@ class TVHeadendClient(QMainWindow):
         self._protect_video_surface(False)
 
     def _new_player(self):
-        if self.engine != ENGINE_MPV:
-            return VlcPlayer()
-        # Imported only here so a libvlc launch never loads libmpv or Qt's OpenGL widgets.
-        try:
-            from .core.mpv_player import MpvPlayer
-        except ImportError:
-            from core.mpv_player import MpvPlayer
         return MpvPlayer()
 
     def _new_video_surface(self):
-        if self.engine != ENGINE_MPV:
-            return QWidget()
         try:
             from .video_widget import MpvVideoWidget
         except ImportError:
@@ -6210,12 +6184,6 @@ class TVHeadendClient(QMainWindow):
                 self.floating_bar.poke()
             if event.type() == QEvent.Type.MouseButtonDblClick:
                 self.toggle_fullscreen()
-                return True
-            # libvlc owns the native window while playing; the OpenGL widget is always Qt's to paint.
-            if self._playback_active and self.engine != ENGINE_MPV and event.type() in (
-                QEvent.Type.Paint,
-                QEvent.Type.UpdateRequest,
-            ):
                 return True
         return super().eventFilter(obj, event)
 
@@ -7102,12 +7070,9 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
 
     def can_draw_title_bar(self):
-        """Whether the title bar switch applies at the next start, which may
-        run on another platform: VLC always runs on X11, mpv on Wayland."""
+        """Whether the title bar switch applies on this desktop (GNOME/KDE)."""
         environ = LAUNCH_ENVIRON or os.environ
-        engine, _reason = choose_engine(environ, preference=self.config['player_engine'])
-        platform = startup_platform(engine, environ) or QApplication.platformName()
-        return window_frame.wants_own_title_bar(platform, environ)
+        return window_frame.wants_own_title_bar(QApplication.platformName(), environ)
 
     def draws_title_bar(self):
         """The Settings choice; the window in use keeps its title bar until the next start."""
@@ -7116,15 +7081,6 @@ class TVHeadendClient(QMainWindow):
     def set_draws_title_bar(self, on):
         self.config['own_title_bar'] = bool(on)
         self.save_config()
-
-    def player_engine_choice(self):
-        """The Settings choice: automatic, mpv, or VLC. ``self.engine`` is the one running."""
-        return self.config['player_engine']
-
-    def set_player_engine_choice(self, choice):
-        if choice in ENGINE_CHOICES:
-            self.config['player_engine'] = choice
-            self.save_config()
 
     def theme_choice(self):
         """The Settings choice: TVHplayer or a Qt style."""
@@ -7856,22 +7812,20 @@ def main():
     # A Windows or macOS build carries its own libmpv.
     frozen_libs.prepare()
     try:
+        problem = mpv_missing()
+        if problem:
+            print(f"Error: libmpv is required: {problem}")
+            sys.exit(1)
+        print("Debug: Playback engine: mpv")
         try:
             settings = ConfigStore().data
-            preference = settings['player_engine']
             theme = settings['ui_theme']
             scheme = settings['color_scheme']
         except Exception as e:
-            print(f"Debug: Could not read the engine and theme settings: {e}")
-            preference = None
+            print(f"Debug: Could not read the theme settings: {e}")
             theme = THEME_TVHPLAYER
             scheme = None
-        engine, reason = choose_engine(preference=preference)
-        print(f"Debug: Playback engine: {engine} ({reason})")
         LAUNCH_ENVIRON.update(os.environ)
-        qt_platform = qt_platform_for(engine)
-        if qt_platform:
-            os.environ["QT_QPA_PLATFORM"] = qt_platform
         cursor_debug.prepare()
         app = QApplication(sys.argv)
         print(f"Debug: Qt platform: {app.platformName()}")
@@ -7892,7 +7846,7 @@ def main():
             set_color_scheme(app, scheme)
             apply_theme(app, theme, NoDialogButtonIconsStyle)
         print(f"Debug: Theme: {theme or 'system (high contrast)'}")
-        player = TVHeadendClient(engine)
+        player = TVHeadendClient()
         player.show()
         sys.exit(app.exec())
     except Exception as e:

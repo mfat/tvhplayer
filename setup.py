@@ -9,8 +9,6 @@ setup(
     url="https://github.com/mfat/tvhplayer",
     install_requires=[
         'PyQt6>=6.4.0',
-        'python-vlc>=3.0.12122',
-        # On Wayland, libmpv draws the picture so the window is not run through XWayland.
         'mpv>=1.0.4',
         'PyChromecast>=14.1.0; python_version >= "3.11"',
         'PyChromecast>=13.1.0,<14; python_version < "3.11"',

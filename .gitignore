@@ -19,7 +19,6 @@ __pycache__/
 /macos/.venv*/
 /macos/build/
 /macos/dist/
-/macos/vlc-plugins-staging/
 /macos/*.log
 /macos/TVHplayer-*.spec
 

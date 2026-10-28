@@ -1,10 +1,9 @@
 """HTTP proxy settings per consumer. No Qt imports.
 
-libvlc 3.0 sends every http:// stream through ``http_proxy`` and ignores
-``no_proxy``, and it reads the variable from this process. The player hides
-``http_proxy`` before VLC runs. requests and ffmpeg get the saved value back
-and keep honoring ``no_proxy``. libmpv gets the proxy for each stream. A
-server on this machine is always reached directly.
+libmpv gets a per-stream proxy. The process ``http_proxy`` is hidden once so
+a local or LAN server is not forced through it; requests and ffmpeg get the
+saved value back and keep honoring ``no_proxy``. A server on this machine is
+always reached directly.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ _HIDDEN = object()
 _saved_http_proxy = _HIDDEN
 
 
-def hide_http_proxy_from_vlc() -> None:
+def hide_http_proxy() -> None:
     """Remove ``http_proxy`` from this process once, keeping its value for others."""
     global _saved_http_proxy
     if _saved_http_proxy is _HIDDEN:

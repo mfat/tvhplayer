@@ -33,9 +33,6 @@ LICENSE_TEXT = (
     'You should have received a copy of the GNU General Public License along with this program. '
     "If not, see <a href='https://www.gnu.org/licenses/'>https://www.gnu.org/licenses/</a>."
 )
-ENGINE_NAMES = {'mpv': 'mpv', 'vlc': 'VLC'}
-
-
 def _link_button(text, url, primary=False):
     button = QPushButton(text)
     if primary:
@@ -49,7 +46,7 @@ class AboutDialog(QDialog):
     def __init__(self, version, icon_path, engine=None, parent=None):
         super().__init__(parent)
         self._version = version
-        self._engine = ENGINE_NAMES.get(engine or '', '')
+        self._engine = 'mpv' if (engine or 'mpv') == 'mpv' else (engine or 'mpv')
         self.setWindowTitle('About TVHplayer')
         self.setAccessibleName('About TVHplayer')
         self.setAccessibleDescription(f'TVHplayer version {version}, created by mFat.')

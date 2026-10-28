@@ -1,8 +1,7 @@
 """The dark bar under the picture: Play/Stop, Record, volume and fullscreen.
 
-In fullscreen the same bar floats over the bottom of the picture in a
-window of its own, because VLC draws into a native window that ordinary
-child widgets cannot cover.
+In fullscreen the same bar floats over the bottom of the picture as a
+child overlay on the OpenGL video widget.
 """
 
 from __future__ import annotations
@@ -470,21 +469,12 @@ class FloatingBar(QWidget):
     MARGIN_BOTTOM = 18
     RADIUS = 26
 
-    def __init__(self, window, overlay=False):
-        # Over a native video window only another window shows on top. Over the
-        # OpenGL video widget a plain child does, and Wayland would not let a
-        # separate window choose its own position.
-        if overlay:
-            super().__init__(window)
-            # A child shows with its window; the bar waits for fullscreen.
-            self.hide()
-        else:
-            super().__init__(
-                window,
-                Qt.WindowType.Tool
-                | Qt.WindowType.FramelessWindowHint
-                | Qt.WindowType.WindowDoesNotAcceptFocus,
-            )
+    def __init__(self, window, overlay=True):
+        # Child of the main window over the OpenGL video widget. A separate
+        # Tool window cannot place itself on Wayland.
+        super().__init__(window)
+        # A child shows with its window; the bar waits for fullscreen.
+        self.hide()
         self._window = window
         self._overlay = overlay
         self._bar = None
@@ -517,7 +507,7 @@ class FloatingBar(QWidget):
         return bar
 
     def place(self):
-        frame = self._window.rect() if self._overlay else self._window.geometry()
+        frame = self._window.rect()
         height = self._bar.sizeHint().height() if self._bar is not None else 52
         width = max(frame.width() - 2 * self.MARGIN_X, 200)
         self.setGeometry(

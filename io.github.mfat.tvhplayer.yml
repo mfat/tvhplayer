@@ -22,7 +22,7 @@ finish-args:
 
 
 modules:
-  # One FFmpeg for libmpv, libvlc, and the ffmpeg command used for local recordings.
+  # One FFmpeg for libmpv and the ffmpeg command used for local recordings.
   - name: ffmpeg
     config-opts:
       - --enable-pic
@@ -112,50 +112,6 @@ modules:
           stable-only: true
           url-template: https://github.com/mpv-player/mpv/archive/v$version.tar.gz
 
-  - name: libdvbpsi
-    sources:
-      - type: archive
-        url: https://download.videolan.org/pub/libdvbpsi/1.3.3/libdvbpsi-1.3.3.tar.bz2
-        sha256: 02b5998bcf289cdfbd8757bedd5987e681309b0a25b3ffe6cebae599f7a00112
-
-  - name: libmpeg2
-    sources:
-      - type: archive
-        # libmpeg2.sourceforge.net no longer serves it; same file, same checksum.
-        url: https://download.videolan.org/pub/contrib/libmpeg2/libmpeg2-0.5.1.tar.gz
-        sha256: dee22e893cb5fc2b2b6ebd60b88478ab8556cb3b93f9a0d7ce8f3b61851871d4
-      # Its config.guess (2008) predates aarch64; use the SDK's.
-      - type: shell
-        commands:
-          - cp /usr/share/automake-*/config.guess /usr/share/automake-*/config.sub .auto/
-    config-opts:
-      - --enable-shared
-      - --disable-static
-
-  - name: libvlc
-    config-opts:
-      - BUILDCC=gcc
-      - --disable-a52
-      - --disable-lua
-      - --disable-qt
-      - --disable-ncurses
-      - --disable-udev
-      - --enable-dvbpsi
-      - --enable-libmpeg2
-      # No keyring: the app passes its own credentials. 3.0.24 finds libsecret.pc but not its headers.
-      - --disable-secret
-    post-install:
-      - /app/lib/vlc/vlc-cache-gen /app/lib/vlc/plugins
-    sources:
-      - type: archive
-        url: https://get.videolan.org/vlc/3.0.24/vlc-3.0.24.tar.xz
-        sha256: e7cab503d1d7d5849b89d2cf0e1ee60d0ef6d012407791b644b9cfc0cc225fdf
-        x-checker-data:
-          type: anitya
-          project-id: 6504
-          stable-only: true
-          url-template: https://get.videolan.org/vlc/$version/vlc-$version.tar.xz
-
   - name: libdvbcsa
     config-opts:
       - --disable-static
@@ -187,7 +143,7 @@ modules:
         path: packaging/tvheadend/build-libhdhomerun.sh
 
   # Built-in server. TVHplayer starts /app/bin/tvheadend on 127.0.0.1 and stops it on quit.
-  # No transcoding (VLC decodes), no Vue UI (needs npm; the classic UI is served at /),
+  # No transcoding (mpv decodes), no Vue UI (needs npm; the classic UI is served at /),
   # and nothing the build would download.
   - name: tvheadend
     config-opts:

@@ -1,9 +1,7 @@
-# Windows build environment (Python 3.13). python-vlc lets an installed VLC
-# serve as the fallback engine; Pillow turns the PNG icon into the .exe's icon.
+# Windows build environment (Python 3.13). Pillow turns the PNG icon into the .exe's icon.
 PyInstaller==6.22.3
 PyQt6==6.11.0
 mpv==1.0.8
-python-vlc==3.0.21203
 PyChromecast==14.1.0
 requests==2.34.2
 urllib3==2.8.0

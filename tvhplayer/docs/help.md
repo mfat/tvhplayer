@@ -156,9 +156,9 @@ While this computer is recording, TVHplayer keeps it from going to sleep. It als
 - **Theme**: Follow System, Light or Dark.
 - **Use TVHplayer's own title bar** (GNOME and KDE on Wayland, and KDE on X11): a title bar drawn by TVHplayer in place of the desktop's.
 
-## Playback engine
+## Playback
 
-On Linux, **Settings → Playback → Playback engine** chooses the player: **Automatic** plays with mpv on a Wayland desktop and with VLC on X11. With VLC on Wayland, the whole window runs through XWayland and can look soft when scaled. The change takes effect the next time TVHplayer starts. macOS and Windows always use VLC.
+TVHplayer plays with **mpv** (libmpv), drawing into the window on Wayland and X11 so the interface stays sharp at fractional scale.
 
 ## Keyboard shortcuts
 

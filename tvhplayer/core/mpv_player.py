@@ -9,7 +9,7 @@ from __future__ import annotations
 import locale
 
 from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Player
-from .proxy import hide_http_proxy_from_vlc, stream_proxy
+from .proxy import hide_http_proxy, stream_proxy
 
 MPV_OPTIONS = {
     'vo': 'libmpv',
@@ -45,7 +45,7 @@ class MpvPlayer(Player):
         # Set by play(); the first picture of that stream reports playback started.
         self._waiting_for_picture = False
         # The proxy goes to mpv per stream, so a local or LAN server is reached directly.
-        hide_http_proxy_from_vlc()
+        hide_http_proxy()
         # QApplication sets the numeric locale from the desktop; libmpv refuses anything but C.
         locale.setlocale(locale.LC_NUMERIC, 'C')
         self._mpv = mpv.MPV(log_handler=_log, loglevel='warn', **MPV_OPTIONS)

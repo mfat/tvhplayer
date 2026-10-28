@@ -11,11 +11,6 @@ _app = None
 @pytest.fixture
 def ui(monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
-    monkeypatch.setitem(
-        sys.modules,
-        'vlc',
-        types.SimpleNamespace(Instance=lambda *a, **k: None, MediaStats=object, __version__='stub'),
-    )
     sys.modules.pop('tvhplayer.tvhplayer', None)
     import tvhplayer.tvhplayer as module
     from PyQt6.QtWidgets import QApplication
