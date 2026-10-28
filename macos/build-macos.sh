@@ -19,11 +19,10 @@ MACOS_DIR="$ROOT/macos"
 PYTHON="${PYTHON:-python3}"
 ARCH="$(uname -m)"
 case "$ARCH" in
-  x86_64) DEFAULT_NAME=TVHplayer-MacOS-Intel ;;
-  arm64) DEFAULT_NAME=TVHplayer-MacOS-AppleSilicon ;;
+  x86_64|arm64) ;;
   *) echo "ERROR: Unknown architecture $ARCH" >&2; exit 1 ;;
 esac
-APP_NAME="${TVHPLAYER_APP_NAME:-$DEFAULT_NAME}"
+APP_NAME="${TVHPLAYER_APP_NAME:-TVHplayer}"
 
 if [[ ! "$APP_NAME" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "ERROR: TVHPLAYER_APP_NAME must contain only letters, digits, dots, dashes or underscores." >&2

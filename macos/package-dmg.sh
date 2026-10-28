@@ -9,10 +9,10 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 case "$(uname -m)" in
-  arm64) DEFAULT_NAME=TVHplayer-MacOS-AppleSilicon; VOLUME='TVHplayer Apple Silicon' ;;
-  *) DEFAULT_NAME=TVHplayer-MacOS-Intel; VOLUME='TVHplayer Intel' ;;
+  arm64) VOLUME='TVHplayer Apple Silicon' ;;
+  *) VOLUME='TVHplayer Intel' ;;
 esac
-APP_NAME="${TVHPLAYER_APP_NAME:-$DEFAULT_NAME}"
+APP_NAME="${TVHPLAYER_APP_NAME:-TVHplayer}"
 APP="$ROOT/dist/$APP_NAME.app"
 OUTPUT="$ROOT/dist/$APP_NAME.dmg"
 

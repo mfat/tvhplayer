@@ -21,7 +21,7 @@ python -m pip install -r macos/requirements-build.txt
 bash macos/build-macos.sh
 ```
 
-The output is `macos/dist/TVHplayer-MacOS-Intel.app` or `macos/dist/TVHplayer-MacOS-AppleSilicon.app`. The build stops if anything in the app still links a library from Homebrew's folders. To create the drag-and-drop disk image:
+The output is `macos/dist/TVHplayer.app` on both architectures. The build stops if anything in the app still links a library from Homebrew's folders. To create the drag-and-drop disk image:
 
 ```bash
 bash macos/package-dmg.sh
@@ -32,7 +32,7 @@ The `.dmg` holds the app, an Applications shortcut, and installation instruction
 Start the app from Terminal to see diagnostic output:
 
 ```bash
-./macos/dist/TVHplayer-MacOS-AppleSilicon.app/Contents/MacOS/TVHplayer-MacOS-AppleSilicon
+./macos/dist/TVHplayer.app/Contents/MacOS/TVHplayer
 ```
 
 The log is in `~/Library/Logs/TVHplayer/app.log`.

@@ -27,10 +27,8 @@ jobs:
           # Homebrew's libraries need the macOS they were built for or newer.
           - runner: macos-15-intel
             arch: x86_64
-            app: TVHplayer-MacOS-Intel
           - runner: macos-14
             arch: arm64
-            app: TVHplayer-MacOS-AppleSilicon
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     permissions:
@@ -78,8 +76,8 @@ jobs:
         run: |
           set -euo pipefail
           bash macos/build-macos.sh
-          APP='macos/dist/${{ matrix.app }}.app'
-          file "$APP/Contents/MacOS/${{ matrix.app }}"
+          APP='macos/dist/TVHplayer.app'
+          file "$APP/Contents/MacOS/TVHplayer"
           test -f "$APP/Contents/Frameworks/icons/play.svg"
           codesign --verify --deep --verbose=2 "$APP"
           bash macos/package-dmg.sh
@@ -91,7 +89,7 @@ jobs:
           set -u
           brew uninstall --ignore-dependencies mpv ffmpeg >/dev/null
           LOG="$HOME/Library/Logs/TVHplayer/app.log"
-          QT_QPA_PLATFORM=offscreen 'macos/dist/${{ matrix.app }}.app/Contents/MacOS/${{ matrix.app }}' &
+          QT_QPA_PLATFORM=offscreen 'macos/dist/TVHplayer.app/Contents/MacOS/TVHplayer' &
           pid=$!
           sleep 25
           running=yes
@@ -102,13 +100,13 @@ jobs:
           grep -q 'Playback engine: mpv' "$LOG" || { echo 'mpv was not chosen'; exit 1; }
           grep -q 'Media player created successfully' "$LOG" || { echo 'mpv did not start'; exit 1; }
           ! grep -q 'Error starting application' "$LOG" || { echo 'The app reported a startup error'; exit 1; }
-          'macos/dist/${{ matrix.app }}.app/Contents/Frameworks/ffmpeg' -hide_banner -version | head -n 1
+          'macos/dist/TVHplayer.app/Contents/Frameworks/ffmpeg' -hide_banner -version | head -n 1
 
       - name: Name release files
         run: |
           mkdir -p release-assets
           name="tvhplayer-${{ steps.version.outputs.label }}-macos-${{ matrix.arch }}.dmg"
-          cp 'macos/dist/${{ matrix.app }}.dmg' "release-assets/$name"
+          cp 'macos/dist/TVHplayer.dmg' "release-assets/$name"
           cd release-assets && shasum -a 256 "$name" > "$name.sha256"
 
       - uses: actions/upload-artifact@v7
