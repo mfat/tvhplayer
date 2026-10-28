@@ -18,6 +18,7 @@
       <li>TV guide showing every channel on a timeline, with watch and record from the guide</li>
       <li>Record on the server or on this computer, and convert recordings for video editing</li>
       <li>Customizable channel list with logos, now and next, groups and favourites</li>
+      <li>Cast live channels to Chromecast and Cast-enabled televisions</li>
       <li>Light and dark themes, keyboard shortcuts and screen reader support</li>
       <li>Support for multiple Tvheadend servers over HTSP or HTTP</li>
     </ul>

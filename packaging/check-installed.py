@@ -23,6 +23,7 @@ REQUIRED_PATHS = (
     '/usr/share/tvhplayer/tvheadend/data/dvb-scan',
     '/usr/share/tvhplayer/tvhplayer.py',
     '/usr/share/tvhplayer/icons/play.svg',
+    '/usr/share/tvhplayer/icons/chromecast.svg',
     '/usr/share/applications/io.github.mfat.tvhplayer.desktop',
     '/usr/share/metainfo/io.github.mfat.tvhplayer.metainfo.xml',
     '/usr/share/icons/hicolor/scalable/apps/io.github.mfat.tvhplayer.svg',
@@ -44,6 +45,11 @@ for name in modules:
     module = importlib.import_module(name)
     if not str(getattr(module, '__file__', '')).startswith(str(APP_DIR)):
         sys.exit(f'Imported {name} from {module.__file__}, not the installed package')
+
+try:
+    import pychromecast  # noqa: F401
+except ImportError as exc:
+    sys.exit(f'pychromecast is not installed: {exc}')
 
 from PyQt6.QtCore import QCoreApplication, QEventLoop, QTimer  # noqa: E402
 

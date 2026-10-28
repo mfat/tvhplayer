@@ -52,6 +52,7 @@ Requires:       python3
 Requires:       python3-pyqt6
 Requires:       python3-requests
 Requires:       python3-psutil
+Requires:       python3-chromecast
 Requires:       qt6-qtsvg
 Requires:       vlc-libs
 Requires:       vlc-plugins-base

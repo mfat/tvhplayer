@@ -29,6 +29,7 @@ Depends: ${shlibs:Depends},
          python3-mpv,
          python3-requests,
          python3-psutil,
+         python3-pychromecast,
          qt6-svg-plugins | libqt6svg6,
          vlc,
          ffmpeg

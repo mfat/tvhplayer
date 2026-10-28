@@ -62,7 +62,11 @@ echo "==> PyInstaller"
   --icon "$icon" \
   --paths "$ROOT/tvhplayer" \
   --collect-submodules core \
+  --collect-all pychromecast \
+  --collect-all zeroconf \
   --hidden-import resources_rc \
+  --hidden-import casttube \
+  --hidden-import google.protobuf \
   --add-binary "$WORK/libmpv-2.dll;." \
   --add-binary "$WORK/vulkan/vulkan-1.dll;." \
   --add-data "$WORK/vulkan/VulkanRT-License.txt;licenses" \
@@ -79,6 +83,9 @@ app="$WORK/dist/TVHplayer"
 test -f "$app/TVHplayer.exe"
 test -f "$app/_internal/libmpv-2.dll"
 test -f "$app/_internal/vulkan-1.dll"
+# Cast is imported optionally at runtime; fail the build if PyInstaller omitted it.
+test -d "$app/_internal/pychromecast"
+test -d "$app/_internal/zeroconf"
 "$app/_internal/ffmpeg.exe" -hide_banner -version | head -n 1
 
 echo "==> Installer"

@@ -79,6 +79,9 @@ jobs:
           APP='macos/dist/TVHplayer.app'
           file "$APP/Contents/MacOS/TVHplayer"
           test -f "$APP/Contents/Frameworks/icons/play.svg"
+          test -f "$APP/Contents/Frameworks/icons/chromecast.svg"
+          test -d "$APP/Contents/Frameworks/pychromecast"
+          test -d "$APP/Contents/Frameworks/zeroconf"
           codesign --verify --deep --verbose=2 "$APP"
           bash macos/package-dmg.sh
 

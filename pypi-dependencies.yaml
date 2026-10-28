@@ -1,4 +1,5 @@
-# Generated with flatpak-pip-generator --runtime=org.kde.Sdk//5.15 --yaml --requirements-file=runtime-requirements.txt --output=pypi-dependencies
+# Generated with flatpak-pip-generator from runtime-requirements.txt (PyChromecast
+# wheels added by hand for the KDE 6.11 / Python 3.13 runtime).
 build-commands: []
 buildsystem: simple
 modules:
@@ -67,4 +68,29 @@ modules:
         --prefix=${FLATPAK_DEST} "urllib3>=2.0.0" --no-build-isolation
     sources:
       - *id001
+  - name: python3-PyChromecast
+    buildsystem: simple
+    build-commands:
+      - pip3 install --verbose --exists-action=i --no-index --find-links="file://${PWD}"
+        --prefix=${FLATPAK_DEST} "PyChromecast>=14.1.0" --no-build-isolation
+    sources:
+      - type: file
+        url: https://files.pythonhosted.org/packages/58/35/6616953221609c6277a6e7cc4bb57059209f8571bb3eead9b6db2eda2454/pychromecast-14.1.0-py2.py3-none-any.whl
+        sha256: 53888d5c38fc03f2c9621e48ddc1ba7ccd56514b4479445ec8878ce42e182c58
+      - type: file
+        url: https://files.pythonhosted.org/packages/0a/d2/0f5006892e07ea342d57dbeda46027e99a097ffb6218bee1e37f9776ed95/casttube-0.2.1-py3-none-any.whl
+        sha256: 36f118007f9eead3959cf30de03c1640b53a263569ff2a3971c0521826c835b2
+      - type: file
+        url: https://files.pythonhosted.org/packages/9c/1f/19ebc343cc71a7ffa78f17018535adc5cbdd87afb31d7c34874680148b32/ifaddr-0.2.0-py3-none-any.whl
+        sha256: 085e0305cfe6f16ab12d72e2024030f5d52674afad6911bb1eee207177b8a748
+      - type: file
+        url: https://files.pythonhosted.org/packages/7e/cc/7e77861000a0691aeea8f4566e5d3aa716f2b1dece4a24439437e41d3d25/protobuf-5.29.5-py3-none-any.whl
+        sha256: 6cf42630262c59b2d8de33954443d94b746c952b01434fc58a417fdbd2e84bd5
+      # Flatpak builds for x86_64 and aarch64; pip picks the matching wheel.
+      - type: file
+        url: https://files.pythonhosted.org/packages/59/ff/c7372507c7e25ad3499fe08d4678deb1ed41c57f78ff5df43bd2d4d98cfc/zeroconf-0.148.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+        sha256: cc88fd01b5552ffb4d5bc551d027ac28a1852c03ceab754d02bd0d5f04c54e85
+      - type: file
+        url: https://files.pythonhosted.org/packages/54/6c/b3e2d39c40802a8cc9415357acdb76ff01bc29e25ffaa811771b6fffc428/zeroconf-0.148.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl
+        sha256: f2995e74969c577461060539164c47e1ba674470585cb0f954ebeb77f032f3c2
 name: pypi-dependencies

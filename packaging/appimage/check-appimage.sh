@@ -25,10 +25,14 @@ import mpv
 player = mpv.MPV(vo="null")
 print("Python", sys.version.split()[0], "| Qt", app.platformName(), "|", player.mpv_version)
 player.terminate()
-import psutil, requests, xdg  # noqa: F401
+import pychromecast, psutil, requests, xdg  # noqa: F401
+from pathlib import Path
 from core.builtin_server import find_bundled_binary
+from core.chromecast import CastManager
 from core.engine import ENGINE_MPV, choose_engine
 assert find_bundled_binary().name == "tvheadend", find_bundled_binary()
 assert choose_engine({"DISPLAY": ":0"})[0] == ENGINE_MPV
+assert Path("icons/chromecast.svg").is_file(), "chromecast.svg missing from the AppImage"
+assert CastManager(None).available, CastManager(None).unavailable_reason
 print("AppImage check passed")
 '

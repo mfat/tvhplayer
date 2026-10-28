@@ -65,7 +65,11 @@ ICON="$MACOS_DIR/build/tvhplayer-1024.png"
   --icon "$ICON" \
   --paths "$ROOT/tvhplayer" \
   --collect-submodules core \
+  --collect-all pychromecast \
+  --collect-all zeroconf \
   --hidden-import resources_rc \
+  --hidden-import casttube \
+  --hidden-import google.protobuf \
   --add-binary "$LIBMPV:." \
   --add-binary "$BREW_FFMPEG/bin/ffmpeg:." \
   --add-binary "$BREW_FFMPEG/bin/ffprobe:." \
@@ -79,6 +83,11 @@ BUNDLE="$MACOS_DIR/dist/$APP_NAME.app"
 if [[ ! -x "$BUNDLE/Contents/MacOS/$APP_NAME" || ! -f "$BUNDLE/Contents/Frameworks/libmpv.2.dylib" ||
       ! -x "$BUNDLE/Contents/Frameworks/ffmpeg" || ! -x "$BUNDLE/Contents/Frameworks/ffprobe" ]]; then
   echo 'ERROR: Incomplete bundle: the program, libmpv, ffmpeg or ffprobe is missing.' >&2
+  exit 1
+fi
+# Cast is imported optionally at runtime; fail the build if PyInstaller omitted it.
+if [[ ! -d "$BUNDLE/Contents/Frameworks/pychromecast" || ! -d "$BUNDLE/Contents/Frameworks/zeroconf" ]]; then
+  echo 'ERROR: Incomplete bundle: pychromecast or zeroconf is missing.' >&2
   exit 1
 fi
 
