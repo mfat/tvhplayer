@@ -33,6 +33,8 @@ def _event(event_id, channel_uuid, start, stop, title, next_id=None):
 
 def test_options_fill_missing_keys_and_ignore_bad_values():
     assert channel_list_options(None) == CHANNEL_LIST_DEFAULTS
+    # The play icon marks the playing channel, so Status starts hidden.
+    assert CHANNEL_LIST_DEFAULTS['columns']['status'] is False
     options = channel_list_options({
         'columns': {'next': True, 'number': 0, 'bogus': True},
         'logos': False,

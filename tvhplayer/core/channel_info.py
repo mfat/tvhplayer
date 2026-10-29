@@ -39,7 +39,7 @@ CHANNEL_LIST_DEFAULTS = {
         COLUMN_NOW: True,
         COLUMN_NEXT: False,
         COLUMN_TYPE: False,
-        COLUMN_STATUS: True,
+        COLUMN_STATUS: False,
     },
     'logos': True,
     'now_progress': True,

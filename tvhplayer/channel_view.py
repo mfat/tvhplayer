@@ -615,21 +615,14 @@ class ChannelDelegate(QStyledItemDelegate):
             font = QFont(opt.font)
             font.setWeight(QFont.Weight.DemiBold)
             opt.font = font
-        mark = None
+        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
         if playing and _starts_row(widget, column):
-            # The background still fills the cell; its contents move over for the icon.
-            mark = QRect(opt.rect)
-            mark.setWidth(self.MARK_MARGIN + self.MARK_ICON)
-            strip = QStyleOptionViewItem(opt)
-            strip.rect = mark
-            style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, strip, painter, widget)
-            opt.rect = opt.rect.adjusted(mark.width(), 0, 0, 0)
+            self._add_playing_mark(opt, selected)
         subtitle = index.data(SUBTITLE_ROLE) if self.two_line and column == COL_NAME else ''
         if subtitle:
             self._paint_two_lines(style, opt, painter, widget, subtitle)
         else:
             style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
-        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
         if self.progress and column == COL_NOW:
             self._paint_progress(painter, opt, index.data(PROGRESS_ROLE), selected)
         if self.dividers:
@@ -637,8 +630,6 @@ class ChannelDelegate(QStyledItemDelegate):
             line.setAlpha(26)
             row = option.rect
             painter.fillRect(QRect(row.left(), row.bottom(), row.width(), 1), line)
-        if mark is not None:
-            self._paint_playing_mark(painter, opt, mark, selected)
 
     @staticmethod
     def _paint_two_lines(style, opt, painter, widget, subtitle):
@@ -703,16 +694,38 @@ class ChannelDelegate(QStyledItemDelegate):
             icon = self._mark_icons[color] = file_icon(self._icons_dir / 'play_arrow.svg', color, self.MARK_ICON)
         return icon
 
-    def _paint_playing_mark(self, painter, opt, area, selected):
+    def _add_playing_mark(self, opt, selected):
+        """Put the play icon in the cell's decoration, before a logo if it has one.
+
+        The style then draws the cell's background in one piece, selection
+        and rounded ends included, and moves the text over for the icon.
+        """
         # A selection filled with the accent would hide an accent-colored icon.
         palette = opt.palette
         color = palette.highlightedText().color() if selected else palette.highlight().color()
-        size = min(self.MARK_ICON, area.height())
-        target = QRect(area.right() - size + 1, area.top() + (area.height() - size) // 2, size, size)
-        painter.save()
-        painter.setClipRect(area)
-        self._mark_icon(color.name()).paint(painter, target)
-        painter.restore()
+        mark = self._mark_icon(color.name())
+        size = min(self.MARK_ICON, opt.rect.height())
+        logo = None
+        if opt.features & QStyleOptionViewItem.ViewItemFeature.HasDecoration and not opt.icon.isNull():
+            logo = opt.decorationSize
+        width = size + (self.MARK_MARGIN + logo.width() if logo is not None else 0)
+        height = max(size, logo.height() if logo is not None else 0)
+        canvas = QPixmap(width * 2, height * 2)
+        canvas.setDevicePixelRatio(2)
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
+        mark.paint(painter, QRect(0, (height - size) // 2, size, size))
+        if logo is not None:
+            mode = QIcon.Mode.Selected if selected else QIcon.Mode.Normal
+            opt.icon.paint(painter, QRect(size + self.MARK_MARGIN, (height - logo.height()) // 2,
+                                          logo.width(), logo.height()), Qt.AlignmentFlag.AlignCenter, mode)
+        painter.end()
+        icon = QIcon()
+        for mode in (QIcon.Mode.Normal, QIcon.Mode.Selected, QIcon.Mode.Active):
+            icon.addPixmap(canvas, mode)
+        opt.icon = icon
+        opt.decorationSize = QSize(width, height)
+        opt.features |= QStyleOptionViewItem.ViewItemFeature.HasDecoration
 
 
 def _starts_row(view, column):
