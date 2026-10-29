@@ -1885,6 +1885,7 @@ class ServerDialog(QDialog):
         self.test_results = {}
         self._tests = set()
         self._test_token = 0
+        self._initial_checks_started = False
         self._loading = False
         self._supervisor = getattr(parent, 'builtin', None)
         self.setup_ui()
@@ -2331,9 +2332,20 @@ class ServerDialog(QDialog):
             self.server_list.setCurrentRow(min(row, len(self.servers) - 1))
         self._show_selected()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._initial_checks_started:
+            self._initial_checks_started = True
+            for server in self.servers:
+                self._test_server(server)
+
     def test_connection(self):
-        server = self._selected_server()
+        self._test_server(self._selected_server())
+
+    def _test_server(self, server):
         if server is None or server.get('builtin') or validate_server_url(server.get('url') or ''):
+            return
+        if self.test_results.get(id(server), {}).get('phase') == 'testing':
             return
         self._test_token += 1
         token = self._test_token
@@ -2344,6 +2356,7 @@ class ServerDialog(QDialog):
             self._tested(test, server, done_token, ok, ms, error)
         )
         self._tests.add(test)
+        self._sync_server(server)
         test.start()
         self._refresh_selected()
 

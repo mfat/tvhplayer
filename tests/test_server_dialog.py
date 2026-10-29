@@ -17,6 +17,14 @@ def ui(monkeypatch):
     global _app
     _app = QApplication.instance() or QApplication([])
     monkeypatch.setattr(module.QMessageBox, 'warning', lambda *a, **k: None)
+    class Backend:
+        def ping(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(module, 'create_backend', lambda server: Backend())
     return module
 
 
@@ -204,6 +212,48 @@ def test_add_duplicate_and_remove(ui):
     dialog.remove_server()
     assert dialog.server_list.currentRow() == 0
     assert dialog.name_input.text() == 'A (copy)'
+
+
+def test_opening_checks_all_valid_remote_servers_once(ui, monkeypatch):
+    from PyQt6.QtCore import QObject, pyqtSignal
+
+    started = []
+
+    class Test(QObject):
+        done = pyqtSignal(int, bool, int, str)
+
+        def __init__(self, server, token):
+            super().__init__()
+            self.server, self.token = dict(server), token
+
+        def start(self):
+            started.append(self)
+
+    monkeypatch.setattr(ui, 'ConnectionTest', Test)
+    dialog = ui.ServerDialog()
+    dialog.load_servers([
+        _remote('A'), _remote('B'), _remote('Local', builtin=True),
+        _remote('Invalid', 'ftp://host'),
+    ])
+    dialog.show()
+    assert [test.server['name'] for test in started] == ['A', 'B']
+    assert dialog.server_list.currentRow() == 0
+    assert dialog.server_list.item(1).data(ui.SERVER_STATUS_ROLE) == 'Testing…'
+    dialog.test_connection()
+    assert len(started) == 2
+    started[0].done.emit(started[0].token, True, 10, '')
+    started[1].done.emit(started[1].token, False, 10, 'unreachable')
+    assert dialog.server_list.item(0).data(ui.SERVER_STATUS_ROLE) == 'Connected'
+    assert dialog.server_list.item(1).data(ui.SERVER_STATUS_ROLE) == 'Unreachable'
+    dialog.hide()
+    dialog.show()
+    assert len(started) == 2
+    dialog.test_connection()
+    assert len(started) == 3
+    dialog.name_input.setText('Edited')
+    started[2].done.emit(started[2].token, True, 10, '')
+    assert dialog.status_label.text() == 'Not checked'
+    dialog.reject()
 
 
 def test_connection_test_reports_result(ui, monkeypatch):
