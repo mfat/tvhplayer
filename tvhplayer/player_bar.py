@@ -38,8 +38,6 @@ ICON_LIGHT = '#d9d9d9'
 CAST_ACTIVE = '#5b9cf8'
 MENU_BACKGROUND = '#1f1f1f'
 
-PLAY_SVG = '<svg viewBox="0 0 48 48"><path d="M19 13 L19 35 L36 24 Z" fill="{c}"/></svg>'
-STOP_SVG = '<svg viewBox="0 0 48 48"><rect x="15" y="15" width="18" height="18" rx="2" fill="{c}"/></svg>'
 CHEVRON_SVG = (
     '<svg viewBox="0 0 10 10"><path d="M2 3.5 L5 6.5 L8 3.5" stroke="{c}" stroke-width="1.4" '
     'fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>'
@@ -142,11 +140,11 @@ class PlayerBar(QWidget):
 
         self.play_btn = QPushButton()
         self.play_btn.setFixedSize(36, 36)
-        self.play_btn.setIconSize(QSize(24, 24))
+        self.play_btn.setIconSize(QSize(32, 32))
         self.play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.play_btn.setStyleSheet(button_stylesheet(
-            f"background: {BUTTON_LIGHT}; border: none; border-radius: 18px; }}"
-            f" QPushButton:hover {{ background: #ffffff;",
+            "background: transparent; border: none; border-radius: 18px; }"
+            " QPushButton:hover { background: rgba(255,255,255,20);",
             radius=18,
         ))
         self.play_btn.setToolTip("Play / Stop (P)")
@@ -239,7 +237,7 @@ class PlayerBar(QWidget):
 
         # The save icon is as wide as the menu's dot and square.
         local_icon = file_icon(
-            Path(icons_dir) / 'save-fill.svg', '#ededed' if not self._contrast else '#000000', 18, pad=6
+            Path(icons_dir) / 'download.svg', '#ededed' if not self._contrast else '#000000', 18
         )
         self.record_menu = QMenu(self)
         self.record_menu.setAccessibleName("Record")
@@ -375,12 +373,11 @@ class PlayerBar(QWidget):
 
     def set_playing(self, playing):
         self._playing = bool(playing)
-        dark = '#000000' if self._contrast else BAR_BACKGROUND
+        name = 'stop_circle.svg' if self._playing else 'play_circle.svg'
+        self.play_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 32))
         if self._playing:
-            self.play_btn.setIcon(svg_icon(STOP_SVG, dark, 22))
             describe(self.play_btn, "Stop", "Stop playback. Keyboard: P or Ctrl+.")
         else:
-            self.play_btn.setIcon(svg_icon(PLAY_SVG, dark, 24))
             describe(self.play_btn, "Play", "Play the selected channel. Keyboard: P, or Enter on the channel list.")
 
     def set_recording(self, server, local, channel_name='', local_here=None):
@@ -433,20 +430,20 @@ class PlayerBar(QWidget):
     def _update_speaker(self):
         volume = self.volume_slider.value()
         if self._muted:
-            name = 'volume-mute-fill.svg'
+            name = 'volume_off.svg'
         elif volume == 0:
-            name = 'volume-off-fill.svg'
+            name = 'volume_mute.svg'
         elif volume < 50:
-            name = 'volume-down-fill.svg'
+            name = 'volume_down.svg'
         else:
-            name = 'volume-up-fill.svg'
+            name = 'volume_up.svg'
         self.mute_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24))
 
     def set_casting(self, casting, name=''):
         casting = bool(casting)
         self.cast_btn.setChecked(casting)
         color = CAST_ACTIVE if casting and not self._contrast else self._icon_color()
-        self.cast_btn.setIcon(file_icon(self._icons_dir / 'chromecast.svg', color, 24))
+        self.cast_btn.setIcon(file_icon(self._icons_dir / 'cast.svg', color, 24))
         if casting:
             label = f'Casting to {name}' if name else 'Casting'
             describe(self.cast_btn, label, 'Choose another Chromecast or disconnect.')
@@ -457,8 +454,8 @@ class PlayerBar(QWidget):
 
     def set_fullscreen(self, fullscreen):
         self.fullscreen_btn.setChecked(bool(fullscreen))
-        name = 'fullscreen-exit.svg' if fullscreen else 'fullscreen.svg'
-        self.fullscreen_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24, pad=3))
+        name = 'fullscreen_exit.svg' if fullscreen else 'fullscreen.svg'
+        self.fullscreen_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24))
 
 
 class FloatingBar(QWidget):

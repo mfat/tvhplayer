@@ -78,8 +78,8 @@ jobs:
           bash macos/build-macos.sh
           APP='macos/dist/TVHplayer.app'
           file "$APP/Contents/MacOS/TVHplayer"
-          test -f "$APP/Contents/Frameworks/icons/play-fill.svg"
-          test -f "$APP/Contents/Frameworks/icons/chromecast.svg"
+          test -f "$APP/Contents/Frameworks/icons/play_circle.svg"
+          test -f "$APP/Contents/Frameworks/icons/cast.svg"
           test -d "$APP/Contents/Frameworks/pychromecast"
           test -d "$APP/Contents/Frameworks/zeroconf"
           codesign --verify --deep --verbose=2 "$APP"

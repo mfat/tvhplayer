@@ -3966,7 +3966,7 @@ class TVHeadendClient(QMainWindow):
         self.server_combo.currentIndexChanged.connect(self.on_server_changed)
         describe(self.server_combo, description="TVHeadend server used for the channel list")
         
-        self.manage_servers_btn = IconToolButton(self.icons_dir / 'gear.svg', 18)
+        self.manage_servers_btn = IconToolButton(self.icons_dir / 'settings.svg', 18)
         self.manage_servers_btn.clicked.connect(self.manage_servers)
         
         server_layout.addWidget(buddy_label("&Server:", self.server_combo))
@@ -6351,27 +6351,27 @@ class TVHeadendClient(QMainWindow):
         muted = bool(self.player and self.player.is_muted())
         text_color = menu.palette().color(QPalette.ColorRole.WindowText).name()
 
-        def tinted(name, pad=0):
-            return file_icon(self.icons_dir / name, text_color, 16, pad=pad)
+        def tinted(name):
+            return file_icon(self.icons_dir / name, text_color, 16)
 
-        play_action = menu.addAction(tinted('play-fill.svg'), "Play")
+        play_action = menu.addAction(tinted('play_circle.svg'), "Play")
         play_action.setEnabled(channel is not None)
         play_action.triggered.connect(lambda: self.play_channel_by_data(channel))
 
-        stop_action = menu.addAction(tinted('stop-fill.svg'), with_keys("Stop", "Ctrl+."))
+        stop_action = menu.addAction(tinted('stop_circle.svg'), with_keys("Stop", "Ctrl+."))
         stop_action.setEnabled(playing)
         stop_action.triggered.connect(self.stop_playback)
 
         menu.addSeparator()
 
         mute_action = menu.addAction(
-            tinted('volume-up-fill.svg' if muted else 'volume-mute-fill.svg'),
+            tinted('volume_up.svg' if muted else 'volume_off.svg'),
             with_keys("Unmute" if muted else "Mute", "M"),
         )
         mute_action.triggered.connect(self.toggle_mute)
 
         fullscreen_action = menu.addAction(
-            tinted('fullscreen-exit.svg' if self.is_fullscreen else 'fullscreen.svg', pad=3),
+            tinted('fullscreen_exit.svg' if self.is_fullscreen else 'fullscreen.svg'),
             with_keys("Exit Fullscreen" if self.is_fullscreen else "Fullscreen", FULLSCREEN_KEY),
         )
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
@@ -6383,13 +6383,13 @@ class TVHeadendClient(QMainWindow):
         record_action.triggered.connect(self.start_recording)
 
         local_action = menu.addAction(
-            tinted('save-fill.svg', pad=4),
+            tinted('download.svg'),
             with_keys("Record Locally", "Ctrl+Shift+R"),
         )
         local_action.setEnabled(channel is not None)
         local_action.triggered.connect(lambda: self.start_local_recording(channel))
 
-        epg_action = menu.addAction(QIcon(f"{self.icons_dir}/epg.svg"), "Show EPG")
+        epg_action = menu.addAction(tinted('event_note.svg'), "Show EPG")
         epg_action.setEnabled(channel is not None)
         epg_action.triggered.connect(lambda: self.show_channel_epg(channel))
 

@@ -32,7 +32,7 @@ from core.chromecast import CastManager
 from core.engine import mpv_missing
 assert find_bundled_binary().name == "tvheadend", find_bundled_binary()
 assert mpv_missing() == "", f"mpv missing: {mpv_missing()}"
-assert Path("icons/chromecast.svg").is_file(), "chromecast.svg missing from the AppImage"
+assert Path("icons/cast.svg").is_file(), "cast.svg missing from the AppImage"
 assert CastManager(None).available, CastManager(None).unavailable_reason
 print("AppImage check passed")
 '

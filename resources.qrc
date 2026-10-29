@@ -2,15 +2,18 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file>icons/record.svg</file>
-        <file>icons/stop-fill.svg</file>
-        <file>icons/play-fill.svg</file>
-        <file>icons/save-fill.svg</file>
+        <file>icons/play_circle.svg</file>
+        <file>icons/stop_circle.svg</file>
+        <file>icons/download.svg</file>
         <file>icons/playerbg.svg</file>
-        <file>icons/volume-mute-fill.svg</file>
-        <file>icons/volume-off-fill.svg</file>
-        <file>icons/volume-down-fill.svg</file>
-        <file>icons/volume-up-fill.svg</file>
+        <file>icons/volume_off.svg</file>
+        <file>icons/volume_mute.svg</file>
+        <file>icons/volume_down.svg</file>
+        <file>icons/volume_up.svg</file>
         <file>icons/fullscreen.svg</file>
-        <file>icons/fullscreen-exit.svg</file>
+        <file>icons/fullscreen_exit.svg</file>
+        <file>icons/cast.svg</file>
+        <file>icons/event_note.svg</file>
+        <file>icons/settings.svg</file>
     </qresource>
 </RCC>
