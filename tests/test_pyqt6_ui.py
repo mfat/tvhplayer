@@ -2683,6 +2683,52 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         app.processEvents()
 
 
+def test_channel_list_columns_can_be_resized(monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QHeaderView
+
+    backend = _ExtrasBackend(int(time.time()))
+    app, ui, window = _channel_list_window(monkeypatch, tmp_path, backend)
+    window.logo_loader.request = lambda *args: None
+    try:
+        table = window.channel_list
+        header = table.horizontalHeader()
+        table.resize(600, 400)
+        window.fetch_channels()
+        _wait_for_channels(app, window)
+        window._fit_channel_columns(measure=True)
+        for column in range(header.count()):
+            assert header.sectionResizeMode(column) == QHeaderView.ResizeMode.Interactive
+
+        # Untouched columns fill the list: name and now share what number and status leave.
+        shown = [c for c in range(header.count()) if not header.isSectionHidden(c)]
+        assert sum(header.sectionSize(c) for c in shown) >= table.viewport().width() - 1
+
+        # A dragged width is kept and saved; now takes up the difference.
+        before_now = header.sectionSize(ui.COL_NOW)
+        header.resizeSection(ui.COL_NAME, header.sectionSize(ui.COL_NAME) - 40)
+        assert header.sectionSize(ui.COL_NOW) == before_now + 40
+        name_width = header.sectionSize(ui.COL_NAME)
+        window._channel_width_save_timer.timeout.emit()
+        assert window.config_store.load()['channel_list']['widths'] == {'name': name_width}
+
+        # A wider pane goes to the columns the user has not sized.
+        window.show()
+        app.processEvents()
+        now_width = header.sectionSize(ui.COL_NOW)
+        window.splitter.moveSplitter(window.splitter.sizes()[0] + 150, 1)
+        app.processEvents()
+        assert table.viewport().width() > 0
+        assert header.sectionSize(ui.COL_NAME) == name_width
+        assert header.sectionSize(ui.COL_NOW) > now_width
+
+        # Reset forgets the widths.
+        window._reset_channel_list_layout()
+        assert window.config_store.load()['channel_list']['widths'] == {}
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_now_next_is_fetched_again_when_a_programme_ends(monkeypatch, tmp_path):
     now = int(time.time())
     backend = _ExtrasBackend(now)

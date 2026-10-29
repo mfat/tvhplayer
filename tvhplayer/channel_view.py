@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QObject, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QObject, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QTableView
 
@@ -447,6 +447,15 @@ class ChannelTableModel(QAbstractTableModel):
 
 class ChannelTableView(QTableView):
     """Table view with the row helpers the window reads the channel list through."""
+
+    # The visible area changed size: the pane was resized, or a scroll bar
+    # came or went.
+    viewport_resized = pyqtSignal()
+
+    def viewportEvent(self, event):
+        if event.type() == QEvent.Type.Resize:
+            self.viewport_resized.emit()
+        return super().viewportEvent(event)
 
     def currentRow(self):
         index = self.currentIndex()

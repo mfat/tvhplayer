@@ -38,6 +38,9 @@ CHANNEL_LIST_DEFAULTS = {
     'hide_disabled': True,
     'tag': '',
     'order': list(DEFAULT_ORDER),
+    # Pixel widths of the columns the user has resized. The others fit the
+    # list by themselves.
+    'widths': {},
 }
 
 # DVB service_type values from the Tvheadend MPEGts API page.
@@ -78,6 +81,13 @@ def channel_list_options(raw) -> dict:
         known = [key for key in order if key in DEFAULT_ORDER]
         known = list(dict.fromkeys(known))
         options['order'] = known + [key for key in DEFAULT_ORDER if key not in known]
+    widths = raw.get('widths')
+    if isinstance(widths, dict):
+        options['widths'] = {
+            key: int(width)
+            for key, width in widths.items()
+            if key in DEFAULT_ORDER and isinstance(width, int) and not isinstance(width, bool) and width > 0
+        }
     return options
 
 

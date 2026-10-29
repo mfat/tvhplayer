@@ -3946,15 +3946,36 @@ class TVHeadendClient(QMainWindow):
             "Press Enter to play. Press Shift+F10 for more actions.",
         )
         header = self.channel_list.horizontalHeader()
-        for column in (COL_NUMBER, COL_STATUS, COL_TYPE):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        for column in (COL_NAME, COL_NOW, COL_NEXT):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        # Every column can be dragged wider or narrower. Until the user does,
+        # number, status, and type fit their contents and the others share
+        # the rest of the width (see _fit_channel_columns).
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(False)
         header.setSectionsMovable(True)
         header.sectionMoved.connect(self._channel_columns_moved)
+        header.sectionResized.connect(self._channel_column_resized)
         header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header.customContextMenuRequested.connect(self._show_channel_column_menu)
-        header.setToolTip("Drag a column to move it. Right-click to choose columns.")
+        header.setToolTip(
+            "Drag a column to move it. Drag a column edge to resize it. Right-click to choose columns."
+        )
+        self._fitting_channel_columns = False
+        self._channel_width_save_timer = QTimer(self)
+        self._channel_width_save_timer.setSingleShot(True)
+        self._channel_width_save_timer.setInterval(500)
+        self._channel_width_save_timer.timeout.connect(self._save_channel_options)
+        self._channel_measure_timer = QTimer(self)
+        self._channel_measure_timer.setSingleShot(True)
+        self._channel_measure_timer.setInterval(150)
+        self._channel_measure_timer.timeout.connect(lambda: self._fit_channel_columns(measure=True))
+        self.channel_list.viewport_resized.connect(self._fit_channel_columns)
+        for signal in (
+            self.channel_model.modelReset,
+            self.channel_model.dataChanged,
+            self.channel_model.layoutChanged,
+            self.channel_model.rowsInserted,
+        ):
+            signal.connect(lambda *_: self._channel_measure_timer.start())
         self.channel_list.setWordWrap(False)
         self.channel_list.setTextElideMode(Qt.TextElideMode.ElideRight)
         header.setTextElideMode(Qt.TextElideMode.ElideRight)
@@ -4928,6 +4949,55 @@ class TVHeadendClient(QMainWindow):
         finally:
             header.blockSignals(False)
         self._progress_delegate.enabled = self.channel_options['now_progress']
+        self._fit_channel_columns(measure=True)
+
+    def _fit_channel_columns(self, measure=False):
+        """Size the columns the user has not resized.
+
+        Number, status, and type fit their contents; name, now, and next share
+        what is left of the list's width. ``measure`` reads the contents again,
+        which is slow on a long list, so a plain resize of the pane skips it.
+        """
+        table = self.channel_list
+        header = table.horizontalHeader()
+        widths = self.channel_options['widths']
+        self._fitting_channel_columns = True
+        try:
+            left = table.viewport().width()
+            sharing = []
+            for visual in range(header.count()):
+                column = header.logicalIndex(visual)
+                if header.isSectionHidden(column):
+                    continue
+                key = COLUMN_KEYS[column]
+                if key in widths:
+                    header.resizeSection(column, widths[key])
+                elif column in (COL_NAME, COL_NOW, COL_NEXT):
+                    sharing.append(column)
+                    continue
+                elif measure:
+                    header.resizeSection(
+                        column, max(header.sectionSizeHint(column), table.sizeHintForColumn(column))
+                    )
+                left -= header.sectionSize(column)
+            for place, column in enumerate(sharing):
+                share = max(left // (len(sharing) - place), header.sectionSizeHint(column))
+                header.resizeSection(column, share)
+                left -= share
+        finally:
+            self._fitting_channel_columns = False
+
+    def _channel_column_resized(self, column, old_size, new_size):
+        """Keep a width the user dragged a column to."""
+        if self._fitting_channel_columns or new_size <= 0:
+            return
+        header = self.channel_list.horizontalHeader()
+        if header.isSectionHidden(column):
+            return
+        self.channel_options['widths'][COLUMN_KEYS[column]] = new_size
+        self._channel_width_save_timer.start()
+        # The columns still sharing the width make room or fill the gap.
+        self._fit_channel_columns()
 
     def _channel_columns_moved(self, logical, old_visual, new_visual):
         header = self.channel_list.horizontalHeader()
