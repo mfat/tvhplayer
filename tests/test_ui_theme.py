@@ -1,4 +1,5 @@
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
 
@@ -99,6 +100,52 @@ def test_both_color_sets_have_every_color():
         assert all(_qcolor(value).isValid() for value in colors.values())
     for _size, _weight, ink, ink_off in LABELS.values():
         assert {ink, ink_off} - {None} <= LIGHT.keys()
+
+
+def test_default_accent_and_window_color_keep_the_tvhplayer_colors():
+    from tvhplayer.ui_theme import DARK, LIGHT, compose
+
+    assert compose(False) == LIGHT
+    assert compose(True) == DARK
+    assert compose(True, 'No such accent', 'No such window') == DARK
+
+
+def test_every_accent_and_window_color_gives_every_color(qapp):
+    from tvhplayer.ui_theme import LIGHT, _qcolor, accent_choices, compose, window_color_choices
+
+    for accent, _label in accent_choices():
+        for window, _label in window_color_choices():
+            for dark in (False, True):
+                colors = compose(dark, accent, window)
+                assert colors.keys() == LIGHT.keys()
+                assert all(_qcolor(value).isValid() for value in colors.values()), (accent, window, dark)
+
+
+def test_accent_reaches_every_theme_but_window_color_only_the_tvhplayer_theme(qapp, monkeypatch):
+    from PyQt6.QtGui import QPalette
+    from tvhplayer import ui_theme
+
+    palettes = []
+    monkeypatch.setattr(ui_theme, '_set_palette', lambda _app, palette: palettes.append(palette))
+    monkeypatch.setattr(ui_theme, '_scheme', Qt.ColorScheme.Dark)
+    monkeypatch.setattr(ui_theme, '_watching', True)
+    monkeypatch.setattr(ui_theme, '_accent', ui_theme.ACCENT_DEFAULT)
+    monkeypatch.setattr(ui_theme, '_window', ui_theme.WINDOW_DEFAULT)
+    monkeypatch.setattr(ui_theme, 'colors', ui_theme.DARK)
+    window = QPalette.ColorRole.Window
+    highlight = QPalette.ColorRole.Highlight
+
+    monkeypatch.setattr(ui_theme, '_active', False)
+    ui_theme.set_window_color(qapp, 'cream')
+    ui_theme.set_accent(qapp, 'Sage')
+    assert palettes[-1].color(window) == ui_theme._qcolor(ui_theme.DARK['window'])
+    assert palettes[-1].color(highlight) == QColor(ui_theme.ACCENTS['sage'][3])
+
+    monkeypatch.setattr(ui_theme, '_active', True)
+    ui_theme.set_window_color(qapp, 'cream')
+    assert palettes[-1].color(window) == QColor(ui_theme.WINDOW_COLORS['cream'][2][0])
+    assert palettes[-1].color(highlight) == QColor(ui_theme.ACCENTS['sage'][3])
+    assert ui_theme.color('window') == QColor(ui_theme.WINDOW_COLORS['cream'][2][0])
 
 
 def test_tables_get_their_grid_back_with_a_qt_style(qapp, monkeypatch):

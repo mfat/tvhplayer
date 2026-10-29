@@ -88,6 +88,9 @@ def default_config():
         # TVHplayer's own look, or the name of a Qt style. Read before the window is built.
         'ui_theme': THEME_TVHPLAYER,
         'color_scheme': SCHEME_SYSTEM,
+        # Keys of ui_theme.ACCENTS and ui_theme.WINDOW_COLORS, or 'default'.
+        'accent_color': 'default',
+        'window_color': 'default',
         # On GNOME and KDE, the app's own title bar instead of the desktop's. Read before the window is built.
         'own_title_bar': False,
         # None until chosen: live resize is off before Qt 6.11, and on from 6.11.
@@ -177,6 +180,9 @@ def _normalize(data):
         cfg['ui_theme'] = THEME_TVHPLAYER
     if cfg.get('color_scheme') not in SCHEME_CHOICES:
         cfg['color_scheme'] = SCHEME_SYSTEM
+    for key in ('accent_color', 'window_color'):
+        if not isinstance(cfg.get(key), str) or not cfg[key].strip():
+            cfg[key] = 'default'
     if cfg.get('local_recording_format') not in RECORDING_FORMATS:
         cfg['local_recording_format'] = DEFAULT_FORMAT
     if not isinstance(cfg.get('last_channel'), dict):

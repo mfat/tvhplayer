@@ -8,7 +8,8 @@ the widget attribute names are unchanged from the tabbed version.
 from __future__ import annotations
 
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QEvent, QRectF, Qt, QTimer
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -28,17 +29,19 @@ try:
     from .a11y import announce_label, describe
     from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
     from .core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
-    from .ui_theme import style_names
+    from .ui_theme import accent_choices, accent_swatch, style_names, window_color_choices, window_swatch
     from .settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 except ImportError:
     from a11y import announce_label, describe
     from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
     from core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
-    from ui_theme import style_names
+    from ui_theme import accent_choices, accent_swatch, style_names, window_color_choices, window_swatch
     from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 
 THEME_SHORT = "TVHplayer is the app's own look. The others are the styles Qt offers on this computer."
 SCHEME_SHORT = 'Follow system theme, or set Light/Dark theme manually'
+ACCENT_SHORT = 'Color of selections, focus and the main buttons'
+WINDOW_COLOR_SHORT = 'Background of windows and panels in the TVHplayer style'
 SCHEME_NAMES = {SCHEME_SYSTEM: 'Follow System', SCHEME_LIGHT: 'Light', SCHEME_DARK: 'Dark'}
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
@@ -85,6 +88,18 @@ DELETE_HELP = 'Only after a successful conversion. Recordings converted by hand 
 TITLE_BAR_HELP = 'Takes effect the next time TVHplayer starts.'
 UPDATES_HELP = 'Once a day, TVHplayer asks GitHub whether a newer version has been released and tells you if so.'
 UPDATES_NOW_HELP = 'Ask GitHub now. A version you skipped is shown again.'
+
+
+def _swatch_icon(fill, edge, size=14):
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(edge)
+    painter.setBrush(QColor(fill))
+    painter.drawEllipse(QRectF(0.5, 0.5, size - 1, size - 1))
+    painter.end()
+    return QIcon(pixmap)
 
 
 class SettingsDialog(QDialog):
@@ -376,6 +391,16 @@ class SettingsDialog(QDialog):
         self.scheme_combo.setCurrentIndex(max(0, self.scheme_combo.findData(host.color_scheme_choice())))
         describe(self.scheme_combo, 'Theme', SCHEME_SHORT)
         group.add_row(SettingRow('&Theme', SCHEME_SHORT, self.scheme_combo))
+        self.accent_combo = self._swatch_combo(accent_choices(), host.accent_choice())
+        describe(self.accent_combo, 'Accent color', ACCENT_SHORT)
+        group.add_row(SettingRow('Acc&ent color', ACCENT_SHORT, self.accent_combo))
+        self.window_color_combo = self._swatch_combo(window_color_choices(), host.window_color_choice())
+        describe(self.window_color_combo, 'Window color', WINDOW_COLOR_SHORT)
+        self._window_color_group = group
+        self._window_color_row = group.add_row(SettingRow(
+            '&Window color', WINDOW_COLOR_SHORT, self.window_color_combo))
+        self._show_window_color_row()
+        self._paint_swatches()
         # GNOME and KDE; on X11 only while a compositor can show the shadow. Shown
         # as the next start will be, since the engine chosen decides Wayland or X11.
         self.title_bar_check = ToggleSwitch("Use TVHplayer's own title bar")
@@ -388,6 +413,8 @@ class SettingsDialog(QDialog):
         self._show_title_bar_row()
         self.theme_combo.currentIndexChanged.connect(self._theme_chosen)
         self.scheme_combo.currentIndexChanged.connect(self._scheme_chosen)
+        self.accent_combo.currentIndexChanged.connect(self._accent_chosen)
+        self.window_color_combo.currentIndexChanged.connect(self._window_color_chosen)
         page.finish()
         return page
 
@@ -399,6 +426,40 @@ class SettingsDialog(QDialog):
 
     def _use_chosen_theme(self):
         self._host.set_theme_choice(self.theme_combo.currentData())
+        self._show_window_color_row()
+
+    def _accent_chosen(self, _index):
+        # Once the list has closed, as for the theme.
+        QTimer.singleShot(0, lambda: self._host.set_accent_choice(self.accent_combo.currentData()))
+
+    def _window_color_chosen(self, _index):
+        QTimer.singleShot(0, lambda: self._host.set_window_color_choice(self.window_color_combo.currentData()))
+
+    def _show_window_color_row(self):
+        self._window_color_group.set_row_visible(
+            self._window_color_row, self.theme_combo.currentData() == THEME_TVHPLAYER)
+
+    @staticmethod
+    def _swatch_combo(choices, chosen):
+        combo = QComboBox()
+        combo.setMinimumWidth(170)
+        for key, label in choices:
+            combo.addItem(label, key)
+        combo.setCurrentIndex(max(0, combo.findData(chosen)))
+        return combo
+
+    def _paint_swatches(self):
+        """Swatches show each color as it looks in the scheme in use."""
+        edge = self.palette().color(QPalette.ColorRole.WindowText)
+        edge.setAlpha(90)
+        for combo, swatch in ((self.accent_combo, accent_swatch), (self.window_color_combo, window_swatch)):
+            for i in range(combo.count()):
+                combo.setItemIcon(i, _swatch_icon(swatch(combo.itemData(i)), edge))
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.PaletteChange and hasattr(self, 'window_color_combo'):
+            self._paint_swatches()
 
     def _scheme_chosen(self, _index):
         # Once the list has closed, as for the theme: the new colors repaint every widget.

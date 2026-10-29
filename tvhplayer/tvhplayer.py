@@ -70,7 +70,10 @@ try:
     from . import cursor_debug
     from . import window_frame
     from .file_manager import show_in_file_manager
-    from .ui_theme import THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
+    from .ui_theme import (
+        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, polish_main_window,
+        set_accent, set_color_scheme, set_window_color, style_key,
+    )
     from .player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -164,7 +167,10 @@ except ImportError:
     import cursor_debug
     import window_frame
     from file_manager import show_in_file_manager
-    from ui_theme import THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, polish_main_window, set_color_scheme, style_key
+    from ui_theme import (
+        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, polish_main_window,
+        set_accent, set_color_scheme, set_window_color, style_key,
+    )
     from player_bar import (
         DOT_SVG,
         PILL_DARK,
@@ -1593,13 +1599,16 @@ class RecordingDurationDialog(QDialog):
         buttons = QDialogButtonBox()
         cancel = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
         self.record_btn = buttons.addButton(" &Record", QDialogButtonBox.ButtonRole.AcceptRole)
-        self.record_btn.setIcon(QIcon(status_dot('#ffffff' if not contrast else STATUS_UNREACHABLE, 10)))
+        self.record_btn.setIcon(QIcon(status_dot(
+            theme_color('on_accent').name() if not contrast else STATUS_UNREACHABLE, 10)))
         self.record_btn.setDefault(True)
         if not contrast:
             self.record_btn.setStyleSheet(
-                "QPushButton { background: #3daee9; color: #ffffff; font-weight: 600; "
-                "border: 1px solid #2a95cf; border-radius: 3px; min-width: 96px; min-height: 28px; "
-                "padding: 0 10px; } QPushButton:focus { border: 2px solid palette(highlight); }"
+                f"QPushButton {{ background: {theme_color('primary').name()}; "
+                f"color: {theme_color('on_accent').name()}; font-weight: 600; "
+                f"border: 1px solid {theme_color('primary_edge').name()}; border-radius: 3px; "
+                "min-width: 96px; min-height: 28px; padding: 0 10px; } "
+                "QPushButton:focus { border: 2px solid palette(highlight); }"
             )
         describe(cancel, "Cancel")
         buttons.accepted.connect(self.accept)
@@ -7492,6 +7501,24 @@ class TVHeadendClient(QMainWindow):
         self.save_config()
         set_color_scheme(QApplication.instance(), mode)
 
+    def accent_choice(self):
+        return self.config['accent_color']
+
+    def set_accent_choice(self, key):
+        self.config['accent_color'] = key
+        self.save_config()
+        if self.running_theme() is not None:
+            set_accent(QApplication.instance(), key)
+
+    def window_color_choice(self):
+        return self.config['window_color']
+
+    def set_window_color_choice(self, key):
+        self.config['window_color'] = key
+        self.save_config()
+        if self.running_theme() is not None:
+            set_window_color(QApplication.instance(), key)
+
     def running_theme(self):
         """The theme in use; None when high contrast kept the system look."""
         app = QApplication.instance()
@@ -8203,10 +8230,12 @@ def main():
             settings = ConfigStore().data
             theme = settings['ui_theme']
             scheme = settings['color_scheme']
+            accent = settings['accent_color']
+            window_color = settings['window_color']
         except Exception as e:
             print(f"Debug: Could not read the theme settings: {e}")
             theme = THEME_TVHPLAYER
-            scheme = None
+            scheme = accent = window_color = None
         LAUNCH_ENVIRON.update(os.environ)
         cursor_debug.prepare()
         app = QApplication(sys.argv)
@@ -8226,6 +8255,8 @@ def main():
             theme = THEME_TVHPLAYER
         if theme is not None:
             set_color_scheme(app, scheme)
+            set_accent(app, accent)
+            set_window_color(app, window_color)
             apply_theme(app, theme, NoDialogButtonIconsStyle)
         print(f"Debug: Theme: {theme or 'system (high contrast)'}")
         player = TVHeadendClient()

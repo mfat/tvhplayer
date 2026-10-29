@@ -7,8 +7,9 @@ a style of the app's own, so the look is drawn, not written as a style sheet.
 Any other theme is a Qt style, which paints the same colors through a palette
 of every role, as Jottr's Classic look does, rather than the desktop's. Every
 theme is light or dark as the desktop is set, following it while the app
-runs, unless set to always light or always dark. Both can be changed while the
-app runs. Under high contrast the system look stays in charge.
+runs, unless set to always light or always dark. An Accent color, and for the
+TVHplayer theme a Window color, as in Jottr, are laid over the colors. All can
+be changed while the app runs. Under high contrast the system look stays in charge.
 """
 
 from __future__ import annotations
@@ -99,6 +100,57 @@ DARK = {
     'arrow': '#a1a9b1', 'arrow_off': '#5c6166',
 }
 
+# Accent colors, as in Jottr: (label, main, soft, bright, deep), with an optional
+# {'light': {...}, 'dark': {...}} of exact act, hover, soft, ink and on_act colors.
+# Light schemes use main, soft and deep; dark ones the bright step.
+ACCENT_DEFAULT = 'default'
+ACCENTS = {
+    'terracotta': ('Terracotta', '#c67139', '#ffe1d0', '#f6a06b', '#643312'),
+    'orange': ('Orange', '#d2690f', '#ffe3c4', '#f5a04a', '#6b3408'),
+    'clay': ('Clay', '#a4552d', '#e9d3c2', '#d6916a', '#5c2c14', {
+        'light': {'act': '#a4552d', 'hover': '#884423', 'soft': '#e9d3c2', 'ink': '#5c2c14', 'on_act': '#fffaf3'},
+        'dark': {'act': '#d6916a', 'hover': '#e3a986', 'ink': '#f1cbb3', 'on_act': '#2e2b25'},
+    }),
+    'marigold': ('Marigold', '#b0650f', '#f1dcb8', '#eba24a', '#5e3406', {
+        'light': {'act': '#b0650f', 'hover': '#93530a', 'soft': '#f1dcb8', 'ink': '#5e3406', 'on_act': '#fffaf3'},
+        'dark': {'act': '#eba24a', 'hover': '#f2b76b', 'ink': '#f8d8a8', 'on_act': '#2e2b25'},
+    }),
+    'sage': ('Sage', '#7a8a5e', '#e1eecc', '#aebf92', '#3d472b'),
+    'ink': ('Ink', '#2e2b25', '#eee7db', '#f9f4ed', '#2e2b25'),
+    'ocean': ('Ocean', '#3f6f9e', '#d6e4f2', '#7fa7d0', '#1f3a56'),
+    'teal': ('Teal', '#2f8578', '#cdeae4', '#6fbfb1', '#174840'),
+    'plum': ('Plum', '#8a4f7d', '#f0dcea', '#c68fb9', '#4a2442'),
+    'rose': ('Rose', '#c0506a', '#fad7df', '#e88ea2', '#6b2334'),
+    'ochre': ('Ochre', '#a0741f', '#f5e6c4', '#e0b660', '#5e4210'),
+}
+
+# Window colors, Jottr's Organic grounds, for the TVHplayer theme only:
+# label, then light and dark as (window, base, alt, nav, ink, muted, placeholder, edge).
+WINDOW_DEFAULT = 'default'
+WINDOW_COLORS = {
+    'paper': ('Paper',
+              ('#f4f2ee', '#ffffff', '#f7f5f2', '#ebe8e3', '#1d1c1a', '#5d5a55', '#9a968f', '#dcd8d1'),
+              ('#2e2e32', '#1d1d20', '#28282c', '#28282c', '#ffffff', '#a3a3a8', '#77777c', '#45454a')),
+    'cream': ('Cream',
+              ('#f5ead8', '#f9f4ed', '#eee7db', '#e6dccb', '#201e1d', '#645c50', '#a19786', '#d3c9ba'),
+              ('#312e2a', '#1f1d1a', '#2b2825', '#2b2825', '#ffffff', '#aaa398', '#7d776e', '#48433e')),
+    'stone': ('Stone',
+              ('#e9e5df', '#f6f4f1', '#eeebe6', '#e0dbd4', '#1f1d1b', '#5f5a54', '#9c968f', '#cbc4bb'),
+              ('#302f2d', '#1e1d1c', '#2a2928', '#2a2928', '#ffffff', '#a8a5a0', '#7a7874', '#474643')),
+    'mist': ('Mist',
+             ('#e4eadb', '#f4f7ef', '#eaefe2', '#dbe3cf', '#1c211a', '#56604d', '#939c88', '#c4cfb4'),
+             ('#2b302a', '#1b1e19', '#262a24', '#262a24', '#ffffff', '#a3ab9a', '#767e6e', '#424940')),
+    'fog': ('Fog',
+            ('#e6e8ea', '#f5f6f7', '#eceef0', '#dcdfe3', '#1b1e21', '#565c63', '#939aa1', '#c6cbd1'),
+            ('#2c2f33', '#1c1e21', '#27292d', '#27292d', '#ffffff', '#a2a7ae', '#767b82', '#43464c')),
+    'steel': ('Steel',
+              ('#d3dce5', '#edf2f6', '#e0e7ee', '#c7d1dc', '#151a20', '#475463', '#83909e', '#afbdcb'),
+              ('#283039', '#181d23', '#232a32', '#232a32', '#ffffff', '#9eaab7', '#717d8a', '#3f4a56')),
+    'blush': ('Blush',
+              ('#f3e1dc', '#faf2ef', '#f1e6e2', '#e9d6d0', '#221c1b', '#67534f', '#a8918b', '#d8c0b9'),
+              ('#322b2a', '#201b1a', '#2c2625', '#2c2625', '#ffffff', '#b0a09c', '#83736f', '#4a413f')),
+}
+
 # Labels the settings pages and dialogs name: point size, weight, color, color when disabled.
 LABELS = {
     'pageTitle': (15, QFont.Weight.DemiBold, None, None),
@@ -127,6 +179,9 @@ _watching = False
 _style = None
 _default_font = None
 _theme_font = None
+# The Accent color and Window color chosen in Settings.
+_accent = ACCENT_DEFAULT
+_window = WINDOW_DEFAULT
 
 PE = QStyle.PrimitiveElement
 CE = QStyle.ControlElement
@@ -179,6 +234,92 @@ def _qcolor(value):
 def color(name):
     """A color of the TVHplayer theme in use, for widgets that paint themselves."""
     return _qcolor(colors[name])
+
+
+def _rgba(value, alpha):
+    c = QColor(value)
+    return f'rgba({c.red()},{c.green()},{c.blue()},{alpha})'
+
+
+def _blend(value, under, amount):
+    """``value`` laid over ``under`` at ``amount`` from 0 to 1, as "#rrggbb"."""
+    a, b = QColor(value), QColor(under)
+    mix = lambda x, y: round(x * amount + y * (1 - amount))
+    return QColor(mix(a.red(), b.red()), mix(a.green(), b.green()), mix(a.blue(), b.blue())).name()
+
+
+def normalize_accent(key):
+    key = str(key or '').strip().casefold()
+    return key if key in ACCENTS else ACCENT_DEFAULT
+
+
+def normalize_window_color(key):
+    key = str(key or '').strip().casefold()
+    return key if key in WINDOW_COLORS else WINDOW_DEFAULT
+
+
+def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT):
+    """The light or dark colors with an Accent color and a Window color laid over them.
+
+    Both at their defaults give LIGHT or DARK as they are.
+    """
+    accent, window = normalize_accent(accent), normalize_window_color(window)
+    c = dict(DARK if dark else LIGHT)
+    if window != WINDOW_DEFAULT:
+        win, base, alt, nav, ink, muted, placeholder, edge = WINDOW_COLORS[window][2 if dark else 1]
+        c.update({
+            'window': win, 'base': base, 'alt': alt, 'read_only': alt, 'nav': nav,
+            'strip': alt, 'strip_ink': muted, 'ink': ink, 'muted': muted,
+            'placeholder': placeholder, 'list_edge': edge, 'arrow': muted,
+        })
+    if accent != ACCENT_DEFAULT:
+        _label, main, soft, bright, deep, *extra = ACCENTS[accent]
+        exact = (extra[0] if extra else {}).get('dark' if dark else 'light', {})
+        if dark:
+            act = exact.get('act', bright)
+            hover = exact.get('hover') or QColor(act).lighter(110).name()
+            c.update({
+                'accent': act, 'primary': act, 'primary_edge': act, 'primary_hover': hover,
+                'primary_off': _blend(act, c['base'], 0.3), 'on_accent': exact.get('on_act', '#1d1c1a'),
+                'link': act, 'selected': _rgba(act, 64), 'selected_ink': exact.get('ink', soft),
+            })
+        else:
+            act = exact.get('act', main)
+            hover = exact.get('hover') or QColor(act).darker(115).name()
+            c.update({
+                'accent': act, 'primary': act, 'primary_edge': hover, 'primary_hover': hover,
+                'primary_off': exact.get('soft', soft), 'on_accent': exact.get('on_act', '#ffffff'),
+                'link': hover, 'selected': _rgba(act, 51), 'selected_ink': exact.get('ink', deep),
+            })
+    if accent != ACCENT_DEFAULT or window != WINDOW_DEFAULT:
+        # Hover and pressed fills are the accent faintly over the fields' color.
+        c['hover'] = _blend(c['accent'], c['base'], 0.11 if dark else 0.05)
+        c['pressed'] = _blend(c['accent'], c['base'], 0.24 if dark else 0.13)
+    return c
+
+
+def accent_choices():
+    """(key, label) of each Accent color, Default first, for Settings."""
+    return [(ACCENT_DEFAULT, 'Default')] + [(key, spec[0]) for key, spec in ACCENTS.items()]
+
+
+def window_color_choices():
+    """(key, label) of each Window color, Default first, for Settings."""
+    return [(WINDOW_DEFAULT, 'Default')] + [(key, spec[0]) for key, spec in WINDOW_COLORS.items()]
+
+
+def is_dark():
+    return _scheme == desktop.ColorScheme.Dark
+
+
+def accent_swatch(key):
+    """The color that stands for an Accent color in Settings, in the scheme in use."""
+    return QColor(compose(is_dark(), key)['accent'])
+
+
+def window_swatch(key):
+    """The color that stands for a Window color in Settings, in the scheme in use."""
+    return QColor(compose(is_dark(), window=key)['window'])
 
 
 def _load_fonts():
@@ -985,7 +1126,7 @@ def _set_palette(app, palette):
 
 def _apply_colors(app, dark):
     global colors
-    colors = DARK if dark else LIGHT
+    colors = compose(dark, _accent, _window)
     _set_palette(app, _palette(colors))
     # Labels and lists hold some of the colors themselves.
     for widget in app.allWidgets():
@@ -1026,7 +1167,7 @@ def _follow_desktop(app, force=False):
     The TVHplayer colors follow, drawn by the TVHplayer theme or given to a
     Qt style as its palette.
     """
-    global _scheme, colors
+    global _scheme
     if _mode == SCHEME_DARK:
         scheme = desktop.ColorScheme.Dark
     elif _mode == SCHEME_LIGHT:
@@ -1047,11 +1188,34 @@ def _follow_desktop(app, force=False):
     # KDE's styles read their scheme only when made, so the style is made again.
     if _kde_color_scheme(app, scheme) and not _active and _style is not None:
         app.setStyle(_style())
+    _recolor(app)
+
+
+def _recolor(app):
+    """Give the app the colors of the scheme in use; a Qt style keeps the default Window color."""
+    global colors
+    dark = _scheme == desktop.ColorScheme.Dark
     if _active:
-        _apply_colors(app, scheme == desktop.ColorScheme.Dark)
+        _apply_colors(app, dark)
     else:
-        colors = DARK if scheme == desktop.ColorScheme.Dark else LIGHT
+        colors = compose(dark, _accent)
         _set_palette(app, _style_palette(colors))
+
+
+def set_accent(app, key):
+    """Use the Accent color ``key`` from now on, in every theme."""
+    global _accent
+    _accent = normalize_accent(key)
+    if _watching:
+        _recolor(app)
+
+
+def set_window_color(app, key):
+    """Use the Window color ``key`` from now on, in the TVHplayer theme."""
+    global _window
+    _window = normalize_window_color(key)
+    if _watching:
+        _recolor(app)
 
 
 def _kde_color_scheme(app, scheme):

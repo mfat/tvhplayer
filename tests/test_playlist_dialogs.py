@@ -676,6 +676,21 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_color_scheme_choice(self, mode):
             self.color_scheme = mode
 
+        accent = 'sage'
+        window_color = 'default'
+
+        def accent_choice(self):
+            return self.accent
+
+        def set_accent_choice(self, key):
+            self.accent = key
+
+        def window_color_choice(self):
+            return self.window_color
+
+        def set_window_color_choice(self, key):
+            self.window_color = key
+
         title_bar = False
 
         def can_draw_title_bar(self):
@@ -716,6 +731,17 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert not dialog.title_bar_check.isChecked()
     dialog.title_bar_check.click()
     assert host.title_bar is True
+    assert dialog.accent_combo.currentData() == 'sage'
+    assert not dialog.accent_combo.itemIcon(0).isNull()
+    dialog.accent_combo.setCurrentIndex(dialog.accent_combo.findData('ocean'))
+    QApplication.processEvents()
+    assert host.accent == 'ocean'
+    assert dialog.window_color_combo.currentData() == 'default'
+    assert dialog.window_color_combo.isVisibleTo(dialog)
+    dialog.theme_combo.setCurrentIndex(dialog.theme_combo.findData('Fusion'))
+    QApplication.processEvents()
+    assert host.theme == 'Fusion'
+    assert not dialog.window_color_combo.isVisibleTo(dialog)
     assert dialog.hide_check.isChecked()
     assert not dialog.play_check.isChecked()
     dialog.play_check.click()
