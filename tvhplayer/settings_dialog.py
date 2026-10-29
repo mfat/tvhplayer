@@ -61,7 +61,10 @@ TIMESHIFT_HELP = (
     'Sets mpv --cache-on-disk, so you can pause and go back much further. '
     'Without it, mpv keeps about a minute of HD in memory. Applies the next time a channel starts.'
 )
-TIMESHIFT_SIZE_HELP = 'Half for going back, half for pausing. 1 GB holds about 15 minutes of HD.'
+TIMESHIFT_SIZE_HELP = (
+    'Disk writes stop near this limit, then buffering continues in memory. '
+    'The disk buffer is released when the channel closes. 1 GB holds about 15 minutes of HD.'
+)
 LIVE_RESIZE_HELP = (
     'Show new video size in real time when resizing the sidebar. '
     'Turn this off if resizing is slow.'

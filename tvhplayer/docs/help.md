@@ -167,7 +167,7 @@ While this computer is recording, TVHplayer keeps it from going to sleep. It als
 
 TVHplayer plays with **mpv** (libmpv), drawing into the window on Wayland and X11 so the interface stays sharp at fractional scale.
 
-While a channel plays, the bar's seek bar, pause, and ±10 s buttons move within what mpv has buffered. **LIVE** shows how far behind you are; click it to catch up. The same commands are in the **Playback** menu. mpv keeps about a minute of HD in memory. **Settings → Playback → Keep the timeshift buffer on disk** sets `--cache-on-disk` for much longer, up to the disk space you choose (half back, half pause). The file is deleted when the channel stops. Applies the next time a channel starts.
+While a channel plays, the bar's seek bar, pause, and ±10 s buttons move within what mpv has buffered. **LIVE** shows how far behind you are; click it to catch up. The same commands are in the **Playback** menu. mpv keeps about a minute of HD in memory. **Settings → Playback → Keep the timeshift buffer on disk** sets `--cache-on-disk` for much longer, until the chosen disk limit is reached, then buffering continues in memory. The limit is checked every half-second, so writes can slightly exceed it. The file is deleted when the channel stops. Applies the next time a channel starts.
 
 **Settings → Playback → Start channels faster** sets mpv's `--demuxer-lavf-analyzeduration=0.5`, for a slightly quicker picture. Turn it off if sound or a sound track goes missing. Applies the next time a channel starts.
 

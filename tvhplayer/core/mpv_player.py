@@ -56,6 +56,8 @@ class MpvPlayer(Player):
         self._surface = None
         self._deinterlace = DEINTERLACE_AUTO
         self._last_buffered = None
+        self._timeshift_store = (None, 0)
+        self._disk_limit = 0
         # Set by play(); the first picture of that stream reports playback started.
         self._waiting_for_picture = False
         # The proxy goes to mpv per stream, so a local or LAN server is reached directly.
@@ -108,6 +110,7 @@ class MpvPlayer(Player):
                 self._emit(self._on_stopped)
 
     def play(self, url: str):
+        self._configure_timeshift_store()
         self._waiting_for_picture = True
         self._mpv['http-proxy'] = stream_proxy(url)
         # mpv keeps pause across files; a new channel always starts playing.
@@ -201,6 +204,12 @@ class MpvPlayer(Player):
                 return None
             position = self._mpv.time_pos
             state = self._mpv.demuxer_cache_state or {}
+            if self._disk_limit and state.get('file-cache-bytes', 0) >= self._disk_limit:
+                # Disabling writes preserves the existing file and seekable data.
+                # The file is released when this channel closes. Polling allows
+                # up to one poll interval of additional writes.
+                self._mpv['cache-on-disk'] = False
+                self._disk_limit = 0
         except Exception:
             return self._last_buffered
         ranges = [(r['start'], r['end']) for r in state.get('seekable-ranges') or []]
@@ -245,13 +254,20 @@ class MpvPlayer(Player):
         self._mpv.command('seek', f'{max(seconds, 0.0):.3f}', 'absolute')
 
     def set_timeshift_store(self, folder, size_bytes=0):
+        self._timeshift_store = (folder, size_bytes)
+
+    def _configure_timeshift_store(self):
+        folder, size_bytes = self._timeshift_store
+        self._disk_limit = 0
+        # In disk mode these bound metadata, not media bytes. Keep RAM bounded
+        # independently and use file-cache-bytes to stop disk writes.
+        self._mpv['demuxer-max-bytes'] = MEMORY_AHEAD_BYTES
+        self._mpv['demuxer-max-back-bytes'] = MEMORY_BEHIND_BYTES
         if folder:
             Path(folder).mkdir(parents=True, exist_ok=True)
-            half = max(int(size_bytes) // 2, 1)
+            self._disk_limit = max(int(size_bytes), 1)
             self._mpv['cache'] = 'yes'
             self._mpv['demuxer-cache-dir'] = str(folder)
-            self._mpv['demuxer-max-bytes'] = half
-            self._mpv['demuxer-max-back-bytes'] = half
             self._mpv['cache-on-disk'] = True
         else:
             self._mpv['cache-on-disk'] = False

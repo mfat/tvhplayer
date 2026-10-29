@@ -318,3 +318,31 @@ def test_real_libmpv_reports_failure_and_playback(monkeypatch):
         player.stop()
     finally:
         player.close()
+
+
+def test_disk_timeshift_stops_writes_at_limit_and_rearms_next_channel(engine, tmp_path):
+    player, mpv, _seen = engine
+    player.set_timeshift_store(str(tmp_path), 1000)
+    assert 'cache-on-disk' not in mpv.props
+    player.play('http://localhost/live')
+    assert mpv.props['cache-on-disk'] is True
+    assert mpv.props['demuxer-max-bytes'] == '150MiB'
+    mpv.time_pos = 10.0
+    mpv.pause = False
+    mpv.demuxer_cache_state = {
+        'seekable-ranges': [{'start': 0.0, 'end': 20.0}],
+        'file-cache-bytes': 999,
+    }
+    assert player.timeshift().span == 20
+    assert mpv.props['cache-on-disk'] is True
+    mpv.demuxer_cache_state['file-cache-bytes'] = 1001
+    assert player.timeshift().span == 20
+    assert mpv.props['cache-on-disk'] is False
+    player.timeshift()
+    assert mpv.props['cache-on-disk'] is False
+    player.play('http://localhost/next')
+    assert mpv.props['cache-on-disk'] is True
+    player.set_timeshift_store(None)
+    assert mpv.props['cache-on-disk'] is True
+    player.play('http://localhost/third')
+    assert mpv.props['cache-on-disk'] is False

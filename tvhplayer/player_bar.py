@@ -225,6 +225,7 @@ class PlayerBar(QWidget):
         self._paused = None
         self._behind = None
         self._seek_span = 0
+        self._available_span = 0
         self._timeshift_visible = None
 
         # Shown while nothing records: a dark pill that opens the Record menu.
@@ -472,6 +473,10 @@ class PlayerBar(QWidget):
 
     def _seek_moved(self, value):
         if not self._seek_updating:
+            value = max(value, self._seek_span - self._available_span)
+            self._seek_updating = True
+            self.seek_slider.setValue(value)
+            self._seek_updating = False
             self.seek_requested.emit(self._seek_span - value)
 
     def set_timeshift(self, state):
@@ -486,6 +491,7 @@ class PlayerBar(QWidget):
             self._seek_span = 0
             return
         paused, behind, span = state
+        self._available_span = max(0, int(span))
         # Keep the longest span seen this channel. mpv drops old packets as you
         # play, which would otherwise shrink the bar and yank the handle left.
         self._seek_span = max(self._seek_span, int(span), int(behind))

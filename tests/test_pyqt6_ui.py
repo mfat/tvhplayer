@@ -3299,6 +3299,13 @@ def test_timeshift_controls_follow_the_player(monkeypatch, tmp_path):
         fake_player.timeshift_state = Timeshift(True, 75.4, 90.0)
         window._sync_timeshift()
         assert (bar.seek_slider.maximum(), bar.seek_slider.value()) == (120, 45)
+        # Expired positions clamp before a seek request is sent.
+        requested = []
+        bar.seek_requested.connect(requested.append)
+        bar.seek_slider.setValue(0)
+        assert requested == [90]
+        assert fake_player.skips == [pytest.approx(75.4 - 90)]
+        fake_player.skips = []
         # The player cannot say for a moment, as while a seek settles: the controls stay.
         fake_player.timeshift_state = None
         window._sync_timeshift()
