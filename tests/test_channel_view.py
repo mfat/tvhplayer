@@ -201,3 +201,28 @@ def test_channel_model_handles_a_very_large_list_quickly():
     # An item per cell took tens of seconds for this many channels.
     assert time.monotonic() - started < 5
     view.close()
+
+
+def test_no_epg_is_displayed_only_after_successful_now_next_fetch():
+    from PyQt6.QtCore import Qt
+
+    from tvhplayer.channel_view import COL_NEXT, COL_NOW
+    from tvhplayer.core.models import Channel
+
+    _app, model, view = _model([Channel(uuid='missing', name='No guide', number=12)])
+    now = model.index(0, COL_NOW)
+    following = model.index(0, COL_NEXT)
+
+    # A request in flight must not be mistaken for missing guide data.
+    assert now.data() == ''
+    model.set_programmes({}, True, fetched=True)
+    assert now.data() == 'No EPG'
+    assert following.data() == ''
+    assert now.data(Qt.ItemDataRole.ToolTipRole) == 'No EPG available for this channel'
+    assert now.data(Qt.ItemDataRole.AccessibleTextRole) == 'No EPG available for this channel'
+
+    # A failed subsequent fetch must keep showing the existing data only if
+    # the window marks it as previously successfully fetched.
+    model.set_programmes({}, True, fetched=False)
+    assert now.data() == ''
+    view.close()
