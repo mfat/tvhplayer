@@ -1715,6 +1715,13 @@ def validate_server_url(url):
     return ""
 
 
+def same_server_address(a, b):
+    try:
+        return http_base_url(a) == http_base_url(b)
+    except ValueError:
+        return (a or '').strip() == (b or '').strip()
+
+
 def server_connection_key(server):
     if server is None:
         return None
@@ -2263,7 +2270,10 @@ class ServerDialog(QDialog):
         server = self._selected_server()
         if server is None or server.get('builtin'):
             return
-        changed = server.get(key) != value
+        if key == 'url':
+            changed = not same_server_address(server.get(key), value)
+        else:
+            changed = server.get(key) != value
         server[key] = value
         if changed and key != 'name':
             self.test_results.pop(id(server), None)

@@ -413,6 +413,18 @@ def test_connection_key_accepts_builtin_without_address(ui):
     assert ui.server_connection_key(_remote(url='http://tvh.example'))[0] == 'http://tvh.example:9981'
 
 
+def test_normalizing_address_keeps_connection_result(ui):
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote(url='http://tvh.example')])
+    result = {'phase': 'done', 'ok': True, 'ms': 10, 'error': ''}
+    dialog.test_results[id(dialog.servers[0])] = result
+    dialog.url_input.editingFinished.emit()
+    assert dialog.url_input.text() == 'http://tvh.example:9981'
+    assert dialog.status_label.text() == 'Connected'
+    dialog.url_input.setText('http://tvh.example:80')
+    assert dialog.status_label.text() == 'Not checked'
+
+
 def test_name_edit_keeps_connection_result(ui):
     dialog = ui.ServerDialog()
     dialog.load_servers([_remote()])
