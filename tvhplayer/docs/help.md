@@ -124,6 +124,10 @@ The **Record** button under the picture records the playing channel:
 - **Record on server…** (Ctrl+R) records on the Tvheadend server, for as long as you choose. The file stays on the server.
 - **Record on this computer** (Ctrl+Shift+R) records with ffmpeg into your recordings folder, for as long as you choose. Several channels can record at once.
 
+If you have rewound or paused the playing channel, **Record on this computer** offers **Record from the position I was watching**, selected by default. It saves the buffered footage from the position where you opened Record, then continues with incoming live footage. The selected duration is additional recording time after you confirm. Uncheck the option to record live using your normal settings.
+
+Recordings from the buffer use MPEG-TS (`.ts`) and do not apply the format or extra ffmpeg options in Settings. They may begin at a nearby earlier keyframe. Playback resumes when recording starts; keep it running, because a long pause can fill the buffer and stop incoming footage. Stopping playback or changing channels ends the buffered recording. If the chosen start has expired while the dialog was open, seek back and try again. **Stop recording** and the recording timer work as usual.
+
 While recording, the button turns into Stop: Ctrl+E stops the server recording and Ctrl+Shift+E the one on this computer.
 
 To schedule a programme, open the TV guide or **Show EPG** and record it from there. Recordings on the built-in server go into the same recordings folder as recordings on this computer.

@@ -26,6 +26,13 @@ class Timeshift(NamedTuple):
     span: float
 
 
+class BufferRecordingPoint(NamedTuple):
+    """A position in one particular playback session, captured before the recording dialog."""
+    stream: int
+    position: float
+    behind: float
+
+
 class Player(ABC):
     """Play one media URL into the window's video surface."""
 
@@ -136,6 +143,14 @@ class Player(ABC):
 
         Applies from the next stream. The default does nothing.
         """
+
+    def buffer_recording_point(self):
+        """Capture a buffered recording start, or None when unavailable."""
+        return None
+
+    def record_buffer(self, file_path, point):
+        """Record from a captured position through live; return a local recorder."""
+        raise RuntimeError('Recording from the timeshift buffer is unavailable')
 
     def show_message(self, text: str, duration_ms: int = 3000):
         """Draw short text over the picture, then let it fade. The default does nothing."""

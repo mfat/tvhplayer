@@ -300,7 +300,7 @@ DEINTERLACE_CHOICES = (
 
 
 class LocalJob:
-    """One recording to this computer: its own ffmpeg, channel and stop timer."""
+    """One recording to this computer: recorder, channel and stop timer."""
 
     def __init__(self, recorder, channel):
         self.recorder = recorder
@@ -1483,6 +1483,8 @@ class RecordingDurationDialog(QDialog):
 
     def __init__(self, parent=None, channel=None, event=None, save_dir=None):
         super().__init__(parent)
+        self._buffer_start = None
+        self.buffer_check = None
         self._save_dir = save_dir
         self._title = "Record to This Computer" if save_dir else "Record on Server"
         self.setWindowTitle(self._title)
@@ -1655,15 +1657,44 @@ class RecordingDurationDialog(QDialog):
                 return minutes
         return 0
 
+    def set_timeshift_start(self, behind):
+        """Offer the position captured when Record was opened, rather than live."""
+        self._buffer_start = datetime.now() - timedelta(seconds=behind)
+        group = QWidget()
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.buffer_check = QCheckBox('Record from the position I was watching')
+        self.buffer_check.setChecked(True)
+        layout.addWidget(self.buffer_check)
+        note = QLabel(
+            'Includes the buffered footage, then continues recording live for the duration below. '
+            'Saved as MPEG-TS (.ts), without extra ffmpeg options. '
+            'Playback resumes; keep it running so the buffer can keep receiving footage. '
+            'Stopping playback or changing channels ends this recording. '
+            'Uncheck to record live using your recording settings.'
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        describe(self.buffer_check, description=note.text())
+        self.layout().insertWidget(1, group)
+        self.buffer_check.toggled.connect(self._update_summary)
+        self._update_summary()
+        self.adjustSize()
+
+    def records_from_buffer(self):
+        return self.buffer_check is not None and self.buffer_check.isChecked()
+
     def _update_summary(self):
         start = datetime.now()
-        start_text = start.strftime('%H:%M')
+        start_text = (self._buffer_start if self.records_from_buffer() else start).strftime('%H:%M')
         if self.programme_event() is not None:
             end = datetime.fromtimestamp(self._event.stop)
             detail = f"stops when {html.escape(self._event.title)} ends"
         else:
             end = start + timedelta(minutes=self._minutes())
             detail = format_minutes(self._minutes())
+        if self.records_from_buffer():
+            detail += ' plus buffered footage'
         self.summary_label.setText(f"Records <b>{start_text} – {end.strftime('%H:%M')}</b> · {detail}")
         self.summary_label.setAccessibleName(
             f"Records {start_text} to {end.strftime('%H:%M')}, {html.unescape(detail)}"
@@ -7093,7 +7124,7 @@ class TVHeadendClient(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to play media: {str(e)}")
 
     def start_local_recording(self, channel):
-        """Record channel stream to local disk using ffmpeg"""
+        """Record a live channel, or the playing channel's buffered position."""
         try:
             if isinstance(channel, dict):
                 channel = Channel.from_raw(channel)
@@ -7111,40 +7142,60 @@ class TVHeadendClient(QMainWindow):
                 return
             print(f"Debug: Starting local recording for channel: {channel_name}")
 
-            try:
-                extra_options = parse_ffmpeg_options(self.recording_ffmpeg_options())
-            except ValueError as e:
-                QMessageBox.warning(
-                    self, "Record to This Computer",
-                    f"The extra ffmpeg options in Settings cannot be read: {e}.",
-                )
-                return
             folder = self.local_recording_dir()
             if not ensure_recording_dir(folder):
                 folder = self._ask_recording_dir(folder)
                 if not folder:
                     return
+            point = None
+            playing = getattr(self, '_playback_channel', None)
+            if playing is not None and channel_key(playing) == channel_key(channel):
+                state = self._timeshift_state()
+                if state is not None and (state.behind > 0 or state.paused):
+                    point = self.player.buffer_recording_point()
             dialog = RecordingDurationDialog(self, channel, self._programme_on_now(channel), save_dir=folder)
+            if point is not None:
+                dialog.set_timeshift_start(point.behind)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 print("Debug: Recording cancelled by user")
                 return
             duration = dialog.get_duration()
             event = dialog.programme_event()
+            from_buffer = point is not None and dialog.records_from_buffer()
+            extra_options = []
+            if not from_buffer:
+                try:
+                    extra_options = parse_ffmpeg_options(self.recording_ffmpeg_options())
+                except ValueError as e:
+                    QMessageBox.warning(
+                        self, "Record to This Computer",
+                        f"The extra ffmpeg options in Settings cannot be read: {e}.",
+                    )
+                    return
             file_path = free_path(
-                os.path.join(folder, local_recording_name(channel_name, datetime.now(), self.recording_format())),
+                os.path.join(folder, local_recording_name(
+                    channel_name, datetime.now(), 'ts' if from_buffer else self.recording_format())),
                 {job.recorder.file_path for job in self.local_jobs if job.is_running},
             )
 
-            stream_url = self.get_backend().stream_url(channel)
-            server = self.current_server() or {}
-            job = LocalJob(self.new_local_recorder(), channel)
-            job.recorder.start(
-                stream_url,
-                file_path,
-                server.get('username') or '',
-                server.get('password') or '',
-                extra_options,
-            )
+            if from_buffer:
+                try:
+                    recorder = self.player.record_buffer(file_path, point)
+                except (RuntimeError, ValueError) as e:
+                    QMessageBox.warning(self, "Record from Timeshift", str(e))
+                    return
+                job = LocalJob(recorder, channel)
+            else:
+                stream_url = self.get_backend().stream_url(channel)
+                server = self.current_server() or {}
+                job = LocalJob(self.new_local_recorder(), channel)
+                job.recorder.start(
+                    stream_url,
+                    file_path,
+                    server.get('username') or '',
+                    server.get('password') or '',
+                    extra_options,
+                )
             self.local_jobs.append(job)
             if self.recording_monitor is None:
                 self.recording_monitor = QTimer(self)
@@ -7174,7 +7225,7 @@ class TVHeadendClient(QMainWindow):
     def check_recording_status(self):
         """Check that each local recording is actually working"""
         for job in list(self.local_jobs):
-            if job.is_running:
+            if job.is_running or job.end is not None:
                 self._check_local_job(job)
         self._refresh_tasks(server=False)
 
@@ -7182,18 +7233,19 @@ class TVHeadendClient(QMainWindow):
         name = getattr(job.channel, 'name', '') or 'Unknown channel'
         try:
             status = job.recorder.status()
+            if status.return_code is not None:
+                self.stop_local_recording(job)
+                if not status.exists or status.size == 0 or status.return_code != 0:
+                    QMessageBox.critical(
+                        self, "Recording Error",
+                        f"Recording {name} failed. {status.stderr or 'No footage was saved.'}"
+                    )
+                return
             if not status.exists:
                 if status.elapsed > 10:
                     self.stop_local_recording(job)
                     QMessageBox.warning(
                         self, "Local Recording Status", f"The recording file for {name} does not exist"
-                    )
-                return
-            if status.return_code is not None:
-                if status.size == 0 or status.return_code != 0:
-                    self.stop_local_recording(job)
-                    QMessageBox.critical(
-                        self, "Recording Error", f"Recording {name} failed - check console for errors"
                     )
                 return
             if status.stalled:
@@ -7233,11 +7285,11 @@ class TVHeadendClient(QMainWindow):
         self._refresh_tasks()
 
     def _stop_local_job(self, job):
+        was_running = job.is_running or job.end is not None
         if job.timer is not None:
             job.timer.stop()
             job.timer = None
         job.end = None
-        was_running = job.is_running
         path = job.recorder.file_path
         job.recorder.stop()
         if was_running and self.converts_after_recording() and not getattr(self, '_closing', False):

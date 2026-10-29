@@ -3694,3 +3694,121 @@ def test_the_window_carries_the_app_icon(monkeypatch, tmp_path):
         assert window.windowIcon().cacheKey() == app.windowIcon().cacheKey()
     finally:
         window.close()
+
+
+@pytest.mark.parametrize('choice', ['buffer', 'live', 'cancel', 'expired', 'other_channel'])
+def test_recording_from_timeshift_uses_the_captured_position(monkeypatch, tmp_path, choice):
+    from concurrent.futures import Future
+    from tvhplayer.core.buffer_recorder import BufferRecorder
+    from tvhplayer.core.models import Channel
+    from tvhplayer.core.player import BufferRecordingPoint, Timeshift
+
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    channel = Channel(uuid='one', name='One')
+    point = BufferRecordingPoint(1, 10.0, 20.0)
+    player.timeshift_state = Timeshift(True, 20.0, 30.0)
+    player.buffer_recording_point = lambda: point
+    window._playback_channel = channel
+    window._playback_active = True
+    window._programme_on_now = lambda _channel: None
+    window.set_local_recording_dir(str(tmp_path))
+    window.set_recording_format('mp4')
+    window.set_recording_ffmpeg_options('-b:a 128k')
+    calls, warnings = [], []
+    future = Future()
+
+    def record_buffer(path, start):
+        assert start is point
+        if choice == 'expired':
+            raise RuntimeError('The selected start is no longer buffered.')
+        calls.append(('buffer', path))
+        Path(path).write_bytes(b'recorded packets')
+        return BufferRecorder(path, future, lambda: future.set_result(None))
+
+    player.record_buffer = record_buffer
+
+    class LiveRecorder:
+        is_running = False
+        file_path = None
+
+        def start(self, url, path, user, password, options):
+            calls.append(('live', path))
+            assert options == ['-b:a', '128k']
+            self.file_path = path
+            self.is_running = True
+
+        def stop(self):
+            self.is_running = False
+
+    window.new_local_recorder = LiveRecorder
+    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c: 'http://tv/live')
+    monkeypatch.setattr(ui.QMessageBox, 'warning', lambda *args: warnings.append(args[2]))
+
+    def confirm(dialog):
+        assert dialog.records_from_buffer() == (choice != 'other_channel')
+        if choice != 'other_channel':
+            assert 'plus buffered footage' in dialog.summary_label.text()
+        if choice == 'live':
+            dialog.buffer_check.setChecked(False)
+            assert 'plus buffered footage' not in dialog.summary_label.text()
+        # Opening the dialog captures the point, even if playback moves meanwhile.
+        player.timeshift_state = Timeshift(False, 10.0, 30.0)
+        return ui.QDialog.DialogCode.Rejected if choice == 'cancel' else ui.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(ui.RecordingDurationDialog, 'exec', confirm)
+    try:
+        selected = Channel(uuid='two', name='Two') if choice == 'other_channel' else channel
+        window.start_local_recording(selected)
+        if choice in ('cancel', 'expired'):
+            assert not calls and not window.local_jobs
+            assert bool(warnings) == (choice == 'expired')
+        else:
+            job = window.local_jobs[0]
+            buffered = choice == 'buffer'
+            assert calls[0][0] == ('buffer' if buffered else 'live')
+            assert Path(calls[0][1]).suffix == ('.ts' if buffered else '.mp4')
+            assert job.timer.interval() == 3600 * 1000
+            job.timer.timeout.emit()
+            assert not job.is_running and job.timer is None
+    finally:
+        window._confirm_quit = lambda: True
+        window.close()
+        app.processEvents()
+
+
+@pytest.mark.parametrize('failed', [False, True])
+def test_finished_buffer_recording_is_finalized_by_monitor(monkeypatch, tmp_path, failed):
+    from concurrent.futures import Future
+    from tvhplayer.core.buffer_recorder import BufferRecorder
+    from tvhplayer.core.models import Channel
+
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    future = Future()
+    path = tmp_path / 'buffer.ts'
+    if failed:
+        future.set_exception(RuntimeError('Cannot write recording'))
+    else:
+        path.write_bytes(b'footage')
+        future.set_result(None)
+    recorder = BufferRecorder(path, future, lambda: pytest.fail('stopped a finished dump'))
+    job = ui.LocalJob(recorder, Channel(uuid='one', name='One'))
+    job.end = time.time() + 3600
+    job.timer = ui.QTimer(window)
+    job.timer.start(3600000)
+    window.local_jobs = [job]
+    window.recording_monitor = ui.QTimer(window)
+    window.recording_monitor.start(2000)
+    errors = []
+    monkeypatch.setattr(ui.QMessageBox, 'critical', lambda *args: errors.append(args[2]))
+    try:
+        window.check_recording_status()
+        assert job.timer is None and job.end is None
+        assert window.recording_monitor is None
+        assert bool(errors) == failed
+        if failed:
+            assert 'Cannot write recording' in errors[0]
+        window.check_recording_status()
+        assert len(errors) == int(failed)
+    finally:
+        window.close()
+        app.processEvents()

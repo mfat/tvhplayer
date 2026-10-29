@@ -9,8 +9,9 @@ from __future__ import annotations
 import locale
 from pathlib import Path
 
+from .buffer_recorder import BufferRecorder
 from .player import (
-    DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Player, Timeshift,
+    BufferRecordingPoint, DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Player, Timeshift,
 )
 from .proxy import hide_http_proxy, stream_proxy
 
@@ -58,6 +59,8 @@ class MpvPlayer(Player):
         self._last_buffered = None
         self._timeshift_store = (None, 0)
         self._disk_limit = 0
+        self._stream_serial = 0
+        self._buffer_recorder = None
         # Set by play(); the first picture of that stream reports playback started.
         self._waiting_for_picture = False
         # The proxy goes to mpv per stream, so a local or LAN server is reached directly.
@@ -110,6 +113,8 @@ class MpvPlayer(Player):
                 self._emit(self._on_stopped)
 
     def play(self, url: str):
+        self._stop_buffer_recording()
+        self._stream_serial += 1
         self._configure_timeshift_store()
         self._waiting_for_picture = True
         self._mpv['http-proxy'] = stream_proxy(url)
@@ -119,6 +124,8 @@ class MpvPlayer(Player):
         self._mpv.loadfile(url)
 
     def stop(self):
+        self._stop_buffer_recording()
+        self._stream_serial += 1
         self._waiting_for_picture = False
         self._last_buffered = None
         self._mpv.command('stop')
@@ -236,6 +243,38 @@ class MpvPlayer(Player):
     def set_paused(self, paused):
         self._mpv.pause = bool(paused)
 
+    def buffer_recording_point(self):
+        buffered = self._buffered()
+        if buffered is None:
+            return None
+        position, _start, end = buffered
+        return BufferRecordingPoint(self._stream_serial, position, max(0.0, end - position))
+
+    def record_buffer(self, file_path, point):
+        mpv = self._mpv
+        if mpv is None or mpv.idle_active or point.stream != self._stream_serial:
+            raise RuntimeError('The channel changed. Seek back again before recording.')
+        # Read fresh ranges: a dialog may have stayed open until the start expired.
+        ranges = (mpv.demuxer_cache_state or {}).get('seekable-ranges') or []
+        if not any(r['start'] <= point.position <= r['end'] for r in ranges):
+            raise RuntimeError('The selected start is no longer buffered. Seek back again before recording.')
+        if self._buffer_recorder is not None and self._buffer_recorder.is_running:
+            raise RuntimeError('A recording from this timeshift buffer is already running.')
+        if Path(file_path).suffix.lower() != '.ts':
+            raise ValueError('Timeshift recordings must use MPEG-TS (.ts).')
+        future = mpv.command_async('dump-cache', str(max(0.0, point.position)), 'no', str(file_path))
+        recorder = BufferRecorder(file_path, future, lambda: mpv.command('dump-cache', '0', '0', ''))
+        self._buffer_recorder = recorder
+        # Consume packets so a paused player does not fill its forward cache
+        # and stop reading the live stream while recording.
+        mpv.pause = False
+        return recorder
+
+    def _stop_buffer_recording(self):
+        if self._buffer_recorder is not None:
+            self._buffer_recorder.stop()
+            self._buffer_recorder = None
+
     def skip(self, seconds):
         buffered = self._buffered()
         if buffered is None:
@@ -302,6 +341,7 @@ class MpvPlayer(Player):
     def close(self):
         # Quiesce playback first; native callbacks must not reach a closing Qt window.
         self._on_playing = self._on_stopped = self._on_error = None
+        self._stop_buffer_recording()
         player = self._mpv
         if player is not None:
             try:

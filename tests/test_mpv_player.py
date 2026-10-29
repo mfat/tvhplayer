@@ -1,6 +1,7 @@
 import sys
 import threading
 import types
+from concurrent.futures import Future
 
 import pytest
 
@@ -66,11 +67,16 @@ class _Mpv:
 
     def command(self, *args):
         self.commands.append(args)
+        if args == ('dump-cache', '0', '0', ''):
+            self.dump_future.set_result(None)
         if args == ('stop',):
             self.idle_active = True
 
     def command_async(self, *args):
         self.messages.append(args)
+        if args[0] == 'dump-cache':
+            self.dump_future = Future()
+            return self.dump_future
 
     def terminate(self):
         self.terminated = True
@@ -371,3 +377,141 @@ def test_disk_timeshift_stops_writes_at_limit_and_rearms_next_channel(engine, tm
     assert mpv.props['cache-on-disk'] is True
     player.play('http://localhost/third')
     assert mpv.props['cache-on-disk'] is False
+
+
+def _buffered_recording_engine(engine):
+    player, mpv, _seen = engine
+    player.play('http://localhost/live')
+    mpv.time_pos = 10.0
+    mpv.pause = True
+    mpv.demuxer_cache_state = {'seekable-ranges': [{'start': 0.0, 'end': 30.0}]}
+    return player, mpv
+
+
+def test_buffer_recording_keeps_the_start_chosen_before_the_dialog(engine, tmp_path):
+    player, mpv = _buffered_recording_engine(engine)
+    point = player.buffer_recording_point()
+    mpv.time_pos = 15.0
+    path = tmp_path / 'recording.ts'
+    recorder = player.record_buffer(path, point)
+    assert mpv.messages[-1] == ('dump-cache', '10.0', 'no', str(path))
+    assert recorder.is_running and not mpv.pause
+    path.write_bytes(b'buffered footage')
+    assert recorder.status().size == 16
+    with pytest.raises(RuntimeError, match='already running'):
+        player.record_buffer(tmp_path / 'second.ts', point)
+    recorder.stop()
+    assert not recorder.is_running
+    assert recorder.status().return_code == 0
+    recorder.stop()  # Does not stop a later recording.
+    assert mpv.commands.count(('dump-cache', '0', '0', '')) == 1
+
+
+@pytest.mark.parametrize('change', ['expired', 'channel', 'stopped'])
+def test_buffer_recording_rejects_a_start_that_is_no_longer_available(engine, tmp_path, change):
+    player, mpv = _buffered_recording_engine(engine)
+    point = player.buffer_recording_point()
+    if change == 'expired':
+        mpv.demuxer_cache_state = {'seekable-ranges': [{'start': 11.0, 'end': 40.0}]}
+    elif change == 'channel':
+        player.play('http://localhost/other')
+    else:
+        player.stop()
+    with pytest.raises(RuntimeError, match='changed|no longer buffered'):
+        player.record_buffer(tmp_path / 'recording.ts', point)
+    assert not mpv.messages
+
+
+@pytest.mark.parametrize('action', ['stop', 'play', 'close'])
+def test_buffer_recording_finishes_before_playback_changes(engine, tmp_path, action):
+    player, mpv = _buffered_recording_engine(engine)
+    recorder = player.record_buffer(tmp_path / 'recording.ts', player.buffer_recording_point())
+    if action == 'play':
+        player.play('http://localhost/other')
+    else:
+        getattr(player, action)()
+    assert not recorder.is_running
+    assert ('dump-cache', '0', '0', '') in mpv.commands
+
+
+def test_buffer_recording_reports_async_write_failure(engine, tmp_path):
+    player, mpv = _buffered_recording_engine(engine)
+    recorder = player.record_buffer(tmp_path / 'recording.ts', player.buffer_recording_point())
+    mpv.dump_future.set_exception(RuntimeError('Disk full'))
+    status = recorder.status()
+    assert not status.running and status.return_code == 1
+    assert status.stderr == 'Disk full'
+    recorder.stop()
+
+
+@pytest.mark.parametrize('disk', [False, True])
+def test_real_buffer_recording_contains_rewound_and_new_footage(tmp_path, disk):
+    import shutil
+    import subprocess
+    import time
+
+    try:
+        import mpv  # noqa: F401
+    except (ImportError, OSError):
+        pytest.skip('libmpv is not installed')
+    if not shutil.which('ffmpeg'):
+        pytest.skip('ffmpeg is not installed')
+    from tvhplayer.core.mpv_player import MpvPlayer
+
+    source = tmp_path / 'source.ts'
+    output = tmp_path / 'recording.ts'
+    subprocess.run([
+        'ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=10',
+        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+        '-t', '12', '-c:v', 'mpeg2video', '-g', '10', '-c:a', 'mp2', str(source),
+    ], check=True, timeout=15)
+
+    def wait_for(predicate):
+        deadline = time.monotonic() + 10
+        while not predicate():
+            assert time.monotonic() < deadline, 'mpv did not reach the expected state'
+            time.sleep(0.02)
+
+    def frame_hashes(path):
+        result = subprocess.run([
+            'ffmpeg', '-v', 'error', '-i', str(path), '-map', '0:v:0',
+            '-f', 'framemd5', '-',
+        ], capture_output=True, text=True, check=True, timeout=15)
+        assert not result.stderr
+        return [line.rsplit(',', 1)[-1].strip() for line in result.stdout.splitlines()
+                if line and not line.startswith('#')]
+
+    player = MpvPlayer()
+    player._mpv['vo'] = 'null'
+    player._mpv['ao'] = 'null'
+    # A local fixture, with the same seekable cache as a network stream. Limit
+    # readahead so recording must append new packets after dumping the cache.
+    player._mpv['demuxer-seekable-cache'] = 'yes'
+    player._mpv['demuxer-readahead-secs'] = 2
+    player._mpv['cache-secs'] = 2
+    if disk:
+        player.set_timeshift_store(str(tmp_path / 'cache'), 100_000_000)
+    try:
+        player.play(str(source))
+        wait_for(lambda: (player._mpv.time_pos or 0) >= 2.2)
+        player.set_paused(True)
+        assert player.skip(-1)
+        wait_for(lambda: player._mpv.time_pos is not None and player._mpv.time_pos < 2)
+        point = player.buffer_recording_point()
+        assert point is not None
+        initial_end = player._mpv.demuxer_cache_state['seekable-ranges'][0]['end']
+        recorder = player.record_buffer(output, point)
+        assert not player._mpv.pause
+        wait_for(lambda: player._mpv.demuxer_cache_state['seekable-ranges'][0]['end'] > initial_end + 1)
+        recorder.stop()
+        assert recorder.status().return_code == 0
+        original, recorded = frame_hashes(source), frame_hashes(output)
+        first = original.index(recorded[0])
+        last = original.index(recorded[-1])
+        # It starts near the chosen position (rounded back to a keyframe),
+        # before the live picture, and includes frames beyond the initial cache.
+        assert max(0, int(point.position * 10) - 15) <= first <= int(point.position * 10)
+        assert last > int(initial_end * 10)
+        assert recorded == original[first:last + 1]
+    finally:
+        player.close()
