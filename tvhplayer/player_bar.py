@@ -35,6 +35,7 @@ PILL_DARK = '#262626'
 PILL_DARK_HOVER = '#333333'
 RECORD_RED = '#e5484d'
 ICON_LIGHT = '#d9d9d9'
+CAST_ACTIVE = '#5b9cf8'
 MENU_BACKGROUND = '#1f1f1f'
 
 PLAY_SVG = '<svg viewBox="0 0 48 48"><path d="M19 13 L19 35 L36 24 Z" fill="{c}"/></svg>'
@@ -314,6 +315,7 @@ class PlayerBar(QWidget):
         self.cast_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cast_btn.setStyleSheet(button_stylesheet(
             "background: transparent; border: none; border-radius: 6px; }"
+            " QPushButton:checked { background: rgba(91,156,248,40); }"
             " QPushButton:hover { background: rgba(255,255,255,20);",
             radius=6,
         ))
@@ -442,7 +444,7 @@ class PlayerBar(QWidget):
     def set_casting(self, casting, name=''):
         casting = bool(casting)
         self.cast_btn.setChecked(casting)
-        color = '#ffffff' if casting and not self._contrast else self._icon_color()
+        color = CAST_ACTIVE if casting and not self._contrast else self._icon_color()
         self.cast_btn.setIcon(file_icon(self._icons_dir / 'chromecast.svg', color, 24))
         if casting:
             label = f'Casting to {name}' if name else 'Casting'
