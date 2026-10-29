@@ -46,6 +46,8 @@ def test_missing_http_port_defaults_to_tvheadend_port():
     ('https://tvh.example', 'https://tvh.example'),
     ('ftp://tvh.example', 'ftp://tvh.example'),
     ('http://tvh.example:abc', 'http://tvh.example:abc'),
+    ('http://[host]', 'http://[host]'),
+    ('HTTP://tvh.example', 'http://tvh.example:80'),
     ('', ''),
 ])
 def test_pin_http_port_keeps_the_old_port_80_default(url, expected):

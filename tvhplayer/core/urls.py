@@ -75,12 +75,12 @@ def pin_http_port(url, port=80):
     text = (url or '').strip()
     if not text:
         return url
-    if not text.startswith(('http://', 'https://')):
+    if not text.lower().startswith(('http://', 'https://')):
         if '://' in text:
             return url
         text = 'http://' + text
-    parts = urlsplit(text)
     try:
+        parts = urlsplit(text)
         if parts.scheme != 'http' or not parts.hostname or parts.port is not None:
             return url
     except ValueError:

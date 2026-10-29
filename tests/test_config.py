@@ -36,6 +36,16 @@ def test_old_config_keeps_port_80_for_portless_http_once(tmp_path):
     assert ConfigStore(path).servers[0]['url'] == 'http://other.example'
 
 
+def test_unparsable_old_address_does_not_discard_the_config(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    path.write_text(json.dumps({'volume': 7, 'servers': [{'name': 'x', 'url': 'http://[host]'}]}),
+                    encoding='utf-8')
+    store = ConfigStore(path)
+    assert store.data['volume'] == 7
+    assert store.servers[0]['url'] == 'http://[host]'
+    assert not (tmp_path / 'tvhplayer.conf.broken').exists()
+
+
 def test_new_config_does_not_pin_http_ports(tmp_path):
     path = tmp_path / 'tvhplayer.conf'
     store = ConfigStore(path)
