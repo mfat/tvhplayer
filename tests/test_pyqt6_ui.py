@@ -3273,11 +3273,14 @@ def test_timeshift_controls_follow_the_player(monkeypatch, tmp_path):
         assert fake_player.store[1] == 2 * 1024 ** 3
         assert window.config['timeshift_on_disk'] is True and window.config['timeshift_gb'] == 2
 
-        # Hidden until a channel plays here with a buffer to move in.
+        # Hidden until a channel plays here; shown even before mpv reports a buffer.
         assert not bar.pause_btn.isVisibleTo(bar)
         from tvhplayer.core.player import Timeshift
-        fake_player.timeshift_state = Timeshift(False, 0.0, 120.0)
+        fake_player.timeshift_state = None
         window._protect_video_surface(True)
+        assert bar.pause_btn.isVisibleTo(bar) and bar.seek_slider.isVisibleTo(bar)
+        fake_player.timeshift_state = Timeshift(False, 0.0, 120.0)
+        window._sync_timeshift()
         assert window._timeshift_timer.isActive()
         assert bar.pause_btn.isVisibleTo(bar)
         assert bar.live_btn.text() == 'LIVE' and not bar.live_btn.isEnabled()
@@ -3315,6 +3318,12 @@ def test_timeshift_controls_follow_the_player(monkeypatch, tmp_path):
         assert not bar.pause_btn.isVisibleTo(bar)
         window._fill_playback_menu(window.playback_menu)
         assert not any(action.isEnabled() for action in window.timeshift_actions)
+
+        fake_player.timeshift_state = Timeshift(False, 0.0, 30.0)
+        window._protect_video_surface(True)
+        assert window._timeshift_timer.isActive()
+        window.close()
+        assert not window._timeshift_timer.isActive()
     finally:
         window.close()
         app.processEvents()
@@ -3428,7 +3437,7 @@ def test_playback_menu_lists_tracks_and_deinterlace(monkeypatch, tmp_path):
         assert fake_player.deinterlace() == 'off'
         # Filled again when it opens, so the list follows the stream.
         window._fill_playback_menu(menu)
-        assert len(menu.actions()) == len(window.playback_actions) + 3
+        assert len(menu.actions()) == len(window.playback_actions) + 4
         assert menu.actions()[0] is window.playback_actions[0]
     finally:
         window.close()

@@ -1,4 +1,4 @@
-"""The dark bar under the picture: Play/Stop, channel switching, Record, volume and fullscreen.
+"""The dark bar under the picture: Play/Stop, channel switching, timeshift, Record, volume and fullscreen.
 
 In fullscreen the same bar floats over the bottom of the picture as a
 child overlay on the OpenGL video widget.
@@ -16,7 +16,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
-    QProxyStyle,
     QPushButton,
     QSlider,
     QStyle,
@@ -102,13 +101,14 @@ def _icon_label(markup, color, size):
     return label
 
 
-class _JumpingSliderStyle(QProxyStyle):
+class SeekSlider(QSlider):
     """A click on the groove moves the handle there, as on a video seek bar."""
 
-    def styleHint(self, hint, option=None, widget=None, data=None):
-        if hint == QStyle.StyleHint.SH_Slider_AbsoluteSetButtons:
-            return Qt.MouseButton.LeftButton.value
-        return super().styleHint(hint, option, widget, data)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.maximum() > self.minimum():
+            self.setValue(QStyle.sliderValueFromPosition(
+                self.minimum(), self.maximum(), int(event.position().x()), max(self.width(), 1)))
+        super().mousePressEvent(event)
 
 
 def _slider_stylesheet():
@@ -160,9 +160,28 @@ class PlayerBar(QWidget):
         self._local = False
         self._floating = False
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 8, 12, 8)
+        root.setSpacing(4)
+
+        # From the oldest buffered picture to live; a click or drag seeks.
+        self.seek_slider = SeekSlider(Qt.Orientation.Horizontal)
+        self.seek_slider.setTracking(False)
+        self.seek_slider.setSingleStep(10)
+        self.seek_slider.setPageStep(60)
+        if not self._contrast:
+            self.seek_slider.setStyleSheet(_slider_stylesheet())
+        describe(self.seek_slider, "Timeshift position",
+                 "Where the picture is in what has been buffered, from the oldest to live.")
+        self.seek_slider.setToolTip("Timeshift position")
+        self._seek_updating = False
+        self.seek_slider.valueChanged.connect(self._seek_moved)
+        root.addWidget(self.seek_slider)
+
+        layout = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
+        root.addLayout(layout)
 
         self.play_btn = QPushButton()
         self.play_btn.setFixedSize(36, 36)
@@ -189,38 +208,23 @@ class PlayerBar(QWidget):
         self.forward_btn = self._icon_button('forward_10.svg')
         describe(self.forward_btn, "Forward 10 seconds", "Go forward 10 seconds, up to live.")
         self.forward_btn.setToolTip("Forward 10 seconds")
-        # From the oldest buffered picture to live; dragging seeks on release.
-        self.seek_slider = QSlider(Qt.Orientation.Horizontal)
-        # Without a base style: given the application's, the proxy would own and delete it.
-        self._seek_style = _JumpingSliderStyle()
-        self.seek_slider.setStyle(self._seek_style)
-        self.seek_slider.setMinimumWidth(80)
-        self.seek_slider.setTracking(False)
-        self.seek_slider.setSingleStep(10)
-        self.seek_slider.setPageStep(60)
-        if not self._contrast:
-            self.seek_slider.setStyleSheet(_slider_stylesheet())
-        describe(self.seek_slider, "Timeshift position",
-                 "Where the picture is in what has been buffered, from the oldest to live.")
-        self.seek_slider.setToolTip("Timeshift position")
-        self._seek_updating = False
-        self.seek_slider.valueChanged.connect(self._seek_moved)
         self.live_btn = QPushButton("LIVE")
-        self.live_btn.setFixedHeight(24)
+        self.live_btn.setFixedHeight(32)
         self.live_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.live_btn.setStyleSheet(button_stylesheet(
-            f"background: {PILL_DARK}; border: none; border-radius: 12px; padding: 0 10px; "
+            f"background: {PILL_DARK}; border: none; border-radius: 16px; padding: 0 12px; "
             "color: #ededed; font-weight: 600; }"
             f" QPushButton:hover {{ background: {PILL_DARK_HOVER}; }}"
             " QPushButton:disabled { color: #9a9a9a;",
-            radius=12,
+            radius=16,
         ))
-        self._timeshift_controls = (self.back_btn, self.pause_btn, self.forward_btn, self.seek_slider,
+        self._timeshift_controls = (self.seek_slider, self.back_btn, self.pause_btn, self.forward_btn,
                                     self.live_btn)
-        for control in self._timeshift_controls:
-            layout.addWidget(control, 1 if control is self.seek_slider else 0)
+        for control in (self.back_btn, self.pause_btn, self.forward_btn, self.live_btn):
+            layout.addWidget(control)
         self._paused = None
         self._behind = None
+        self._timeshift_visible = None
 
         # Shown while nothing records: a dark pill that opens the Record menu.
         self.record_btn = QPushButton()
@@ -359,8 +363,6 @@ class PlayerBar(QWidget):
             lambda: self.popup_above(self.record_menu, self.recording_group)
         )
 
-        # Gives way to the seek bar while it shows.
-        self._spacer_index = layout.count()
         layout.addStretch(1)
 
         self.cast_btn = QPushButton()
@@ -473,9 +475,11 @@ class PlayerBar(QWidget):
 
     def set_timeshift(self, state):
         """The player's ``(paused, behind, span)``, or None to hide the timeshift controls."""
-        for control in self._timeshift_controls:
-            control.setVisible(state is not None)
-        self.layout().setStretch(self._spacer_index, 0 if state is not None else 1)
+        visible = state is not None
+        if visible != self._timeshift_visible:
+            self._timeshift_visible = visible
+            for control in self._timeshift_controls:
+                control.setVisible(visible)
         if state is None:
             self._paused = self._behind = None
             return

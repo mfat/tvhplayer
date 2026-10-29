@@ -60,7 +60,7 @@ try:
     from .core import frozen_libs
     from .core.engine import mpv_missing
     from .core.mpv_player import MpvPlayer
-    from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
+    from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from .core.playlist_sync import PlaylistSource, same_source, server_key, source_key
     from .core.playback_status import (
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
@@ -159,7 +159,7 @@ except ImportError:
     from core import frozen_libs
     from core.engine import mpv_missing
     from core.mpv_player import MpvPlayer
-    from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
+    from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from core.playlist_sync import PlaylistSource, same_source, server_key, source_key
     from core.playback_status import (
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
@@ -5517,9 +5517,7 @@ class TVHeadendClient(QMainWindow):
         ):
             self._held_timeshift = None
             return None
-        state = player.timeshift()
-        if state is None:
-            return getattr(self, '_held_timeshift', None)
+        state = player.timeshift() or getattr(self, '_held_timeshift', None) or Timeshift(False, 0.0, 0.0)
         self._held_timeshift = state
         return state
 
@@ -5534,7 +5532,14 @@ class TVHeadendClient(QMainWindow):
             timer.start()
         elif not playing_here:
             timer.stop()
+        shown = state is not None
         self.controls_bar.set_timeshift(state)
+        if shown != getattr(self, '_timeshift_shown', None):
+            self._timeshift_shown = shown
+            if getattr(self, 'is_fullscreen', False):
+                bar = getattr(self, 'floating_bar', None)
+                if bar is not None:
+                    bar.place()
 
     def toggle_pause(self):
         state = self._timeshift_state()
@@ -7245,6 +7250,9 @@ class TVHeadendClient(QMainWindow):
             event.ignore()
             return
         self._closing = True
+        timer = getattr(self, '_timeshift_timer', None)
+        if timer is not None:
+            timer.stop()
         # Closing Settings saves an edit still being typed there.
         if self._settings_dialog is not None:
             self._settings_dialog.close()

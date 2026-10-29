@@ -196,7 +196,7 @@ class MpvPlayer(Player):
         the last reading stands in for it.
         """
         try:
-            if self._mpv.idle_active:
+            if self._mpv is None or self._mpv.idle_active:
                 self._last_buffered = None
                 return None
             position = self._mpv.time_pos
@@ -212,12 +212,13 @@ class MpvPlayer(Player):
         return self._last_buffered
 
     def timeshift(self):
+        mpv = self._mpv
         buffered = self._buffered()
-        if buffered is None:
+        if mpv is None or buffered is None:
             return None
         position, start, end = buffered
         behind = end - position
-        return Timeshift(bool(self._mpv.pause), 0.0 if behind < LIVE_SLACK_SECONDS else behind, end - start)
+        return Timeshift(bool(mpv.pause), 0.0 if behind < LIVE_SLACK_SECONDS else behind, end - start)
 
     def set_paused(self, paused):
         self._mpv.pause = bool(paused)
@@ -247,12 +248,14 @@ class MpvPlayer(Player):
         if folder:
             Path(folder).mkdir(parents=True, exist_ok=True)
             half = max(int(size_bytes) // 2, 1)
+            self._mpv['cache'] = 'yes'
             self._mpv['demuxer-cache-dir'] = str(folder)
             self._mpv['demuxer-max-bytes'] = half
             self._mpv['demuxer-max-back-bytes'] = half
             self._mpv['cache-on-disk'] = True
         else:
             self._mpv['cache-on-disk'] = False
+            self._mpv['cache'] = 'auto'
             self._mpv['demuxer-max-bytes'] = MEMORY_AHEAD_BYTES
             self._mpv['demuxer-max-back-bytes'] = MEMORY_BEHIND_BYTES
 

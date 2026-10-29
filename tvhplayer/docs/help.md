@@ -38,7 +38,7 @@ The first time the built-in server starts without channels, **Set Up Channels** 
 
 ### Watching live TV
 
-Double-click a channel, press Enter on it, or press the round play button under the picture. The same button, or P, stops playback. The bar under the picture also has the volume, mute, fullscreen and Record buttons.
+Double-click a channel, press Enter on it, or press the round play button under the picture. The same button, or P, stops playback. The bar under the picture also has pause, skip, a seek bar, volume, mute, fullscreen and Record. Click **LIVE** (or the time behind live) to catch up.
 
 While a channel starts, a spinner shows what the server is doing. For tuner channels it also shows the reception, for example **Signal weak (SNR 11 dB)**. If a channel will not start or stops, the reason the server gives, such as **No free adapter**, shows on the picture and in the status bar.
 
@@ -167,7 +167,7 @@ While this computer is recording, TVHplayer keeps it from going to sleep. It als
 
 TVHplayer plays with **mpv** (libmpv), drawing into the window on Wayland and X11 so the interface stays sharp at fractional scale.
 
-While a channel plays, the buttons beside the channel arrows pause it, go back or forward 10 seconds, and show how far behind live you are; click that time to go back to live. The same commands are in the **Playback** menu. mpv keeps about a minute of HD in memory for this. **Settings → Playback → Keep the timeshift buffer on disk** sets mpv's `--cache-on-disk` for much longer, up to the disk space you choose, half for going back and half for pausing. Applies the next time a channel starts.
+While a channel plays, the bar's seek bar, pause, and ±10 s buttons move within what mpv has buffered. **LIVE** shows how far behind you are; click it to catch up. The same commands are in the **Playback** menu. mpv keeps about a minute of HD in memory. **Settings → Playback → Keep the timeshift buffer on disk** sets `--cache-on-disk` for much longer, up to the disk space you choose (half back, half pause). The file is deleted when the channel stops. Applies the next time a channel starts.
 
 **Settings → Playback → Start channels faster** sets mpv's `--demuxer-lavf-analyzeduration=0.5`, for a slightly quicker picture. Turn it off if sound or a sound track goes missing. Applies the next time a channel starts.
 
