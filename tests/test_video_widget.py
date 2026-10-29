@@ -1,4 +1,6 @@
-from tvhplayer.video_widget import live_splitter_keeps_up
+from types import SimpleNamespace
+
+from tvhplayer.video_widget import MpvVideoWidget, live_splitter_keeps_up
 
 
 def test_live_splitter_keeps_up_from_qt_6_11():
