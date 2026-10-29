@@ -80,7 +80,7 @@ LIGHT = {
     'list_edge': '#bcbdbf',
     'scroll': 'rgba(35,38,41,70)', 'scroll_hover': 'rgba(35,38,41,110)', 'track': 'rgba(35,38,41,31)',
     'disabled': 'rgba(35,38,41,110)', 'disabled_soft': 'rgba(35,38,41,90)',
-    'selected': 'rgba(61,174,233,51)', 'selected_ink': '#124a6a',
+    'selected': 'rgba(61,174,233,90)', 'selected_ink': '#124a6a',
     'tooltip': '#232629', 'tooltip_ink': '#ffffff',
     'arrow': '#5d6166', 'arrow_off': '#b8babc',
 }
@@ -97,7 +97,7 @@ DARK = {
     'list_edge': '#4b4f53',
     'scroll': 'rgba(252,252,252,70)', 'scroll_hover': 'rgba(252,252,252,120)', 'track': 'rgba(252,252,252,31)',
     'disabled': 'rgba(252,252,252,100)', 'disabled_soft': 'rgba(252,252,252,80)',
-    'selected': 'rgba(61,174,233,64)', 'selected_ink': '#d4eefc',
+    'selected': 'rgba(61,174,233,105)', 'selected_ink': '#d4eefc',
     'tooltip': '#31363b', 'tooltip_ink': '#fcfcfc',
     'arrow': '#a1a9b1', 'arrow_off': '#5c6166',
 }
@@ -129,6 +129,8 @@ ACCENTS = {
     'plum': ('Plum', '#8a4f7d', '#f0dcea', '#c68fb9', '#4a2442'),
     'rose': ('Rose', '#c0506a', '#fad7df', '#e88ea2', '#6b2334'),
 }
+# What Default means in the TVHplayer look. Organic's Default is its own graphite.
+TVHPLAYER_ACCENT = 'blue'
 # Accents taken out for looking too much like another; a saved one becomes that one.
 RETIRED_ACCENTS = {'orange': 'terracotta', 'ochre': 'marigold'}
 
@@ -297,11 +299,14 @@ def normalize_window_color(key):
 def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT, organic=False):
     """The light or dark colors with an Accent color and a Window color laid over them.
 
-    Both at their defaults give LIGHT or DARK as they are. ``organic`` gives
-    the Organic look's colors: Paper by default, its own graphite accent,
-    see-through edges and hover fills, and selections filled with the accent.
+    The TVHplayer look's Default accent is GNOME's blue (``TVHPLAYER_ACCENT``).
+    ``organic`` gives the Organic look's colors: Paper by default, its own
+    graphite accent, see-through edges and hover fills, and selections
+    filled with the accent.
     """
     accent, window = normalize_accent(accent), normalize_window_color(window)
+    if accent == ACCENT_DEFAULT and not organic:
+        accent = TVHPLAYER_ACCENT
     if organic and window == WINDOW_DEFAULT:
         window = ORGANIC_DEFAULT_WINDOW
     c = dict(DARK if dark else LIGHT)
@@ -321,7 +326,7 @@ def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT, organic=False):
             c.update({
                 'accent': act, 'primary': act, 'primary_edge': act, 'primary_hover': hover,
                 'primary_off': _blend(act, c['base'], 0.3), 'on_accent': exact.get('on_act', '#1d1c1a'),
-                'link': act, 'selected': _rgba(act, 64), 'selected_ink': exact.get('ink', soft),
+                'link': act, 'selected': _rgba(act, 105), 'selected_ink': exact.get('ink', soft),
             })
         else:
             act = exact.get('act', main)
@@ -329,7 +334,7 @@ def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT, organic=False):
             c.update({
                 'accent': act, 'primary': act, 'primary_edge': hover, 'primary_hover': hover,
                 'primary_off': exact.get('soft', soft), 'on_accent': exact.get('on_act', '#ffffff'),
-                'link': hover, 'selected': _rgba(act, 51), 'selected_ink': exact.get('ink', deep),
+                'link': hover, 'selected': _rgba(act, 90), 'selected_ink': exact.get('ink', deep),
             })
     if organic:
         act, act_hover, act_soft, on_act, popover = ORGANIC_ACT[window][1 if dark else 0]

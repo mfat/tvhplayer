@@ -102,12 +102,17 @@ def test_both_color_sets_have_every_color():
         assert {ink, ink_off} - {None} <= LIGHT.keys()
 
 
-def test_default_accent_and_window_color_keep_the_tvhplayer_colors():
+def test_the_tvhplayer_look_s_default_accent_is_gnome_blue():
     from tvhplayer.ui_theme import DARK, LIGHT, compose
 
-    assert compose(False) == LIGHT
-    assert compose(True) == DARK
-    assert compose(True, 'No such accent', 'No such window') == DARK
+    for dark, base in ((False, LIGHT), (True, DARK)):
+        colors = compose(dark)
+        assert colors == compose(dark, 'blue')
+        assert colors['accent'] == '#3584e4'
+        assert colors['window'] == base['window'] and colors['ink'] == base['ink']
+    assert compose(True, 'No such accent', 'No such window') == compose(True)
+    # Organic keeps its own graphite accent.
+    assert compose(False, organic=True)['accent'] != '#3584e4'
 
 
 def test_every_accent_and_window_color_gives_every_color(qapp):
