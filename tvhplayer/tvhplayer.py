@@ -4402,9 +4402,10 @@ class TVHeadendClient(QMainWindow):
         return rect.center()
 
     def current_server(self):
-        if not self.servers:
+        combo = getattr(self, 'server_combo', None)
+        if not self.servers or combo is None:
             return None
-        index = self.server_combo.currentIndex()
+        index = combo.currentIndex()
         if index < 0 or index >= len(self.servers):
             return None
         return self.servers[index]
@@ -5840,13 +5841,14 @@ class TVHeadendClient(QMainWindow):
         manager.failed.connect(self._on_cast_failed)
         manager.operation_failed.connect(self._on_cast_operation_failed)
         manager.audio_changed.connect(self._on_cast_audio_changed)
-        manager.profiles_ready.connect(self._on_cast_profiles)
+        manager.profiles_ready.connect(self._on_stream_profiles)
         manager.profile_selected.connect(self._on_cast_profile_selected)
         manager.automatic_profile_worked.connect(self._on_cast_profile_worked)
         self._cast_target = False
         self._cast_saved_audio = None
-        self._cast_profiles_cache = {}
-        self._cast_profiles_loading = None
+        self._stream_profiles_cache = {}
+        self._stream_profiles_loading = None
+        self._stream_profile_menu = None
         if not manager.available:
             self.cast_btn.setEnabled(False)
             self.cast_btn.setToolTip(manager.unavailable_reason)
@@ -5861,7 +5863,7 @@ class TVHeadendClient(QMainWindow):
         if not manager.devices and not manager.discovering:
             manager.discover()
         if self.current_server() is not None:
-            self._prefetch_cast_profiles()
+            self._prefetch_stream_profiles()
         self._fill_cast_menu()
         self.controls_bar.popup_above(self.cast_menu, self.cast_btn)
 
@@ -5889,14 +5891,7 @@ class TVHeadendClient(QMainWindow):
         refresh.triggered.connect(lambda: self._refresh_cast_devices())
         address = menu.addAction("Connect by IP address…")
         address.triggered.connect(self._cast_by_address)
-        self._cast_profile_menu = menu.addMenu("Stream profile")
-        self._cast_profile_menu.setEnabled(self.current_server() is not None)
-        try:
-            self._cast_profile_menu.aboutToShow.disconnect(self._on_cast_profile_menu_about_to_show)
-        except TypeError:
-            pass
-        self._cast_profile_menu.aboutToShow.connect(self._on_cast_profile_menu_about_to_show)
-        self._fill_cast_profile_menu(self._cast_profile_menu)
+        self._add_stream_profile_menu(menu, cast=True)
 
     def _cast_by_address(self):
         host, accepted = QInputDialog.getText(self, "Connect to Chromecast", "Receiver IP address:")
@@ -5904,72 +5899,93 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage("Connecting to Chromecast…")
             self.cast_manager.connect_host(host)
 
-    def _prefetch_cast_profiles(self, force=False):
+    def _prefetch_stream_profiles(self, force=False):
         server = self.current_server()
         if server is None:
             return
         key = server_key(server)
-        if self._cast_profiles_loading == key:
+        if self._stream_profiles_loading == key:
             return
-        if not force and key in self._cast_profiles_cache:
+        if not force and key in self._stream_profiles_cache:
             return
-        self._cast_profiles_loading = key
+        self._stream_profiles_loading = key
         self.cast_manager.request_profiles(dict(server), key)
 
-    def _on_cast_profile_menu_about_to_show(self):
-        self._prefetch_cast_profiles(force=True)
-        menu = getattr(self, '_cast_profile_menu', None)
-        if menu is not None:
-            self._fill_cast_profile_menu(menu)
+    def _add_stream_profile_menu(self, menu, cast):
+        """Add a Stream profile submenu: the Cast choice when ``cast``, else local playback's."""
+        submenu = menu.addMenu("Stream Pro&file")
+        submenu.setEnabled(self.current_server() is not None)
+        submenu.aboutToShow.connect(lambda: self._on_stream_profile_menu_about_to_show(submenu, cast))
+        self._fill_stream_profile_menu(submenu, cast)
+        return submenu
 
-    def _fill_cast_profile_menu(self, menu):
+    def _on_stream_profile_menu_about_to_show(self, menu, cast):
+        self._stream_profile_menu = (menu, cast)
+        self._prefetch_stream_profiles(force=True)
+        self._fill_stream_profile_menu(menu, cast)
+
+    def _fill_stream_profile_menu(self, menu, cast):
         menu.clear()
         server = self.current_server()
         if server is None:
             return
         key = server_key(server)
-        selected = self.config.get('cast_profiles', {}).get(key, AUTO_PROFILE)
+        field = 'cast_profiles' if cast else 'stream_profiles'
+        selected = self.config.get(field, {}).get(key, AUTO_PROFILE if cast else '')
         group = QActionGroup(menu)
         group.setExclusive(True)
-        choices = [(AUTO_PROFILE, 'Automatic (recommended)'), ('', 'Server default')]
-        for item in self._cast_profiles_cache.get(key, []):
-            choices.append((item.uuid or item.name, f'{item.name} ({item.uuid})'))
+        choices = [(AUTO_PROFILE, 'Automatic (recommended)')] if cast else []
+        choices.append(('', 'Server default'))
+        for item in self._stream_profiles_cache.get(key, []):
+            choices.append((item.uuid or item.name, item.name.replace('&', '&&')))
         for value, label in choices:
             action = menu.addAction(label)
             action.setCheckable(True)
             action.setChecked(value == selected)
             group.addAction(action)
-            action.triggered.connect(lambda _checked=False, value=value: self._set_cast_profile(value))
-        if self._cast_profiles_loading == key:
+            action.triggered.connect(
+                lambda _checked=False, value=value: self._set_stream_profile(field, value)
+            )
+        if self._stream_profiles_loading == key:
             waiting = menu.addAction('Loading profiles…')
             waiting.setEnabled(False)
 
-    def _set_cast_profile(self, value):
+    def _set_stream_profile(self, field, value):
+        """Save the profile, then restart the channel that is on so the change shows at once."""
         server = self.current_server()
         if server is None:
             return
-        key = server_key(server)
-        self.config.setdefault('cast_profiles', {})[key] = value
+        self.config.setdefault(field, {})[server_key(server)] = value
         self.save_config()
-        self.statusbar.showMessage('Chromecast stream profile saved; it applies to the next channel')
+        channel = self._playing_channel()
+        applies_now = (field == 'cast_profiles') == bool(self.cast_manager.is_connected)
+        if channel is None or not applies_now or not self._playing_listed_here():
+            self.statusbar.showMessage('Stream profile saved; it applies to the next channel')
+            return
+        self.play_channel_by_data(channel)
 
-    def _on_cast_profiles(self, key, profiles, error):
+    def _on_stream_profiles(self, key, profiles, error):
         # A response for a server we have since left still completes its request.
         # Do not clear a newer request for another server, however.
-        if self._cast_profiles_loading == key:
-            self._cast_profiles_loading = None
+        if self._stream_profiles_loading == key:
+            self._stream_profiles_loading = None
         if self._closing or self.current_server() is None or server_key(self.current_server()) != key:
             return
         if error:
             self.statusbar.showMessage(error)
-            menu = getattr(self, '_cast_profile_menu', None)
-            if menu is not None and (menu.isVisible() or self.cast_menu.isVisible()):
-                self._fill_cast_profile_menu(menu)
+        else:
+            self._stream_profiles_cache[key] = profiles
+        shown = self._stream_profile_menu
+        if shown is None:
             return
-        self._cast_profiles_cache[key] = profiles
-        menu = getattr(self, '_cast_profile_menu', None)
-        if menu is not None and (menu.isVisible() or self.cast_menu.isVisible()):
-            self._fill_cast_profile_menu(menu)
+        menu, cast = shown
+        try:
+            visible = menu.isVisible()
+        except RuntimeError:
+            self._stream_profile_menu = None
+            return
+        if visible:
+            self._fill_stream_profile_menu(menu, cast)
 
     def _on_cast_profile_selected(self, name):
         if self._awaiting_playback and self.cast_manager.is_connected:
@@ -6331,25 +6347,29 @@ class TVHeadendClient(QMainWindow):
         channel = self.selected_channel()
         playing = bool(self.player and self.player.is_playing())
         muted = bool(self.player and self.player.is_muted())
+        text_color = menu.palette().color(QPalette.ColorRole.WindowText).name()
 
-        play_action = menu.addAction(QIcon(f"{self.icons_dir}/play.svg"), "Play")
+        def tinted(name):
+            return file_icon(self.icons_dir / name, text_color, 16)
+
+        play_action = menu.addAction(tinted('play-fill.svg'), "Play")
         play_action.setEnabled(channel is not None)
         play_action.triggered.connect(lambda: self.play_channel_by_data(channel))
 
-        stop_action = menu.addAction(QIcon(f"{self.icons_dir}/stop.svg"), with_keys("Stop", "Ctrl+."))
+        stop_action = menu.addAction(tinted('stop-fill.svg'), with_keys("Stop", "Ctrl+."))
         stop_action.setEnabled(playing)
         stop_action.triggered.connect(self.stop_playback)
 
         menu.addSeparator()
 
         mute_action = menu.addAction(
-            QIcon(f"{self.icons_dir}/unmute.svg" if muted else f"{self.icons_dir}/mute.svg"),
+            tinted('volume-up-fill.svg' if muted else 'volume-mute-fill.svg'),
             with_keys("Unmute" if muted else "Mute", "M"),
         )
         mute_action.triggered.connect(self.toggle_mute)
 
         fullscreen_action = menu.addAction(
-            QIcon(f"{self.icons_dir}/fullscreen.svg"),
+            tinted('fullscreen.svg'),
             with_keys("Exit Fullscreen" if self.is_fullscreen else "Fullscreen", FULLSCREEN_KEY),
         )
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
@@ -6361,7 +6381,7 @@ class TVHeadendClient(QMainWindow):
         record_action.triggered.connect(self.start_recording)
 
         local_action = menu.addAction(
-            file_icon(self.icons_dir / 'save.svg', menu.palette().color(QPalette.ColorRole.WindowText).name(), 16),
+            tinted('save-fill.svg'),
             with_keys("Record Locally", "Ctrl+Shift+R"),
         )
         local_action.setEnabled(channel is not None)
@@ -6419,7 +6439,7 @@ class TVHeadendClient(QMainWindow):
         ]
 
     def _fill_playback_menu(self, menu):
-        """Playback commands, then Audio Track, Subtitles, and Deinterlace for the stream playing now."""
+        """Playback commands, then Stream Profile, Audio Track, Subtitles, and Deinterlace for the stream playing now."""
         if menu is getattr(self, 'playback_menu', None):
             menu.clear()
             for item in self.playback_actions:
@@ -6427,8 +6447,9 @@ class TVHeadendClient(QMainWindow):
                     menu.addSeparator()
                 else:
                     menu.addAction(item)
-        if self.cast_manager.is_connected:
-            menu.addAction("Use the Cast menu to choose a stream profile").setEnabled(False)
+        casting = self.cast_manager.is_connected
+        self._add_stream_profile_menu(menu, cast=casting)
+        if casting:
             return
         player = getattr(self, 'player', None)
         audio = menu.addMenu("&Audio Track")
@@ -8193,13 +8214,13 @@ class TVHeadendClient(QMainWindow):
             self._playback_server = self._channels_server
             self._remember_channel(channel)
             server = self.current_server()
-            profiles = self.config.get('cast_profiles', {})
             casting = self.cast_manager.is_connected
-            profile = profiles.get(server_key(server), AUTO_PROFILE) if server and casting else ''
+            profiles = self.config.get('cast_profiles' if casting else 'stream_profiles', {})
+            profile = profiles.get(server_key(server), AUTO_PROFILE if casting else '') if server else ''
             if casting:
                 self._stream = None
             else:
-                stream_url = self.get_backend().stream_url(channel)
+                stream_url = self.get_backend().stream_url(channel, profile=profile or None)
                 self._watch_stream_log()
                 self._stream = {'path': stream_path(stream_url), 'name': channel.name, 'started': False,
                                 'scrambled': '', 'failed_at': None}

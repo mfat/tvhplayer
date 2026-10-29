@@ -73,6 +73,7 @@ def default_config():
         'channel_list': channel_list_options(None),
         'play_on_start': False,
         'last_channel': {},
+        'stream_profiles': {},
         'cast_profiles': {},
         'cast_auto_profiles': {},
         'hide_dead_channels': True,
@@ -189,7 +190,7 @@ def _normalize(data):
         cfg['local_recording_format'] = DEFAULT_FORMAT
     if not isinstance(cfg.get('last_channel'), dict):
         cfg['last_channel'] = {}
-    for field in ('cast_profiles', 'cast_auto_profiles'):
+    for field in ('stream_profiles', 'cast_profiles', 'cast_auto_profiles'):
         profiles = cfg.get(field)
         cfg[field] = {key: value for key, value in profiles.items()
                       if isinstance(key, str) and isinstance(value, str)} if isinstance(profiles, dict) else {}

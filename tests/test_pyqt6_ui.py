@@ -350,6 +350,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             'Show EPG',
             'Show in TV Guide',
             'Go to Playing Channel',
+            'Stream Pro&file',
             '&Audio Track',
             '&Subtitles',
             '&Deinterlace',
@@ -459,7 +460,7 @@ def test_spinner_shows_until_playback_starts(monkeypatch, tmp_path):
         assert not window.playback_spinner.isVisible()
 
         class Backend:
-            def stream_url(self, channel):
+            def stream_url(self, channel, profile=None):
                 return 'http://tv.example/stream'
 
         window.get_backend = lambda: Backend()
@@ -516,7 +517,7 @@ def test_the_servers_reason_shows_over_the_player(monkeypatch, tmp_path):
         app.processEvents()
 
         class Backend:
-            def stream_url(self, channel):
+            def stream_url(self, channel, profile=None):
                 return 'http://tv.example/stream/channel/news?profile=pass'
 
         window.get_backend = lambda: Backend()
@@ -777,7 +778,7 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
             def get_channels(self):
                 return [news, sport]
 
-            def stream_url(self, channel):
+            def stream_url(self, channel, profile=None):
                 return f'http://tv.example/stream/{channel.uuid}'
 
         window.get_backend = lambda: Backend()
@@ -881,7 +882,7 @@ def test_go_to_playing_channel_switches_to_its_server(monkeypatch, tmp_path):
             def get_channels(self):
                 return lineups[self.server['url']]
 
-            def stream_url(self, channel):
+            def stream_url(self, channel, profile=None):
                 return f'{self.server["url"]}/stream/{channel.uuid}'
 
         window.get_backend = lambda: Backend(window.current_server())
@@ -1906,7 +1907,7 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
 
     monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
     monkeypatch.setattr(ui.QFileDialog, 'getSaveFileName', lambda *_a, **_k: pytest.fail('asked for a file'))
-    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c: 'http://tv/stream')
+    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c, profile=None: 'http://tv/stream')
     window._programme_on_now = lambda _c: None
     window.new_local_recorder = Recorder
     window.set_local_recording_dir(str(tmp_path / 'videos'))
@@ -1973,7 +1974,7 @@ def test_several_channels_record_to_this_computer_at_once(monkeypatch, tmp_path)
             return None
 
     monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
-    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda c: f'http://tv/{c.uuid}')
+    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda c, profile=None: f'http://tv/{c.uuid}')
     window._programme_on_now = lambda _c: None
     window.new_local_recorder = Recorder
     window.set_local_recording_dir(str(tmp_path / 'videos'))
@@ -2064,7 +2065,7 @@ def test_flatpak_asks_for_the_recordings_folder_once(monkeypatch, tmp_path):
     monkeypatch.setattr(ui, 'QMessageBox', Box)
     monkeypatch.setattr(ui.QFileDialog, 'getExistingDirectory', lambda *_a: asked.append(1) or str(chosen))
     monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
-    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c: 'http://tv/stream')
+    window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c, profile=None: 'http://tv/stream')
     window._programme_on_now = lambda _c: None
     window.new_local_recorder = Recorder
     window.config.pop('local_recording_dir', None)
@@ -2569,7 +2570,7 @@ class _ExtrasBackend:
         self.image_requests.append(reference)
         return f'http://127.0.0.1:9981/{reference}'
 
-    def stream_url(self, channel):
+    def stream_url(self, channel, profile=None):
         return f'http://tv.example/stream/{channel.uuid}'
 
 
@@ -3088,14 +3089,15 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
         from tvhplayer.core.models import StreamProfile
         profile = StreamProfile(uuid='cast-h264', name='Chromecast')
         key = ui.server_key(window.current_server())
-        window._on_cast_profiles(key, [profile], '')
-        window._set_cast_profile('cast-h264')
+        window._on_stream_profiles(key, [profile], '')
         requested = []
         window.get_backend = lambda: types.SimpleNamespace(
             stream_url=lambda _channel, profile=None: requested.append(profile) or 'http://tv.local/live.ts'
         )
-        window.play_channel_by_data(channel)
+        window._set_stream_profile('cast_profiles', 'cast-h264')
         assert requested == ['cast-h264']
+        assert manager.played[-1] == ('http://tv.local/live.ts', 'News')
+        manager.playing.emit()
 
         learned = f'living|{key}'
         writes = []
@@ -3139,12 +3141,12 @@ def test_cast_profile_request_finishes_after_switching_away_and_can_refresh_agai
     monkeypatch.setattr(window.cast_manager, 'request_profiles',
                         lambda _server, key: requests.append(key))
     try:
-        window._prefetch_cast_profiles()
+        window._prefetch_stream_profiles()
         current[0] = {'url': 'http://server-b:9981'}
-        window._on_cast_profiles('http://server-a:9981', [], '')
-        assert window._cast_profiles_loading is None
+        window._on_stream_profiles('http://server-a:9981', [], '')
+        assert window._stream_profiles_loading is None
         current[0] = {'url': 'http://server-a:9981'}
-        window._prefetch_cast_profiles(force=True)
+        window._prefetch_stream_profiles(force=True)
         assert requests == ['http://server-a:9981', 'http://server-a:9981']
     finally:
         window.close()
@@ -3157,13 +3159,51 @@ def test_stale_cast_profile_response_does_not_clear_newer_server_request(monkeyp
     monkeypatch.setattr(window, 'current_server', lambda: current[0])
     monkeypatch.setattr(window.cast_manager, 'request_profiles', lambda *_args: None)
     try:
-        window._prefetch_cast_profiles()
+        window._prefetch_stream_profiles()
         current[0] = {'url': 'http://server-b:9981'}
-        window._prefetch_cast_profiles()
-        window._on_cast_profiles('http://server-a:9981', [], '')
-        assert window._cast_profiles_loading == 'http://server-b:9981'
-        window._on_cast_profiles('http://server-b:9981', [], '')
-        assert window._cast_profiles_loading is None
+        window._prefetch_stream_profiles()
+        window._on_stream_profiles('http://server-a:9981', [], '')
+        assert window._stream_profiles_loading == 'http://server-b:9981'
+        window._on_stream_profiles('http://server-b:9981', [], '')
+        assert window._stream_profiles_loading is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_choosing_a_stream_profile_restarts_the_local_channel(monkeypatch, tmp_path):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    server = {'url': 'http://server-a:9981'}
+    monkeypatch.setattr(window, 'current_server', lambda: server)
+    monkeypatch.setattr(window.cast_manager, 'request_profiles', lambda *_args: None)
+    requested = []
+    window.get_backend = lambda: types.SimpleNamespace(
+        stream_url=lambda _channel, profile=None: requested.append(profile) or 'http://tv/stream'
+    )
+    window._remember_channel = lambda _channel: None
+    window._server_requests_ready = lambda: True
+    try:
+        from tvhplayer.core.models import StreamProfile
+        window._on_stream_profiles('http://server-a:9981', [StreamProfile(uuid='low', name='Low & slow')], '')
+        submenus = [action.menu() for action in window._video_context_menu().actions() if action.menu()]
+        profile_menu = next(menu for menu in submenus if menu.title() == 'Stream Pro&file')
+        labels = [action.text() for action in profile_menu.actions()]
+        assert labels == ['Server default', 'Low && slow']
+        assert profile_menu.actions()[0].isChecked()
+
+        # Nothing playing: the choice is saved for the next channel.
+        profile_menu.actions()[1].trigger()
+        assert requested == []
+        assert window.config['stream_profiles'] == {'http://server-a:9981': 'low'}
+
+        window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        assert requested == ['low']
+        window._on_playback_started()
+
+        # Playing: the channel restarts with the new profile at once.
+        window._set_stream_profile('stream_profiles', '')
+        assert requested == ['low', None]
+        assert window._playing_channel().uuid == 'news'
     finally:
         window.close()
         app.processEvents()

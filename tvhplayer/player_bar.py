@@ -256,7 +256,7 @@ class PlayerBar(QWidget):
 
         # The save icon is as wide as the menu's dot and square.
         local_icon = file_icon(
-            Path(icons_dir) / 'save.svg', '#ededed' if not self._contrast else '#000000', 18, pad=6
+            Path(icons_dir) / 'save-fill.svg', '#ededed' if not self._contrast else '#000000', 18, pad=6
         )
         self.record_menu = QMenu(self)
         self.record_menu.setAccessibleName("Record")

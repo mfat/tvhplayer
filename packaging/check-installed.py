@@ -22,7 +22,7 @@ REQUIRED_PATHS = (
     '/usr/share/tvhplayer/tvheadend/src/webui/static',
     '/usr/share/tvhplayer/tvheadend/data/dvb-scan',
     '/usr/share/tvhplayer/tvhplayer.py',
-    '/usr/share/tvhplayer/icons/play.svg',
+    '/usr/share/tvhplayer/icons/play-fill.svg',
     '/usr/share/tvhplayer/icons/chromecast.svg',
     '/usr/share/applications/io.github.mfat.tvhplayer.desktop',
     '/usr/share/metainfo/io.github.mfat.tvhplayer.metainfo.xml',
