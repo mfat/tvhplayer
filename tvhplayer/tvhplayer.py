@@ -1708,34 +1708,10 @@ NEGATIVE_TEXT = '#da4453'
 
 def validate_server_url(url):
     """What is wrong with a server address, or '' when it looks usable."""
-    url = url.strip()
-    if not url:
-        return "Enter the server address"
-    if url.startswith('http://'):
-        rest = url[7:]
-    elif url.startswith('https://'):
-        rest = url[8:]
-    elif '://' in url:
-        return "Use http:// or https://"
-    else:
-        rest = url
-    host = rest.split('/', 1)[0]
-    if ':' in host:
-        host, port = host.split(':', 1)
-        if not (port.isascii() and port.isdigit()):
-            return "Invalid port number"
-        if not 1 <= int(port) <= 65535:
-            return "Port must be between 1 and 65535"
-    if not host:
-        return "Enter a host name or IP address"
-    if any(c.isspace() for c in host):
-        return "Host name must not contain spaces"
-    if all(c in '0123456789.' for c in host):
-        parts = host.split('.')
-        if len(parts) != 4 or not all(parts):
-            return "Invalid IP address format"
-        if any(int(part) > 255 for part in parts):
-            return "IP numbers must be between 0 and 255"
+    try:
+        http_base_url(url)
+    except ValueError as exc:
+        return str(exc)
     return ""
 
 

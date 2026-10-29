@@ -153,6 +153,9 @@ def test_portless_address_is_normalized_on_edit_and_close(ui):
     ('myserver:8080/tvh', 'http://myserver:8080/tvh'),
     ('  myserver  ', 'http://myserver:9981'),
     ('https://myserver', 'https://myserver'),
+    ('http://[::1]:9981', 'http://[::1]:9981'),
+    ('[::1]', 'http://[::1]:9981'),
+    ('https://[2001:db8::1]/tvh', 'https://[2001:db8::1]/tvh'),
 ])
 def test_scheme_is_normalized_on_focus_loss_and_apply(ui, address, expected):
     dialog = ui.ServerDialog()
@@ -164,6 +167,18 @@ def test_scheme_is_normalized_on_focus_loss_and_apply(ui, address, expected):
     assert dialog.apply_changes()
     assert dialog.servers[0]['url'] == expected
     assert dialog.url_input.text() == expected
+
+
+@pytest.mark.parametrize('address', ['myserver?x=1', 'http://host#frag', 'host?', 'host#'])
+def test_query_and_fragment_are_rejected_without_rewriting(ui, address):
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote()])
+    dialog.url_input.setText(address)
+    dialog.url_input.editingFinished.emit()
+    assert dialog.url_input.text() == address
+    assert not dialog.test_btn.isEnabled()
+    assert not dialog.apply_changes()
+    assert 'query or fragment' in dialog.url_hint.text()
 
 
 def test_bad_address_is_flagged_and_blocks_closing(ui):

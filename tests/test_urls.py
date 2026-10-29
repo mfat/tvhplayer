@@ -39,6 +39,23 @@ def test_unsupported_scheme_is_rejected():
         http_base_url('ftp://myserver')
 
 
+@pytest.mark.parametrize('address', [
+    'myserver?x=1', 'http://host#frag', 'host?', 'host#',
+    'http://[::1', 'http://[::1]oops', 'http://host:',
+    'http://[::1]:abc', 'http://[::1]:65536', 'http://host:0',
+])
+def test_invalid_server_addresses_are_rejected(address):
+    with pytest.raises(ValueError):
+        http_base_url(address)
+
+
+def test_ipv6_credentials_preserve_brackets():
+    url = insert_basic_auth('http://[::1]:9981/stream/channel/abc', 'user', 'secret')
+    assert url == 'http://user:secret@[::1]:9981/stream/channel/abc'
+    assert urlparse(url).hostname == '::1'
+    assert urlparse(url).port == 9981
+
+
 def test_insert_basic_auth():
     url = insert_basic_auth('http://127.0.0.1:9981/stream/channel/abc', 'user', 'secret')
     assert url == 'http://user:secret@127.0.0.1:9981/stream/channel/abc'
