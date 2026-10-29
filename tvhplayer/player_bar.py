@@ -1,4 +1,4 @@
-"""The dark bar under the picture: channel switching, Play/Stop, Record, volume and fullscreen.
+"""The dark bar under the picture: Play/Stop, channel switching, Record, volume and fullscreen.
 
 In fullscreen the same bar floats over the bottom of the picture as a
 child overlay on the OpenGL video widget.
@@ -138,9 +138,6 @@ class PlayerBar(QWidget):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(10)
 
-        self.prev_btn = self._channel_button('skip_previous.svg', "Previous channel", "Ctrl+PgUp")
-        layout.addWidget(self.prev_btn)
-
         self.play_btn = QPushButton()
         self.play_btn.setFixedSize(36, 36)
         self.play_btn.setIconSize(QSize(32, 32))
@@ -153,6 +150,8 @@ class PlayerBar(QWidget):
         self.play_btn.setToolTip("Play / Stop (P)")
         layout.addWidget(self.play_btn)
 
+        self.prev_btn = self._channel_button('skip_previous.svg', "Previous channel", "Ctrl+PgUp")
+        layout.addWidget(self.prev_btn)
         self.next_btn = self._channel_button('skip_next.svg', "Next channel", "Ctrl+PgDown")
         layout.addWidget(self.next_btn)
 
@@ -348,7 +347,7 @@ class PlayerBar(QWidget):
         self.fullscreen_btn.setStyleSheet(self.mute_btn.styleSheet())
         layout.addWidget(self.fullscreen_btn)
 
-        for control in (self.prev_btn, self.play_btn, self.next_btn, self.cast_btn, self.mute_btn,
+        for control in (self.play_btn, self.prev_btn, self.next_btn, self.cast_btn, self.mute_btn,
                         self.volume_slider, self.fullscreen_btn):
             control.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 

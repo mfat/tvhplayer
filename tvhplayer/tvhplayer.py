@@ -4345,6 +4345,8 @@ class TVHeadendClient(QMainWindow):
             self.tag_combo,
             self.video_frame,
             self.play_btn,
+            self.controls_bar.prev_btn,
+            self.controls_bar.next_btn,
             self.record_btn,
             self.stop_record_btn,
             self.record_more_btn,
