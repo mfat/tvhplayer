@@ -687,8 +687,26 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_draws_title_bar(self, on):
             self.title_bar = on
 
+        updates = True
+        update_checks = 0
+
+        def checks_for_updates(self):
+            return self.updates
+
+        def set_checks_for_updates(self, on):
+            self.updates = on
+
+        def check_for_updates(self):
+            self.update_checks += 1
+
     host = Host()
     dialog = SettingsDialog(host)
+    assert dialog.nav.item(dialog.nav.count() - 1).text() == 'Updates'
+    assert dialog.updates_check.isChecked()
+    dialog.updates_check.click()
+    assert host.updates is False
+    dialog.updates_btn.click()
+    assert host.update_checks == 1
     # Appearance comes first and Settings opens on it.
     assert dialog.nav.item(0).text() == 'Appearance'
     assert dialog.pages.currentWidget().widget().findChild(QLabel, 'pageTitle').text() == 'Appearance'

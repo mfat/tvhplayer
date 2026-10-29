@@ -89,6 +89,7 @@ try:
     from .sleep_inhibit import SleepInhibitor
     from .core.sleep_guard import awake_reason, server_on_this_computer
     from .core.storage import free_bytes, low_space_message
+    from .core.updates import UpdateCheckError, check_due, fetch_latest, installed_by_flatpak, is_newer
     from .core.channel_edit import ChannelEditor, check_number, is_favourite, number_text
     from .core.tvh_admin import TvhAdmin
     from .core.conflicts import conflict_key, find_conflicts, read_tuner_use
@@ -182,6 +183,7 @@ except ImportError:
     from sleep_inhibit import SleepInhibitor
     from core.sleep_guard import awake_reason, server_on_this_computer
     from core.storage import free_bytes, low_space_message
+    from core.updates import UpdateCheckError, check_due, fetch_latest, installed_by_flatpak, is_newer
     from core.channel_edit import ChannelEditor, check_number, is_favourite, number_text
     from core.tvh_admin import TvhAdmin
     from core.conflicts import conflict_key, find_conflicts, read_tuner_use
@@ -253,6 +255,7 @@ import platform
 
 # Shown in About; the release notes in the metainfo file give the same version.
 APP_VERSION = "4.2.1"
+UPDATE_CHECK_DELAY_MS = 10_000
 CHANNEL_RELOAD_SECONDS = 30
 # A reload of a big list freezes the window a while: space them by a second per this many channels.
 CHANNELS_PER_RELOAD_SECOND = 100
@@ -3267,6 +3270,38 @@ class ChannelEditJob(QObject):
             pass
 
 
+class UpdateCheck(QObject):
+    """Ask GitHub for the latest release, off the UI thread.
+
+    ``done`` carries the Release, or None and an error message.
+    """
+
+    done = pyqtSignal(object, str)
+
+    def __init__(self, current_version, fetch=fetch_latest, parent=None):
+        super().__init__(parent)
+        self._current = current_version
+        self._fetch = fetch
+        self._thread = threading.Thread(target=self._run, name='update-check', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _run(self):
+        release, error = None, ''
+        try:
+            release = self._fetch(self._current)
+        except UpdateCheckError as e:
+            error = str(e)
+        except Exception as e:
+            error = f'Unexpected error: {e}'
+        try:
+            self.done.emit(release, error)
+        except RuntimeError:
+            # The window closed while this was on its way.
+            pass
+
+
 class StartWatch(QObject):
     """Follow the server's status for a channel that is starting, off the UI thread.
 
@@ -3587,6 +3622,8 @@ class TVHeadendClient(QMainWindow):
         self._now_next_loaded = False
         self._now_next_fetched = 0.0
         self._now_next_fetch = None
+        self._update_check = None
+        self._update_check_quiet = True
         self._channel_kinds = {}
         self._recording_keys = set()
         self._logo_pixmaps = {}
@@ -3687,6 +3724,8 @@ class TVHeadendClient(QMainWindow):
         self._bind_chromecast()
         self._bind_playback_splash()
         self._check_disk_space()
+        # Late enough that the window and the channel list come first.
+        QTimer.singleShot(UPDATE_CHECK_DELAY_MS, self._check_for_updates_when_due)
 
         if self.builtin is not None and self.config.get('builtin_autostart'):
             self.builtin.start()
@@ -3799,6 +3838,11 @@ class TVHeadendClient(QMainWindow):
         log_folder_action = QAction("Open &Log Folder", self)
         log_folder_action.triggered.connect(self.open_log_folder)
         help_menu.addAction(log_folder_action)
+
+        self.check_updates_action = QAction("Check for &Updates…", self)
+        self.check_updates_action.setStatusTip("Ask GitHub whether a newer TVHplayer has been released")
+        self.check_updates_action.triggered.connect(self.check_for_updates)
+        help_menu.addAction(self.check_updates_action)
 
         # Add About action to Help menu
         about_action = QAction("&About", self)
@@ -6531,6 +6575,87 @@ class TVHeadendClient(QMainWindow):
         """Show the about dialog"""
         print("Debug: Showing about dialog")
         AboutDialog(APP_VERSION, str(self.icons_dir / 'tvhplayer.svg'), self.engine, self).exec()
+
+    def checks_for_updates(self):
+        return self.config['check_for_updates']
+
+    def set_checks_for_updates(self, on):
+        self.config['check_for_updates'] = bool(on)
+        self.save_config()
+
+    def _check_for_updates_when_due(self):
+        if self.config['check_for_updates'] and check_due(self.config['last_update_check'], time.time()):
+            self._start_update_check(quiet=True)
+
+    def check_for_updates(self):
+        """Help → Check for Updates: always answers, and shows a skipped version too."""
+        self._start_update_check(quiet=False)
+
+    def _start_update_check(self, quiet):
+        if self._update_check is not None:
+            # A quiet check already running answers out loud once asked by hand.
+            self._update_check_quiet = self._update_check_quiet and quiet
+            return
+        self._update_check_quiet = quiet
+        if not quiet:
+            self.statusbar.showMessage("Checking for updates…")
+        check = UpdateCheck(APP_VERSION, parent=self)
+        check.done.connect(lambda release, error, check=check: self._on_update_checked(check, release, error))
+        self._update_check = check
+        self.check_updates_action.setEnabled(False)
+        check.start()
+
+    def _on_update_checked(self, check, release, error):
+        if check is not self._update_check:
+            return
+        self._update_check = None
+        self.check_updates_action.setEnabled(True)
+        quiet = self._update_check_quiet
+        if error:
+            print(f"Debug: Update check failed: {error}")
+            if not quiet:
+                self.statusbar.showMessage("Could not check for updates")
+                QMessageBox.warning(self, "Check for Updates", f"Could not check for updates.\n\n{error}")
+            return
+        self.config['last_update_check'] = time.time()
+        self.save_config()
+        if not is_newer(release.version, APP_VERSION):
+            print(f"Debug: TVHplayer {APP_VERSION} is up to date (latest release {release.version})")
+            if not quiet:
+                self.statusbar.showMessage("TVHplayer is up to date")
+                QMessageBox.information(
+                    self, "Check for Updates", f"You have the latest version of TVHplayer ({APP_VERSION}).")
+            return
+        if quiet and release.version == self.config['skipped_update_version']:
+            print(f"Debug: TVHplayer {release.version} is available but was skipped")
+            return
+        self.statusbar.showMessage(f"TVHplayer {release.version} is available")
+        self._show_update_available(release)
+
+    def _show_update_available(self, release):
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("Update Available")
+        box.setText(f"TVHplayer {release.version} is available.")
+        flatpak = installed_by_flatpak()
+        if flatpak:
+            box.setInformativeText(
+                "This copy was installed with Flatpak. Update it from your software center, "
+                "or run: flatpak update io.github.mfat.tvhplayer")
+            open_page = None
+        else:
+            open_page = box.addButton("&Open Release Page", QMessageBox.ButtonRole.AcceptRole)
+        skip = box.addButton("&Skip This Version", QMessageBox.ButtonRole.DestructiveRole)
+        later = box.addButton("OK" if flatpak else "&Later", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(open_page or later)
+        box.setEscapeButton(later)
+        box.exec()
+        clicked = box.clickedButton()
+        if open_page is not None and clicked is open_page:
+            QDesktopServices.openUrl(QUrl(release.url))
+        elif clicked is skip:
+            self.config['skipped_update_version'] = release.version
+            self.save_config()
 
     def show_user_guide(self):
         """Open the user guide documentation"""

@@ -1,6 +1,6 @@
 """The Settings window: playback at startup, where recordings go, and imported channels that do not work.
 
-Layout: a sidebar of pages (Appearance, Playback, Channels, Recordings, Conversion, Sleep). Every setting is a
+Layout: a sidebar of pages (Appearance, Playback, Channels, Recordings, Conversion, Sleep, Updates). Every setting is a
 row with its name and description on the left and the control on the right. The settings logic and
 the widget attribute names are unchanged from the tabbed version.
 """
@@ -83,6 +83,8 @@ LOGOS_HELP = "Each channel's logo is shown next to its name in the channel list 
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 DELETE_HELP = 'Only after a successful conversion. Recordings converted by hand are always kept.'
 TITLE_BAR_HELP = 'Takes effect the next time TVHplayer starts.'
+UPDATES_HELP = 'Once a day, TVHplayer asks GitHub whether a newer version has been released and tells you if so.'
+UPDATES_NOW_HELP = 'Ask GitHub now. A version you skipped is shown again.'
 
 
 class SettingsDialog(QDialog):
@@ -95,6 +97,7 @@ class SettingsDialog(QDialog):
         ('Recordings', 'Folder, format, padding'),
         ('Conversion', 'Edit-friendly copies'),
         ('Sleep', 'Scheduled recordings'),
+        ('Updates', 'New versions'),
     )
 
     def __init__(self, host, parent=None):
@@ -117,6 +120,7 @@ class SettingsDialog(QDialog):
             self._recordings_page(host, has_builtin),
             self._conversion_page(host),
             self._sleep_page(host),
+            self._updates_page(host),
         ]
 
         self.nav = SettingsNav()
@@ -161,6 +165,8 @@ class SettingsDialog(QDialog):
         self.convert_edit.editingFinished.connect(self._convert_edited)
         self.delete_check.toggled.connect(host.set_deletes_converted_original)
         self.awake_check.toggled.connect(host.set_stays_awake_for_scheduled)
+        self.updates_check.toggled.connect(host.set_checks_for_updates)
+        self.updates_btn.clicked.connect(host.check_for_updates)
         self.space_spin.editingFinished.connect(self._space_edited)
         self.logos_check.toggled.connect(host.set_shows_channel_logos)
         self.picon_btn.clicked.connect(self._download_picons)
@@ -330,6 +336,20 @@ class SettingsDialog(QDialog):
             'The computer never sleeps while it is recording. '
             'TVHplayer has to be open for the built-in server to record.'
         ))
+        page.finish()
+        return page
+
+    def _updates_page(self, host):
+        page = SettingsPage('Updates')
+        group = page.add(SettingsGroup())
+        self.updates_check = ToggleSwitch('Check for updates automatically')
+        self.updates_check.setChecked(host.checks_for_updates())
+        describe(self.updates_check, description=UPDATES_HELP)
+        group.add_row(SettingRow('&Check for updates automatically', UPDATES_HELP, self.updates_check))
+        self.updates_btn = QPushButton('Check &Now')
+        describe(self.updates_btn, 'Check for Updates Now', UPDATES_NOW_HELP)
+        self.updates_btn.setToolTip(UPDATES_NOW_HELP)
+        group.add_row(SettingRow('Check for updates now', UPDATES_NOW_HELP, self.updates_btn))
         page.finish()
         return page
 

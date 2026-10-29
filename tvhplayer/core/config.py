@@ -105,6 +105,11 @@ def default_config():
         'guide_choices': {},
         # Missing from configs saved when a port-less http:// address meant port 80.
         'http_ports_pinned': True,
+        # Ask GitHub about a newer release at most once a day; the time is seconds since the epoch.
+        'check_for_updates': True,
+        'last_update_check': 0.0,
+        # A release the user chose not to hear about again; a later one is shown.
+        'skipped_update_version': '',
     }
 
 
@@ -150,14 +155,18 @@ def _normalize(data):
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
     for key in (
         'play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original',
-        'stay_awake_for_scheduled', 'setup_offered', 'own_title_bar',
+        'stay_awake_for_scheduled', 'setup_offered', 'own_title_bar', 'check_for_updates',
     ):
         cfg[key] = bool(cfg.get(key))
+    try:
+        cfg['last_update_check'] = max(0.0, float(cfg.get('last_update_check') or 0))
+    except (TypeError, ValueError):
+        cfg['last_update_check'] = 0.0
     # Left unset so the Qt version picks the default, until Settings saves true or false.
     cfg.pop('resize_on_release', None)
     choice = cfg.get('live_resize', None)
     cfg['live_resize'] = None if choice is None else bool(choice)
-    for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options'):
+    for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options', 'skipped_update_version'):
         if not isinstance(cfg.get(key), str):
             cfg[key] = ''
     if cfg.get('deinterlace') not in DEINTERLACE_MODES:
