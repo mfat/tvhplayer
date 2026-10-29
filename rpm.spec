@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.2.2
+Version:        4.3.0
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,22 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.3.0-1
+- Add an Organic look in Settings > Appearance, beside TVHplayer and the Qt styles
+- Add Accent color and Window color settings, with GNOME blue as the default accent
+- Add channel list row sizes and row styles; row dividers are off by default
+- Let channel list columns be resized and remember their widths
+- Hide the channel number column by default
+- Switch the stream profile from the playback menus; playback restarts on the new profile
+- Check for updates and offer a Download button for new releases
+- Show the Cast button in blue while casting
+- Show the volume level on the mute button and use sharper fullscreen and SVG icons
+- Put play, volume and recording shortcuts in the Playback menu
+- Let Tab leave the channel list and other tables
+- Keep player bar controls from taking focus on click
+- Fix the ambiguous Ctrl+- shortcut for shorter channel rows
+- Use macOS keys for quit, fullscreen and help, and in key names in text
+
 * Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.2.2-1
 - Add File → Manage Servers to add, edit and test servers in one place
 - Check saved remote servers in the background and update their status dots automatically

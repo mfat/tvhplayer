@@ -34,6 +34,26 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.3.0" date="2026-10-29">
+      <description>
+        <ul>
+          <li>Add an Organic look in Settings &gt; Appearance, beside TVHplayer and the Qt styles</li>
+          <li>Add Accent color and Window color settings, with GNOME blue as the default accent</li>
+          <li>Add channel list row sizes and row styles; row dividers are off by default</li>
+          <li>Let channel list columns be resized and remember their widths</li>
+          <li>Hide the channel number column by default</li>
+          <li>Switch the stream profile from the playback menus; playback restarts on the new profile</li>
+          <li>Check for updates and offer a Download button for new releases</li>
+          <li>Show the Cast button in blue while casting</li>
+          <li>Show the volume level on the mute button and use sharper fullscreen and SVG icons</li>
+          <li>Put play, volume and recording shortcuts in the Playback menu</li>
+          <li>Let Tab leave the channel list and other tables</li>
+          <li>Keep player bar controls from taking focus on click</li>
+          <li>Fix the ambiguous Ctrl+- shortcut for shorter channel rows</li>
+          <li>Use macOS keys for quit, fullscreen and help, and in key names in text</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.2.2" date="2026-10-29">
       <description>
         <ul>
