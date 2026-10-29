@@ -4,6 +4,8 @@
         <file>icons/record.svg</file>
         <file>icons/play_circle.svg</file>
         <file>icons/stop_circle.svg</file>
+        <file>icons/skip_previous.svg</file>
+        <file>icons/skip_next.svg</file>
         <file>icons/download.svg</file>
         <file>icons/playerbg.svg</file>
         <file>icons/volume_off.svg</file>

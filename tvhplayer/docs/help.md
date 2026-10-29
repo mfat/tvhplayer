@@ -175,6 +175,7 @@ Press F1 (**Help → Keyboard Shortcuts**) for the full list. The most used ones
 |---|---|
 | Enter | Play the selected channel |
 | P | Play or stop |
+| Ctrl+PgUp / Ctrl+PgDown | Previous or next channel |
 | M | Mute or unmute |
 | Ctrl+Up / Ctrl+Down | Volume |
 | F or F11, Escape | Fullscreen, leave fullscreen |

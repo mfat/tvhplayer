@@ -38,6 +38,8 @@ Channels
 Playback
   P                Play the selected channel, or stop playback
   Ctrl+.           Stop playback
+  Ctrl+PgUp        Play the previous channel in the list
+  Ctrl+PgDown      Play the next channel in the list
   M                Mute or unmute
   Ctrl+Up          Raise volume
   Ctrl+Down        Lower volume

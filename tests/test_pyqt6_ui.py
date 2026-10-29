@@ -336,13 +336,15 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
         )
 
         menu = window._video_context_menu()
-        assert [action.text().split('\t')[1:] for action in menu.actions()[:6]] == [
-            [], ['Ctrl+.'], [], ['M'], ['F11'], [],
+        assert [action.text().split('\t')[1:] for action in menu.actions()[:8]] == [
+            [], ['Ctrl+.'], ['Ctrl+PgUp'], ['Ctrl+PgDown'], [], ['M'], ['F11'], [],
         ]
         labels = [action.text().split('\t')[0] for action in menu.actions() if not action.isSeparator()]
         assert labels == [
             'Play',
             'Stop',
+            'Previous Channel',
+            'Next Channel',
             'Mute',
             'Fullscreen',
             'Record',
@@ -1242,7 +1244,9 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.channel_list.currentRow() == 1
 
         playback_labels = [action.text().replace("&", "") for action in window.playback_menu.actions()]
-        assert playback_labels[:4] == ["Play or Stop\tP", "Stop Playback", "", "Mute or Unmute\tM"]
+        assert playback_labels[:6] == [
+            "Play or Stop\tP", "Stop Playback", "Previous Channel", "Next Channel", "", "Mute or Unmute\tM",
+        ]
         shortcuts = {
             action.text().replace("&", ""): action.shortcut().toString()
             for action in window.playback_menu.actions()
@@ -1250,6 +1254,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         }
         assert shortcuts == {
             "Stop Playback": "Ctrl+.",
+            "Previous Channel": "Ctrl+PgUp",
+            "Next Channel": "Ctrl+PgDown",
             "Volume Up": "Ctrl+Up",
             "Volume Down": "Ctrl+Down",
             "Record on Server": "Ctrl+R",
@@ -3186,6 +3192,42 @@ def test_stale_cast_profile_response_does_not_clear_newer_server_request(monkeyp
         assert window._stream_profiles_loading == 'http://server-b:9981'
         window._on_stream_profiles('http://server-b:9981', [], '')
         assert window._stream_profiles_loading is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_next_and_previous_channel_follow_the_list_and_wrap(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    played = []
+    window.get_backend = lambda: types.SimpleNamespace(
+        stream_url=lambda channel, profile=None: played.append(channel.name) or 'http://tv/stream'
+    )
+    window._remember_channel = lambda _channel: None
+    window._server_requests_ready = lambda: True
+    try:
+        window.channel_model.set_channels([
+            ui.Channel(uuid='a', name='One', number=1),
+            ui.Channel(uuid='b', name='Two', number=2),
+            ui.Channel(uuid='c', name='Three', number=3),
+        ])
+        # Nothing playing: start next to the selected row.
+        window.channel_list.setCurrentCell(1, 1)
+        window.play_adjacent_channel(1)
+        window._on_playback_started()
+        assert played == ['Three']
+
+        # Playing: step from the playing channel, wrapping at both ends.
+        window.controls_bar.next_btn.click()
+        assert played[-1] == 'One'
+        window.controls_bar.prev_btn.click()
+        assert played[-1] == 'Three'
+        assert window.channel_list.currentRow() == 2
+
+        window.channel_model.set_channels([])
+        window.play_adjacent_channel(1)
+        assert played[-1] == 'Three'
+        assert window.status_label.text() == 'No channels to switch to'
     finally:
         window.close()
         app.processEvents()

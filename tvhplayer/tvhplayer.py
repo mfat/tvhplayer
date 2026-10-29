@@ -4168,6 +4168,8 @@ class TVHeadendClient(QMainWindow):
         bar = self.controls_bar
         self.play_btn = bar.play_btn
         self.play_btn.clicked.connect(self.toggle_playback)
+        bar.prev_btn.clicked.connect(lambda: self.play_adjacent_channel(-1))
+        bar.next_btn.clicked.connect(lambda: self.play_adjacent_channel(1))
         self.record_btn = bar.record_btn
         self.stop_record_btn = bar.stop_record_btn
         self.stop_record_btn.clicked.connect(self.stop_any_recording)
@@ -6369,6 +6371,14 @@ class TVHeadendClient(QMainWindow):
         stop_action.setEnabled(playing)
         stop_action.triggered.connect(self.stop_playback)
 
+        has_channels = self.channel_list.rowCount() > 0
+        prev_action = menu.addAction(tinted('skip_previous.svg'), with_keys("Previous Channel", "Ctrl+PgUp"))
+        prev_action.setEnabled(has_channels)
+        prev_action.triggered.connect(lambda: self.play_adjacent_channel(-1))
+        next_action = menu.addAction(tinted('skip_next.svg'), with_keys("Next Channel", "Ctrl+PgDown"))
+        next_action.setEnabled(has_channels)
+        next_action.triggered.connect(lambda: self.play_adjacent_channel(1))
+
         menu.addSeparator()
 
         mute_action = menu.addAction(
@@ -6431,6 +6441,8 @@ class TVHeadendClient(QMainWindow):
         self.playback_actions = [
             action(with_keys("&Play or Stop", "P"), lambda: self.toggle_playback()),
             action("S&top Playback", lambda: self.stop_playback(), "Ctrl+."),
+            action("Pre&vious Channel", lambda: self.play_adjacent_channel(-1), "Ctrl+PgUp"),
+            action("Ne&xt Channel", lambda: self.play_adjacent_channel(1), "Ctrl+PgDown"),
             None,
             action(with_keys("&Mute or Unmute", "M"), lambda: self.toggle_mute()),
             action("Volume &Up", lambda: self._adjust_volume(5), "Ctrl+Up"),
@@ -6684,6 +6696,14 @@ class TVHeadendClient(QMainWindow):
             return
         if key == Qt.Key.Key_MediaStop:
             self.stop_playback()
+            event.accept()
+            return
+        if key in (Qt.Key.Key_MediaNext, Qt.Key.Key_ChannelUp):
+            self.play_adjacent_channel(1)
+            event.accept()
+            return
+        if key in (Qt.Key.Key_MediaPrevious, Qt.Key.Key_ChannelDown):
+            self.play_adjacent_channel(-1)
             event.accept()
             return
 
@@ -8178,6 +8198,27 @@ class TVHeadendClient(QMainWindow):
         except Exception as e:
             print(f"Debug: Error fetching EPG: {str(e)}")
             self.statusbar.showMessage(f"Error fetching EPG: {str(e)}")
+
+    def play_adjacent_channel(self, step):
+        """Play the channel ``step`` rows from the playing one in the list, wrapping at the ends.
+
+        With nothing playing from this list, count from the selected row.
+        """
+        count = self.channel_list.rowCount()
+        if count == 0:
+            self.statusbar.showMessage("No channels to switch to")
+            return
+        row = -1
+        playing = self._playing_channel()
+        if playing is not None and self._playing_listed_here():
+            row = self.channel_model.find_row(lambda listed: self._channels_match(listed, playing))
+        if row < 0:
+            row = self.channel_list.currentRow()
+        if row < 0:
+            row = 0 if step > 0 else count - 1
+        else:
+            row = (row + step) % count
+        self.play_channel_by_data(self.channel_from_row(row))
 
     def play_channel_from_table(self, index):
         """Play the channel of a double-clicked row."""
