@@ -2475,6 +2475,13 @@ def test_last_channel_plays_at_start_when_asked(monkeypatch, tmp_path):
         window.set_plays_on_start(True)
         assert window.plays_on_start()
 
+        window.set_resizes_on_release(True)
+        assert window.resizes_on_release()
+        assert window.config['resize_on_release'] is True
+        assert window.splitter.opaqueResize() is False
+        window.set_resizes_on_release(False)
+        assert window.splitter.opaqueResize() is True
+
         # Settings and View > Channel List share the logos option.
         window.set_shows_channel_logos(False)
         assert not window.shows_channel_logos()

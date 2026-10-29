@@ -3730,14 +3730,9 @@ class TVHeadendClient(QMainWindow):
         
         # Create splitter for resizable panes
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        # Qt 6.10 live-resizes the mpv OpenGL widget on every handle move and
-        # falls behind the pointer; Qt 6.11 (AppImage, Flatpak, venv) keeps up.
-        try:
-            from .video_widget import live_splitter_keeps_up
-        except ImportError:
-            from video_widget import live_splitter_keeps_up
-        if not live_splitter_keeps_up():
-            self.splitter.setOpaqueResize(False)
+        # Live resize of the mpv widget falls behind the pointer on Qt before 6.11.
+        # Settings can turn that off for any Qt; older Qt keeps it off until then.
+        self.splitter.setOpaqueResize(not self.resizes_on_release())
 
         # Left pane
         self.left_pane = QFrame()
@@ -7087,6 +7082,19 @@ class TVHeadendClient(QMainWindow):
     def set_plays_on_start(self, on):
         self.config['play_on_start'] = bool(on)
         self.save_config()
+
+    def resizes_on_release(self):
+        """Panes move only when the divider is released. On before Qt 6.11 until chosen."""
+        try:
+            from .video_widget import resize_on_release
+        except ImportError:
+            from video_widget import resize_on_release
+        return resize_on_release(self.config.get('resize_on_release'))
+
+    def set_resizes_on_release(self, on):
+        self.config['resize_on_release'] = bool(on)
+        self.save_config()
+        self.splitter.setOpaqueResize(not on)
 
     def can_draw_title_bar(self):
         """Whether the title bar switch applies on this desktop (GNOME/KDE)."""

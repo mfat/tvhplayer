@@ -38,6 +38,17 @@ def live_splitter_keeps_up(qt_version=None):
     return tuple(parts[:3]) >= _LIVE_SPLITTER_QT
 
 
+def resize_on_release(choice, qt_version=None):
+    """Whether pane drags resize only on mouse release.
+
+    ``choice`` is the saved setting. None follows the Qt version: on before
+    6.11, where live resize falls behind the pointer, and off from 6.11.
+    """
+    if choice is None:
+        return not live_splitter_keeps_up(qt_version)
+    return bool(choice)
+
+
 class MpvVideoWidget(QOpenGLWidget):
     """The picture surface. ``MpvPlayer.attach()`` binds the engine to it."""
 
