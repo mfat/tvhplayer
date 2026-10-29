@@ -31,7 +31,8 @@ def grid_rows(fetch, params=None) -> list:
     """Every row of a grid call, GRID_LIMIT rows a request.
 
     ``fetch(params)`` returns the call's reply. A caller's own ``limit`` asks
-    once. Otherwise pages follow while the reply's ``total`` says more remain.
+    once. Otherwise pages follow while the reply's ``total`` or
+    ``totalCount`` (EPG grid) says more remain.
     """
     params = dict(params or {})
     if 'limit' in params:
