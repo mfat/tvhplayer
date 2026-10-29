@@ -3731,8 +3731,8 @@ class TVHeadendClient(QMainWindow):
         # Create splitter for resizable panes
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         # Live resize of the mpv widget falls behind the pointer on Qt before 6.11.
-        # Settings can turn that off for any Qt; older Qt keeps it off until then.
-        self.splitter.setOpaqueResize(not self.resizes_on_release())
+        # The setting stays off there until someone turns it on.
+        self.splitter.setOpaqueResize(self.uses_live_resize())
 
         # Left pane
         self.left_pane = QFrame()
@@ -7083,18 +7083,18 @@ class TVHeadendClient(QMainWindow):
         self.config['play_on_start'] = bool(on)
         self.save_config()
 
-    def resizes_on_release(self):
-        """Panes move only when the divider is released. On before Qt 6.11 until chosen."""
+    def uses_live_resize(self):
+        """The picture changes size while a divider moves. Off before Qt 6.11 until chosen."""
         try:
-            from .video_widget import resize_on_release
+            from .video_widget import use_live_resize
         except ImportError:
-            from video_widget import resize_on_release
-        return resize_on_release(self.config.get('resize_on_release'))
+            from video_widget import use_live_resize
+        return use_live_resize(self.config.get('live_resize'))
 
-    def set_resizes_on_release(self, on):
-        self.config['resize_on_release'] = bool(on)
+    def set_uses_live_resize(self, on):
+        self.config['live_resize'] = bool(on)
         self.save_config()
-        self.splitter.setOpaqueResize(not on)
+        self.splitter.setOpaqueResize(bool(on))
 
     def can_draw_title_bar(self):
         """Whether the title bar switch applies on this desktop (GNOME/KDE)."""

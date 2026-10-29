@@ -89,8 +89,8 @@ def default_config():
         'color_scheme': SCHEME_SYSTEM,
         # On GNOME and KDE, the app's own title bar instead of the desktop's. Read before the window is built.
         'own_title_bar': False,
-        # None until chosen: panes resize only on release before Qt 6.11, and live from 6.11.
-        'resize_on_release': None,
+        # None until chosen: live resize is off before Qt 6.11, and on from 6.11.
+        'live_resize': None,
         # Minutes the built-in server starts recordings early and ends them late.
         'builtin_padding_early': 2,
         'builtin_padding_late': 5,
@@ -146,8 +146,9 @@ def _normalize(data):
     ):
         cfg[key] = bool(cfg.get(key))
     # Left unset so the Qt version picks the default, until Settings saves true or false.
-    choice = cfg.get('resize_on_release', None)
-    cfg['resize_on_release'] = None if choice is None else bool(choice)
+    cfg.pop('resize_on_release', None)
+    choice = cfg.get('live_resize', None)
+    cfg['live_resize'] = None if choice is None else bool(choice)
     for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options'):
         if not isinstance(cfg.get(key), str):
             cfg[key] = ''

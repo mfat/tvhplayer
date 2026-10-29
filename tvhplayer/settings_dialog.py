@@ -45,9 +45,9 @@ HIDE_HELP = (
     'Channels that fail are hidden and come back once a later test finds them working.'
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
-RESIZE_HELP = (
-    'Dragging a divider resizes the player as you move. Turn this on if the pointer '
-    'lags behind while video is playing.'
+LIVE_RESIZE_HELP = (
+    'Show new video size in real time when resizing the sidebar. '
+    'Turn this off if resizing is slow.'
 )
 FOLDER_HELP = 'Recording to this computer saves here without asking for a file name.'
 BUILTIN_FOLDER_HELP = ' The built-in server saves its recordings here too.'
@@ -152,7 +152,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(footer)
 
         self.play_check.toggled.connect(host.set_plays_on_start)
-        self.resize_check.toggled.connect(host.set_resizes_on_release)
+        self.live_resize_check.toggled.connect(host.set_uses_live_resize)
         self.folder_btn.clicked.connect(self._choose_folder)
         self.format_combo.currentIndexChanged.connect(self._format_chosen)
         self.options_edit.editingFinished.connect(self._options_edited)
@@ -185,10 +185,10 @@ class SettingsDialog(QDialog):
         describe(self.play_check, description=PLAY_HELP)
         startup.add_row(SettingRow('&Play the last channel when TVHplayer starts', PLAY_HELP, self.play_check))
         panes = page.add(SettingsGroup('Panes'))
-        self.resize_check = ToggleSwitch('Resize panes when you release the divider')
-        self.resize_check.setChecked(host.resizes_on_release())
-        describe(self.resize_check, description=RESIZE_HELP)
-        panes.add_row(SettingRow('Resize panes when you &release the divider', RESIZE_HELP, self.resize_check))
+        self.live_resize_check = ToggleSwitch('Live resize')
+        self.live_resize_check.setChecked(host.uses_live_resize())
+        describe(self.live_resize_check, description=LIVE_RESIZE_HELP)
+        panes.add_row(SettingRow('&Live resize', LIVE_RESIZE_HELP, self.live_resize_check))
         page.finish()
         return page
 

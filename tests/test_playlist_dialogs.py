@@ -552,11 +552,11 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_plays_on_start(self, on):
             self.play = on
 
-        def resizes_on_release(self):
-            return getattr(self, 'resize', False)
+        def uses_live_resize(self):
+            return getattr(self, 'live_resize', False)
 
-        def set_resizes_on_release(self, on):
-            self.resize = on
+        def set_uses_live_resize(self, on):
+            self.live_resize = on
 
         def shows_channel_logos(self):
             return True
@@ -700,9 +700,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert not dialog.play_check.isChecked()
     dialog.play_check.click()
     assert host.play is True
-    assert not dialog.resize_check.isChecked()
-    dialog.resize_check.click()
-    assert host.resize is True
+    assert not dialog.live_resize_check.isChecked()
+    dialog.live_resize_check.click()
+    assert host.live_resize is True
     assert dialog.folder_edit.text() == '/videos'
     monkeypatch.setattr(QFileDialog, 'getExistingDirectory', lambda *_a: '/recordings')
     dialog.folder_btn.click()

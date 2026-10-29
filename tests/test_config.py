@@ -157,17 +157,19 @@ def test_every_setting_has_a_default_and_bad_values_are_replaced(tmp_path):
     assert default_config()['hide_dead_channels'] is True
 
 
-def test_resize_on_release_stays_unset_until_chosen(tmp_path):
+def test_live_resize_stays_unset_until_chosen(tmp_path):
     path = tmp_path / 'config.json'
-    assert default_config()['resize_on_release'] is None
+    assert default_config()['live_resize'] is None
     path.write_text('{}', encoding='utf-8')
-    assert ConfigStore(path).data['resize_on_release'] is None
+    assert ConfigStore(path).data['live_resize'] is None
+    path.write_text(json.dumps({'live_resize': True}), encoding='utf-8')
+    assert ConfigStore(path).data['live_resize'] is True
+    path.write_text(json.dumps({'live_resize': False}), encoding='utf-8')
+    assert ConfigStore(path).data['live_resize'] is False
+    path.write_text(json.dumps({'live_resize': None}), encoding='utf-8')
+    assert ConfigStore(path).data['live_resize'] is None
     path.write_text(json.dumps({'resize_on_release': True}), encoding='utf-8')
-    assert ConfigStore(path).data['resize_on_release'] is True
-    path.write_text(json.dumps({'resize_on_release': False}), encoding='utf-8')
-    assert ConfigStore(path).data['resize_on_release'] is False
-    path.write_text(json.dumps({'resize_on_release': None}), encoding='utf-8')
-    assert ConfigStore(path).data['resize_on_release'] is None
+    assert 'resize_on_release' not in ConfigStore(path).data
 
 
 def test_own_title_bar_is_off_unless_chosen(tmp_path):
