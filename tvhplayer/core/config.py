@@ -29,6 +29,7 @@ SCHEME_SYSTEM = 'system'
 SCHEME_LIGHT = 'light'
 SCHEME_DARK = 'dark'
 SCHEME_CHOICES = (SCHEME_SYSTEM, SCHEME_LIGHT, SCHEME_DARK)
+TIMESHIFT_MAX_GB = 500
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +91,9 @@ def default_config():
         'deinterlace': DEINTERLACE_AUTO,
         # Probe a new stream for less time, so a channel's picture comes sooner.
         'fast_channel_start': False,
+        # Timeshift buffer on disk, up to this many GB, instead of mpv's buffer in memory.
+        'timeshift_on_disk': False,
+        'timeshift_gb': 4,
         # TVHplayer's own look, or the name of a Qt style. Read before the window is built.
         'ui_theme': THEME_TVHPLAYER,
         'color_scheme': SCHEME_SYSTEM,
@@ -164,6 +168,7 @@ def _normalize(data):
     for key in (
         'play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original',
         'stay_awake_for_scheduled', 'setup_offered', 'own_title_bar', 'check_for_updates', 'fast_channel_start',
+        'timeshift_on_disk',
     ):
         cfg[key] = bool(cfg.get(key))
     try:
@@ -206,6 +211,9 @@ def _normalize(data):
         value = cfg.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             cfg[key] = defaults[key]
+    value = cfg.get('timeshift_gb')
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= TIMESHIFT_MAX_GB:
+        cfg['timeshift_gb'] = defaults['timeshift_gb']
     return cfg
 
 

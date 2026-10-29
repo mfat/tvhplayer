@@ -290,6 +290,8 @@ GUIDE_START_FALLBACK_MS = 60000
 # How long a server's tuner count and channel muxes are trusted before reading them again.
 TUNER_USE_REFRESH_SECONDS = 600
 STATUS_BAR_HEIGHT = 34
+TIMESHIFT_SKIP_SECONDS = 10
+
 DEINTERLACE_CHOICES = (
     (DEINTERLACE_AUTO, "&Automatic", "Deinterlace streams marked as interlaced, such as 1080i broadcasts"),
     (DEINTERLACE_ON, "Al&ways", "Deinterlace every stream, for channels that are interlaced but not marked as such"),
@@ -3743,6 +3745,7 @@ class TVHeadendClient(QMainWindow):
             self.player = self._new_player()
             self.player.set_deinterlace(self.config['deinterlace'])
             self.player.set_fast_start(self.config['fast_channel_start'])
+            self._apply_timeshift_store()
             print("Debug: Media player created successfully")
         except Exception as e:
             print(f"Error initializing {self.engine}: {str(e)}")
@@ -4171,6 +4174,14 @@ class TVHeadendClient(QMainWindow):
         self.play_btn.clicked.connect(self.toggle_playback)
         bar.prev_btn.clicked.connect(lambda: self.play_adjacent_channel(-1))
         bar.next_btn.clicked.connect(lambda: self.play_adjacent_channel(1))
+        bar.back_btn.clicked.connect(lambda: self.skip_timeshift(-TIMESHIFT_SKIP_SECONDS))
+        bar.forward_btn.clicked.connect(lambda: self.skip_timeshift(TIMESHIFT_SKIP_SECONDS))
+        bar.pause_btn.clicked.connect(self.toggle_pause)
+        bar.live_btn.clicked.connect(self.go_live)
+        bar.seek_requested.connect(self.seek_timeshift)
+        self._timeshift_timer = QTimer(self)
+        self._timeshift_timer.setInterval(500)
+        self._timeshift_timer.timeout.connect(self._sync_timeshift)
         self.record_btn = bar.record_btn
         self.stop_record_btn = bar.stop_record_btn
         self.stop_record_btn.clicked.connect(self.stop_any_recording)
@@ -5491,6 +5502,72 @@ class TVHeadendClient(QMainWindow):
                 bool(getattr(self, '_playback_active', False) or getattr(self, '_awaiting_playback', False))
             )
 
+    def _timeshift_state(self):
+        """The player's ``Timeshift`` while a channel plays here, else None.
+
+        A channel keeps its last state when the player cannot say for a moment,
+        so the controls do not blink while a seek settles.
+        """
+        player = getattr(self, 'player', None)
+        if (
+            player is None
+            or not getattr(self, '_playback_active', False)
+            or getattr(self, '_awaiting_playback', False)
+            or self.cast_manager.is_connected
+        ):
+            self._held_timeshift = None
+            return None
+        state = player.timeshift()
+        if state is None:
+            return getattr(self, '_held_timeshift', None)
+        self._held_timeshift = state
+        return state
+
+    def _sync_timeshift(self):
+        """Show the timeshift controls while they work, and follow how far behind live the picture is."""
+        timer = getattr(self, '_timeshift_timer', None)
+        if timer is None:
+            return
+        state = self._timeshift_state()
+        playing_here = getattr(self, '_playback_active', False) and not self.cast_manager.is_connected
+        if playing_here and not timer.isActive():
+            timer.start()
+        elif not playing_here:
+            timer.stop()
+        self.controls_bar.set_timeshift(state)
+
+    def toggle_pause(self):
+        state = self._timeshift_state()
+        if state is None:
+            return
+        paused = not state.paused
+        self.player.set_paused(paused)
+        self.statusbar.showMessage("Paused" if paused else "Resumed")
+        self._sync_timeshift()
+
+    def skip_timeshift(self, seconds):
+        if self._timeshift_state() is None:
+            return
+        if not self.player.skip(seconds):
+            self.statusbar.showMessage(
+                "Nothing more buffered to go back to" if seconds < 0 else "Already live")
+        self._sync_timeshift()
+
+    def seek_timeshift(self, seconds):
+        """Go to ``seconds`` after the oldest buffered picture, as the seek bar counts."""
+        state = self._timeshift_state()
+        if state is None:
+            return
+        self.player.skip(seconds - (state.span - state.behind))
+        self._sync_timeshift()
+
+    def go_live(self):
+        if self._timeshift_state() is None:
+            return
+        self.player.go_live()
+        self.statusbar.showMessage("Live")
+        self._sync_timeshift()
+
     def _server_recordings_for(self, channel):
         """Running server recordings of channel."""
         if channel is None:
@@ -5687,6 +5764,7 @@ class TVHeadendClient(QMainWindow):
         """While a channel is on, keep the splash and spinner in sync with the picture."""
         self._playback_active = playing
         self._sync_play_button()
+        self._sync_timeshift()
         if hasattr(self, '_splash_idle_timer'):
             self._splash_idle_timer.stop()
         waiting = bool(getattr(self, '_awaiting_playback', False))
@@ -6447,6 +6525,16 @@ class TVHeadendClient(QMainWindow):
             action("Pre&vious Channel", lambda: self.play_adjacent_channel(-1), "Ctrl+PgUp"),
             action("Ne&xt Channel", lambda: self.play_adjacent_channel(1), "Ctrl+PgDown"),
             None,
+        ]
+        # Without shortcuts on purpose: keys stay free for other commands.
+        self.timeshift_actions = [
+            action("Pause &or Resume", lambda: self.toggle_pause()),
+            action("&Back 10 Seconds", lambda: self.skip_timeshift(-TIMESHIFT_SKIP_SECONDS)),
+            action("Forward 10 Seco&nds", lambda: self.skip_timeshift(TIMESHIFT_SKIP_SECONDS)),
+            action("&Go to Live", lambda: self.go_live()),
+        ]
+        self.playback_actions += self.timeshift_actions + [
+            None,
             action(with_keys("&Mute or Unmute", "M"), lambda: self.toggle_mute()),
             action("Volume &Up", lambda: self._adjust_volume(5), "Ctrl+Up"),
             action("Volume Do&wn", lambda: self._adjust_volume(-5), "Ctrl+Down"),
@@ -6465,6 +6553,9 @@ class TVHeadendClient(QMainWindow):
     def _fill_playback_menu(self, menu):
         """Playback commands, then Stream Profile, Audio Track, Subtitles, and Deinterlace for the stream playing now."""
         if menu is getattr(self, 'playback_menu', None):
+            state = self._timeshift_state()
+            for item in self.timeshift_actions:
+                item.setEnabled(state is not None)
             menu.clear()
             for item in self.playback_actions:
                 if item is None:
@@ -7621,6 +7712,28 @@ class TVHeadendClient(QMainWindow):
         self.config['fast_channel_start'] = bool(on)
         self.save_config()
         self.player.set_fast_start(bool(on))
+
+    def timeshift_on_disk(self):
+        return self.config['timeshift_on_disk']
+
+    def set_timeshift_on_disk(self, on):
+        """Applies the next time a channel starts."""
+        self.config['timeshift_on_disk'] = bool(on)
+        self.save_config()
+        self._apply_timeshift_store()
+
+    def timeshift_gb(self):
+        return self.config['timeshift_gb']
+
+    def set_timeshift_gb(self, gb):
+        self.config['timeshift_gb'] = int(gb)
+        self.save_config()
+        self._apply_timeshift_store()
+
+    def _apply_timeshift_store(self):
+        on = self.config['timeshift_on_disk']
+        folder = str(default_cache_dir() / 'timeshift') if on else None
+        self.player.set_timeshift_store(folder, self.config['timeshift_gb'] * 1024 ** 3)
 
     def uses_live_resize(self):
         """The picture changes size while a divider moves. Off before Qt 6.11 until chosen."""

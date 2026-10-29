@@ -28,13 +28,17 @@ from PyQt6.QtWidgets import (
 try:
     from .a11y import announce_label, describe
     from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
-    from .core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER
+    from .core.config import (
+        SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER, TIMESHIFT_MAX_GB,
+    )
     from .ui_theme import accent_choices, accent_swatch, style_names, window_color_choices, window_swatch
     from .settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 except ImportError:
     from a11y import announce_label, describe
     from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
-    from core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER
+    from core.config import (
+        SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER, TIMESHIFT_MAX_GB,
+    )
     from ui_theme import accent_choices, accent_swatch, style_names, window_color_choices, window_swatch
     from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 
@@ -53,6 +57,11 @@ FAST_START_HELP = (
     'Sets mpv --demuxer-lavf-analyzeduration=0.5. Turn off if sound or a sound track is missing. '
     'Applies the next time a channel starts.'
 )
+TIMESHIFT_HELP = (
+    'Sets mpv --cache-on-disk, so you can pause and go back much further. '
+    'Without it, mpv keeps about a minute of HD in memory. Applies the next time a channel starts.'
+)
+TIMESHIFT_SIZE_HELP = 'Half for going back, half for pausing. 1 GB holds about 15 minutes of HD.'
 LIVE_RESIZE_HELP = (
     'Show new video size in real time when resizing the sidebar. '
     'Turn this off if resizing is slow.'
@@ -112,7 +121,7 @@ class SettingsDialog(QDialog):
 
     PAGES = (
         ('Appearance', 'Theme, light or dark'),
-        ('Playback', 'Startup, channels, panes'),
+        ('Playback', 'Startup, timeshift, panes'),
         ('Channels', 'Logos, imported playlists'),
         ('Recordings', 'Folder, format, padding'),
         ('Conversion', 'Edit-friendly copies'),
@@ -178,6 +187,8 @@ class SettingsDialog(QDialog):
 
         self.play_check.toggled.connect(host.set_plays_on_start)
         self.fast_start_check.toggled.connect(host.set_starts_channels_fast)
+        self.timeshift_check.toggled.connect(self._timeshift_toggled)
+        self.timeshift_spin.editingFinished.connect(self._timeshift_size_edited)
         self.live_resize_check.toggled.connect(host.set_uses_live_resize)
         self.folder_btn.clicked.connect(self._choose_folder)
         self.format_combo.currentIndexChanged.connect(self._format_chosen)
@@ -217,6 +228,21 @@ class SettingsDialog(QDialog):
         self.fast_start_check.setChecked(host.starts_channels_fast())
         describe(self.fast_start_check, description=FAST_START_HELP)
         channels.add_row(SettingRow('Start channels &faster', FAST_START_HELP, self.fast_start_check))
+        timeshift = page.add(SettingsGroup('Timeshift'))
+        self.timeshift_check = ToggleSwitch('Keep the timeshift buffer on disk')
+        self.timeshift_check.setChecked(host.timeshift_on_disk())
+        describe(self.timeshift_check, description=TIMESHIFT_HELP)
+        timeshift.add_row(SettingRow('&Keep the timeshift buffer on disk', TIMESHIFT_HELP, self.timeshift_check))
+        self.timeshift_spin = QSpinBox()
+        self.timeshift_spin.setRange(1, TIMESHIFT_MAX_GB)
+        self.timeshift_spin.setSuffix(' GB')
+        self.timeshift_spin.setValue(host.timeshift_gb())
+        self.timeshift_spin.setMinimumWidth(110)
+        describe(self.timeshift_spin, 'Disk space for timeshift', TIMESHIFT_SIZE_HELP)
+        self.timeshift_spin.setToolTip(TIMESHIFT_SIZE_HELP)
+        self._timeshift_size_row = timeshift.add_row(
+            SettingRow('&Disk space for timeshift', TIMESHIFT_SIZE_HELP, self.timeshift_spin))
+        self._timeshift_size_row.setEnabled(self.timeshift_check.isChecked())
         panes = page.add(SettingsGroup('Panes'))
         self.live_resize_check = ToggleSwitch('Live resize')
         self.live_resize_check.setChecked(host.uses_live_resize())
@@ -537,6 +563,14 @@ class SettingsDialog(QDialog):
         if padding != tuple(self._host.recording_padding()):
             self._host.set_recording_padding(*padding)
 
+    def _timeshift_toggled(self, on):
+        self._host.set_timeshift_on_disk(on)
+        self._timeshift_size_row.setEnabled(on)
+
+    def _timeshift_size_edited(self):
+        if self.timeshift_spin.value() != self._host.timeshift_gb():
+            self._host.set_timeshift_gb(self.timeshift_spin.value())
+
     def _space_edited(self):
         if self.space_spin.value() != self._host.low_space_gb():
             self._host.set_low_space_gb(self.space_spin.value())
@@ -602,6 +636,7 @@ class SettingsDialog(QDialog):
         self._options_edited()
         self._convert_edited()
         self._space_edited()
+        self._timeshift_size_edited()
         if self.early_spin is not None:
             self._padding_edited()
         super().done(result)

@@ -558,6 +558,21 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_starts_channels_fast(self, on):
             self.fast_start = on
 
+        timeshift_disk = False
+        timeshift_size = 4
+
+        def timeshift_on_disk(self):
+            return self.timeshift_disk
+
+        def set_timeshift_on_disk(self, on):
+            self.timeshift_disk = on
+
+        def timeshift_gb(self):
+            return self.timeshift_size
+
+        def set_timeshift_gb(self, gb):
+            self.timeshift_size = gb
+
         def uses_live_resize(self):
             return getattr(self, 'live_resize', False)
 
@@ -759,6 +774,14 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert not dialog.fast_start_check.isChecked()
     dialog.fast_start_check.click()
     assert host.fast_start is True
+    assert not dialog.timeshift_check.isChecked()
+    assert not dialog._timeshift_size_row.isEnabled()
+    dialog.timeshift_check.click()
+    assert host.timeshift_disk is True
+    assert dialog._timeshift_size_row.isEnabled()
+    dialog.timeshift_spin.setValue(10)
+    dialog.timeshift_spin.editingFinished.emit()
+    assert host.timeshift_size == 10
     assert not dialog.live_resize_check.isChecked()
     dialog.live_resize_check.click()
     assert host.live_resize is True

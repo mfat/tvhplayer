@@ -7,8 +7,11 @@ the OpenGL context and asks this engine for a render context once it has one.
 from __future__ import annotations
 
 import locale
+from pathlib import Path
 
-from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Player
+from .player import (
+    DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Player, Timeshift,
+)
 from .proxy import hide_http_proxy, stream_proxy
 
 MPV_OPTIONS = {
@@ -33,6 +36,13 @@ DEINTERLACE_VALUES = {DEINTERLACE_AUTO: 'auto', DEINTERLACE_ON: 'yes', DEINTERLA
 # Seconds of stream ffmpeg reads to learn the tracks; 0 leaves it to ffmpeg. Much
 # shorter can leave a sound track without the details it needs to play.
 FAST_START_ANALYZE_SECONDS = 0.5
+# mpv's own buffer sizes, used again when timeshift leaves the disk.
+MEMORY_AHEAD_BYTES = '150MiB'
+MEMORY_BEHIND_BYTES = '50MiB'
+# The newest buffered picture runs about a second ahead of the one shown, so
+# "live" is anything this close to it, and going live stops this short of it.
+LIVE_SLACK_SECONDS = 3.0
+LIVE_MARGIN_SECONDS = 1.0
 
 
 class MpvPlayer(Player):
@@ -45,6 +55,7 @@ class MpvPlayer(Player):
         self._mpv_module = mpv
         self._surface = None
         self._deinterlace = DEINTERLACE_AUTO
+        self._last_buffered = None
         # Set by play(); the first picture of that stream reports playback started.
         self._waiting_for_picture = False
         # The proxy goes to mpv per stream, so a local or LAN server is reached directly.
@@ -99,11 +110,16 @@ class MpvPlayer(Player):
     def play(self, url: str):
         self._waiting_for_picture = True
         self._mpv['http-proxy'] = stream_proxy(url)
+        # mpv keeps pause across files; a new channel always starts playing.
+        self._mpv.pause = False
+        self._last_buffered = None
         self._mpv.loadfile(url)
 
     def stop(self):
         self._waiting_for_picture = False
+        self._last_buffered = None
         self._mpv.command('stop')
+        self._mpv.pause = False
 
     def is_playing(self) -> bool:
         try:
@@ -172,6 +188,73 @@ class MpvPlayer(Player):
 
     def set_fast_start(self, on):
         self._mpv['demuxer-lavf-analyzeduration'] = FAST_START_ANALYZE_SECONDS if on else 0
+
+    def _buffered(self):
+        """``(position, start, end)`` of the buffered stretch being played, or None.
+
+        While a seek or pause settles, mpv can report no position for a moment;
+        the last reading stands in for it.
+        """
+        try:
+            if self._mpv.idle_active:
+                self._last_buffered = None
+                return None
+            position = self._mpv.time_pos
+            state = self._mpv.demuxer_cache_state or {}
+        except Exception:
+            return self._last_buffered
+        ranges = [(r['start'], r['end']) for r in state.get('seekable-ranges') or []]
+        here = [] if position is None else [r for r in ranges if r[0] <= position <= r[1] + LIVE_MARGIN_SECONDS]
+        if not here:
+            return self._last_buffered
+        start, end = max(here, key=lambda r: r[1])
+        self._last_buffered = (position, start, end)
+        return self._last_buffered
+
+    def timeshift(self):
+        buffered = self._buffered()
+        if buffered is None:
+            return None
+        position, start, end = buffered
+        behind = end - position
+        return Timeshift(bool(self._mpv.pause), 0.0 if behind < LIVE_SLACK_SECONDS else behind, end - start)
+
+    def set_paused(self, paused):
+        self._mpv.pause = bool(paused)
+
+    def skip(self, seconds):
+        buffered = self._buffered()
+        if buffered is None:
+            return False
+        position, start, end = buffered
+        target = max(start, min(position + seconds, end - LIVE_MARGIN_SECONDS))
+        if abs(target - position) < 0.5:
+            return False
+        self._seek_to(target)
+        return True
+
+    def go_live(self):
+        self._mpv.pause = False
+        buffered = self._buffered()
+        if buffered is not None and buffered[2] - buffered[0] >= LIVE_SLACK_SECONDS:
+            self._seek_to(buffered[2] - LIVE_MARGIN_SECONDS)
+
+    def _seek_to(self, seconds):
+        # mpv counts a negative absolute seek from the end; the buffer can start at -0.0000002.
+        self._mpv.command('seek', f'{max(seconds, 0.0):.3f}', 'absolute')
+
+    def set_timeshift_store(self, folder, size_bytes=0):
+        if folder:
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            half = max(int(size_bytes) // 2, 1)
+            self._mpv['demuxer-cache-dir'] = str(folder)
+            self._mpv['demuxer-max-bytes'] = half
+            self._mpv['demuxer-max-back-bytes'] = half
+            self._mpv['cache-on-disk'] = True
+        else:
+            self._mpv['cache-on-disk'] = False
+            self._mpv['demuxer-max-bytes'] = MEMORY_AHEAD_BYTES
+            self._mpv['demuxer-max-back-bytes'] = MEMORY_BEHIND_BYTES
 
     def show_message(self, text: str, duration_ms: int = 3000):
         """mpv's on-screen text: drawn into the picture, so it shows in fullscreen too.

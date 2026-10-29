@@ -167,6 +167,8 @@ While this computer is recording, TVHplayer keeps it from going to sleep. It als
 
 TVHplayer plays with **mpv** (libmpv), drawing into the window on Wayland and X11 so the interface stays sharp at fractional scale.
 
+While a channel plays, the buttons beside the channel arrows pause it, go back or forward 10 seconds, and show how far behind live you are; click that time to go back to live. The same commands are in the **Playback** menu. mpv keeps about a minute of HD in memory for this. **Settings → Playback → Keep the timeshift buffer on disk** sets mpv's `--cache-on-disk` for much longer, up to the disk space you choose, half for going back and half for pausing. Applies the next time a channel starts.
+
 **Settings → Playback → Start channels faster** sets mpv's `--demuxer-lavf-analyzeduration=0.5`, for a slightly quicker picture. Turn it off if sound or a sound track goes missing. Applies the next time a channel starts.
 
 ## Keyboard shortcuts

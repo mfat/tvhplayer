@@ -192,6 +192,16 @@ def test_every_setting_has_a_default_and_bad_values_are_replaced(tmp_path):
     assert default_config()['hide_dead_channels'] is True
 
 
+def test_timeshift_size_falls_back_when_unusable(tmp_path):
+    path = tmp_path / 'config.json'
+    assert default_config()['timeshift_on_disk'] is False
+    for raw, expected in ((10, 10), (0, 4), (501, 4), ('8', 4), (True, 4)):
+        path.write_text(json.dumps({'timeshift_gb': raw, 'timeshift_on_disk': 1}), encoding='utf-8')
+        data = ConfigStore(path).data
+        assert data['timeshift_gb'] == expected
+        assert data['timeshift_on_disk'] is True
+
+
 def test_live_resize_stays_unset_until_chosen(tmp_path):
     path = tmp_path / 'config.json'
     assert default_config()['live_resize'] is None

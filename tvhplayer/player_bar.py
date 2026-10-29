@@ -16,8 +16,10 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
+    QProxyStyle,
     QPushButton,
     QSlider,
+    QStyle,
     QVBoxLayout,
     QWidget,
     QWidgetAction,
@@ -100,6 +102,27 @@ def _icon_label(markup, color, size):
     return label
 
 
+class _JumpingSliderStyle(QProxyStyle):
+    """A click on the groove moves the handle there, as on a video seek bar."""
+
+    def styleHint(self, hint, option=None, widget=None, data=None):
+        if hint == QStyle.StyleHint.SH_Slider_AbsoluteSetButtons:
+            return Qt.MouseButton.LeftButton.value
+        return super().styleHint(hint, option, widget, data)
+
+
+def _slider_stylesheet():
+    return (
+        "QSlider { background: transparent; min-height: 16px; }"
+        "QSlider::groove:horizontal { height: 3px; border-radius: 1px; background: #3a3a3a; }"
+        f"QSlider::sub-page:horizontal {{ height: 3px; border-radius: 1px; background: {BUTTON_LIGHT}; }}"
+        f"QSlider::handle:horizontal {{ width: 12px; height: 12px; margin: -5px 0; "
+        f"border-radius: 6px; background: {BUTTON_LIGHT}; }}"
+        "QSlider::handle:horizontal:focus { border: 2px solid palette(highlight); "
+        "width: 10px; height: 10px; margin: -6px 0; border-radius: 7px; }"
+    )
+
+
 def _menu_stylesheet():
     if prefers_high_contrast():
         return ""
@@ -119,8 +142,11 @@ class PlayerBar(QWidget):
     """Controls joined to the bottom of the picture.
 
     The window connects the buttons and reports state back through
-    set_playing(), set_recording(), set_muted() and set_fullscreen().
+    set_playing(), set_timeshift(), set_recording(), set_muted() and set_fullscreen().
     """
+
+    # Seconds after the oldest buffered picture, chosen on the seek bar.
+    seek_requested = pyqtSignal(int)
 
     def __init__(self, icons_dir, parent=None):
         super().__init__(parent)
@@ -154,6 +180,47 @@ class PlayerBar(QWidget):
         layout.addWidget(self.prev_btn)
         self.next_btn = self._channel_button('skip_next.svg', "Next channel", "Ctrl+PgDown")
         layout.addWidget(self.next_btn)
+
+        # Timeshift: shown while a channel plays on this computer.
+        self.back_btn = self._icon_button('replay_10.svg')
+        describe(self.back_btn, "Back 10 seconds", "Go back 10 seconds in what has been buffered.")
+        self.back_btn.setToolTip("Back 10 seconds")
+        self.pause_btn = self._icon_button('pause.svg')
+        self.forward_btn = self._icon_button('forward_10.svg')
+        describe(self.forward_btn, "Forward 10 seconds", "Go forward 10 seconds, up to live.")
+        self.forward_btn.setToolTip("Forward 10 seconds")
+        # From the oldest buffered picture to live; dragging seeks on release.
+        self.seek_slider = QSlider(Qt.Orientation.Horizontal)
+        # Without a base style: given the application's, the proxy would own and delete it.
+        self._seek_style = _JumpingSliderStyle()
+        self.seek_slider.setStyle(self._seek_style)
+        self.seek_slider.setMinimumWidth(80)
+        self.seek_slider.setTracking(False)
+        self.seek_slider.setSingleStep(10)
+        self.seek_slider.setPageStep(60)
+        if not self._contrast:
+            self.seek_slider.setStyleSheet(_slider_stylesheet())
+        describe(self.seek_slider, "Timeshift position",
+                 "Where the picture is in what has been buffered, from the oldest to live.")
+        self.seek_slider.setToolTip("Timeshift position")
+        self._seek_updating = False
+        self.seek_slider.valueChanged.connect(self._seek_moved)
+        self.live_btn = QPushButton("LIVE")
+        self.live_btn.setFixedHeight(24)
+        self.live_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.live_btn.setStyleSheet(button_stylesheet(
+            f"background: {PILL_DARK}; border: none; border-radius: 12px; padding: 0 10px; "
+            "color: #ededed; font-weight: 600; }"
+            f" QPushButton:hover {{ background: {PILL_DARK_HOVER}; }}"
+            " QPushButton:disabled { color: #9a9a9a;",
+            radius=12,
+        ))
+        self._timeshift_controls = (self.back_btn, self.pause_btn, self.forward_btn, self.seek_slider,
+                                    self.live_btn)
+        for control in self._timeshift_controls:
+            layout.addWidget(control, 1 if control is self.seek_slider else 0)
+        self._paused = None
+        self._behind = None
 
         # Shown while nothing records: a dark pill that opens the Record menu.
         self.record_btn = QPushButton()
@@ -292,6 +359,8 @@ class PlayerBar(QWidget):
             lambda: self.popup_above(self.record_menu, self.recording_group)
         )
 
+        # Gives way to the seek bar while it shows.
+        self._spacer_index = layout.count()
         layout.addStretch(1)
 
         self.cast_btn = QPushButton()
@@ -326,15 +395,7 @@ class PlayerBar(QWidget):
         self.volume_slider.setSingleStep(1)
         self.volume_slider.setPageStep(10)
         if not self._contrast:
-            self.volume_slider.setStyleSheet(
-                "QSlider { background: transparent; min-height: 16px; }"
-                "QSlider::groove:horizontal { height: 3px; border-radius: 1px; background: #3a3a3a; }"
-                f"QSlider::sub-page:horizontal {{ height: 3px; border-radius: 1px; background: {BUTTON_LIGHT}; }}"
-                f"QSlider::handle:horizontal {{ width: 12px; height: 12px; margin: -5px 0; "
-                f"border-radius: 6px; background: {BUTTON_LIGHT}; }}"
-                "QSlider::handle:horizontal:focus { border: 2px solid palette(highlight); "
-                "width: 10px; height: 10px; margin: -6px 0; border-radius: 7px; }"
-            )
+            self.volume_slider.setStyleSheet(_slider_stylesheet())
         layout.addWidget(self.volume_slider)
         self._muted = False
         self.volume_slider.valueChanged.connect(self._update_speaker)
@@ -347,11 +408,12 @@ class PlayerBar(QWidget):
         self.fullscreen_btn.setStyleSheet(self.mute_btn.styleSheet())
         layout.addWidget(self.fullscreen_btn)
 
-        for control in (self.play_btn, self.prev_btn, self.next_btn, self.cast_btn, self.mute_btn,
-                        self.volume_slider, self.fullscreen_btn):
+        for control in (self.play_btn, self.prev_btn, self.next_btn, *self._timeshift_controls,
+                        self.cast_btn, self.mute_btn, self.volume_slider, self.fullscreen_btn):
             control.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
         self.set_playing(False)
+        self.set_timeshift(None)
         self.set_casting(False)
         self.set_muted(False)
         self.set_fullscreen(False)
@@ -360,7 +422,7 @@ class PlayerBar(QWidget):
     def _icon_color(self):
         return '#000000' if self._contrast else ICON_LIGHT
 
-    def _channel_button(self, icon, label, keys):
+    def _icon_button(self, icon):
         button = QPushButton()
         button.setFixedSize(32, 32)
         button.setIconSize(QSize(24, 24))
@@ -371,6 +433,10 @@ class PlayerBar(QWidget):
             radius=6,
         ))
         button.setIcon(file_icon(self._icons_dir / icon, self._icon_color(), 24))
+        return button
+
+    def _channel_button(self, icon, label, keys):
+        button = self._icon_button(icon)
         button.setToolTip(keys_text(f"{label} ({keys})"))
         describe(button, label, keys_text(f"Play the {label.split()[0].lower()} channel in the list. Keyboard: {keys}."))
         return button
@@ -400,6 +466,47 @@ class PlayerBar(QWidget):
             describe(self.play_btn, "Stop", "Stop playback. Keyboard: P or Ctrl+.")
         else:
             describe(self.play_btn, "Play", "Play the selected channel. Keyboard: P, or Enter on the channel list.")
+
+    def _seek_moved(self, value):
+        if not self._seek_updating:
+            self.seek_requested.emit(value)
+
+    def set_timeshift(self, state):
+        """The player's ``(paused, behind, span)``, or None to hide the timeshift controls."""
+        for control in self._timeshift_controls:
+            control.setVisible(state is not None)
+        self.layout().setStretch(self._spacer_index, 0 if state is not None else 1)
+        if state is None:
+            self._paused = self._behind = None
+            return
+        paused, behind, span = state
+        if not self.seek_slider.isSliderDown():
+            self._seek_updating = True
+            self.seek_slider.setRange(0, max(int(span), 0))
+            self.seek_slider.setValue(int(span - behind))
+            self._seek_updating = False
+        if paused != self._paused:
+            self._paused = paused
+            self.pause_btn.setIcon(file_icon(
+                self._icons_dir / ('play_arrow.svg' if paused else 'pause.svg'), self._icon_color(), 24))
+            name = "Resume" if paused else "Pause"
+            describe(self.pause_btn, name, "Resume from where it paused." if paused
+                     else "Pause the channel; it keeps buffering so you can resume where you left off.")
+            self.pause_btn.setToolTip(name)
+        behind = int(behind)
+        if behind == self._behind:
+            return
+        # The name changes only between live and behind, so screen readers are not told every second.
+        if self._behind is None or (behind > 0) != (self._behind > 0):
+            if behind > 0:
+                describe(self.live_btn, "Go to live", "Shows how far behind live the picture is.")
+                self.live_btn.setToolTip("Go to live")
+            else:
+                describe(self.live_btn, "Live", "The picture is live.")
+                self.live_btn.setToolTip("Live")
+        self._behind = behind
+        self.live_btn.setText(f"−{_clock(behind)}" if behind > 0 else "LIVE")
+        self.live_btn.setEnabled(behind > 0)
 
     def set_recording(self, server, local, channel_name='', local_here=None):
         """Swap Record for Stop recording while either kind runs.
@@ -477,6 +584,13 @@ class PlayerBar(QWidget):
         self.fullscreen_btn.setChecked(bool(fullscreen))
         name = 'fullscreen_exit.svg' if fullscreen else 'fullscreen.svg'
         self.fullscreen_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24))
+
+
+def _clock(seconds):
+    """1:05 or 1:02:05."""
+    minutes, seconds = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}:{minutes:02}:{seconds:02}" if hours else f"{minutes}:{seconds:02}"
 
 
 class _PulseDot(QWidget):

@@ -6,7 +6,7 @@ The window owns the video widget. An engine opens a URL in that widget.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, NamedTuple, Optional, Tuple
 
 # Deinterlacing: the engine decides from the stream, always on, or off.
 DEINTERLACE_AUTO = 'auto'
@@ -15,6 +15,15 @@ DEINTERLACE_OFF = 'off'
 DEINTERLACE_MODES = (DEINTERLACE_AUTO, DEINTERLACE_ON, DEINTERLACE_OFF)
 # The track id that turns subtitles off.
 NO_TRACK = -1
+
+
+class Timeshift(NamedTuple):
+    """Where the picture is in what the player has buffered of a live stream."""
+    paused: bool
+    # Seconds behind live; 0 when live.
+    behind: float
+    # Seconds buffered in all, from the oldest picture kept to live.
+    span: float
 
 
 class Player(ABC):
@@ -106,6 +115,26 @@ class Player(ABC):
         """Probe new streams briefly, for a quicker first picture. Applies from the next stream.
 
         The default does nothing.
+        """
+
+    def timeshift(self) -> Optional[Timeshift]:
+        """Where the picture is while the stream can pause and go back, else None."""
+        return None
+
+    def set_paused(self, paused: bool):
+        """Pause or resume the stream. The default does nothing."""
+
+    def skip(self, seconds: float) -> bool:
+        """Move within what is buffered, back when negative. False when it cannot."""
+        return False
+
+    def go_live(self):
+        """Resume at the newest buffered picture. The default does nothing."""
+
+    def set_timeshift_store(self, folder: Optional[str], size_bytes: int = 0):
+        """Buffer streams in ``folder`` on disk up to ``size_bytes``, or in memory with None.
+
+        Applies from the next stream. The default does nothing.
         """
 
     def show_message(self, text: str, duration_ms: int = 3000):

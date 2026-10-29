@@ -146,6 +146,24 @@ class _FakePlayer:
     def set_fast_start(self, on):
         self.fast_start = on
 
+    timeshift_state = None
+
+    def timeshift(self):
+        return self.timeshift_state
+
+    def set_paused(self, paused):
+        self.timeshift_state = self.timeshift_state._replace(paused=paused)
+
+    def skip(self, seconds):
+        self.skips = getattr(self, 'skips', []) + [seconds]
+        return seconds < 0
+
+    def go_live(self):
+        self.timeshift_state = self.timeshift_state._replace(paused=False, behind=0.0)
+
+    def set_timeshift_store(self, folder, size_bytes=0):
+        self.store = (folder, size_bytes)
+
     def show_message(self, text, duration_ms=3000):
         return None
 
@@ -1247,8 +1265,9 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.channel_list.currentRow() == 1
 
         playback_labels = [action.text().replace("&", "") for action in window.playback_menu.actions()]
-        assert playback_labels[:6] == [
-            "Play or Stop\tP", "Stop Playback", "Previous Channel", "Next Channel", "", "Mute or Unmute\tM",
+        assert playback_labels[:11] == [
+            "Play or Stop\tP", "Stop Playback", "Previous Channel", "Next Channel", "",
+            "Pause or Resume", "Back 10 Seconds", "Forward 10 Seconds", "Go to Live", "", "Mute or Unmute\tM",
         ]
         shortcuts = {
             action.text().replace("&", ""): action.shortcut().toString()
@@ -3237,6 +3256,65 @@ def test_next_and_previous_channel_follow_the_list_and_wrap(monkeypatch, tmp_pat
         window.play_adjacent_channel(1)
         assert played[-1] == 'Three'
         assert window.status_label.text() == 'No channels to switch to'
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_timeshift_controls_follow_the_player(monkeypatch, tmp_path):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    bar = window.controls_bar
+    try:
+        assert fake_player.store == (None, 4 * 1024 ** 3)
+        window.set_timeshift_on_disk(True)
+        folder, size = fake_player.store
+        assert folder.endswith('timeshift') and size == 4 * 1024 ** 3
+        window.set_timeshift_gb(2)
+        assert fake_player.store[1] == 2 * 1024 ** 3
+        assert window.config['timeshift_on_disk'] is True and window.config['timeshift_gb'] == 2
+
+        # Hidden until a channel plays here with a buffer to move in.
+        assert not bar.pause_btn.isVisibleTo(bar)
+        from tvhplayer.core.player import Timeshift
+        fake_player.timeshift_state = Timeshift(False, 0.0, 120.0)
+        window._protect_video_surface(True)
+        assert window._timeshift_timer.isActive()
+        assert bar.pause_btn.isVisibleTo(bar)
+        assert bar.live_btn.text() == 'LIVE' and not bar.live_btn.isEnabled()
+        assert (bar.seek_slider.maximum(), bar.seek_slider.value()) == (120, 120)
+        window._fill_playback_menu(window.playback_menu)
+        assert all(action.isEnabled() for action in window.timeshift_actions)
+        assert all(action.shortcut().isEmpty() for action in window.timeshift_actions)
+
+        bar.pause_btn.click()
+        assert fake_player.timeshift_state.paused
+        assert bar.pause_btn.accessibleName() == 'Resume'
+        fake_player.timeshift_state = Timeshift(True, 75.4, 120.0)
+        window._sync_timeshift()
+        assert bar.seek_slider.value() == 44
+        # The player cannot say for a moment, as while a seek settles: the controls stay.
+        fake_player.timeshift_state = None
+        window._sync_timeshift()
+        assert bar.pause_btn.isVisibleTo(bar) and bar.live_btn.text() == '−1:15'
+        fake_player.timeshift_state = Timeshift(True, 75.4, 120.0)
+        bar.seek_slider.setValue(100)
+        assert fake_player.skips == [pytest.approx(55.4)]
+        fake_player.skips = []
+        assert bar.live_btn.text() == '−1:15' and bar.live_btn.isEnabled()
+        assert bar.live_btn.accessibleName() == 'Go to live'
+
+        bar.back_btn.click()
+        bar.forward_btn.click()
+        assert fake_player.skips == [-10, 10]
+        assert window.status_label.text() == 'Already live'
+        bar.live_btn.click()
+        assert bar.live_btn.text() == 'LIVE' and bar.pause_btn.accessibleName() == 'Pause'
+
+        window.stop_playback()
+        assert not window._timeshift_timer.isActive()
+        assert not bar.pause_btn.isVisibleTo(bar)
+        window._fill_playback_menu(window.playback_menu)
+        assert not any(action.isEnabled() for action in window.timeshift_actions)
     finally:
         window.close()
         app.processEvents()
