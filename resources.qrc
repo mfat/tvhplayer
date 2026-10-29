@@ -11,5 +11,6 @@
         <file>icons/volume-down-fill.svg</file>
         <file>icons/volume-up-fill.svg</file>
         <file>icons/fullscreen.svg</file>
+        <file>icons/fullscreen-exit.svg</file>
     </qresource>
 </RCC>

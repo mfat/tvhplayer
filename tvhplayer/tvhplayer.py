@@ -6369,7 +6369,7 @@ class TVHeadendClient(QMainWindow):
         mute_action.triggered.connect(self.toggle_mute)
 
         fullscreen_action = menu.addAction(
-            tinted('fullscreen.svg'),
+            tinted('fullscreen-exit.svg' if self.is_fullscreen else 'fullscreen.svg'),
             with_keys("Exit Fullscreen" if self.is_fullscreen else "Fullscreen", FULLSCREEN_KEY),
         )
         fullscreen_action.triggered.connect(self.toggle_fullscreen)

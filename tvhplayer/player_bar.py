@@ -46,17 +46,6 @@ CHEVRON_SVG = (
 )
 DOT_SVG = '<svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="6" fill="{c}"/></svg>'
 SQUARE_SVG = '<svg viewBox="0 0 10 10"><rect width="10" height="10" rx="1" fill="{c}"/></svg>'
-FULLSCREEN_SVG = (
-    '<svg viewBox="0 0 48 48"><path d="M 14 20 L 14 14 L 20 14 M 28 14 L 34 14 L 34 20 '
-    'M 14 28 L 14 34 L 20 34 M 28 34 L 34 34 L 34 28" stroke="{c}" stroke-width="2.5" '
-    'stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>'
-)
-EXIT_FULLSCREEN_SVG = (
-    '<svg viewBox="0 0 48 48"><path d="M 14 20 L 20 20 L 20 14 M 28 14 L 28 20 L 34 20 '
-    'M 14 28 L 20 28 L 20 34 M 28 34 L 28 28 L 34 28" stroke="{c}" stroke-width="2.5" '
-    'stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>'
-)
-
 # Menu icons share one square so the dot, the square and the arrow line up.
 MENU_DOT_SVG = '<svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="5" fill="{c}"/></svg>'
 MENU_SQUARE_SVG = '<svg viewBox="0 0 18 18"><rect x="4" y="4" width="10" height="10" rx="1" fill="{c}"/></svg>'
@@ -468,8 +457,8 @@ class PlayerBar(QWidget):
 
     def set_fullscreen(self, fullscreen):
         self.fullscreen_btn.setChecked(bool(fullscreen))
-        markup = EXIT_FULLSCREEN_SVG if fullscreen else FULLSCREEN_SVG
-        self.fullscreen_btn.setIcon(svg_icon(markup, self._icon_color(), 24))
+        name = 'fullscreen-exit.svg' if fullscreen else 'fullscreen.svg'
+        self.fullscreen_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24))
 
 
 class FloatingBar(QWidget):
