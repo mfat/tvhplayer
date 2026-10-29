@@ -2,19 +2,21 @@
 
 The TVHplayer theme is a style over Fusion that draws the app's own look from
 a light or a dark set of colors, with a palette made from the same colors.
-Qt keeps style sheets for small, local changes and does not support them over
+The Organic theme is the same style drawn in Jottr's Organic look: rounder,
+with pill buttons and fields, on a warm window color. Qt keeps style sheets for small, local changes and does not support them over
 a style of the app's own, so the look is drawn, not written as a style sheet.
 Any other theme is a Qt style, which paints the same colors through a palette
 of every role, as Jottr's Classic look does, rather than the desktop's. Every
 theme is light or dark as the desktop is set, following it while the app
 runs, unless set to always light or always dark. An Accent color, and for the
-TVHplayer theme a Window color, as in Jottr, are laid over the colors. All can
+TVHplayer and Organic themes a Window color, as in Jottr, are laid over the colors. All can
 be changed while the app runs. Under high contrast the system look stays in charge.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -59,14 +61,14 @@ from PyQt6.QtWidgets import (
 
 try:
     from . import system_color_scheme as desktop
-    from .core.config import SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
+    from .core.config import SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER
 except ImportError:
     import system_color_scheme as desktop
-    from core.config import SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
+    from core.config import SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER
 
 LIGHT = {
     'ink': '#232629', 'muted': '#5d6166', 'placeholder': '#8a8d90', 'link': '#1d79b0',
-    'window': '#eff0f1', 'base': '#fcfcfc', 'alt': '#f6f7f7', 'read_only': '#f3f4f5',
+    'window': '#eff0f1', 'base': '#fcfcfc', 'alt': '#f6f7f7', 'read_only': '#f3f4f5', 'popover': '#fcfcfc',
     'nav': '#e6e8ea', 'strip': '#f6f7f7', 'strip_ink': '#3b3f43',
     'accent': '#3daee9', 'primary': '#2c8fc9', 'primary_edge': '#2478aa', 'primary_hover': '#267fb4',
     'primary_off': '#9fcbe5', 'on_accent': '#ffffff',
@@ -85,7 +87,7 @@ LIGHT = {
 
 DARK = {
     'ink': '#fcfcfc', 'muted': '#a1a9b1', 'placeholder': '#7f868c', 'link': '#3daee9',
-    'window': '#202326', 'base': '#292c30', 'alt': '#2e3236', 'read_only': '#25282b',
+    'window': '#202326', 'base': '#292c30', 'alt': '#2e3236', 'read_only': '#25282b', 'popover': '#292c30',
     'nav': '#1b1e20', 'strip': '#25282b', 'strip_ink': '#d0d3d6',
     'accent': '#3daee9', 'primary': '#2c8fc9', 'primary_edge': '#3daee9', 'primary_hover': '#349fd6',
     'primary_off': '#2b4a5c', 'on_accent': '#ffffff',
@@ -151,6 +153,26 @@ WINDOW_COLORS = {
               ('#322b2a', '#201b1a', '#2c2625', '#2c2625', '#ffffff', '#b0a09c', '#83736f', '#4a413f')),
 }
 
+# The Organic look's own accent for each Window color, light and dark, from Jottr:
+# (act, act_hover, act_soft, on_act, popover). Organic's Default window color is Paper.
+ORGANIC_DEFAULT_WINDOW = 'paper'
+ORGANIC_ACT = {
+    'paper': (('#34322f', '#22211f', '#e0dcd5', '#f4f2ee', '#ffffff'),
+              ('#e6e6e8', '#ffffff', 'rgba(255,255,255,41)', '#222226', '#36363a')),
+    'cream': (('#3d3a36', '#2a2825', '#dcd1bf', '#f5ead8', '#f9f4ed'),
+              ('#ece6dc', '#ffffff', 'rgba(255,255,255,41)', '#25221f', '#3a3632')),
+    'stone': (('#3b3835', '#282624', '#d4cec6', '#e9e5df', '#f6f4f1'),
+              ('#e8e6e2', '#ffffff', 'rgba(255,255,255,41)', '#242321', '#393836')),
+    'mist': (('#354030', '#242c20', '#cdd8bf', '#e4eadb', '#f4f7ef'),
+             ('#e2eadb', '#ffffff', 'rgba(255,255,255,41)', '#20241e', '#343a32')),
+    'fog': (('#353a40', '#23272c', '#cfd3d8', '#e6e8ea', '#f5f6f7'),
+            ('#e4e8ec', '#ffffff', 'rgba(255,255,255,41)', '#212428', '#35383d')),
+    'steel': (('#2b3644', '#1b242f', '#b9c6d3', '#d3dce5', '#edf2f6'),
+              ('#dce5ee', '#ffffff', 'rgba(255,255,255,41)', '#1c232b', '#313a44')),
+    'blush': (('#40322f', '#2c221f', '#dfc8c1', '#f3e1dc', '#faf2ef'),
+              ('#f0e1dd', '#ffffff', 'rgba(255,255,255,41)', '#261f1e', '#3b3332')),
+}
+
 # Labels the settings pages and dialogs name: point size, weight, color, color when disabled.
 LABELS = {
     'pageTitle': (15, QFont.Weight.DemiBold, None, None),
@@ -179,6 +201,8 @@ _watching = False
 _style = None
 _default_font = None
 _theme_font = None
+# Whether the theme in use is drawn in the Organic look.
+_organic = False
 # The Accent color and Window color chosen in Settings.
 _accent = ACCENT_DEFAULT
 _window = WINDOW_DEFAULT
@@ -194,7 +218,12 @@ State = QStyle.StateFlag
 
 
 def is_active():
+    """Whether the app's own theme, TVHplayer or Organic, is in use."""
     return _active
+
+
+def is_organic():
+    return _active and _organic
 
 
 def _palette(c):
@@ -258,12 +287,16 @@ def normalize_window_color(key):
     return key if key in WINDOW_COLORS else WINDOW_DEFAULT
 
 
-def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT):
+def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT, organic=False):
     """The light or dark colors with an Accent color and a Window color laid over them.
 
-    Both at their defaults give LIGHT or DARK as they are.
+    Both at their defaults give LIGHT or DARK as they are. ``organic`` gives
+    the Organic look's colors: Paper by default, its own graphite accent,
+    see-through edges and hover fills, and selections filled with the accent.
     """
     accent, window = normalize_accent(accent), normalize_window_color(window)
+    if organic and window == WINDOW_DEFAULT:
+        window = ORGANIC_DEFAULT_WINDOW
     c = dict(DARK if dark else LIGHT)
     if window != WINDOW_DEFAULT:
         win, base, alt, nav, ink, muted, placeholder, edge = WINDOW_COLORS[window][2 if dark else 1]
@@ -291,7 +324,26 @@ def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT):
                 'primary_off': exact.get('soft', soft), 'on_accent': exact.get('on_act', '#ffffff'),
                 'link': hover, 'selected': _rgba(act, 51), 'selected_ink': exact.get('ink', deep),
             })
-    if accent != ACCENT_DEFAULT or window != WINDOW_DEFAULT:
+    if organic:
+        act, act_hover, act_soft, on_act, popover = ORGANIC_ACT[window][1 if dark else 0]
+        line = _rgba(c['ink'], 38 if dark else 41)
+        tint = _rgba(c['ink'], 20 if dark else 18)
+        c.update({
+            'popover': popover, 'tooltip': popover, 'tooltip_ink': c['ink'],
+            'edge': line, 'edge_soft': line, 'menu_edge': line,
+            'hover': tint, 'tint': tint,
+            'scroll': _rgba(c['ink'], 77), 'scroll_hover': _rgba(c['ink'], 128),
+        })
+        if accent == ACCENT_DEFAULT:
+            c.update({
+                'accent': act, 'primary': act, 'primary_edge': act, 'primary_hover': act_hover,
+                'primary_off': act_soft, 'on_accent': on_act, 'pressed': act_soft,
+            })
+        else:
+            c['pressed'] = _rgba(c['accent'], 61) if dark else ACCENTS[accent][2]
+        c['selected'] = c['accent']
+        c['selected_ink'] = c['on_accent']
+    elif accent != ACCENT_DEFAULT or window != WINDOW_DEFAULT:
         # Hover and pressed fills are the accent faintly over the fields' color.
         c['hover'] = _blend(c['accent'], c['base'], 0.11 if dark else 0.05)
         c['pressed'] = _blend(c['accent'], c['base'], 0.24 if dark else 0.13)
@@ -314,12 +366,12 @@ def is_dark():
 
 def accent_swatch(key):
     """The color that stands for an Accent color in Settings, in the scheme in use."""
-    return QColor(compose(is_dark(), key)['accent'])
+    return QColor(compose(is_dark(), key, organic=is_organic())['accent'])
 
 
 def window_swatch(key):
     """The color that stands for a Window color in Settings, in the scheme in use."""
-    return QColor(compose(is_dark(), window=key)['window'])
+    return QColor(compose(is_dark(), window=key, organic=is_organic())['window'])
 
 
 def _load_fonts():
@@ -384,12 +436,18 @@ def _box(painter, rect, radius, fill=None, edge=None, width=1):
     painter.restore()
 
 
+def _radius(rect, classic, cap):
+    """A corner radius: the TVHplayer look's ``classic``, or in Organic round ends up to ``cap``."""
+    return min(QRectF(rect).height() / 2, cap) if _organic else classic
+
+
 def _field(painter, rect, fill, focused):
     """Text fields, dropdowns and number boxes: a thin edge, a thicker accent one with focus."""
+    radius = _radius(rect, 4, 14)
     if focused:
-        _box(painter, rect, 4, fill, color('accent'), 2)
+        _box(painter, rect, radius, fill, color('accent'), 2)
     else:
-        _box(painter, rect, 4, fill, color('edge'))
+        _box(painter, rect, radius, fill, color('edge'))
 
 
 def _chevron(painter, rect, points, ink, size):
@@ -407,6 +465,69 @@ def _chevron(painter, rect, points, ink, size):
     painter.setPen(pen)
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawPath(path)
+    painter.restore()
+
+
+def _see_through_corners(popup):
+    """Let a menu's or dropdown list's rounded corners show what is behind them.
+
+    A popup is a window of its own, and an opaque one fills its corners with
+    the window color. On Windows Qt makes a window see-through only when it
+    is also frameless, else the corners are black; its shadow is square, so
+    it goes too. Set before the popup is first shown: a window made opaque
+    keeps square corners until the next start.
+    """
+    popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    if sys.platform == 'win32':
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint
+        if (popup.windowFlags() & flags) != flags:
+            popup.setWindowFlags(popup.windowFlags() | flags)
+
+
+# Organic's check mark, dash and dot, in a 24 by 24 box, as in Jottr.
+CHECK = ((5.5, 12.5), (10, 17), (18.5, 7.5))
+DASH = ((7, 12), (17, 12))
+
+
+def _indicator(option, painter, radio):
+    """Organic's check boxes and radio buttons: a ring in the ink, filled with the accent once on."""
+    state = option.state
+    enabled = bool(state & State.State_Enabled)
+    on = bool(state & (State.State_On | State.State_NoChange))
+    side = min(option.rect.width(), option.rect.height())
+    box = QRectF(0, 0, side, side)
+    box.moveCenter(QRectF(option.rect).center())
+    radius = side / 2 if radio else side / 3
+    if on:
+        fill = color('primary_off' if not enabled else
+                     'primary_hover' if state & State.State_MouseOver else 'accent')
+        _box(painter, box, radius, fill)
+    else:
+        amount = 0.2 if not enabled else 0.7 if state & State.State_MouseOver else 0.45
+        edge = QColor(_blend(color('ink').name(), color('base').name(), amount))
+        _box(painter, box, radius, color('base'), edge, 2)
+    if not on:
+        return
+    ink = color('on_accent' if enabled else 'muted')
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    scale = side / 24
+    if radio:
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(ink)
+        painter.drawEllipse(box.center(), 5.5 * scale, 5.5 * scale)
+    else:
+        path = QPainterPath()
+        points = DASH if state & State.State_NoChange else CHECK
+        for i, (x, y) in enumerate(points):
+            point = QPointF(box.left() + x * scale, box.top() + y * scale)
+            path.moveTo(point) if i == 0 else path.lineTo(point)
+        pen = QPen(ink, 3.25 * scale)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
     painter.restore()
 
 
@@ -474,19 +595,21 @@ FRAME_INSETS = {
     'rowSeparator': (0, 0, 0, 0),
     'none': (0, 0, 0, 0),
 }
+# Organic's rounder lists and dropdown lists need more room at their corners.
+ORGANIC_INSETS = {'list': (7, 7, 7, 7), 'popup': (6, 6, 6, 6)}
 
 
 def _draw_frame(kind, painter, rect):
     if kind == 'list':
-        _box(painter, rect, 6, color('base'), color('list_edge'))
+        _box(painter, rect, 14 if _organic else 6, color('base'), color('list_edge'))
     elif kind == 'popup':
-        _box(painter, rect, 4, color('base'), color('edge'))
+        _box(painter, rect, 14 if _organic else 4, color('popover'), color('edge'))
     elif kind == 'settingsNav':
         # Edges are see-through: drawn over what is behind the frame, not over its fill.
         painter.fillRect(rect.adjusted(0, 0, -1, 0), color('nav'))
         _line(painter, rect.right(), rect.top(), 1, rect.height(), 'rule')
     elif kind == 'groupCard':
-        _box(painter, rect, 8, color('base'), color('edge_soft'))
+        _box(painter, rect, 14 if _organic else 8, color('base'), color('edge_soft'))
     elif kind == 'statusStrip':
         r = QRectF(rect.adjusted(0, 1, 0, 0))
         path = QPainterPath()
@@ -586,8 +709,12 @@ def _dress(widget):
     elif isinstance(widget, QAbstractItemView):
         _keep(widget)
         palette = QPalette(widget.property('theme_palette'))
-        # ThemeStyle draws the selected row as a light tint, so its text is dark, not white.
-        _set_ink(palette, QPalette.ColorRole.HighlightedText, 'ink' if _in_combo_popup(widget) else 'selected_ink')
+        # ThemeStyle draws the selected row as a light tint, so its text is dark, not white;
+        # Organic fills it with the accent.
+        popup = _in_combo_popup(widget)
+        _set_ink(palette, QPalette.ColorRole.HighlightedText, 'ink' if popup and not _organic else 'selected_ink')
+        if popup:
+            _set_ink(palette, QPalette.ColorRole.Base, 'popover', ALL)
         if name == 'settingsNav':
             _set_ink(palette, QPalette.ColorRole.Base, 'nav', ALL)
         if isinstance(widget, QTableView) and widget.property('theme_grid') is None:
@@ -668,6 +795,8 @@ class ThemeStyle(QProxyStyle):
             target.setPalette(QApplication.palette())
         if _active and isinstance(target, QWidget):
             _dress(target)
+            if _organic and (isinstance(target, QMenu) or target.inherits('QComboBoxPrivateContainer')):
+                _see_through_corners(target)
         return result
 
     def unpolish(self, target):
@@ -690,11 +819,11 @@ class ThemeStyle(QProxyStyle):
     def pixelMetric(self, metric, option=None, widget=None):
         if _active:
             if metric == PM.PM_ScrollBarExtent:
-                return 10
+                return 12 if _organic else 10
             if metric == PM.PM_ScrollBarSliderMin:
                 return 30
             if metric in (PM.PM_MenuHMargin, PM.PM_MenuVMargin):
-                return 4
+                return 6 if _organic else 4
             if metric == PM.PM_MenuPanelWidth:
                 return 1
             if metric == PM.PM_MenuBarHMargin:
@@ -715,6 +844,8 @@ class ThemeStyle(QProxyStyle):
             return super().sizeFromContents(kind, option, size, widget)
         # Each adds the theme's padding and edge to what the widget needs for its text.
         if kind == CT.CT_PushButton:
+            if _organic:
+                return QSize(size.width() + 40, size.height() + 14)
             return QSize(size.width() + 30, size.height() + 10)
         if kind == CT.CT_ToolButton:
             return QSize(size.width() + 21, size.height() + 13)
@@ -735,10 +866,11 @@ class ThemeStyle(QProxyStyle):
             base = super().sizeFromContents(kind, option, size, widget)
             if option.menuItemType == QStyleOptionMenuItem.MenuItemType.Separator:
                 return QSize(base.width(), 9)
-            return QSize(base.width() + 3, max(base.height(), option.fontMetrics.height() + 12))
+            return QSize(base.width() + (16 if _organic else 3),
+                         max(base.height(), option.fontMetrics.height() + (14 if _organic else 12)))
         if kind == CT.CT_ItemViewItem and _in_combo_popup(widget):
             base = super().sizeFromContents(kind, option, size, widget)
-            return QSize(base.width() + 18, option.fontMetrics.height() + 12)
+            return QSize(base.width() + 18, option.fontMetrics.height() + (14 if _organic else 12))
         return super().sizeFromContents(kind, option, size, widget)
 
     def subElementRect(self, element, option, widget=None):
@@ -747,11 +879,12 @@ class ThemeStyle(QProxyStyle):
             if element in (SE.SE_ShapedFrameContents, SE.SE_FrameContents):
                 kind = _frame_kind(widget)
                 if kind is not None:
-                    left, top, right, bottom = FRAME_INSETS[kind]
+                    left, top, right, bottom = (ORGANIC_INSETS.get(kind) if _organic else None) or FRAME_INSETS[kind]
                     return option.rect.adjusted(left, top, -right, -bottom)
             elif (element == SE.SE_LineEditContents and isinstance(option, QStyleOptionFrame)
                   and option.lineWidth > 0):
-                return option.rect.adjusted(9, 5, -9, -5)
+                side = 12 if _organic else 9
+                return option.rect.adjusted(side, 5, -side, -5)
             elif element == SE.SE_HeaderLabel and isinstance(option, QStyleOptionHeader):
                 return option.rect.adjusted(8, 6, -8, -7)
             elif element == SE.SE_ItemViewItemText and _in_combo_popup(widget):
@@ -766,20 +899,22 @@ class ThemeStyle(QProxyStyle):
             return super().subControlRect(control, option, sub, widget)
         r = option.rect
         if control == CC.CC_ComboBox and isinstance(option, QStyleOptionComboBox) and option.frame:
+            side = 4 if _organic else 0
             if sub == SC.SC_ComboBoxArrow:
-                return QRect(r.right() - 24, r.top() + 1, 24, r.height() - 2)
+                return QRect(r.right() - 24 - side, r.top() + 1, 24, r.height() - 2)
             if sub == SC.SC_ComboBoxEditField:
-                return QRect(r.left() + 9, r.top() + 5, r.width() - 34, r.height() - 10)
+                return QRect(r.left() + 9 + side, r.top() + 5, r.width() - 34 - 2 * side, r.height() - 10)
             if sub == SC.SC_ComboBoxFrame:
                 return QRect(r)
         elif control == CC.CC_SpinBox and isinstance(widget, QSpinBox):
             half = r.height() // 2
+            side = 4 if _organic else 0
             if sub == SC.SC_SpinBoxUp:
-                return QRect(r.right() - 21, r.top() + 3, 20, half - 3)
+                return QRect(r.right() - 21 - side, r.top() + 3, 20, half - 3)
             if sub == SC.SC_SpinBoxDown:
-                return QRect(r.right() - 21, r.top() + half, 20, r.height() - half - 3)
+                return QRect(r.right() - 21 - side, r.top() + half, 20, r.height() - half - 3)
             if sub == SC.SC_SpinBoxEditField:
-                return QRect(r.left() + 9, r.top() + 5, r.width() - 32, r.height() - 10)
+                return QRect(r.left() + 9 + side, r.top() + 5, r.width() - 32 - 2 * side, r.height() - 10)
             if sub == SC.SC_SpinBoxFrame:
                 return QRect(r)
         elif control == CC.CC_ScrollBar and isinstance(option, QStyleOptionSlider):
@@ -788,8 +923,9 @@ class ThemeStyle(QProxyStyle):
 
     @staticmethod
     def _scroll_rect(option, sub):
-        """A bar with no arrow buttons: a rounded handle in a 2px margin."""
-        groove = option.rect.adjusted(2, 2, -2, -2)
+        """A bar with no arrow buttons: a rounded handle in a 2px margin, 3px in Organic."""
+        margin = 3 if _organic else 2
+        groove = option.rect.adjusted(margin, margin, -margin, -margin)
         if sub == SC.SC_ScrollBarGroove:
             return groove
         if sub not in (SC.SC_ScrollBarSlider, SC.SC_ScrollBarSubPage, SC.SC_ScrollBarAddPage):
@@ -858,16 +994,19 @@ class ThemeStyle(QProxyStyle):
         elif element == PE.PE_PanelMenu:
             if not isinstance(widget, QMenu):
                 return False
-            _box(painter, option.rect, 6, color('base'))
+            _box(painter, option.rect, 14 if _organic else 6, color('popover'))
         elif element == PE.PE_FrameMenu:
             if not isinstance(widget, QMenu):
                 return False
-            _box(painter, option.rect, 6, None, color('menu_edge'))
+            _box(painter, option.rect, 14 if _organic else 6, None, color('menu_edge'))
         elif element == PE.PE_PanelMenuBar:
             pass
         elif element == PE.PE_PanelStatusBar:
             painter.fillRect(option.rect, color('window'))
-            _line(painter, option.rect.left(), option.rect.top(), option.rect.width(), 1, 'rule')
+            if not _organic:
+                _line(painter, option.rect.left(), option.rect.top(), option.rect.width(), 1, 'rule')
+        elif element in (PE.PE_IndicatorCheckBox, PE.PE_IndicatorRadioButton) and _organic:
+            _indicator(option, painter, element == PE.PE_IndicatorRadioButton)
         elif element == PE.PE_FrameStatusBarItem:
             pass
         elif element == PE.PE_PanelTipLabel:
@@ -891,12 +1030,17 @@ class ThemeStyle(QProxyStyle):
             fill = color('primary_off' if not enabled else
                          'primary_hover' if state & State.State_MouseOver else 'primary')
             edge = color('primary_off' if not enabled else 'primary_edge')
+        elif _organic:
+            # Clear on the window, as in Jottr; only focus colors the edge.
+            fill = (color('pressed') if state & State.State_Sunken else
+                    color('hover') if enabled and state & State.State_MouseOver else None)
+            edge = color('accent' if focused else 'edge')
         else:
             fill = color('pressed' if state & State.State_Sunken else
                          'hover' if enabled and state & State.State_MouseOver else 'base')
             edge = color('accent' if focused or (enabled and state & State.State_MouseOver) else
                          'edge' if enabled else 'edge_soft')
-        _box(painter, option.rect, 4, fill, edge, 2 if focused else 1)
+        _box(painter, option.rect, _radius(option.rect, 4, 22), fill, edge, 2 if focused else 1)
 
     @staticmethod
     def _selected_row(option, painter, widget):
@@ -907,14 +1051,16 @@ class ThemeStyle(QProxyStyle):
         """
         first, last = _row_ends(widget, option.index)
         rect = QRectF(option.rect)
-        # The rounded shape runs past the cell on a side that joins another cell, then is cut off.
+        radius = _radius(rect, 4, 14)
+        # The rounded shape runs past the cell, further than its corners, on a side
+        # that joins another cell, then is cut off.
         if not first:
-            rect.setLeft(rect.left() - 8)
+            rect.setLeft(rect.left() - radius - 4)
         if not last:
-            rect.setRight(rect.right() + 8)
+            rect.setRight(rect.right() + radius + 4)
         painter.save()
         painter.setClipRect(option.rect)
-        _box(painter, rect, 4, color('selected'))
+        _box(painter, rect, radius, color('selected'))
         painter.restore()
 
     def drawControl(self, element, option, painter, widget=None):
@@ -1026,18 +1172,24 @@ class ThemeStyle(QProxyStyle):
         r = option.rect
         if not titlebar:
             painter.fillRect(r, color('window'))
-            if widget is not None:
+            if widget is not None and not _organic:
                 _line(painter, r.left(), widget.height() - 1, r.width(), 1, 'rule')
         if element == CE.CE_MenuBarEmptyArea:
             return
         state = option.state
-        if state & State.State_Enabled and state & (State.State_Selected | State.State_Sunken):
-            _box(painter, r, 4, color('tint'))
+        palette = option.palette
+        if _organic and state & State.State_Enabled and state & State.State_Sunken:
+            # The open menu's title matches its highlighted items.
+            _box(painter, r, _radius(r, 4, 11), color('selected'))
+            palette = QPalette(palette)
+            _set_ink(palette, QPalette.ColorRole.WindowText, 'selected_ink')
+        elif state & State.State_Enabled and state & (State.State_Selected | State.State_Sunken):
+            _box(painter, r, _radius(r, 4, 11), color('tint'))
         flags = (Qt.AlignmentFlag.AlignCenter.value | Qt.TextFlag.TextShowMnemonic.value
                  | Qt.TextFlag.TextDontClip.value | Qt.TextFlag.TextSingleLine.value)
         if not self.styleHint(QStyle.StyleHint.SH_UnderlineShortcut, option, widget):
             flags |= Qt.TextFlag.TextHideMnemonic.value
-        self.drawItemText(painter, r, flags, option.palette, bool(state & State.State_Enabled),
+        self.drawItemText(painter, r, flags, palette, bool(state & State.State_Enabled),
                           option.text, QPalette.ColorRole.WindowText)
 
     def _menu_item(self, option, painter, widget):
@@ -1045,13 +1197,19 @@ class ThemeStyle(QProxyStyle):
         if option.menuItemType == QStyleOptionMenuItem.MenuItemType.Separator:
             _line(painter, r.left() + 8, r.top() + r.height() // 2, r.width() - 16, 1, 'hairline')
             return
-        if option.state & State.State_Selected and option.state & State.State_Enabled:
-            _box(painter, r, 4, color('selected'))
+        selected = option.state & State.State_Selected and option.state & State.State_Enabled
+        if selected:
+            _box(painter, r, 10 if _organic else 4, color('selected'))
         # Fusion draws the check, icon, text, shortcut and arrow on the theme's own highlight.
-        state = option.state
+        state, palette = option.state, option.palette
         option.state = state & ~State.State_Selected
+        if selected and _organic:
+            option.palette = QPalette(palette)
+            for role in (QPalette.ColorRole.Text, QPalette.ColorRole.WindowText,
+                         QPalette.ColorRole.ButtonText, QPalette.ColorRole.HighlightedText):
+                _set_ink(option.palette, role, 'selected_ink')
         super().drawControl(CE.CE_MenuItem, option, painter, widget)
-        option.state = state
+        option.state, option.palette = state, palette
 
     def drawComplexControl(self, control, option, painter, widget=None):
         option = _typed(option)
@@ -1104,8 +1262,8 @@ def style_names():
 
 
 def style_key(theme):
-    """The Qt style a theme runs on: Fusion for TVHplayer, else the style of that name, or None."""
-    if theme == THEME_TVHPLAYER:
+    """The Qt style a theme runs on: Fusion for TVHplayer and Organic, else the style of that name, or None."""
+    if theme in (THEME_TVHPLAYER, THEME_ORGANIC):
         return 'Fusion'
     for key in style_names():
         if key.casefold() == str(theme).casefold():
@@ -1126,7 +1284,7 @@ def _set_palette(app, palette):
 
 def _apply_colors(app, dark):
     global colors
-    colors = compose(dark, _accent, _window)
+    colors = compose(dark, _accent, _window, _organic)
     _set_palette(app, _palette(colors))
     # Labels and lists hold some of the colors themselves.
     for widget in app.allWidgets():
@@ -1254,19 +1412,20 @@ def set_color_scheme(app, mode):
 
 
 def apply(app, theme, style_class=ThemeStyle):
-    """Use ``theme``, TVHplayer or a Qt style's name, at startup or while the app runs.
+    """Use ``theme``, TVHplayer, Organic or a Qt style's name, at startup or while the app runs.
 
     Returns False when there is no such style. Qt sends every widget a
     StyleChange, so widgets that set themselves up for a theme can follow;
     the main window's panes need polish_main_window() again.
     """
-    global _active, _style, _default_font, _watching
+    global _active, _organic, _style, _default_font, _watching
     key = style_key(theme)
     if key is None:
         return False
     if _default_font is None:
         _default_font = app.font()
-    _active = theme == THEME_TVHPLAYER
+    _active = theme in (THEME_TVHPLAYER, THEME_ORGANIC)
+    _organic = theme == THEME_ORGANIC
     if _active:
         app.setFont(_load_fonts() or _default_font)
     else:

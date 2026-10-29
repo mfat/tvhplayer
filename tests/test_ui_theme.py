@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QRect, Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
@@ -20,7 +20,7 @@ def _apply(monkeypatch, answers, theme, mode='system', palettes=None):
     monkeypatch.setattr(ui_theme, '_kde_color_scheme', lambda _app, _scheme: False)
     monkeypatch.setattr(app.styleHints(), 'setColorScheme', pinned.append, raising=False)
     monkeypatch.setattr(app, 'setStyle', lambda style: styles.append(style.baseStyle().name()))
-    for name, value in (('_active', False), ('_scheme', None), ('_watching', False),
+    for name, value in (('_active', False), ('_organic', False), ('_scheme', None), ('_watching', False),
                         ('_default_font', None), ('_mode', mode)):
         monkeypatch.setattr(ui_theme, name, value)
     monkeypatch.setattr(app, 'setProperty', lambda *_args: True)
@@ -119,6 +119,65 @@ def test_every_accent_and_window_color_gives_every_color(qapp):
                 colors = compose(dark, accent, window)
                 assert colors.keys() == LIGHT.keys()
                 assert all(_qcolor(value).isValid() for value in colors.values()), (accent, window, dark)
+
+
+def test_organic_colors_are_jottr_s_paper_with_selections_filled_by_the_accent(qapp):
+    from tvhplayer.ui_theme import (
+        ACCENTS, LIGHT, ORGANIC_ACT, WINDOW_COLORS, _qcolor, accent_choices, compose, window_color_choices,
+    )
+
+    light = compose(False, organic=True)
+    assert light['window'] == WINDOW_COLORS['paper'][1][0]
+    assert light['accent'] == ORGANIC_ACT['paper'][0][0]
+    assert light['on_accent'] == ORGANIC_ACT['paper'][0][3]
+    assert (light['selected'], light['selected_ink']) == (light['accent'], light['on_accent'])
+    assert compose(True, 'teal', 'cream', organic=True)['selected'] == ACCENTS['teal'][3]
+    for accent, _label in accent_choices():
+        for window, _label in window_color_choices():
+            for dark in (False, True):
+                colors = compose(dark, accent, window, organic=True)
+                assert colors.keys() == LIGHT.keys()
+                assert all(_qcolor(value).isValid() for value in colors.values()), (accent, window, dark)
+
+
+def test_organic_runs_on_fusion_as_the_app_s_own_theme(monkeypatch):
+    from tvhplayer import ui_theme
+
+    assert ui_theme.style_key('Organic') == 'Fusion'
+    _changed, applied, _pinned, styles = _apply(monkeypatch, [Qt.ColorScheme.Light] * 2, 'Organic')
+    assert styles == ['fusion']
+    assert applied == [False]
+    assert ui_theme.is_active() and ui_theme.is_organic()
+    assert ui_theme.apply(QApplication.instance(), 'TVHplayer')
+    assert ui_theme.is_active() and not ui_theme.is_organic()
+
+
+def test_organic_rounds_popups_and_draws_its_own_check_boxes(qapp, monkeypatch):
+    from PyQt6.QtGui import QImage, QPainter
+    from PyQt6.QtWidgets import QCheckBox, QMenu, QStyleOptionButton
+    from tvhplayer import ui_theme
+
+    monkeypatch.setattr(ui_theme, '_active', True)
+    monkeypatch.setattr(ui_theme, '_organic', True)
+    monkeypatch.setattr(ui_theme, 'colors', ui_theme.compose(False, organic=True))
+    style = ui_theme.ThemeStyle('Fusion')
+    menu = QMenu()
+    style.polish(menu)
+    assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    box = QCheckBox()
+    option = QStyleOptionButton()
+    option.initFrom(box)
+    option.rect = QRect(0, 0, 18, 18)
+    option.state |= ui_theme.State.State_On | ui_theme.State.State_Enabled
+    image = QImage(18, 18, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    style.drawPrimitive(ui_theme.PE.PE_IndicatorCheckBox, option, painter, box)
+    painter.end()
+    # Filled with the accent at its edge, the check in the accent's ink at its middle.
+    assert image.pixelColor(9, 2).name() == ui_theme.colors['accent']
+    assert image.pixelColor(0, 0).alpha() == 0
 
 
 def test_accent_reaches_every_theme_but_window_color_only_the_tvhplayer_theme(qapp, monkeypatch):

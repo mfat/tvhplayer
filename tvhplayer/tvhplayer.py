@@ -71,7 +71,7 @@ try:
     from . import window_frame
     from .file_manager import show_in_file_manager
     from .ui_theme import (
-        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, polish_main_window,
+        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, polish_main_window,
         set_accent, set_color_scheme, set_window_color, style_key,
     )
     from .player_bar import (
@@ -168,7 +168,7 @@ except ImportError:
     import window_frame
     from file_manager import show_in_file_manager
     from ui_theme import (
-        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, polish_main_window,
+        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, polish_main_window,
         set_accent, set_color_scheme, set_window_color, style_key,
     )
     from player_bar import (
@@ -1606,7 +1606,8 @@ class RecordingDurationDialog(QDialog):
             self.record_btn.setStyleSheet(
                 f"QPushButton {{ background: {theme_color('primary').name()}; "
                 f"color: {theme_color('on_accent').name()}; font-weight: 600; "
-                f"border: 1px solid {theme_color('primary_edge').name()}; border-radius: 3px; "
+                f"border: 1px solid {theme_color('primary_edge').name()}; "
+                f"border-radius: {15 if is_organic() else 3}px; "
                 "min-width: 96px; min-height: 28px; padding: 0 10px; } "
                 "QPushButton:focus { border: 2px solid palette(highlight); }"
             )

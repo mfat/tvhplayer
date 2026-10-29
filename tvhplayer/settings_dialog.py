@@ -28,20 +28,21 @@ from PyQt6.QtWidgets import (
 try:
     from .a11y import announce_label, describe
     from .core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
-    from .core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
+    from .core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER
     from .ui_theme import accent_choices, accent_swatch, style_names, window_color_choices, window_swatch
     from .settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 except ImportError:
     from a11y import announce_label, describe
     from core.recorder import RECORDING_FORMATS, parse_ffmpeg_options
-    from core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_TVHPLAYER
+    from core.config import SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER
     from ui_theme import accent_choices, accent_swatch, style_names, window_color_choices, window_swatch
     from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, StatusStrip, ToggleSwitch
 
-THEME_SHORT = "TVHplayer is the app's own look. The others are the styles Qt offers on this computer."
+THEME_SHORT = ("TVHplayer is the app's own look, and Organic its rounder, warmer one, as in Jottr. "
+               "The others are the styles Qt offers on this computer.")
 SCHEME_SHORT = 'Follow system theme, or set Light/Dark theme manually'
 ACCENT_SHORT = 'Color of selections, focus and the main buttons'
-WINDOW_COLOR_SHORT = 'Background of windows and panels in the TVHplayer style'
+WINDOW_COLOR_SHORT = 'Background of windows and panels in the TVHplayer and Organic styles'
 SCHEME_NAMES = {SCHEME_SYSTEM: 'Follow System', SCHEME_LIGHT: 'Light', SCHEME_DARK: 'Dark'}
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
@@ -374,6 +375,7 @@ class SettingsDialog(QDialog):
         self.theme_combo = QComboBox()
         self.theme_combo.setMinimumWidth(170)
         self.theme_combo.addItem('TVHplayer', THEME_TVHPLAYER)
+        self.theme_combo.addItem('Organic', THEME_ORGANIC)
         for name in style_names():
             self.theme_combo.addItem(name, name)
         chosen = host.theme_choice()
@@ -437,7 +439,7 @@ class SettingsDialog(QDialog):
 
     def _show_window_color_row(self):
         self._window_color_group.set_row_visible(
-            self._window_color_row, self.theme_combo.currentData() == THEME_TVHPLAYER)
+            self._window_color_row, self.theme_combo.currentData() in (THEME_TVHPLAYER, THEME_ORGANIC))
 
     @staticmethod
     def _swatch_combo(choices, chosen):

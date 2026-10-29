@@ -738,6 +738,10 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert host.accent == 'ocean'
     assert dialog.window_color_combo.currentData() == 'default'
     assert dialog.window_color_combo.isVisibleTo(dialog)
+    dialog.theme_combo.setCurrentIndex(dialog.theme_combo.findData('Organic'))
+    QApplication.processEvents()
+    assert host.theme == 'Organic'
+    assert dialog.window_color_combo.isVisibleTo(dialog)
     dialog.theme_combo.setCurrentIndex(dialog.theme_combo.findData('Fusion'))
     QApplication.processEvents()
     assert host.theme == 'Fusion'

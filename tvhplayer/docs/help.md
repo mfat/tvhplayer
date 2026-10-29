@@ -157,8 +157,10 @@ While this computer is recording, TVHplayer keeps it from going to sleep. It als
 
 **Settings → Appearance**:
 
-- **Application style**: TVHplayer, the app's own look, or any style Qt offers on your computer, such as Breeze or Fusion.
+- **Application style**: TVHplayer, the app's own look; Organic, its rounder, warmer look from Jottr; or any style Qt offers on your computer, such as Breeze or Fusion.
 - **Theme**: Follow System, Light or Dark.
+- **Accent color**: the color of selections, focus and the main buttons, in every style.
+- **Window color**: the background of windows and panels, in the TVHplayer and Organic styles. Organic's default is Paper.
 - **Use TVHplayer's own title bar** (GNOME and KDE on Wayland, and KDE on X11): a title bar drawn by TVHplayer in place of the desktop's. Takes effect the next time TVHplayer starts.
 
 ## Playback

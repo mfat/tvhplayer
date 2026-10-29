@@ -22,6 +22,8 @@ from .urls import pin_http_port
 
 # The app's own theme; any other ui_theme value names a Qt style.
 THEME_TVHPLAYER = 'TVHplayer'
+# The same, drawn in Jottr's Organic look.
+THEME_ORGANIC = 'Organic'
 # Light or dark: as the desktop is, or always one of them.
 SCHEME_SYSTEM = 'system'
 SCHEME_LIGHT = 'light'

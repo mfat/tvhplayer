@@ -21,9 +21,9 @@ from PyQt6.QtWidgets import (
 )  # QCheckBox is the base of ToggleSwitch
 
 try:
-    from .ui_theme import is_active as theme_is_active
+    from .ui_theme import color as theme_color, is_active as theme_is_active, is_organic
 except ImportError:
-    from ui_theme import is_active as theme_is_active
+    from ui_theme import color as theme_color, is_active as theme_is_active, is_organic
 
 
 # QWIDGETSIZE_MAX, the maximum size of a widget with none set.
@@ -122,7 +122,8 @@ class ToggleSwitch(QCheckBox):
         knob = QRectF(track.x() + 2 + self._offset * 16, track.y() + 2, 16, 16)
         p.setBrush(QColor(0, 0, 0, 40))
         p.drawEllipse(knob.translated(0, 0.8))
-        p.setBrush(QColor('#ffffff'))
+        # On the accent, the accent's own ink: Organic's dark accent is near white.
+        p.setBrush(pal.color(QPalette.ColorRole.HighlightedText) if self.isChecked() else QColor('#ffffff'))
         p.drawEllipse(knob)
         if self.hasFocus():
             pen = p.pen()
@@ -345,13 +346,19 @@ class _NavDelegate(QStyledItemDelegate):
             style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, option, p, option.widget)
             if selected:
                 ink = option.palette.color(QPalette.ColorRole.HighlightedText)
+        elif selected and is_organic():
+            # Organic fills the selected page with the accent, as its lists.
+            p.setBrush(theme_color('selected'))
+            p.drawRoundedRect(r, 14, 14)
+            ink = theme_color('selected_ink')
         elif selected:
             # The app's highlight: the theme gives lists a clear one, as ThemeStyle draws their selection.
             p.setBrush(_alpha(QApplication.palette().color(QPalette.ColorRole.Highlight), 56))
             p.drawRoundedRect(r, 6, 6)
         elif hover:
             p.setBrush(_alpha(ink, 18))
-            p.drawRoundedRect(r, 6, 6)
+            radius = 14 if is_organic() else 6
+            p.drawRoundedRect(r, radius, radius)
         title_font = QFont(option.font)
         title_font.setPointSizeF(option.font.pointSizeF() * 1.04)
         title_font.setWeight(QFont.Weight.DemiBold if selected else QFont.Weight.Medium)
