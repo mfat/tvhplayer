@@ -62,6 +62,7 @@ class BuiltinSupervisor(QObject):
     status_changed = pyqtSignal(str)
     ready = pyqtSignal(int, int)
     failed = pyqtSignal(str)
+    log_output = pyqtSignal(str)
     # From the readiness check's thread: attempt, answered, defaults that failed.
     _checked = pyqtSignal(int, bool, object)
 
@@ -175,6 +176,7 @@ class BuiltinSupervisor(QObject):
         self._log.append(data)
         if len(self._log) > 400:
             self._log = self._log[-400:]
+        self.log_output.emit(data)
         self._partial_line += data
         *lines, self._partial_line = self._partial_line.split('\n')
         for line in lines:

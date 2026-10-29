@@ -299,6 +299,36 @@ def test_log_viewer_is_modal_child_of_server_management(ui, monkeypatch, builtin
     assert opened == [(dialog, ui.Qt.WindowModality.WindowModal)]
 
 
+def test_builtin_log_streams_preserves_scroll_and_stops_on_close(ui):
+    from PyQt6.QtCore import QObject, pyqtSignal
+    from PyQt6.QtWidgets import QApplication
+
+    class Supervisor(QObject):
+        log_output = pyqtSignal(str)
+
+        def log_text(self):
+            return ''.join(f'line {i}\n' for i in range(200)) + 'partial'
+
+    supervisor = Supervisor()
+    dialog = ui.BuiltinLogDialog(supervisor)
+    dialog.show()
+    QApplication.processEvents()
+    supervisor.log_output.emit(' completed\n')
+    assert dialog.view.toPlainText().endswith('partial completed\n')
+    bar = dialog.view.verticalScrollBar()
+    assert bar.value() == bar.maximum()
+    bar.setValue(20)
+    supervisor.log_output.emit('next line\n')
+    assert bar.value() == 20
+    bar.setValue(bar.maximum())
+    supervisor.log_output.emit('last line\n')
+    assert bar.value() == bar.maximum()
+    dialog.close()
+    contents = dialog.view.toPlainText()
+    supervisor.log_output.emit('after closing\n')
+    assert dialog.view.toPlainText() == contents
+
+
 def test_builtin_server_page(ui):
     from PyQt6.QtCore import QObject, pyqtSignal
     from PyQt6.QtWidgets import QWidget

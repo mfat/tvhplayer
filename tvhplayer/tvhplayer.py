@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
     QIcon, QAction, QActionGroup, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
-    QFont, QFontDatabase, QFontMetrics, QKeySequence, QPalette, QValidator,
+    QFont, QFontDatabase, QFontMetrics, QKeySequence, QPalette, QValidator, QTextCursor,
 )
 import html
 import json
@@ -3378,6 +3378,54 @@ class ServerLogWatch(QObject):
         finally:
             if feed is not None:
                 feed.close()
+
+
+class BuiltinLogDialog(QDialog):
+    """Retained built-in log followed by live process output."""
+
+    def __init__(self, supervisor, parent=None):
+        super().__init__(parent)
+        self._supervisor = supervisor
+        self.setWindowTitle("Built-in server log")
+        layout = QVBoxLayout(self)
+        where = QLabel(f"The full log is saved in {log_dir() / SERVER_LOG}")
+        where.setWordWrap(True)
+        where.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(where)
+        self.view = QPlainTextEdit()
+        self.view.setReadOnly(True)
+        self.view.setMaximumBlockCount(5000)
+        self.view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.view.setPlaceholderText("No log yet.")
+        describe(self.view, "Built-in server log", "Live log messages, newest at the bottom")
+        layout.addWidget(self.view)
+        close_btn = QPushButton("&Close")
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+        self.resize(640, 360)
+        if supervisor is not None:
+            self.add_output(supervisor.log_text())
+            supervisor.log_output.connect(self.add_output)
+            self.finished.connect(self._stop_updates)
+
+    def add_output(self, text):
+        bar = self.view.verticalScrollBar()
+        position = bar.value()
+        at_end = position == bar.maximum()
+        previous_blocks = self.view.document().blockCount()
+        cursor = QTextCursor(self.view.document())
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(text)
+        if at_end:
+            bar.setValue(bar.maximum())
+        else:
+            removed = max(0, previous_blocks + text.count('\n') - self.view.document().blockCount())
+            bar.setValue(max(0, position - removed))
+
+    def _stop_updates(self):
+        if self._supervisor is not None:
+            self._supervisor.log_output.disconnect(self.add_output)
+            self._supervisor = None
 
 
 class ServerLogDialog(QDialog):
@@ -7571,23 +7619,8 @@ class TVHeadendClient(QMainWindow):
 
     def show_builtin_log(self, *, dialog_parent=None):
         supervisor = getattr(self, 'builtin', None)
-        text = supervisor.log_text() if supervisor is not None else ''
-        dialog = QDialog(dialog_parent if dialog_parent is not None else self)
+        dialog = BuiltinLogDialog(supervisor, dialog_parent if dialog_parent is not None else self)
         dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        dialog.setWindowTitle("Built-in server log")
-        layout = QVBoxLayout(dialog)
-        where = QLabel(f"The full log is saved in {log_dir() / SERVER_LOG}")
-        where.setWordWrap(True)
-        where.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        layout.addWidget(where)
-        view = QTextEdit()
-        view.setReadOnly(True)
-        view.setPlainText(text or "No log yet.")
-        layout.addWidget(view)
-        close_btn = QPushButton("&Close")
-        close_btn.clicked.connect(dialog.accept)
-        layout.addWidget(close_btn)
-        dialog.resize(640, 360)
         dialog.exec()
         dialog.deleteLater()
 
