@@ -43,7 +43,10 @@ def grid_rows(fetch, params=None) -> list:
         batch = _grid_entries(data)
         rows.extend(batch)
         start += len(batch)
-        total = data.get('total') if isinstance(data, dict) else None
+        # Tvheadend's epg/events/grid reports totalCount; many idnode grids
+        # instead report total. Accept both to avoid truncating EPG pages.
+        total = (data.get('total', data.get('totalCount'))
+                 if isinstance(data, dict) else None)
         if len(batch) < GRID_LIMIT or not isinstance(total, int) or start >= total:
             return rows
 
