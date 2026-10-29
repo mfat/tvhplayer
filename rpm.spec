@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.4.0
+Version:        4.4.1
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,11 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.4.1-1
+- Record local footage from the timeshift position
+- Fix pause and resume without a seekable buffer
+- Keep batched live read-ahead from moving the timeshift bar
+
 * Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.4.0-1
 - Add pause, skip, a seek bar and an opt-in disk timeshift buffer
 - Add previous and next channel controls with Ctrl+PgUp/PgDown

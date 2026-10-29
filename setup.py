@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="tvhplayer",
-    version="4.4.0",
+    version="4.4.1",
     description="Desktop client for TVHeadend",
     author="mFat",
     author_email="mah.fat@gmail.com",

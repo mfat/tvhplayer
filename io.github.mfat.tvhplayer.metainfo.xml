@@ -34,6 +34,15 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.4.1" date="2026-10-29">
+      <description>
+        <ul>
+          <li>Record local footage from the timeshift position</li>
+          <li>Fix pause and resume without a seekable buffer</li>
+          <li>Keep batched live read-ahead from moving the timeshift bar</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.4.0" date="2026-10-29">
       <description>
         <ul>
