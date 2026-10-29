@@ -119,10 +119,11 @@ ACCENTS = {
     'sage': ('Sage', '#7a8a5e', '#e1eecc', '#aebf92', '#3d472b'),
     'ink': ('Ink', '#2e2b25', '#eee7db', '#f9f4ed', '#2e2b25'),
     'ocean': ('Ocean', '#3f6f9e', '#d6e4f2', '#7fa7d0', '#1f3a56'),
-    # GNOME's (libadwaita's) blue accent, the same in light and dark, with its standalone text colors.
-    'blue': ('Blue', '#3584e4', '#d0e3fa', '#3584e4', '#0461be', {
-        'light': {'act': '#3584e4', 'hover': '#1c71d8', 'soft': '#d0e3fa', 'ink': '#0461be', 'on_act': '#ffffff'},
-        'dark': {'act': '#3584e4', 'hover': '#62a0ea', 'ink': '#81d0ff', 'on_act': '#ffffff'},
+    # GNOME's (libadwaita's) blue accent, the same in light and dark. Ink is the text
+    # of a selected row: near-black or near-white, as for the other accents.
+    'blue': ('Blue', '#3584e4', '#d0e3fa', '#3584e4', '#15396b', {
+        'light': {'act': '#3584e4', 'hover': '#1c71d8', 'soft': '#d0e3fa', 'ink': '#15396b', 'on_act': '#ffffff'},
+        'dark': {'act': '#3584e4', 'hover': '#62a0ea', 'ink': '#d3e5fb', 'on_act': '#ffffff'},
     }),
     'teal': ('Teal', '#2f8578', '#cdeae4', '#6fbfb1', '#174840'),
     'plum': ('Plum', '#8a4f7d', '#f0dcea', '#c68fb9', '#4a2442'),
