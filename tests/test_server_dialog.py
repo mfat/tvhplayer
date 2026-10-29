@@ -165,6 +165,37 @@ def test_connection_test_reports_result(ui, monkeypatch):
     assert dialog.test_label.text() == "Not tested yet."
 
 
+@pytest.mark.parametrize('http_error', [None, 'TLS handshake failed'])
+def test_htsp_connection_requires_working_http_endpoint(ui, monkeypatch, http_error):
+    checked, closed, results = [], [], []
+
+    class Backend:
+        def __init__(self, server):
+            self.server = server
+
+        def ping(self):
+            checked.append(dict(self.server))
+            if self.server['protocol'] == 'http' and http_error:
+                raise ConnectionError(http_error)
+
+        def close(self):
+            closed.append(self.server['protocol'])
+
+    monkeypatch.setattr(ui, 'create_backend', Backend)
+    server = _remote(url='https://127.0.0.1:9981', protocol='htsp')
+    test = ui.ConnectionTest(server, 1)
+    test.done.connect(lambda *result: results.append(result))
+    test._run()
+    assert [entry['protocol'] for entry in checked] == ['htsp', 'http']
+    assert all(entry['url'] == server['url'] for entry in checked)
+    assert sorted(closed) == ['htsp', 'http']
+    assert server['protocol'] == 'htsp'
+    assert results[0][1] is (http_error is None)
+    if http_error:
+        assert 'HTSP connected' in results[0][3]
+        assert http_error in results[0][3]
+
+
 def test_builtin_server_page(ui):
     from PyQt6.QtCore import QObject, pyqtSignal
     from PyQt6.QtWidgets import QWidget

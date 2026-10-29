@@ -1835,6 +1835,21 @@ class ConnectionTest(QObject):
         try:
             backend = create_backend(self._server)
             backend.ping()
+            if (self._server.get('protocol') or PROTOCOL_HTTP).lower() == PROTOCOL_HTSP:
+                http_backend = None
+                try:
+                    http_backend = create_backend(dict(self._server, protocol=PROTOCOL_HTTP))
+                    http_backend.ping()
+                except Exception as exc:
+                    raise ConnectionError(
+                        f'HTSP connected, but the HTTP/HTTPS playback endpoint failed: {exc}'
+                    ) from exc
+                finally:
+                    if http_backend is not None:
+                        try:
+                            http_backend.close()
+                        except Exception:
+                            pass
         except Exception as exc:
             ok, error = False, str(exc) or exc.__class__.__name__
         finally:
