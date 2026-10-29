@@ -1266,10 +1266,20 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert "Playback error" in window.status_label.text()
 
         window.start_recording_indicator()
-        assert window.recording_indicator.text() == "REC"
-        assert window.recording_indicator.isVisible()
-        assert "Recording" in window.recording_indicator.accessibleName()
+        badge = window.recording_indicator
+        assert badge.text() == "Recording"
+        assert badge.isVisible()
+        assert badge.dot.is_pulsing()
+        assert "Recording" in badge.accessibleName()
+        window.tasks_pane.recordings_changed.emit(2)
+        assert badge.text() == "2 recordings"
+        assert badge.accessibleName() == "2 recordings in progress"
+        window._close_tasks_pane()
+        badge.click()
+        assert window.tasks_pane.isVisible()
+        assert window.tasks_action.isChecked()
         window.stop_recording_indicator()
+        assert not badge.dot.is_pulsing()
         assert window.recording_indicator.text() == ""
         assert window.recording_indicator.accessibleName() == "Not recording"
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PyQt6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QByteArray, QEasingCurve, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
@@ -458,6 +458,123 @@ class PlayerBar(QWidget):
         self.fullscreen_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24))
 
 
+class _PulseDot(QWidget):
+    """A dot that breathes while something records."""
+
+    SIZE = 8
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(self.SIZE, self.SIZE)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.color = QColor('#ffffff')
+        self._level = 1.0
+        self._pulse = QVariantAnimation(self)
+        self._pulse.setDuration(1600)
+        # Fade out and back in one loop, so it never snaps from dim to bright.
+        self._pulse.setStartValue(1.0)
+        self._pulse.setKeyValueAt(0.5, 0.35)
+        self._pulse.setEndValue(1.0)
+        self._pulse.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._pulse.setLoopCount(-1)
+        self._pulse.valueChanged.connect(self._set_level)
+
+    def _set_level(self, value):
+        self._level = float(value)
+        self.update()
+
+    def start(self):
+        if self._pulse.state() != QVariantAnimation.State.Running:
+            self._pulse.start()
+
+    def stop(self):
+        self._pulse.stop()
+        self._set_level(1.0)
+
+    def is_pulsing(self):
+        return self._pulse.state() == QVariantAnimation.State.Running
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor(self.color)
+        color.setAlphaF(self._level)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        painter.drawEllipse(QRectF(self.rect()))
+        painter.end()
+
+
+class RecordingBadge(QPushButton):
+    """The status bar's red pill while anything records; a click opens Tasks."""
+
+    HEIGHT = 22
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(self.HEIGHT)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(9, 0, 10, 0)
+        layout.setSpacing(6)
+        self.dot = _PulseDot(self)
+        layout.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.label = QLabel()
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.label, 0, Qt.AlignmentFlag.AlignVCenter)
+        if prefers_high_contrast():
+            self.dot.color = self.palette().color(self.foregroundRole())
+        else:
+            radius = self.HEIGHT // 2
+            self.setStyleSheet(button_stylesheet(
+                f"background: {RECORD_RED}; border: none; border-radius: {radius}px;",
+                radius=radius,
+            ) + " QPushButton:hover { background: #d13d42; } QPushButton:pressed { background: #b8343a; }")
+            self.label.setStyleSheet(
+                "color: #ffffff; background: transparent; font-weight: 600;"
+            )
+        self.setToolTip("Show recordings in Tasks")
+        self._count = 0
+        self.hide()
+        self._describe()
+
+    def text(self):
+        return self.label.text()
+
+    def count(self):
+        return self._count
+
+    def set_count(self, count):
+        """How many recordings run; more than one is shown on the pill."""
+        self._count = max(int(count or 0), 0)
+        if self.label.text():
+            self._show_text()
+
+    def start(self):
+        self._show_text()
+        self.show()
+        self.dot.start()
+
+    def stop(self):
+        self.dot.stop()
+        self.label.setText("")
+        self.hide()
+        self._describe()
+
+    def _show_text(self):
+        self.label.setText(f"{self._count} recordings" if self._count > 1 else "Recording")
+        self.setMinimumWidth(self.layout().sizeHint().width())
+        self._describe()
+
+    def _describe(self):
+        if not self.label.text():
+            describe(self, "Not recording", "Shown only while a recording is in progress")
+            return
+        name = f"{self._count} recordings in progress" if self._count > 1 else "Recording in progress"
+        describe(self, name, "Open Tasks to see or stop the recordings.")
+
+
 class FloatingBar(QWidget):
     """Holds the player bar over the bottom of the picture in fullscreen.
 
@@ -544,4 +661,4 @@ class FloatingBar(QWidget):
         painter.end()
 
 
-__all__ = ['PlayerBar', 'FloatingBar', 'file_icon', 'svg_icon']
+__all__ = ['PlayerBar', 'FloatingBar', 'RecordingBadge', 'file_icon', 'svg_icon']

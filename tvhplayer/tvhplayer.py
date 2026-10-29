@@ -7,12 +7,12 @@ from PyQt6.QtWidgets import (
     QComboBox, QSplitter, QFrame,
     QListWidget, QDialog, QFormLayout, QLineEdit,
     QDialogButtonBox, QMessageBox, QApplication,
-    QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
+    QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QFileDialog,
     QMenu, QMenuBar, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
     QInputDialog, QSpacerItem,
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
     QIcon, QAction, QActionGroup, QShortcut, QPainter, QPen, QColor, QPixmap, QDesktopServices,
     QFont, QFontDatabase, QFontMetrics, QKeySequence, QPalette, QValidator, QTextCursor,
@@ -82,6 +82,7 @@ try:
         RECORD_RED,
         FloatingBar,
         PlayerBar,
+        RecordingBadge,
         file_icon,
         svg_icon,
     )
@@ -180,6 +181,7 @@ except ImportError:
         RECORD_RED,
         FloatingBar,
         PlayerBar,
+        RecordingBadge,
         file_icon,
         svg_icon,
     )
@@ -747,6 +749,8 @@ class TasksPanel(QFrame):
     close_requested = pyqtSignal()
     # A task appeared that was not there before.
     task_added = pyqtSignal()
+    # How many recordings run, server and local, after each redraw.
+    recordings_changed = pyqtSignal(int)
     # Generation, entries or None, error or None; sent from the fetch thread.
     _server_fetched = pyqtSignal(int, object, object)
 
@@ -921,6 +925,7 @@ class TasksPanel(QFrame):
         tasks.extend(self._conversion_tasks())
         self._tasks = sorted(tasks, key=self._sort_key)
         self._apply_filter()
+        self.recordings_changed.emit(sum(1 for task in tasks if task['bucket'] == 'recording'))
         keys = {task['key'] for task in tasks}
         added = keys - self._known_keys
         self._known_keys = keys
@@ -3730,11 +3735,7 @@ class TVHeadendClient(QMainWindow):
 
         
         # Add recording indicator variables
-        self.recording_indicator_timer = None
-        self.recording_indicator_visible = False
         self.is_recording = False
-        self.recording_animation = None
-        self.opacity_effect = None
         
         print(f"Debug: Initializing the {self.engine} playback engine")
         try:
@@ -4250,16 +4251,10 @@ class TVHeadendClient(QMainWindow):
         status_layout.setContentsMargins(0, 0, 0, 0)
         status_layout.setSpacing(10)  # Space between indicator and text
         
-        # Text plus a dark-red badge, so recording state is not color alone.
-        self.recording_indicator = QLabel("")
-        self.recording_indicator.setVisible(False)
-        self.recording_indicator.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        if not prefers_high_contrast():
-            self.recording_indicator.setStyleSheet(
-                "QLabel { background-color: #7f1d1d; color: #ffffff; "
-                "font-weight: bold; padding: 1px 6px; border-radius: 8px; }"
-            )
-        describe(self.recording_indicator, "Not recording", "Shown only while a recording is in progress")
+        # Text plus a red pill, so recording state is not color alone.
+        self.recording_indicator = RecordingBadge()
+        self.recording_indicator.clicked.connect(self._show_recordings_in_tasks)
+        self.tasks_pane.recordings_changed.connect(self.recording_indicator.set_count)
         
         # Shown while the recordings folder runs low on space.
         self.space_warning = QLabel("")
@@ -6930,47 +6925,24 @@ class TVHeadendClient(QMainWindow):
             self._refresh_tasks()
 
     def start_recording_indicator(self):
-        """Start the recording indicator with smooth pulsing animation"""
+        """Show the Recording pill in the status bar."""
         print("Debug: Starting recording indicator")
         self.is_recording = True
-        self.recording_indicator.setText("REC")
-        self.recording_indicator.setVisible(True)
-        describe(self.recording_indicator, "Recording in progress", "A recording is in progress")
-        self.recording_indicator.setProperty("recording", True)
-        self.recording_indicator.style().polish(self.recording_indicator)
-        
-        # Create opacity effect
-        self.opacity_effect = QGraphicsOpacityEffect(self.recording_indicator)
-        self.recording_indicator.setGraphicsEffect(self.opacity_effect)
-        
-        # Create and configure the animation
-        self.recording_animation = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.recording_animation.setDuration(1000)  # 1 second per pulse
-        self.recording_animation.setStartValue(1.0)
-        self.recording_animation.setEndValue(0.3)
-        self.recording_animation.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self.recording_animation.setLoopCount(-1)  # Infinite loop
-        
-        # Start the animation
-        self.recording_animation.start()
+        self.recording_indicator.start()
         self._sync_record_controls()
 
     def stop_recording_indicator(self):
-        """Stop the recording indicator and its animation"""
+        """Hide the Recording pill."""
         print("Debug: Stopping recording indicator")
         self.is_recording = False
-        if self.recording_animation:
-            self.recording_animation.stop()
-            self.recording_animation = None
-        if hasattr(self, 'opacity_effect'):
-            self.recording_indicator.setGraphicsEffect(None)
-            self.opacity_effect = None
-        self.recording_indicator.setText("")
-        self.recording_indicator.setVisible(False)
-        describe(self.recording_indicator, "Not recording", "Shown only while a recording is in progress")
-        self.recording_indicator.setProperty("recording", False)
-        self.recording_indicator.style().polish(self.recording_indicator)
+        self.recording_indicator.stop()
         self._sync_record_controls()
+
+    def _show_recordings_in_tasks(self):
+        """The Recording pill opens Tasks with the list focused."""
+        self._open_tasks_pane()
+        if self.tasks_pane.isVisible():
+            self.tasks_pane.task_table.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def show_dvr_status(self):
         """Show DVR status dialog"""
