@@ -18,6 +18,7 @@ from .models import ServerConfig
 from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES
 from .playlist_sync import PlaylistSource
 from .recorder import DEFAULT_FORMAT, RECORDING_FORMATS
+from .urls import pin_http_port
 
 # The app's own theme; any other ui_theme value names a Qt style.
 THEME_TVHPLAYER = 'TVHplayer'
@@ -102,6 +103,8 @@ def default_config():
         # chosen by hand: {server key: {channel uuid: choice}}.
         'guide_sources': [],
         'guide_choices': {},
+        # Missing from configs saved when a port-less http:// address meant port 80.
+        'http_ports_pinned': True,
     }
 
 
@@ -118,7 +121,12 @@ def _normalize(data):
     servers = []
     for raw in data.get('servers') or []:
         servers.append(ServerConfig.from_dict(raw).to_dict())
+    if not data.get('http_ports_pinned'):
+        for server in servers:
+            if not server['builtin']:
+                server['url'] = pin_http_port(server['url'])
     cfg['servers'] = servers
+    cfg['http_ports_pinned'] = True
     cfg['playlists'] = [
         PlaylistSource.from_dict(raw).to_dict()
         for raw in data.get('playlists') or []

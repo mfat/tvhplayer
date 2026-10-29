@@ -70,6 +70,24 @@ def http_base_url(url):
     return base + path if path else base
 
 
+def pin_http_port(url, port=80):
+    """Write out the port of a port-less http:// address, so the 9981 default does not apply to it."""
+    text = (url or '').strip()
+    if not text:
+        return url
+    if not text.startswith(('http://', 'https://')):
+        if '://' in text:
+            return url
+        text = 'http://' + text
+    parts = urlsplit(text)
+    try:
+        if parts.scheme != 'http' or not parts.hostname or parts.port is not None:
+            return url
+    except ValueError:
+        return url
+    return urlunsplit(parts._replace(netloc=f'{parts.netloc.rstrip(":")}:{port}'))
+
+
 def origin_url(url):
     """Return scheme://host[:port] with any webroot path dropped."""
     parsed = urlparse(http_base_url(url))

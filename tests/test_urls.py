@@ -10,6 +10,7 @@ from tvhplayer.core.urls import (
     http_auth,
     http_base_url,
     htsp_host_port,
+    pin_http_port,
     insert_basic_auth,
 )
 
@@ -32,6 +33,23 @@ def test_missing_http_port_defaults_to_tvheadend_port():
     assert http_base_url('https://tvh.example/tvh') == 'https://tvh.example/tvh'
     assert http_base_url('http://[::1]') == 'http://[::1]:9981'
     assert htsp_host_port('http://tvh.example') == ('tvh.example', 9982)
+
+
+@pytest.mark.parametrize('url, expected', [
+    ('http://tvh.example', 'http://tvh.example:80'),
+    ('http://tvh.example/tvh/', 'http://tvh.example:80/tvh/'),
+    ('http://user:pw@tvh.example', 'http://user:pw@tvh.example:80'),
+    ('http://tvh.example:', 'http://tvh.example:80'),
+    ('http://[::1]', 'http://[::1]:80'),
+    ('tvh.example', 'http://tvh.example:80'),
+    ('http://tvh.example:9981', 'http://tvh.example:9981'),
+    ('https://tvh.example', 'https://tvh.example'),
+    ('ftp://tvh.example', 'ftp://tvh.example'),
+    ('http://tvh.example:abc', 'http://tvh.example:abc'),
+    ('', ''),
+])
+def test_pin_http_port_keeps_the_old_port_80_default(url, expected):
+    assert pin_http_port(url) == expected
 
 
 def test_unsupported_scheme_is_rejected():

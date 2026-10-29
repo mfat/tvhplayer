@@ -19,6 +19,31 @@ def test_config_roundtrip_normalizes_servers(tmp_path):
     assert loaded.data['window_geometry']['width'] == 1200
 
 
+def test_old_config_keeps_port_80_for_portless_http_once(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    path.write_text(json.dumps({'servers': [
+        {'name': 'proxy', 'url': 'http://tvh.example/tvh'},
+        {'name': 'tls', 'url': 'https://tvh.example'},
+        {'name': 'box', 'url': 'http://127.0.0.1:9981'},
+    ]}), encoding='utf-8')
+    store = ConfigStore(path)
+    assert [s['url'] for s in store.servers] == [
+        'http://tvh.example:80/tvh', 'https://tvh.example', 'http://127.0.0.1:9981',
+    ]
+    store.save()
+    store.servers = [{'name': 'new', 'url': 'http://other.example'}]
+    store.save()
+    assert ConfigStore(path).servers[0]['url'] == 'http://other.example'
+
+
+def test_new_config_does_not_pin_http_ports(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    store = ConfigStore(path)
+    store.servers = [{'name': 'new', 'url': 'http://other.example'}]
+    store.save()
+    assert ConfigStore(path).servers[0]['url'] == 'http://other.example'
+
+
 def test_corrupt_config_falls_back_to_defaults(tmp_path):
     path = tmp_path / 'tvhplayer.conf'
     path.write_text('{not json', encoding='utf-8')
