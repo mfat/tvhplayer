@@ -1044,14 +1044,15 @@ class ThemeStyle(QProxyStyle):
 
     @staticmethod
     def _selected_row(option, painter, widget):
-        """A selected row is one tint, rounded at its two ends.
+        """A selected row is one fill, rounded at its two ends.
 
         A table counts hidden columns, so with its first column hidden no
         visible cell would start the row: the ends are the visible ones.
         """
         first, last = _row_ends(widget, option.index)
         rect = QRectF(option.rect)
-        radius = _radius(rect, 4, 14)
+        # Rows are dense: a small radius, not Organic's round ends.
+        radius = 6 if _organic else 4
         # The rounded shape runs past the cell, further than its corners, on a side
         # that joins another cell, then is cut off.
         if not first:
@@ -1199,7 +1200,7 @@ class ThemeStyle(QProxyStyle):
             return
         selected = option.state & State.State_Selected and option.state & State.State_Enabled
         if selected:
-            _box(painter, r, 10 if _organic else 4, color('selected'))
+            _box(painter, r, 8 if _organic else 4, color('selected'))
         # Fusion draws the check, icon, text, shortcut and arrow on the theme's own highlight.
         state, palette = option.state, option.palette
         option.state = state & ~State.State_Selected

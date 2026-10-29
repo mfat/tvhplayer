@@ -4014,6 +4014,8 @@ class TVHeadendClient(QMainWindow):
             "Drag a column to move it. Drag a column edge to resize it. Right-click to choose columns."
         )
         self._fitting_channel_columns = False
+        # (column, pixels) the last column was widened by to reach the list's edge.
+        self._channel_column_gap = None
         self._channel_width_save_timer = QTimer(self)
         self._channel_width_save_timer.setSingleShot(True)
         self._channel_width_save_timer.setInterval(500)
@@ -5017,12 +5019,19 @@ class TVHeadendClient(QMainWindow):
         widths = self.channel_options['widths']
         self._fitting_channel_columns = True
         try:
+            if self._channel_column_gap is not None:
+                column, gap = self._channel_column_gap
+                self._channel_column_gap = None
+                if not header.isSectionHidden(column):
+                    header.resizeSection(column, max(header.sectionSize(column) - gap, 1))
             left = table.viewport().width()
             sharing = []
+            last = None
             for visual in range(header.count()):
                 column = header.logicalIndex(visual)
                 if header.isSectionHidden(column):
                     continue
+                last = column
                 key = COLUMN_KEYS[column]
                 if key in widths:
                     header.resizeSection(column, widths[key])
@@ -5038,6 +5047,11 @@ class TVHeadendClient(QMainWindow):
                 share = max(left // (len(sharing) - place), header.sectionSizeHint(column))
                 header.resizeSection(column, share)
                 left -= share
+            if not sharing and last is not None and left > 0:
+                # Every column has its width: the last one runs on to the list's edge,
+                # so a selected row does too. Not saved as the user's width.
+                header.resizeSection(last, header.sectionSize(last) + left)
+                self._channel_column_gap = (last, left)
         finally:
             self._fitting_channel_columns = False
 
@@ -5048,6 +5062,8 @@ class TVHeadendClient(QMainWindow):
         header = self.channel_list.horizontalHeader()
         if header.isSectionHidden(column):
             return
+        if self._channel_column_gap is not None and self._channel_column_gap[0] == column:
+            self._channel_column_gap = None
         self.channel_options['widths'][COLUMN_KEYS[column]] = new_size
         self._channel_width_save_timer.start()
         # The columns still sharing the width make room or fill the gap.
@@ -5059,6 +5075,8 @@ class TVHeadendClient(QMainWindow):
             COLUMN_KEYS[header.logicalIndex(visual)] for visual in range(header.count())
         ]
         self._save_channel_options()
+        # Another column may be last now.
+        self._fit_channel_columns()
 
     def _set_channel_column(self, key, visible):
         had_now_next = self._wants_now_next()

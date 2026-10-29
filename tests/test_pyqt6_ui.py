@@ -2721,6 +2721,28 @@ def test_channel_list_columns_can_be_resized(monkeypatch, tmp_path):
         assert header.sectionSize(ui.COL_NAME) == name_width
         assert header.sectionSize(ui.COL_NOW) > now_width
 
+        # With every column dragged, the last one runs on to the list's edge, so a
+        # selected row does too, without saving the extra as its width.
+        header.resizeSection(ui.COL_NOW, 120)
+        shown = sorted((c for c in range(header.count()) if not header.isSectionHidden(c)),
+                       key=header.visualIndex)
+        last = shown[-1]
+        last_width = window.channel_options['widths'].get(ui.COLUMN_KEYS[last])
+        if last_width is None:
+            header.resizeSection(last, 60)
+            last_width = 60
+        window._fit_channel_columns()
+        assert sum(header.sectionSize(c) for c in shown) == table.viewport().width()
+        assert window.channel_options['widths'][ui.COLUMN_KEYS[last]] == last_width
+        # A wider pane and back again: the extra follows the pane and does not pile up.
+        widths = [header.sectionSize(c) for c in shown]
+        window.splitter.moveSplitter(window.splitter.sizes()[0] + 80, 1)
+        app.processEvents()
+        assert sum(header.sectionSize(c) for c in shown) == table.viewport().width()
+        window.splitter.moveSplitter(window.splitter.sizes()[0] - 80, 1)
+        app.processEvents()
+        assert [header.sectionSize(c) for c in shown] == widths
+
         # Reset forgets the widths.
         window._reset_channel_list_layout()
         assert window.config_store.load()['channel_list']['widths'] == {}
