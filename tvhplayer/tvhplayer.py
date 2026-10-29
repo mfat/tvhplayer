@@ -1667,11 +1667,8 @@ class RecordingDurationDialog(QDialog):
         self.buffer_check.setChecked(True)
         layout.addWidget(self.buffer_check)
         note = QLabel(
-            'Includes the buffered footage, then continues recording live for the duration below. '
-            'Saved as MPEG-TS (.ts), without extra ffmpeg options. '
-            'Playback resumes; keep it running so the buffer can keep receiving footage. '
-            'Stopping playback or changing channels ends this recording. '
-            'Uncheck to record live using your recording settings.'
+            'Saves from this point as a .ts file. Keep this channel playing; '
+            'stopping or changing channels ends the recording.'
         )
         note.setWordWrap(True)
         layout.addWidget(note)
