@@ -359,6 +359,9 @@ class PlayerBar(QWidget):
         self.fullscreen_btn.setStyleSheet(self.mute_btn.styleSheet())
         layout.addWidget(self.fullscreen_btn)
 
+        for control in (self.play_btn, self.cast_btn, self.mute_btn, self.volume_slider, self.fullscreen_btn):
+            control.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+
         self.set_playing(False)
         self.set_casting(False)
         self.set_muted(False)
