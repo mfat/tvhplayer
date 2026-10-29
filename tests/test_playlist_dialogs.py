@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 import tvhplayer.playlist_dialogs as dialogs  # noqa: E402
 from tvhplayer.core.errors import TvhAuthError  # noqa: E402
-from tvhplayer.core.playlist_sync import PlaylistSource  # noqa: E402
+from tvhplayer.core.playlist_sync import PlaylistSource, same_source, source_key  # noqa: E402
 
 BUILTIN = {'name': 'Built-in Server', 'url': 'http://127.0.0.1:20000', 'builtin': True}
 OTHER = {'name': 'Living room', 'url': 'http://tv.lan:9981'}
@@ -106,7 +106,11 @@ class FakeHost:
         return [PlaylistSource.from_dict(data) for data in self.stored]
 
     def store_playlist_source(self, data):
-        self.stored = [item for item in self.stored if item['location'] != data['location']] + [data]
+        source = PlaylistSource.from_dict(data)
+        self.stored = [
+            item for item in self.stored
+            if not same_source(PlaylistSource.from_dict(item), source)
+        ] + [data]
 
     def ensure_server_ready(self, server, on_ready, on_failed):
         on_ready(server)
@@ -134,17 +138,17 @@ class FakeHost:
 
 
     def claim_playlist(self, source):
-        key = (source.server, source.location)
+        key = source_key(source)
         if key in self.busy:
             return False
         self.busy.add(key)
         return True
 
     def release_playlist(self, source):
-        self.busy.discard((source.server, source.location))
+        self.busy.discard(source_key(source))
 
     def is_playlist_busy(self, source):
-        return (source.server, source.location) in self.busy
+        return source_key(source) in self.busy
 
     def stop_playlist_job(self, source):
         for job in self.kept:
@@ -252,6 +256,45 @@ def test_xtream_provider_and_headers_reuse_the_playlist_pipeline(app, monkeypatc
     assert source.request_headers['User-Agent'] == 'Provider App'
 
 
+def test_xtream_settings_rotate_password_without_duplicating_source(app, monkeypatch):
+    from tvhplayer.core.playlist import parse_playlist
+
+    loaded = []
+
+    def load(location, cancelled=None, headers=None):
+        loaded.append((location, headers))
+        playlist = parse_playlist(TWO)
+        playlist.max_connections = 1
+        return playlist
+
+    monkeypatch.setattr(dialogs, 'load_xtream', load)
+    original = PlaylistSource(
+        'Provider',
+        'https://provider.example/get.php?username=user&password=old',
+        'builtin',
+        source_type='xc',
+        request_headers={'User-Agent': 'Old App'},
+    )
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    host.stored = [original.to_dict()]
+    dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN, source=original)
+    assert dialog.windowTitle() == 'Edit Source'
+    assert not dialog.source_type_combo.isEnabled()
+    assert not dialog.username_input.isEnabled()
+    assert not dialog.server_combo.isEnabled()
+    dialog.password_input.setText('new')
+    dialog.user_agent_input.setText('New App')
+    _run(app, dialog)
+    assert loaded == [(
+        'https://provider.example/get.php?username=user&password=new',
+        {'User-Agent': 'New App'},
+    )]
+    assert len(host.stored) == 1
+    saved = PlaylistSource.from_dict(host.stored[0])
+    assert saved.location.endswith('username=user&password=new')
+    assert saved.request_headers == {'User-Agent': 'New App'}
+
+
 def test_import_rejects_unsafe_provider_headers(app):
     host = FakeHost([BUILTIN], current=BUILTIN)
     dialog = dialogs.ImportPlaylistDialog(host)
@@ -348,7 +391,7 @@ def test_playlists_dialog_refreshes_and_removes(app, tmp_path, monkeypatch):
 def test_one_job_per_playlist(app, tmp_path):
     host = FakeHost([BUILTIN], current=BUILTIN)
     location = _playlist(tmp_path, TWO)
-    host.busy.add(('builtin', location))
+    host.busy.add(source_key(PlaylistSource('news', location, 'builtin')))
     dialog = dialogs.ImportPlaylistDialog(host)
     dialog.location_input.setText(location)
     _run(app, dialog)
@@ -727,7 +770,7 @@ def test_a_playlist_being_updated_cannot_be_refreshed(app, tmp_path):
     _run(app, importer)
 
     # An update started elsewhere, such as the refresh at startup.
-    host.busy.add(('builtin', location))
+    host.busy.add(source_key(PlaylistSource('news', location, 'builtin')))
     dialog = dialogs.PlaylistsDialog(host)
     assert dialog.playlist_list.item(0).text() == 'news — updating…'
     assert not dialog.refresh_btn.isEnabled()

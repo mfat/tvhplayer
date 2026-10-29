@@ -12,6 +12,7 @@ from tvhplayer.core.playlist import (
     NOT_A_PLAYLIST,
     ONLY_FILMS,
     STOPPED,
+    XTREAM_AUTH_FAILED,
     decode_playlist,
     ffmpeg_command,
     ffmpeg_input,
@@ -314,6 +315,19 @@ def test_native_xtream_live_channels_are_ingested(monkeypatch):
     assert entry.attrs['tvg-id'] == 'world.news'
     assert entry.headers == {'User-Agent': 'XC client'}
     assert [call[1].get('action') for call in calls] == [None, 'get_live_categories', 'get_live_streams']
+
+
+def test_xtream_rejected_credentials_have_a_clear_error(monkeypatch):
+    class Reply:
+        status_code = 200
+
+        def json(self):
+            return {'user_info': {'auth': 0}}
+
+    monkeypatch.setattr(requests.Session, 'get', lambda *_args, **_kwargs: Reply())
+    with pytest.raises(PlaylistError) as info:
+        load_xtream(xtream_playlist_url('https://xc.example', 'user', 'wrong'))
+    assert str(info.value) == XTREAM_AUTH_FAILED
 
 
 def test_load_playlist_downloads_and_stops_when_cancelled():

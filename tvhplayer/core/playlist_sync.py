@@ -25,7 +25,7 @@ from typing import Callable, Dict, List, Optional
 
 from .errors import PlaylistError, TvhAuthError, TvhConnectionError
 from .ffmpeg_starter import install_starter
-from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, _quote, ffmpeg_input
+from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, _quote, ffmpeg_input, xtream_identity
 
 BUILTIN_SERVER_KEY = 'builtin'
 # Distro packages and the common Docker images install ffmpeg here. A bare
@@ -111,7 +111,7 @@ class PlaylistSource:
             chosen_groups=[str(group) for group in chosen] if isinstance(chosen, list) else None,
             left_out=[str(key) for key in data.get('left_out') or [] if key],
             source_type='xc' if data.get('source_type') == 'xc' else 'm3u',
-            request_headers=_request_headers(data.get('request_headers')),
+            request_headers=normalize_request_headers(data.get('request_headers')),
             health={str(key): value for key, value in (data.get('health') or {}).items() if isinstance(value, dict)}
             if isinstance(data.get('health'), dict) else {},
             health_totals=_health_totals(data.get('health_totals')),
@@ -156,14 +156,25 @@ def _seconds(value) -> float:
         return 0.0
 
 
-def _request_headers(value) -> Dict[str, str]:
+def normalize_request_headers(value, strict: bool = False) -> Dict[str, str]:
+    """Clean provider HTTP headers; in strict mode reject malformed input."""
     if not isinstance(value, dict):
+        if strict:
+            raise ValueError('headers must be a dictionary')
         return {}
-    return {
-        str(key): str(item) for key, item in value.items()
-        if _HTTP_HEADER_NAME.match(str(key)) and str(item).strip()
-        and '\r' not in str(item) and '\n' not in str(item)
-    }
+    headers = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not isinstance(item, str):
+            if strict:
+                raise ValueError('header names and values must be text')
+            continue
+        if not _HTTP_HEADER_NAME.match(key) or '\r' in item or '\n' in item:
+            if strict:
+                raise ValueError('invalid HTTP header')
+            continue
+        if item.strip():
+            headers[key] = item.strip()
+    return headers
 
 
 def _health_totals(value) -> Dict[str, int]:
@@ -253,10 +264,27 @@ def retarget_commands(rows, ffmpeg: str, others) -> List[dict]:
     return changes
 
 
-def find_source(sources: List[PlaylistSource], location: str, key: str) -> Optional[PlaylistSource]:
-    location = (location or '').strip()
+def source_identity(source_type: str, location: str):
+    """Stable identity for one provider source; XC passwords are deliberately excluded."""
+    if source_type == 'xc':
+        return 'xc', *xtream_identity(location)
+    return 'm3u', (location or '').strip()
+
+
+def source_key(source: PlaylistSource):
+    return source.server, *source_identity(source.source_type, source.location)
+
+
+def same_source(left: PlaylistSource, right: PlaylistSource) -> bool:
+    return source_key(left) == source_key(right)
+
+
+def find_source(
+    sources: List[PlaylistSource], location: str, key: str, source_type: str = 'm3u'
+) -> Optional[PlaylistSource]:
+    identity = (key, *source_identity(source_type, location))
     for source in sources:
-        if source.server == key and source.location == location:
+        if source_key(source) == identity:
             return source
     return None
 
@@ -497,6 +525,8 @@ def sync_playlist(
         tags.update(plan.groups)
     source.tags = sorted(tags)
     source.health = {key: value for key, value in source.health.items() if key in source.muxes}
+    if not check:
+        _reconcile_health_totals(source)
     checkpoint()
     if check and retest and not result.cancelled:
         admin.scan_muxes(retest)
@@ -660,6 +690,21 @@ def _update_health(source: PlaylistSource, rows) -> None:
     source.health_totals = counts
     if rows and not counts['checking']:
         source.last_checked = now
+
+
+def _reconcile_health_totals(source: PlaylistSource) -> None:
+    """Keep aggregates honest when a sync deliberately skips server checks."""
+    failed = sum(item.get('status') == 'failed' for item in source.health.values())
+    detailed_untested = sum(item.get('status') == 'untested' for item in source.health.values())
+    remaining = max(len(source.muxes) - failed - detailed_untested, 0)
+    previous_working = _count(source.health_totals.get('working'))
+    working = min(previous_working, remaining)
+    source.health_totals = {
+        'working': working,
+        'failed': failed,
+        'untested': detailed_untested + remaining - working,
+        'checking': 0,
+    }
 
 
 def wait_for_checks(

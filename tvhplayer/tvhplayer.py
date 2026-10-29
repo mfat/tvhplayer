@@ -60,7 +60,7 @@ try:
     from .core.engine import mpv_missing
     from .core.mpv_player import MpvPlayer
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
-    from .core.playlist_sync import PlaylistSource, server_key
+    from .core.playlist_sync import PlaylistSource, same_source, server_key, source_key
     from .core.playback_status import (
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
         starting_caption, stream_path, stream_reason,
@@ -152,7 +152,7 @@ except ImportError:
     from core.engine import mpv_missing
     from core.mpv_player import MpvPlayer
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK
-    from core.playlist_sync import PlaylistSource, server_key
+    from core.playlist_sync import PlaylistSource, same_source, server_key, source_key
     from core.playback_status import (
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
         starting_caption, stream_path, stream_reason,
@@ -6846,25 +6846,25 @@ class TVHeadendClient(QMainWindow):
         return None
 
     def claim_playlist(self, source):
-        key = (source.server, source.location)
+        key = source_key(source)
         if key in self._busy_playlists:
             return False
         self._busy_playlists.add(key)
         return True
 
     def release_playlist(self, source):
-        self._busy_playlists.discard((source.server, source.location))
+        self._busy_playlists.discard(source_key(source))
         if self._waiting_playlist_jobs:
             # Later, so a job that ends while it starts does not start others meanwhile.
             QTimer.singleShot(0, self._start_waiting_playlist_jobs)
 
     def is_playlist_busy(self, source):
-        return (source.server, source.location) in self._busy_playlists
+        return source_key(source) in self._busy_playlists
 
     def stop_playlist_job(self, source):
         """Stop the update of ``source`` running here. Returns its job, or None."""
         for job in self._playlist_jobs:
-            if job.is_running() and (job.source.server, job.source.location) == (source.server, source.location):
+            if job.is_running() and same_source(job.source, source):
                 job.cancel()
                 return job
         return None
@@ -6873,7 +6873,7 @@ class TVHeadendClient(QMainWindow):
         gone = PlaylistSource.from_dict(data)
         self.config['playlists'] = [
             source.to_dict() for source in self.playlist_sources()
-            if (source.server, source.location) != (gone.server, gone.location)
+            if not same_source(source, gone)
         ]
         for guide in self.all_guide_sources():
             if guide.server == gone.server and guide.playlist == gone.location:
@@ -7334,11 +7334,11 @@ class TVHeadendClient(QMainWindow):
 
     def _start_playlist_jobs(self, action):
         # A job doing this already, or waiting to, is enough.
-        doing = {(job.source.server, job.source.location) for job in self._playlist_jobs if job.action == action}
+        doing = {source_key(job.source) for job in self._playlist_jobs if job.action == action}
         jobs = []
         for source in self.playlist_sources():
             server = self.server_for_playlist(source)
-            if server is None or (source.server, source.location) in doing:
+            if server is None or source_key(source) in doing:
                 continue
             job = PlaylistJob(self, source, server, action=action, parent=self)
             self.keep_playlist_job(job)
@@ -7357,7 +7357,7 @@ class TVHeadendClient(QMainWindow):
         """
         if self._closing:
             return
-        saved = {(source.server, source.location) for source in self.playlist_sources()}
+        saved = {source_key(source) for source in self.playlist_sources()}
         checking = {
             job.source.server for job in self._playlist_jobs
             if job.action == PlaylistJob.CHECK and job.is_running()
@@ -7365,7 +7365,7 @@ class TVHeadendClient(QMainWindow):
         for job in list(self._waiting_playlist_jobs):
             if job not in self._waiting_playlist_jobs:
                 continue
-            if (job.source.server, job.source.location) not in saved:
+            if source_key(job.source) not in saved:
                 # Removed while it waited.
                 self._waiting_playlist_jobs.remove(job)
                 self._playlist_job_ended(job)
@@ -7398,13 +7398,21 @@ class TVHeadendClient(QMainWindow):
     def store_playlist_source(self, data):
         source = PlaylistSource.from_dict(data)
         sources = self.playlist_sources()
+        replaced_location = ''
         for index, existing in enumerate(sources):
-            if existing.server == source.server and existing.location == source.location:
+            if same_source(existing, source):
+                replaced_location = existing.location if existing.location != source.location else ''
                 sources[index] = source
                 break
         else:
             sources.append(source)
         self.config['playlists'] = [item.to_dict() for item in sources]
+        if replaced_location:
+            guides = self.all_guide_sources()
+            for guide in guides:
+                if guide.server == source.server and guide.playlist == replaced_location:
+                    guide.playlist = source.location
+            self.config['guide_sources'] = [guide.to_dict() for guide in guides]
         self.save_config()
 
     def ensure_server_ready(self, server, on_ready, on_failed):

@@ -8,7 +8,6 @@ UI thread and reports the outcome in plain words.
 from __future__ import annotations
 
 import json
-import re
 import time
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, pyqtSignal
@@ -37,7 +36,7 @@ try:
     from .a11y import announce_label, buddy_label, describe, set_item_access
     from .core.playlist import (
         load_playlist, load_xtream, plan_channels, playlist_commands, playlist_name,
-        xtream_connections, xtream_playlist_url,
+        xtream_account, xtream_connections, xtream_playlist_url,
     )
     from .core.playlist_sync import (
         NETWORK_GONE,
@@ -50,6 +49,7 @@ try:
         ffmpeg_for_server,
         find_source,
         health_counts,
+        normalize_request_headers,
         plan_group,
         remove_playlist,
         result_message,
@@ -66,7 +66,7 @@ except ImportError:
     from a11y import announce_label, buddy_label, describe, set_item_access
     from core.playlist import (
         load_playlist, load_xtream, plan_channels, playlist_commands, playlist_name,
-        xtream_connections, xtream_playlist_url,
+        xtream_account, xtream_connections, xtream_playlist_url,
     )
     from core.playlist_sync import (
         NETWORK_GONE,
@@ -79,6 +79,7 @@ except ImportError:
         ffmpeg_for_server,
         find_source,
         health_counts,
+        normalize_request_headers,
         plan_group,
         remove_playlist,
         result_message,
@@ -119,7 +120,6 @@ NONE_CHOSEN = 'None of the channels you chose are in this playlist any more. Use
 NO_GROUP = 'No group'
 BUSY_POLL_MS = 1000
 REMOVED_SERVERS = 'Removed servers'
-_HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
 
 def _playlists(count):
@@ -587,20 +587,23 @@ CHECK_HINT = 'The channels are in the list. Those that do not work are hidden as
 class ImportPlaylistDialog(QDialog):
     """One step: choose a playlist and a server, then Import."""
 
-    def __init__(self, host, parent=None, server=None):
+    def __init__(self, host, parent=None, server=None, source=None):
         super().__init__(parent)
         self._host = host
         self._server = server
+        self._source = PlaylistSource.from_dict(source.to_dict()) if source is not None else None
         self._job = None
         self._skipped = []
         self._step_text = ''
         self._done_server = None
-        self.setWindowTitle('Import Playlist')
+        self.setWindowTitle('Edit Source' if source is not None else 'Import Playlist')
         self.setModal(True)
         self.setMinimumWidth(520)
         self.setAccessibleName('Import Playlist')
         self.setAccessibleDescription('Add TV channels from an M3U playlist to a server.')
         self._build()
+        if self._source is not None:
+            self._fill_source(self._source)
 
     def event(self, event):
         # Qt sizes a window without asking wrapped text how tall it gets at the
@@ -701,7 +704,10 @@ class ImportPlaylistDialog(QDialog):
         layout.addWidget(self.hint_label)
 
         self.buttons = QDialogButtonBox()
-        self.import_btn = self.buttons.addButton('&Import', QDialogButtonBox.ButtonRole.AcceptRole)
+        self.import_btn = self.buttons.addButton(
+            '&Save and Refresh' if self._source is not None else '&Import',
+            QDialogButtonBox.ButtonRole.AcceptRole,
+        )
         self.details_btn = self.buttons.addButton('&Details', QDialogButtonBox.ButtonRole.HelpRole)
         self.show_btn = self.buttons.addButton('&Show Channels', QDialogButtonBox.ButtonRole.ActionRole)
         self.close_btn = self.buttons.addButton(QDialogButtonBox.StandardButton.Close)
@@ -723,6 +729,26 @@ class ImportPlaylistDialog(QDialog):
         for widget in (self.username_label, self.username_input, self.password_label, self.password_input):
             widget.setVisible(xc)
 
+    def _fill_source(self, source):
+        index = self.source_type_combo.findData(source.source_type)
+        self.source_type_combo.setCurrentIndex(max(index, 0))
+        if source.source_type == 'xc':
+            base, username, password = xtream_account(source.location)
+            self.location_input.setText(base)
+            self.username_input.setText(username)
+            self.password_input.setText(password)
+            # Server and account identify the existing source; password and headers are editable.
+            self.location_input.setEnabled(False)
+            self.username_input.setEnabled(False)
+        else:
+            self.location_input.setText(source.location)
+            self.location_input.setEnabled(False)
+        headers = dict(source.request_headers)
+        self.user_agent_input.setText(headers.pop('User-Agent', ''))
+        self.headers_input.setText(json.dumps(headers, separators=(',', ':')) if headers else '')
+        self.source_type_combo.setEnabled(False)
+        self.server_combo.setEnabled(False)
+
     def _browse(self):
         path, _filter = QFileDialog.getOpenFileName(
             self, 'Choose a Playlist', '', 'Playlists (*.m3u *.m3u8);;All files (*)'
@@ -739,7 +765,14 @@ class ImportPlaylistDialog(QDialog):
             self.password_input, self.user_agent_input, self.headers_input,
         ):
             widget.setEnabled(not running)
-        self.server_combo.setEnabled(not running)
+        if not running and self._source is not None:
+            self.source_type_combo.setEnabled(False)
+            self.location_input.setEnabled(False)
+            self.server_combo.setEnabled(False)
+            if self._source.source_type == 'xc':
+                self.username_input.setEnabled(False)
+        else:
+            self.server_combo.setEnabled(not running)
         self.import_btn.setEnabled(not running)
         self.close_btn.setText('Cancel' if running else 'Close')
         self.progress_bar.setVisible(running)
@@ -759,11 +792,7 @@ class ImportPlaylistDialog(QDialog):
             return
         try:
             headers = json.loads(self.headers_input.text().strip() or '{}')
-            if not isinstance(headers, dict) or any(not isinstance(key, str) or not isinstance(value, str)
-                                                   for key, value in headers.items()):
-                raise ValueError
-            if any(not _HTTP_HEADER_NAME.match(key) or '\r' in value or '\n' in value for key, value in headers.items()):
-                raise ValueError
+            headers = normalize_request_headers(headers, strict=True)
         except (ValueError, json.JSONDecodeError):
             self._set_status('Other headers must be a JSON object whose names and values are text.')
             self.headers_input.setFocus()
@@ -778,16 +807,24 @@ class ImportPlaylistDialog(QDialog):
         if not self._targets:
             self._set_status('Add a server first, then import the playlist.')
             return
-        server = self._targets[max(self.server_combo.currentIndex(), 0)]
-        key = server_key(server)
         sources = self._host.playlist_sources()
-        existing = find_source(sources, location, key)
+        if self._source is not None:
+            server = self._host.server_for_playlist(self._source)
+            existing = self._source
+            if server is None:
+                self._set_status('This playlist\'s server is no longer available.')
+                return
+        else:
+            server = self._targets[max(self.server_combo.currentIndex(), 0)]
+            existing = find_source(sources, location, server_key(server), source_type)
+        key = server_key(server)
         if existing is not None:
             source = PlaylistSource.from_dict(existing.to_dict())
         else:
             source = PlaylistSource(unique_name(sources, playlist_name(location), key), location, key)
+        source.location = location
         source.source_type = source_type
-        source.request_headers = headers
+        source.request_headers = normalize_request_headers(headers)
         self.details_btn.hide()
         self.show_btn.hide()
         self.progress_bar.setRange(0, 0)
@@ -906,18 +943,22 @@ class PlaylistsDialog(QDialog):
         header.addLayout(heading, 1)
         self.refresh_btn = QPushButton('&Refresh')
         self.choose_btn = QPushButton('&Choose Channels…')
+        self.edit_btn = QPushButton('Se&ttings…')
         self.health_btn = QPushButton('&Health…')
         self.remove_btn = QPushButton('Re&move')
         describe(self.refresh_btn, 'Refresh', 'Read the playlist again and update its channels.')
         describe(self.choose_btn, 'Choose channels', 'Choose which channels of the playlist are added.')
+        describe(self.edit_btn, 'Source settings', 'Change provider credentials and HTTP headers.')
         describe(self.health_btn, 'Stream health', 'Show the latest check result for every channel.')
         describe(self.remove_btn, 'Remove', 'Remove the playlist and its channels from the server.')
         self.refresh_btn.clicked.connect(lambda: self._run(remove=False))
         self.choose_btn.clicked.connect(lambda: self._run(remove=False, choose=True))
+        self.edit_btn.clicked.connect(self._edit_source)
         self.health_btn.clicked.connect(self._show_health)
         self.remove_btn.clicked.connect(self._confirm_remove)
         header.addWidget(self.refresh_btn, 0, Qt.AlignmentFlag.AlignTop)
         header.addWidget(self.choose_btn, 0, Qt.AlignmentFlag.AlignTop)
+        header.addWidget(self.edit_btn, 0, Qt.AlignmentFlag.AlignTop)
         header.addWidget(self.health_btn, 0, Qt.AlignmentFlag.AlignTop)
         header.addWidget(self.remove_btn, 0, Qt.AlignmentFlag.AlignTop)
         detail.addLayout(header)
@@ -1073,6 +1114,7 @@ class PlaylistsDialog(QDialog):
         has_server = source is not None and self._host.server_for_playlist(source) is not None
         self.refresh_btn.setEnabled(not running and not busy and has_server)
         self.choose_btn.setEnabled(not running and not busy and has_server)
+        self.edit_btn.setEnabled(not running and not busy and has_server)
         self.health_btn.setEnabled(
             not running and source is not None and bool(source.health or source.health_totals)
         )
@@ -1115,6 +1157,14 @@ class PlaylistsDialog(QDialog):
         ImportPlaylistDialog(self._host, self, server=server).exec()
         self._load()
 
+    def _edit_source(self):
+        source = self._selected()
+        server = self._host.server_for_playlist(source) if source is not None else None
+        if source is None or server is None:
+            return
+        ImportPlaylistDialog(self._host, self, server=server, source=source).exec()
+        self._load()
+
     def _confirm_remove(self):
         source = self._selected()
         if source is None:
@@ -1155,7 +1205,9 @@ class PlaylistsDialog(QDialog):
             return
         self._stopping = None
         # The stopped job saved the playlist's latest state; remove that one.
-        current = find_source(self._host.playlist_sources(), source.location, source.server)
+        current = find_source(
+            self._host.playlist_sources(), source.location, source.server, source.source_type
+        )
         self._load()
         if current is not None:
             self._run(remove=True, source=current)

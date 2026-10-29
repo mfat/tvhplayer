@@ -325,6 +325,15 @@ def test_without_checks_a_refresh_tests_nothing_and_hides_nothing():
     assert show_all_channels(admin, PlaylistSource('Gone', 'http://x/gone.m3u', 'builtin')) == 0
 
 
+def test_without_checks_reconciles_health_after_channels_are_removed():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    sync_playlist(admin, source, _plans(FIRST), check=False)
+    source.health_totals = {'working': 2, 'failed': 0, 'untested': 0, 'checking': 0}
+    sync_playlist(admin, source, _plans(FIRST)[:1], check=False)
+    assert health_counts(source) == {'working': 1, 'failed': 0, 'untested': 0, 'checking': 0}
+
+
 def test_lost_muxes_are_adopted_by_address_and_duplicates_deleted():
     admin = FakeAdmin()
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
@@ -670,6 +679,28 @@ def test_sources_are_found_and_named_per_server():
     assert find_source(sources, 'http://a/ir.m3u', 'http://tv.lan') is None
     assert unique_name(sources, 'ir', 'builtin') == 'ir 2'
     assert unique_name(sources, 'ir', 'http://tv.lan') == 'ir'
+
+
+def test_xtream_source_identity_ignores_a_rotated_password():
+    old = PlaylistSource(
+        'Provider',
+        'https://xc.example/get.php?username=viewer&password=old',
+        'builtin',
+        source_type='xc',
+    )
+    sources = [old]
+    assert find_source(
+        sources,
+        'https://xc.example/get.php?username=viewer&password=new',
+        'builtin',
+        'xc',
+    ) is old
+    assert find_source(
+        sources,
+        'https://xc.example/get.php?username=other&password=new',
+        'builtin',
+        'xc',
+    ) is None
 
 
 def test_check_messages_read_naturally():

@@ -48,7 +48,8 @@ The user imports a playlist and it works. The dialogs use no Tvheadend or stream
 
 The playlist's name comes from the file name or the web address's host. A source whose address is already imported to that server is refreshed instead of added twice.
 
-**File → Playlists…** lists the imported playlists with **Refresh** and **Remove**:
+**File → Playlists…** lists the imported playlists with **Refresh**, **Settings**, and **Remove**.
+Settings can replace provider headers or an Xtream Codes password, then refresh the existing source without creating a duplicate:
 - **Remove** asks "Remove the channels from <name>?" and then deletes the network. Its muxes, services, channels, and bouquet go with it, which a test confirmed. The app then deletes the leftover `*** <name>` network tag, which Tvheadend leaves behind, and the group tags the playlist created once no other channel carries them. The source remembers those tag names for this.
 - A playlist is read again only when the user refreshes it. The server keeps the channels, and the channel list comes from the server. Refreshing every playlist at each start downloaded a 100 MB playlist and retested its 32768 streams every time.
 

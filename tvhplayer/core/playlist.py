@@ -23,6 +23,7 @@ from .proxy import configure_session
 NOT_A_PLAYLIST = 'This file is not a TV playlist.'
 NO_CHANNELS = 'This playlist has no channels TVHplayer can add.'
 DOWNLOAD_FAILED = 'Could not download the playlist. Check the address and your internet connection.'
+XTREAM_AUTH_FAILED = 'The Xtream Codes server did not accept the username or password.'
 FILE_FAILED = 'Could not open the playlist file.'
 TOO_LARGE = 'This playlist is too large to import.'
 STOPPED = 'Import stopped.'
@@ -146,7 +147,7 @@ def load_xtream(
     headers: Optional[Dict[str, str]] = None,
 ) -> Playlist:
     """Read live channels from an Xtream Codes ``player_api.php`` endpoint."""
-    base, username, password = _xtream_account(location)
+    base, username, password = xtream_account(location)
     if not base or not username or not password:
         raise PlaylistError('Enter a valid Xtream Codes server, username, and password.')
     cancelled = cancelled or (lambda: False)
@@ -156,6 +157,9 @@ def load_xtream(
         configure_session(session, api_url)
         session.headers.update(dict(headers or {}))
         account = _xtream_json(session, api_url, auth, cancelled)
+        user_info = account.get('user_info') if isinstance(account, dict) else None
+        if isinstance(user_info, dict) and 'auth' in user_info and str(user_info.get('auth')).lower() in ('0', 'false'):
+            raise PlaylistError(XTREAM_AUTH_FAILED)
         categories = _xtream_json(session, api_url, dict(auth, action='get_live_categories'), cancelled)
         streams = _xtream_json(session, api_url, dict(auth, action='get_live_streams'), cancelled)
 
@@ -210,6 +214,30 @@ def xtream_playlist_url(server: str, username: str, password: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, path, urlencode({
         'username': (username or '').strip(), 'password': password or '',
     }), ''))
+
+
+def xtream_account(location: str) -> Tuple[str, str, str]:
+    """``(server base, username, password)`` from a saved XC playlist URL."""
+    parts = urlsplit((location or '').strip())
+    if parts.scheme not in ('http', 'https') or not parts.netloc:
+        return '', '', ''
+    query = parse_qs(parts.query)
+    username = query.get('username', [''])[0]
+    password = query.get('password', [''])[0]
+    path = parts.path.rstrip('/')
+    for suffix in ('/get.php', '/player_api.php'):
+        if path.endswith(suffix):
+            path = path[:-len(suffix)]
+    base = urlunsplit((parts.scheme, parts.netloc, path, '', '')).rstrip('/')
+    return base, username, password
+
+
+def xtream_identity(location: str) -> Tuple[str, str]:
+    """Password-independent XC identity: normalized server plus username."""
+    base, username, _password = xtream_account(location)
+    parts = urlsplit(base)
+    normalized = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip('/'), '', ''))
+    return normalized, username
 
 
 def xtream_connections(location: str, headers: Optional[Dict[str, str]] = None) -> Optional[int]:
@@ -488,21 +516,6 @@ def _apply_provider_headers(playlist: Playlist, headers) -> None:
         merged = dict(defaults)
         merged.update(entry.headers)
         entry.headers = merged
-
-
-def _xtream_account(location: str) -> Tuple[str, str, str]:
-    parts = urlsplit((location or '').strip())
-    if parts.scheme not in ('http', 'https') or not parts.netloc:
-        return '', '', ''
-    query = parse_qs(parts.query)
-    username = query.get('username', [''])[0]
-    password = query.get('password', [''])[0]
-    path = parts.path.rstrip('/')
-    for suffix in ('/get.php', '/player_api.php'):
-        if path.endswith(suffix):
-            path = path[:-len(suffix)]
-    base = urlunsplit((parts.scheme, parts.netloc, path, '', '')).rstrip('/')
-    return base, username, password
 
 
 def _xtream_json(session, url, params, cancelled):

@@ -96,6 +96,7 @@ The channels appear in the channel list when the import finishes.
 The server keeps the channels, so TVHplayer does not read the playlist again by itself. When your provider adds or removes channels, or changes their addresses, refresh it. To manage your playlists, choose **File → Playlists…**:
 
 - **Refresh** reads the playlist again now: new channels are added, channels that left the playlist are removed, and channels whose address changed are tested again.
+- **Settings…** changes provider headers or an Xtream Codes password, then refreshes the same playlist without adding it twice.
 - **Health…** shows the latest saved Tvheadend check result and completion time for every channel.
 - **Remove** removes the playlist and its channels.
 
