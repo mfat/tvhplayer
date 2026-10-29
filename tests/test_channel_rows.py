@@ -102,7 +102,8 @@ def test_model_gives_playing_state_programme_and_scalable_logos():
 
 
 def test_delegate_marks_the_playing_row_at_its_first_shown_column():
-    from PyQt6.QtGui import QColor, QImage, QPalette
+    from PyQt6.QtGui import QImage, QPalette
+    from PyQt6.QtWidgets import QStyleOptionViewItem
     from tvhplayer.channel_view import COL_NUMBER
     from tvhplayer.core.models import Channel
 
@@ -121,14 +122,31 @@ def test_delegate_marks_the_playing_row_at_its_first_shown_column():
         return image
 
     accent = view.palette().color(QPalette.ColorRole.Highlight)
-    middle = view.rowHeight(0) // 2
-    x = view.columnViewportPosition(COL_NUMBER) + 2
-    assert grab().pixelColor(x, middle) == accent
+    left = view.columnViewportPosition(COL_NUMBER)
+    width = delegate.MARK_MARGIN + delegate.MARK_ICON
+
+    def marked(image, row):
+        top = view.rowViewportPosition(row)
+        def near(color):
+            return max(abs(color.red() - accent.red()), abs(color.green() - accent.green()),
+                       abs(color.blue() - accent.blue())) <= 8 and color.alpha() > 200
+        return any(
+            near(image.pixelColor(left + x, top + y))
+            for x in range(width) for y in range(view.rowHeight(row))
+        )
+
+    image = grab()
+    assert marked(image, 0)
     # The second row is not playing.
-    assert grab().pixelColor(x, view.rowHeight(0) + middle) != accent
+    assert not marked(image, 1)
+    # The number moves over to make room for the icon.
+    option = QStyleOptionViewItem()
+    option.widget = view
+    playing_width = delegate.sizeHint(option, model.index(0, COL_NUMBER)).width()
+    assert playing_width == delegate.sizeHint(option, model.index(1, COL_NUMBER)).width() + width
 
     delegate.mark_playing = False
     view.viewport().update()
     app.processEvents()
-    assert grab().pixelColor(x, middle) != QColor(accent)
+    assert not marked(grab(), 0)
     view.close()

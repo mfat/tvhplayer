@@ -51,7 +51,7 @@ CHANNEL_LIST_DEFAULTS = {
     'two_line': False,
     'stripes': False,
     'dividers': False,
-    # An accent bar at the start of the playing channel's row, and its name in bold.
+    # A play icon at the start of the playing channel's row, and its name in bold.
     'mark_playing': True,
     'tag': '',
     'order': list(DEFAULT_ORDER),

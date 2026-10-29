@@ -17,5 +17,6 @@
         <file>icons/cast.svg</file>
         <file>icons/event_note.svg</file>
         <file>icons/settings.svg</file>
+        <file>icons/play_arrow.svg</file>
     </qresource>
 </RCC>

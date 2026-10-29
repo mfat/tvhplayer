@@ -4055,7 +4055,7 @@ class TVHeadendClient(QMainWindow):
         self.channel_list.setWordWrap(False)
         self.channel_list.setTextElideMode(Qt.TextElideMode.ElideRight)
         header.setTextElideMode(Qt.TextElideMode.ElideRight)
-        self._channel_delegate = ChannelDelegate(self.channel_list)
+        self._channel_delegate = ChannelDelegate(self.channel_list, self.icons_dir)
         self.channel_list.setItemDelegate(self._channel_delegate)
         self._apply_channel_row_style()
         self.channel_list.density_step.connect(self._step_channel_density)
@@ -5013,7 +5013,7 @@ class TVHeadendClient(QMainWindow):
             ('two_line', "Programme &Under Channel Name",
              "Show the programme on now in smaller text under each channel's name"),
             ('mark_playing', "Highlight Playing &Channel",
-             "Put a colored bar at the start of the playing channel's row and its name in bold"),
+             "Put a play icon at the start of the playing channel's row and its name in bold"),
             ('stripes', "&Alternating Row Colors", "Shade every other row so long rows are easier to follow"),
             ('dividers', "Row &Dividers", "Draw a faint line between rows"),
             ('recording_status', "Mark &Recording Channels", "Show Recording on channels the server is recording"),

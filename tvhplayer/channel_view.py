@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-from PyQt6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QObject, QRect, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QObject, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QIcon, QImage, QPainter, QPalette, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -44,6 +44,7 @@ try:
     from .core.config import default_cache_dir
     from .core.proxy import configure_session
     from .core.urls import http_auth
+    from .player_bar import file_icon
 except ImportError:
     from core.channel_info import (
         COLUMN_NAME,
@@ -62,6 +63,7 @@ except ImportError:
     from core.config import default_cache_dir
     from core.proxy import configure_session
     from core.urls import http_auth
+    from player_bar import file_icon
 
 # Logical column indices. Number, name, and status keep the places older
 # code reads them from; the user can still drag them anywhere on screen.
@@ -118,6 +120,8 @@ CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
 PLAYING_ROLE = Qt.ItemDataRole.UserRole + 4
 # Title of the programme on now, for the second line under the name.
 SUBTITLE_ROLE = Qt.ItemDataRole.UserRole + 5
+
+DEFAULT_ICONS_DIR = Path(__file__).resolve().parent.parent / 'icons'
 
 _DISPLAY = Qt.ItemDataRole.DisplayRole
 _DECORATION = Qt.ItemDataRole.DecorationRole
@@ -572,18 +576,33 @@ class ChannelDelegate(QStyledItemDelegate):
 
     A thin bar along the bottom of the programme on now, the programme under
     the name on a second line, a faint line under each row, and, on the
-    playing channel, a bold name and an accent bar at the start of the row.
+    playing channel, a bold name and a play icon at the start of the row.
     """
 
     BAR_HEIGHT = 3
-    MARK_WIDTH = 3
+    MARK_ICON = 16
+    MARK_MARGIN = 4
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, icons_dir=None):
         super().__init__(parent)
         self.progress = True
         self.two_line = False
         self.dividers = False
         self.mark_playing = True
+        self._icons_dir = Path(icons_dir) if icons_dir else DEFAULT_ICONS_DIR
+        # Color name -> play icon drawn in that color.
+        self._mark_icons = {}
+
+    def _marks(self, index, view):
+        """Whether the playing mark goes in this cell: the first one shown on the playing row."""
+        return (self.mark_playing and bool(index.data(PLAYING_ROLE))
+                and _starts_row(view, index.column()))
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        if self._marks(index, option.widget or self.parent()):
+            size.setWidth(size.width() + self.MARK_MARGIN + self.MARK_ICON)
+        return size
 
     def paint(self, painter, option, index):
         opt = QStyleOptionViewItem(option)
@@ -596,6 +615,15 @@ class ChannelDelegate(QStyledItemDelegate):
             font = QFont(opt.font)
             font.setWeight(QFont.Weight.DemiBold)
             opt.font = font
+        mark = None
+        if playing and _starts_row(widget, column):
+            # The background still fills the cell; its contents move over for the icon.
+            mark = QRect(opt.rect)
+            mark.setWidth(self.MARK_MARGIN + self.MARK_ICON)
+            strip = QStyleOptionViewItem(opt)
+            strip.rect = mark
+            style.drawPrimitive(QStyle.PrimitiveElement.PE_PanelItemViewItem, strip, painter, widget)
+            opt.rect = opt.rect.adjusted(mark.width(), 0, 0, 0)
         subtitle = index.data(SUBTITLE_ROLE) if self.two_line and column == COL_NAME else ''
         if subtitle:
             self._paint_two_lines(style, opt, painter, widget, subtitle)
@@ -607,9 +635,10 @@ class ChannelDelegate(QStyledItemDelegate):
         if self.dividers:
             line = QColor(opt.palette.color(QPalette.ColorRole.Text))
             line.setAlpha(26)
-            painter.fillRect(QRect(opt.rect.left(), opt.rect.bottom(), opt.rect.width(), 1), line)
-        if playing and _starts_row(widget, column):
-            self._paint_playing_mark(painter, opt, selected)
+            row = option.rect
+            painter.fillRect(QRect(row.left(), row.bottom(), row.width(), 1), line)
+        if mark is not None:
+            self._paint_playing_mark(painter, opt, mark, selected)
 
     @staticmethod
     def _paint_two_lines(style, opt, painter, widget, subtitle):
@@ -668,17 +697,21 @@ class ChannelDelegate(QStyledItemDelegate):
         painter.fillRect(done, fill)
         painter.restore()
 
-    def _paint_playing_mark(self, painter, opt, selected):
-        # A selection filled with the accent would hide an accent bar.
+    def _mark_icon(self, color):
+        icon = self._mark_icons.get(color)
+        if icon is None:
+            icon = self._mark_icons[color] = file_icon(self._icons_dir / 'play_arrow.svg', color, self.MARK_ICON)
+        return icon
+
+    def _paint_playing_mark(self, painter, opt, area, selected):
+        # A selection filled with the accent would hide an accent-colored icon.
         palette = opt.palette
-        fill = palette.highlightedText().color() if selected else palette.highlight().color()
-        inset = max(3, opt.rect.height() // 6)
-        bar = QRectF(opt.rect.left() + 1, opt.rect.top() + inset, self.MARK_WIDTH, opt.rect.height() - 2 * inset)
+        color = palette.highlightedText().color() if selected else palette.highlight().color()
+        size = min(self.MARK_ICON, area.height())
+        target = QRect(area.right() - size + 1, area.top() + (area.height() - size) // 2, size, size)
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(fill)
-        painter.drawRoundedRect(bar, self.MARK_WIDTH / 2, self.MARK_WIDTH / 2)
+        painter.setClipRect(area)
+        self._mark_icon(color.name()).paint(painter, target)
         painter.restore()
 
 
