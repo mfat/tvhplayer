@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import locale
 from pathlib import Path
+from time import monotonic
 
 from .buffer_recorder import BufferRecorder
 from .player import (
@@ -40,9 +41,12 @@ FAST_START_ANALYZE_SECONDS = 0.5
 # mpv's own buffer sizes, used again when timeshift leaves the disk.
 MEMORY_AHEAD_BYTES = '150MiB'
 MEMORY_BEHIND_BYTES = '50MiB'
-# The newest buffered picture runs about a second ahead of the one shown, so
-# "live" is anything this close to it, and going live stops this short of it.
+# Go live waits for this much buffer before seeking. The on-screen delay does
+# not use it: a channel that delivers packets in batches sits this far ahead
+# of the picture the whole time it is playing live.
 LIVE_SLACK_SECONDS = 3.0
+# Stop this short of the newest cached packet, and this close to the live
+# edge still counts as caught up.
 LIVE_MARGIN_SECONDS = 1.0
 
 
@@ -57,6 +61,8 @@ class MpvPlayer(Player):
         self._surface = None
         self._deinterlace = DEINTERLACE_AUTO
         self._last_buffered = None
+        self._live_clock = None
+        self._timeshift_active = False
         self._timeshift_store = (None, 0)
         self._disk_limit = 0
         self._stream_serial = 0
@@ -121,6 +127,8 @@ class MpvPlayer(Player):
         # mpv keeps pause across files; a new channel always starts playing.
         self._mpv.pause = False
         self._last_buffered = None
+        self._live_clock = None
+        self._timeshift_active = False
         self._mpv.loadfile(url)
 
     def stop(self):
@@ -128,6 +136,8 @@ class MpvPlayer(Player):
         self._stream_serial += 1
         self._waiting_for_picture = False
         self._last_buffered = None
+        self._live_clock = None
+        self._timeshift_active = False
         self._mpv.command('stop')
         self._mpv.pause = False
 
@@ -227,6 +237,29 @@ class MpvPlayer(Player):
         self._last_buffered = (position, start, end)
         return self._last_buffered
 
+    def _live_position(self, buffered):
+        """Presentation position of live TV, excluding the demuxer's read-ahead.
+
+        Cache ranges arrive in batches and can run several seconds ahead of
+        normal playback. While live, follow the picture. When the user pauses
+        or rewinds, advance that reference with a monotonic clock, bounded by
+        the footage actually available. Once the edge is waiting on data, the
+        next batch continues from there instead of skipping the edge forward.
+        """
+        position, start, end = buffered
+        now = monotonic()
+        if not self._timeshift_active:
+            self._live_clock = (position, now)
+            return position
+        anchor, captured = self._live_clock or (position, now)
+        live = anchor + max(0.0, now - captured)
+        if live > end:
+            live = end
+        if live < start:
+            live = start
+        self._live_clock = (live, now)
+        return live
+
     def timeshift(self):
         mpv = self._mpv
         buffered = self._buffered()
@@ -236,19 +269,34 @@ class MpvPlayer(Player):
             # Pausing works before a seekable range exists (and on streams
             # without one). Report the real pause state so Resume works too.
             return Timeshift(bool(mpv.pause), 0.0, 0.0)
-        position, start, end = buffered
-        behind = end - position
-        return Timeshift(bool(mpv.pause), 0.0 if behind < LIVE_SLACK_SECONDS else behind, end - start)
+        position, start, _end = buffered
+        live = self._live_position(buffered)
+        # Read-ahead past the picture is not time behind live. Only a pause
+        # or a rewind, which start the clock above, moves the delay.
+        behind = max(0.0, live - position) if self._timeshift_active else 0.0
+        return Timeshift(bool(mpv.pause), behind, max(0.0, live - start))
 
     def set_paused(self, paused):
+        if paused and not self._timeshift_active:
+            if self._buffered() is not None:
+                self._live_position(self._buffered())
+            self._timeshift_active = True
+        elif not paused and self._timeshift_active:
+            buffered = self._buffered()
+            # A pause too short to leave the live edge returns to following the
+            # picture. A real delay keeps counting from where the picture sits.
+            caught_up = buffered is None or self._live_position(buffered) - buffered[0] < LIVE_MARGIN_SECONDS
+            if caught_up:
+                self._timeshift_active = False
+                self._live_clock = None
         self._mpv.pause = bool(paused)
 
     def buffer_recording_point(self):
         buffered = self._buffered()
         if buffered is None:
             return None
-        position, _start, end = buffered
-        return BufferRecordingPoint(self._stream_serial, position, max(0.0, end - position))
+        position, _start, _end = buffered
+        return BufferRecordingPoint(self._stream_serial, position, max(0.0, self._live_position(buffered) - position))
 
     def record_buffer(self, file_path, point):
         mpv = self._mpv
@@ -283,6 +331,8 @@ class MpvPlayer(Player):
         target = max(start, min(position + seconds, end - LIVE_MARGIN_SECONDS))
         if abs(target - position) < 0.5:
             return False
+        live = self._live_position(buffered)
+        self._timeshift_active = bool(self._mpv.pause) or target < live - LIVE_MARGIN_SECONDS
         self._seek_to(target)
         return True
 
@@ -291,6 +341,8 @@ class MpvPlayer(Player):
         buffered = self._buffered()
         if buffered is not None and buffered[2] - buffered[0] >= LIVE_SLACK_SECONDS:
             self._seek_to(buffered[2] - LIVE_MARGIN_SECONDS)
+        self._timeshift_active = False
+        self._live_clock = None
 
     def _seek_to(self, seconds):
         # mpv counts a negative absolute seek from the end; the buffer can start at -0.0000002.

@@ -364,10 +364,13 @@ def test_disk_timeshift_stops_writes_at_limit_and_rearms_next_channel(engine, tm
         'seekable-ranges': [{'start': 0.0, 'end': 20.0}],
         'file-cache-bytes': 999,
     }
-    assert player.timeshift().span == 20
+    # The cache runs 10s ahead of the picture. That read-ahead is not time
+    # behind live, so the bar covers the history back to the oldest packet.
+    playing = player.timeshift()
+    assert playing.behind == 0 and playing.span == 10
     assert mpv.props['cache-on-disk'] is True
     mpv.demuxer_cache_state['file-cache-bytes'] = 1001
-    assert player.timeshift().span == 20
+    assert player.timeshift() == playing
     assert mpv.props['cache-on-disk'] is False
     player.timeshift()
     assert mpv.props['cache-on-disk'] is False
@@ -377,6 +380,102 @@ def test_disk_timeshift_stops_writes_at_limit_and_rearms_next_channel(engine, tm
     assert mpv.props['cache-on-disk'] is True
     player.play('http://localhost/third')
     assert mpv.props['cache-on-disk'] is False
+
+
+def _clock(monkeypatch):
+    now = {'t': 1000.0}
+    from tvhplayer.core import mpv_player as engine_module
+    monkeypatch.setattr(engine_module, 'monotonic', lambda: now['t'])
+    return now
+
+
+def _cache(mpv, position, end, start=0.0):
+    mpv.time_pos = position
+    mpv.demuxer_cache_state = {'seekable-ranges': [{'start': start, 'end': end}]}
+
+
+def test_batched_readahead_stays_live(engine, monkeypatch):
+    """TV3-style batches: the cache end jumps, the picture does not rewind."""
+    now = _clock(monkeypatch)
+    player, mpv, _seen = engine
+    player.play('http://localhost/live')
+    mpv.pause = False
+    behind, spans = [], []
+    for step in range(8):
+        position = 100.0 + step * 0.5
+        _cache(mpv, position, 104.0 if step < 4 else 108.0, start=80.0)
+        state = player.timeshift()
+        behind.append(state.behind)
+        spans.append(state.span)
+        now['t'] += 0.5
+    assert behind == [0.0] * 8
+    assert spans == [20.0 + step * 0.5 for step in range(8)]
+    assert not any(command[0] == 'seek' for command in mpv.commands)
+
+
+def test_pause_and_rewind_hold_still_when_the_buffer_arrives_in_batches(engine, monkeypatch):
+    now = _clock(monkeypatch)
+    player, mpv, _seen = engine
+    player.play('http://localhost/live')
+    mpv.pause = False
+    _cache(mpv, 100.0, 104.0, start=40.0)
+    assert player.timeshift().behind == 0
+
+    player.set_paused(True)
+    assert mpv.pause is True
+    # No new packets: the delay cannot run past the footage in hand.
+    now['t'] += 4
+    _cache(mpv, 100.0, 100.0, start=40.0)
+    assert player.timeshift().behind == 0
+    # A 4s batch must not appear all at once. The edge then keeps real time.
+    _cache(mpv, 100.0, 108.0, start=40.0)
+    now['t'] += 0.5
+    assert player.timeshift().behind == 0.5
+    now['t'] += 2
+    assert player.timeshift().behind == 2.5
+
+    player.set_paused(False)
+    assert mpv.pause is False
+    # The pause was long enough to leave live, so resuming keeps that delay
+    # while the picture and the cache end both move.
+    now['t'] += 2
+    _cache(mpv, 102.0, 112.0, start=40.0)
+    resumed = player.timeshift()
+    assert not resumed.paused and resumed.behind == 2.5 and resumed.span == 64.5
+
+    assert player.skip(-10)
+    assert mpv.commands[-1] == ('seek', '92.000', 'absolute')
+    _cache(mpv, 92.0, 112.0, start=40.0)
+    held = player.timeshift()
+    assert held.behind == 12.5
+    now['t'] += 3
+    _cache(mpv, 95.0, 116.0, start=40.0)
+    steady = player.timeshift()
+    assert steady.behind == 12.5 and steady.span == held.span + 3
+
+    player.go_live()
+    assert mpv.pause is False
+    assert mpv.commands[-1] == ('seek', '115.000', 'absolute')
+    _cache(mpv, 115.0, 116.0, start=40.0)
+    assert player.timeshift().behind == 0
+    now['t'] += 0.5
+    _cache(mpv, 115.5, 120.0, start=40.0)
+    assert player.timeshift().behind == 0
+
+
+def test_a_short_pause_returns_to_the_picture(engine, monkeypatch):
+    now = _clock(monkeypatch)
+    player, mpv, _seen = engine
+    player.play('http://localhost/live')
+    mpv.pause = False
+    _cache(mpv, 50.0, 53.0, start=10.0)
+    player.set_paused(True)
+    now['t'] += 0.5
+    assert player.timeshift().behind == 0.5
+    player.set_paused(False)
+    now['t'] += 0.5
+    _cache(mpv, 50.5, 57.0, start=10.0)
+    assert mpv.pause is False and player.timeshift().behind == 0
 
 
 def _buffered_recording_engine(engine):
