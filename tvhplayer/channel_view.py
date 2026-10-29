@@ -512,6 +512,9 @@ class ChannelTableView(QTableView):
         self._density = DENSITY_COMFORTABLE
         self._two_line = False
         self._wheel = 0
+        # Tab and Shift+Tab leave the list; the arrow keys move between cells.
+        # Otherwise keyboard and screen reader users are trapped inside it.
+        self.setTabKeyNavigation(False)
         rows = self.verticalHeader()
         # Every row is one height, so a long list needs no measuring.
         rows.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)

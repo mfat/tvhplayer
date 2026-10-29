@@ -25,6 +25,7 @@ Channels
   Type letters     Jump to a matching channel
   Enter            Play the selected channel
   Shift+F10        Open the channel menu
+  Tab              Leave the list for the next control (Shift+Tab: previous)
   Ctrl+F           Focus channel search
   S                Focus channel search (not while typing in the list)
   Ctrl+J           Go to the playing channel in the list

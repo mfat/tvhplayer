@@ -348,6 +348,7 @@ class DVRStatusDialog(QDialog):
         
         # Upcoming/Current recordings tab
         self.upcoming_table = QTableWidget()
+        self.upcoming_table.setTabKeyNavigation(False)
         self.upcoming_table.setColumnCount(5)  # Added one more column for status
         self.upcoming_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Duration', 'Status'])
         fit_table_columns(self.upcoming_table, (1,))
@@ -361,6 +362,7 @@ class DVRStatusDialog(QDialog):
         
         # Finished recordings tab
         self.finished_table = QTableWidget()
+        self.finished_table.setTabKeyNavigation(False)
         self.finished_table.setColumnCount(4)
         self.finished_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Duration'])
         fit_table_columns(self.finished_table, (1,))
@@ -370,6 +372,7 @@ class DVRStatusDialog(QDialog):
         
         # Failed recordings tab
         self.failed_table = QTableWidget()
+        self.failed_table.setTabKeyNavigation(False)
         self.failed_table.setColumnCount(4)
         self.failed_table.setHorizontalHeaderLabels(['Channel', 'Title', 'Start Time', 'Error'])
         fit_table_columns(self.failed_table, (1, 3))
@@ -835,6 +838,7 @@ class TasksPanel(QFrame):
         layout.addWidget(self.error_label)
 
         self.task_table = QTableWidget(0, 7)
+        self.task_table.setTabKeyNavigation(False)
         self.task_table.setHorizontalHeaderLabels(
             ["", "Kind", "Channel", "Title", "Status", "Size", "Detail"]
         )
@@ -2517,6 +2521,7 @@ class ServerStatusDialog(QDialog):
         
         # Active streams/subscriptions tab
         self.subscriptions_table = QTableWidget()
+        self.subscriptions_table.setTabKeyNavigation(False)
         self.subscriptions_table.setColumnCount(5)
         self.subscriptions_table.setHorizontalHeaderLabels([
             'Channel/Peer', 
@@ -2531,6 +2536,7 @@ class ServerStatusDialog(QDialog):
         
         # Signal Status tab (new)
         self.signal_table = QTableWidget()
+        self.signal_table.setTabKeyNavigation(False)
         self.signal_table.setColumnCount(5)
         self.signal_table.setHorizontalHeaderLabels([
             'Input', 
@@ -3997,7 +4003,7 @@ class TVHeadendClient(QMainWindow):
             self.channel_list,
             "Channels",
             "Channel numbers, names, what is on now, and playing status. Type to jump to a channel. "
-            "Press Enter to play. Press Shift+F10 for more actions.",
+            "Press Enter to play. Press Shift+F10 for more actions. Press Tab to leave the list.",
         )
         header = self.channel_list.horizontalHeader()
         # Every column can be dragged wider or narrower. Until the user does,

@@ -108,6 +108,33 @@ def _model(channels):
     return app, model, view
 
 
+def test_tab_leaves_the_channel_list():
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+
+    from tvhplayer.core.models import Channel
+
+    app, model, view = _model([Channel(uuid=f'c{n}', name=f'Channel {n}', number=n) for n in range(1, 4)])
+    window = QWidget()
+    before, after = QPushButton('Before'), QPushButton('After')
+    layout = QVBoxLayout(window)
+    for widget in (before, view, after):
+        layout.addWidget(widget)
+    window.show()
+    window.activateWindow()
+    QTest.qWaitForWindowActive(window)
+    view.setFocus()
+    view.setCurrentIndex(model.index(0, 0))
+
+    QTest.keyClick(view, Qt.Key.Key_Tab)
+    assert app.focusWidget() is after
+    view.setFocus()
+    QTest.keyClick(view, Qt.Key.Key_Backtab, Qt.KeyboardModifier.ShiftModifier)
+    assert app.focusWidget() is before
+    window.close()
+
+
 def _names(model):
     return [model.channel_at(row).name for row in range(model.rowCount())]
 
