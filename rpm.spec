@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.2.0
+Version:        4.2.1
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,16 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.2.1-1
+- Add provider-aware IPTV imports
+- Let IPTV source settings update credentials without duplicating playlists
+- Fix MPV render shutdown race
+- Fetch fresh Now/Next via lightweight mode=now grid instead of full channel sync
+- Match live EPG grid results by channel UUID, not stale HTSP event IDs
+- Only show No EPG after a successful programme query
+- Do not label locally expired EPG programmes as missing
+- Stop publishing SHA sidecars and the Fedora source RPM
+
 * Wed Oct 28 2026 mFat <newmfat@gmail.com> - 4.2.0-1
 - Play with libmpv only on every platform; VLC is gone
 - Cast live channels to Chromecast from the player bar

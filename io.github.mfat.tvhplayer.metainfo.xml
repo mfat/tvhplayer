@@ -34,6 +34,20 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.2.1" date="2026-10-29">
+      <description>
+        <ul>
+          <li>Add provider-aware IPTV imports</li>
+          <li>Let IPTV source settings update credentials without duplicating playlists</li>
+          <li>Fix MPV render shutdown race</li>
+          <li>Fetch fresh Now/Next via lightweight mode=now grid instead of full channel sync</li>
+          <li>Match live EPG grid results by channel UUID, not stale HTSP event IDs</li>
+          <li>Only show No EPG after a successful programme query</li>
+          <li>Do not label locally expired EPG programmes as missing</li>
+          <li>Stop publishing SHA sidecars and the Fedora source RPM</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.2.0" date="2026-10-28">
       <description>
         <ul>
