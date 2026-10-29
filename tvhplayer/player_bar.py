@@ -46,16 +46,6 @@ CHEVRON_SVG = (
 )
 DOT_SVG = '<svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="6" fill="{c}"/></svg>'
 SQUARE_SVG = '<svg viewBox="0 0 10 10"><rect width="10" height="10" rx="1" fill="{c}"/></svg>'
-SPEAKER_SVG = (
-    '<svg viewBox="0 0 48 48"><path d="M 16 20 h 4 l 8 -6 v 20 l -8 -6 h -4 z" fill="{c}"/>'
-    '<path d="M 31 19 c 1.5 1 1.5 9 0 10 M 35 17 c 2 2 2 12 0 14" stroke="{c}" '
-    'stroke-width="2.5" stroke-linecap="round" fill="none"/></svg>'
-)
-MUTED_SVG = (
-    '<svg viewBox="0 0 48 48"><path d="M 16 20 h 4 l 8 -6 v 20 l -8 -6 h -4 z" fill="{c}"/>'
-    '<path d="M 31 21 l 6 6 M 37 21 l -6 6" stroke="{c}" stroke-width="2.5" '
-    'stroke-linecap="round"/></svg>'
-)
 FULLSCREEN_SVG = (
     '<svg viewBox="0 0 48 48"><path d="M 14 20 L 14 14 L 20 14 M 28 14 L 34 14 L 34 20 '
     'M 14 28 L 14 34 L 20 34 M 28 34 L 34 34 L 34 28" stroke="{c}" stroke-width="2.5" '
@@ -350,6 +340,8 @@ class PlayerBar(QWidget):
                 "width: 10px; height: 10px; margin: -6px 0; border-radius: 7px; }"
             )
         layout.addWidget(self.volume_slider)
+        self._muted = False
+        self.volume_slider.valueChanged.connect(self._update_speaker)
 
         self.fullscreen_btn = QPushButton()
         self.fullscreen_btn.setFixedSize(32, 32)
@@ -441,8 +433,21 @@ class PlayerBar(QWidget):
         self.record_local_action.setEnabled(not local_here)
 
     def set_muted(self, muted):
-        self.mute_btn.setChecked(bool(muted))
-        self.mute_btn.setIcon(svg_icon(MUTED_SVG if muted else SPEAKER_SVG, self._icon_color(), 24))
+        self._muted = bool(muted)
+        self.mute_btn.setChecked(self._muted)
+        self._update_speaker()
+
+    def _update_speaker(self):
+        volume = self.volume_slider.value()
+        if self._muted:
+            name = 'volume-mute-fill.svg'
+        elif volume == 0:
+            name = 'volume-off-fill.svg'
+        elif volume < 50:
+            name = 'volume-down-fill.svg'
+        else:
+            name = 'volume-up-fill.svg'
+        self.mute_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24))
 
     def set_casting(self, casting, name=''):
         casting = bool(casting)

@@ -7,6 +7,8 @@
         <file>icons/save-fill.svg</file>
         <file>icons/playerbg.svg</file>
         <file>icons/volume-mute-fill.svg</file>
+        <file>icons/volume-off-fill.svg</file>
+        <file>icons/volume-down-fill.svg</file>
         <file>icons/volume-up-fill.svg</file>
         <file>icons/fullscreen.svg</file>
     </qresource>
