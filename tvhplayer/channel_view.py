@@ -143,6 +143,7 @@ class ChannelTableModel(QAbstractTableModel):
         self._playing = None
         self._recording = frozenset()
         self._now_next = {}
+        self._epg_loaded = False
         self._show_progress = True
         self._kinds = {}
         self._logos = False
@@ -233,8 +234,10 @@ class ChannelTableModel(QAbstractTableModel):
         self._recording = recording
         self._changed(range(len(COLUMN_TITLES)))
 
-    def set_programmes(self, now_next, show_progress):
+    def set_programmes(self, now_next, show_progress, fetched=False):
         self._now_next = now_next
+        # Do not claim 'No EPG' while a request is pending or has failed.
+        self._epg_loaded = bool(fetched)
         self._show_progress = show_progress
         self._changed((COL_NAME, COL_NOW, COL_NEXT))
 
@@ -323,6 +326,8 @@ class ChannelTableModel(QAbstractTableModel):
         if column in (COL_NOW, COL_NEXT):
             now = int(time.time())
             event = self._programme(position, column, now)
+            if column == COL_NOW and event is None and self._epg_loaded:
+                return 'No EPG'
             return programme_text(event, now, with_start=column == COL_NEXT)[0]
         if column == COL_TYPE:
             kind = self._kinds.get(self._keys[position])
@@ -338,7 +343,11 @@ class ChannelTableModel(QAbstractTableModel):
                 if column != COL_NOW or not self._show_progress:
                     return None
                 return progress(event, now)
-            if role == _ACCESSIBLE_DESCRIPTION or event is None:
+            if role == _ACCESSIBLE_DESCRIPTION:
+                return None
+            if event is None:
+                if column == COL_NOW and self._epg_loaded and role in (_TOOLTIP, _ACCESSIBLE_TEXT):
+                    return 'No EPG available for this channel'
                 return None
             _, tooltip, spoken = programme_text(event, now, with_start=column == COL_NEXT)
             return tooltip if role == _TOOLTIP else spoken
