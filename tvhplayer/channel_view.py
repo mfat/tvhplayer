@@ -15,9 +15,16 @@ from datetime import datetime
 from pathlib import Path
 
 import requests
-from PyQt6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QObject, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QImage, QPainter, QPixmap
-from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QTableView
+from PyQt6.QtCore import QAbstractTableModel, QEvent, QModelIndex, QObject, QRect, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QFontMetrics, QIcon, QImage, QPainter, QPalette, QPixmap
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHeaderView,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QTableView,
+)
 
 try:
     from .core.channel_info import (
@@ -27,6 +34,10 @@ try:
         COLUMN_NUMBER,
         COLUMN_STATUS,
         COLUMN_TYPE,
+        DENSITIES,
+        DENSITY_COMFORTABLE,
+        DENSITY_COMPACT,
+        DENSITY_SPACIOUS,
         channel_key,
         progress,
     )
@@ -41,6 +52,10 @@ except ImportError:
         COLUMN_NUMBER,
         COLUMN_STATUS,
         COLUMN_TYPE,
+        DENSITIES,
+        DENSITY_COMFORTABLE,
+        DENSITY_COMPACT,
+        DENSITY_SPACIOUS,
         channel_key,
         progress,
     )
@@ -86,10 +101,23 @@ COLUMN_MENU = (
 # Share of the programme already shown, 0 to 1, on Now cells.
 PROGRESS_ROLE = Qt.ItemDataRole.UserRole + 1
 
-LOGO_SIZE = QSize(40, 24)
+# Logos are fitted to the largest size a row shows and scaled down to the
+# row's own. The row sizes keep this shape so names still line up.
+LOGO_SIZE = QSize(56, 32)
+# Logo size and the space above and below a row's contents, by row size.
+DENSITY_STYLE = {
+    # Room under the text for the progress bar under the programme on now.
+    DENSITY_COMPACT: (QSize(28, 16), 10),
+    DENSITY_COMFORTABLE: (QSize(42, 24), 12),
+    DENSITY_SPACIOUS: (LOGO_SIZE, 20),
+}
 # The channel's logo reference, read by the logo requests for rows on screen.
 LOGO_ROLE = Qt.ItemDataRole.UserRole + 2
 CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
+# Whether the row's channel is the one on.
+PLAYING_ROLE = Qt.ItemDataRole.UserRole + 4
+# Title of the programme on now, for the second line under the name.
+SUBTITLE_ROLE = Qt.ItemDataRole.UserRole + 5
 
 _DISPLAY = Qt.ItemDataRole.DisplayRole
 _DECORATION = Qt.ItemDataRole.DecorationRole
@@ -117,6 +145,13 @@ def programme_text(event, now, with_start=False):
     if event.summary and event.summary != event.subtitle:
         lines.append(event.summary)
     return text, '\n'.join(lines), ', '.join(lines[:3])
+
+
+def row_height(density, line_spacing, two_line=False):
+    """Pixel height of a channel row: the taller of its text and its logo, plus padding."""
+    logo, padding = DENSITY_STYLE.get(density, DENSITY_STYLE[DENSITY_COMFORTABLE])
+    text = line_spacing * 2 + 2 if two_line else line_spacing
+    return max(text, logo.height()) + padding
 
 
 class ChannelTableModel(QAbstractTableModel):
@@ -148,6 +183,9 @@ class ChannelTableModel(QAbstractTableModel):
         self._kinds = {}
         self._logos = False
         self._pixmaps = {}
+        # Reference -> (pixmap cache key, icon). The view scales an icon to its
+        # icon size; a pixmap it draws at the pixmap's own.
+        self._icons = {}
         self._placeholder = None
         # Spoken description of a channel row: describe(channel, is_playing, is_recording).
         self.describe = lambda channel, is_playing, is_recording: ''
@@ -174,10 +212,15 @@ class ChannelTableModel(QAbstractTableModel):
             return self._display(position, column)
         if role == _DECORATION:
             if column == COL_NAME and self._logos:
-                return self._pixmaps.get(self._logo_refs[position]) or self._placeholder
+                return self._icon(self._logo_refs[position])
             return None
         if role in (_TOOLTIP, _ACCESSIBLE_TEXT, _ACCESSIBLE_DESCRIPTION, PROGRESS_ROLE):
             return self._extra(position, column, role)
+        if role == PLAYING_ROLE:
+            return self.is_playing(self._channels[position])
+        if role == SUBTITLE_ROLE and column == COL_NAME:
+            event = self._programme(position, COL_NOW, int(time.time()))
+            return event.title if event is not None else ''
         if role == CHANNEL_KEY_ROLE:
             return self._keys[position]
         if role == LOGO_ROLE and column == COL_NAME:
@@ -252,11 +295,21 @@ class ChannelTableModel(QAbstractTableModel):
         """
         self._logos = enabled
         self._pixmaps = pixmaps
+        self._icons = {}
         self._placeholder = placeholder
         self.logos_arrived()
 
     def logos_arrived(self):
         self._changed((COL_NAME,), [_DECORATION])
+
+    def _icon(self, reference):
+        pixmap = self._pixmaps.get(reference)
+        if pixmap is None:
+            return self._placeholder
+        cached = self._icons.get(reference)
+        if cached is None or cached[0] != pixmap.cacheKey():
+            cached = self._icons[reference] = (pixmap.cacheKey(), QIcon(pixmap))
+        return cached[1]
 
     # Reading rows
 
@@ -451,6 +504,46 @@ class ChannelTableView(QTableView):
     # The visible area changed size: the pane was resized, or a scroll bar
     # came or went.
     viewport_resized = pyqtSignal()
+    # Ctrl and the mouse wheel: +1 for taller rows, -1 for shorter ones.
+    density_step = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._density = DENSITY_COMFORTABLE
+        self._two_line = False
+        self._wheel = 0
+        rows = self.verticalHeader()
+        # Every row is one height, so a long list needs no measuring.
+        rows.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        rows.setMinimumSectionSize(1)
+        self._apply_row_style()
+
+    def set_row_style(self, density, two_line):
+        self._density = density if density in DENSITIES else DENSITY_COMFORTABLE
+        self._two_line = bool(two_line)
+        self._apply_row_style()
+
+    def _apply_row_style(self):
+        self.setIconSize(DENSITY_STYLE[self._density][0])
+        height = row_height(self._density, self.fontMetrics().lineSpacing(), self._two_line)
+        self.verticalHeader().setDefaultSectionSize(height)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            self._apply_row_style()
+
+    def wheelEvent(self, event):
+        if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self._wheel = 0
+            super().wheelEvent(event)
+            return
+        # A touchpad sends many small steps; one notch of a wheel is 120.
+        self._wheel += event.angleDelta().y()
+        if abs(self._wheel) >= 120:
+            self.density_step.emit(1 if self._wheel > 0 else -1)
+            self._wheel = 0
+        event.accept()
 
     def viewportEvent(self, event):
         if event.type() == QEvent.Type.Resize:
@@ -471,26 +564,97 @@ class ChannelTableView(QTableView):
             self.setCurrentIndex(model.index(row, column))
 
 
-class ProgressDelegate(QStyledItemDelegate):
-    """Draws the cell as usual, then a thin bar along its bottom edge."""
+class ChannelDelegate(QStyledItemDelegate):
+    """Draws a channel row's cells with the extras chosen in View > Channel List.
+
+    A thin bar along the bottom of the programme on now, the programme under
+    the name on a second line, a faint line under each row, and, on the
+    playing channel, a bold name and an accent bar at the start of the row.
+    """
 
     BAR_HEIGHT = 3
+    MARK_WIDTH = 3
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.enabled = True
+        self.progress = True
+        self.two_line = False
+        self.dividers = True
+        self.mark_playing = True
 
     def paint(self, painter, option, index):
-        super().paint(painter, option, index)
-        if not self.enabled:
-            return
-        value = index.data(PROGRESS_ROLE)
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        widget = opt.widget
+        style = widget.style() if widget is not None else QApplication.style()
+        column = index.column()
+        playing = self.mark_playing and bool(index.data(PLAYING_ROLE))
+        if playing and column == COL_NAME:
+            font = QFont(opt.font)
+            font.setWeight(QFont.Weight.DemiBold)
+            opt.font = font
+        subtitle = index.data(SUBTITLE_ROLE) if self.two_line and column == COL_NAME else ''
+        if subtitle:
+            self._paint_two_lines(style, opt, painter, widget, subtitle)
+        else:
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        if self.progress and column == COL_NOW:
+            self._paint_progress(painter, opt, index.data(PROGRESS_ROLE), selected)
+        if self.dividers:
+            line = QColor(opt.palette.color(QPalette.ColorRole.Text))
+            line.setAlpha(26)
+            painter.fillRect(QRect(opt.rect.left(), opt.rect.bottom(), opt.rect.width(), 1), line)
+        if playing and _starts_row(widget, column):
+            self._paint_playing_mark(painter, opt, selected)
+
+    @staticmethod
+    def _paint_two_lines(style, opt, painter, widget, subtitle):
+        """The name, and the programme on now under it in smaller, fainter text."""
+        rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, opt, widget)
+        margin = style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, widget) + 1
+        rect = rect.adjusted(margin, 0, -margin, 0)
+        name = opt.text
+        opt.text = ''
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+        small = QFont(opt.font)
+        small.setWeight(QFont.Weight.Normal)
+        if small.pointSizeF() > 0:
+            small.setPointSizeF(small.pointSizeF() * 0.9)
+        else:
+            small.setPixelSize(max(1, round(small.pixelSize() * 0.9)))
+        name_metrics, small_metrics = QFontMetrics(opt.font), QFontMetrics(small)
+        gap = 2
+        top = rect.top() + (rect.height() - name_metrics.height() - gap - small_metrics.height()) // 2
+        enabled = bool(opt.state & QStyle.StateFlag.State_Enabled)
+        group = QPalette.ColorGroup.Normal if enabled else QPalette.ColorGroup.Disabled
+        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        ink = opt.palette.color(group, QPalette.ColorRole.HighlightedText if selected else QPalette.ColorRole.Text)
+        faint = QColor(ink)
+        faint.setAlphaF(ink.alphaF() * 0.7)
+        align = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        painter.save()
+        painter.setClipRect(opt.rect)
+        painter.setFont(opt.font)
+        painter.setPen(ink)
+        painter.drawText(
+            QRect(rect.left(), top, rect.width(), name_metrics.height()), align,
+            name_metrics.elidedText(name, Qt.TextElideMode.ElideRight, rect.width()),
+        )
+        painter.setFont(small)
+        painter.setPen(faint)
+        painter.drawText(
+            QRect(rect.left(), top + name_metrics.height() + gap, rect.width(), small_metrics.height()), align,
+            small_metrics.elidedText(subtitle, Qt.TextElideMode.ElideRight, rect.width()),
+        )
+        painter.restore()
+
+    def _paint_progress(self, painter, opt, value, selected):
         if value is None:
             return
-        rect = option.rect.adjusted(4, 0, -4, -2)
+        rect = opt.rect.adjusted(4, 0, -4, -2)
         bar = QRect(rect.left(), rect.bottom() - self.BAR_HEIGHT + 1, rect.width(), self.BAR_HEIGHT)
-        palette = option.palette
-        selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        palette = opt.palette
         track = QColor(palette.highlightedText().color() if selected else palette.mid().color())
         track.setAlpha(90)
         fill = palette.highlightedText().color() if selected else palette.highlight().color()
@@ -500,6 +664,31 @@ class ProgressDelegate(QStyledItemDelegate):
         done = QRect(bar.left(), bar.top(), int(bar.width() * float(value)), bar.height())
         painter.fillRect(done, fill)
         painter.restore()
+
+    def _paint_playing_mark(self, painter, opt, selected):
+        # A selection filled with the accent would hide an accent bar.
+        palette = opt.palette
+        fill = palette.highlightedText().color() if selected else palette.highlight().color()
+        inset = max(3, opt.rect.height() // 6)
+        bar = QRectF(opt.rect.left() + 1, opt.rect.top() + inset, self.MARK_WIDTH, opt.rect.height() - 2 * inset)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(bar, self.MARK_WIDTH / 2, self.MARK_WIDTH / 2)
+        painter.restore()
+
+
+def _starts_row(view, column):
+    """Whether ``column`` is the first one shown, wherever the user dragged it."""
+    if not isinstance(view, QTableView):
+        return column == COL_NAME
+    header = view.horizontalHeader()
+    for visual in range(header.count()):
+        logical = header.logicalIndex(visual)
+        if not header.isSectionHidden(logical):
+            return logical == column
+    return False
 
 
 def logo_image(data, size=LOGO_SIZE):

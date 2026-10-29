@@ -23,6 +23,16 @@ OPTIONAL_COLUMNS = (COLUMN_NUMBER, COLUMN_NOW, COLUMN_NEXT, COLUMN_TYPE, COLUMN_
 # Left-to-right order the list starts with. The user can drag columns around.
 DEFAULT_ORDER = (COLUMN_NUMBER, COLUMN_NAME, COLUMN_NOW, COLUMN_NEXT, COLUMN_TYPE, COLUMN_STATUS)
 
+# Row heights, shortest first. Each has its own padding and logo size.
+DENSITY_COMPACT = 'compact'
+DENSITY_COMFORTABLE = 'comfortable'
+DENSITY_SPACIOUS = 'spacious'
+DENSITIES = (DENSITY_COMPACT, DENSITY_COMFORTABLE, DENSITY_SPACIOUS)
+_FLAG_OPTIONS = (
+    'logos', 'now_progress', 'recording_status', 'tag_filter', 'hide_disabled',
+    'two_line', 'stripes', 'dividers', 'mark_playing',
+)
+
 CHANNEL_LIST_DEFAULTS = {
     'columns': {
         COLUMN_NUMBER: True,
@@ -36,6 +46,13 @@ CHANNEL_LIST_DEFAULTS = {
     'recording_status': True,
     'tag_filter': True,
     'hide_disabled': True,
+    'density': DENSITY_COMFORTABLE,
+    # The programme on now, in smaller text under the channel's name.
+    'two_line': False,
+    'stripes': False,
+    'dividers': True,
+    # An accent bar at the start of the playing channel's row, and its name in bold.
+    'mark_playing': True,
     'tag': '',
     'order': list(DEFAULT_ORDER),
     # Pixel widths of the columns the user has resized. The others fit the
@@ -71,9 +88,11 @@ def channel_list_options(raw) -> dict:
         for key in OPTIONAL_COLUMNS:
             if key in columns:
                 options['columns'][key] = bool(columns[key])
-    for key in ('logos', 'now_progress', 'recording_status', 'tag_filter', 'hide_disabled'):
+    for key in _FLAG_OPTIONS:
         if key in raw:
             options[key] = bool(raw[key])
+    if raw.get('density') in DENSITIES:
+        options['density'] = raw['density']
     if isinstance(raw.get('tag'), str):
         options['tag'] = raw['tag']
     order = raw.get('order')

@@ -99,6 +99,7 @@ try:
     from .core.picons import STYLE_DARK, STYLE_LIGHT, PiconIndex, default_picon_dir, download_pack
     from .guide_view import GuideWindow
     from .core.channel_info import (
+        DENSITIES,
         channel_icon_reference,
         channel_key,
         channel_kinds,
@@ -117,11 +118,10 @@ try:
         COLUMN_INDEX,
         COLUMN_KEYS,
         COLUMN_MENU,
-        LOGO_SIZE,
+        ChannelDelegate,
         ChannelTableModel,
         ChannelTableView,
         LogoLoader,
-        ProgressDelegate,
         padded_pixmap,
     )
 except ImportError:
@@ -196,6 +196,7 @@ except ImportError:
     from core.picons import STYLE_DARK, STYLE_LIGHT, PiconIndex, default_picon_dir, download_pack
     from guide_view import GuideWindow
     from core.channel_info import (
+        DENSITIES,
         channel_icon_reference,
         channel_key,
         channel_kinds,
@@ -214,11 +215,10 @@ except ImportError:
         COLUMN_INDEX,
         COLUMN_KEYS,
         COLUMN_MENU,
-        LOGO_SIZE,
+        ChannelDelegate,
         ChannelTableModel,
         ChannelTableView,
         LogoLoader,
-        ProgressDelegate,
         padded_pixmap,
     )
 try:
@@ -4035,9 +4035,10 @@ class TVHeadendClient(QMainWindow):
         self.channel_list.setWordWrap(False)
         self.channel_list.setTextElideMode(Qt.TextElideMode.ElideRight)
         header.setTextElideMode(Qt.TextElideMode.ElideRight)
-        self.channel_list.setIconSize(LOGO_SIZE)
-        self._progress_delegate = ProgressDelegate(self.channel_list)
-        self.channel_list.setItemDelegateForColumn(COL_NOW, self._progress_delegate)
+        self._channel_delegate = ChannelDelegate(self.channel_list)
+        self.channel_list.setItemDelegate(self._channel_delegate)
+        self._apply_channel_row_style()
+        self.channel_list.density_step.connect(self._step_channel_density)
         self.channel_list.verticalHeader().setVisible(False)
         self.channel_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         # Stop recording follows the highlighted channel.
@@ -4960,11 +4961,35 @@ class TVHeadendClient(QMainWindow):
             action.toggled.connect(lambda checked, key=key: self._set_channel_column(key, checked))
             self.channel_columns_menu.addAction(action)
             self._channel_column_actions[key] = action
+        size_menu = menu.addMenu("Row Si&ze")
+        size_menu.setAccessibleName("Channel list row size")
+        group = QActionGroup(size_menu)
+        self._channel_density_actions = {}
+        for density, label in zip(DENSITIES, ("&Compact", "Co&mfortable", "&Spacious")):
+            action = QAction(label, group)
+            action.setCheckable(True)
+            action.setChecked(self.channel_options['density'] == density)
+            action.triggered.connect(lambda checked, density=density: self._set_channel_density(density))
+            size_menu.addAction(action)
+            self._channel_density_actions[density] = action
+        size_menu.addSeparator()
+        taller = size_menu.addAction("&Taller Rows")
+        taller.setShortcuts([QKeySequence(QKeySequence.StandardKey.ZoomIn), QKeySequence("Ctrl+=")])
+        taller.triggered.connect(lambda: self._step_channel_density(1))
+        shorter = size_menu.addAction("Sh&orter Rows")
+        shorter.setShortcuts([QKeySequence(QKeySequence.StandardKey.ZoomOut), QKeySequence("Ctrl+-")])
+        shorter.triggered.connect(lambda: self._step_channel_density(-1))
         menu.addSeparator()
         self._channel_option_actions = {}
         for key, label, tip in (
             ('logos', "Channel &Logos", "Show each channel's logo next to its name"),
             ('now_progress', "&Progress Bar Under Now Playing", "Show how far the current programme has got"),
+            ('two_line', "Programme &Under Channel Name",
+             "Show the programme on now in smaller text under each channel's name"),
+            ('mark_playing', "Highlight Playing &Channel",
+             "Put a colored bar at the start of the playing channel's row and its name in bold"),
+            ('stripes', "&Alternating Row Colors", "Shade every other row so long rows are easier to follow"),
+            ('dividers', "Row &Dividers", "Draw a faint line between rows"),
             ('recording_status', "Mark &Recording Channels", "Show Recording on channels the server is recording"),
             ('tag_filter', "&Group Filter", "Show a list for picking one channel group"),
             ('hide_disabled', "&Hide Disabled Channels", "Leave out channels that are turned off on the server"),
@@ -5004,8 +5029,20 @@ class TVHeadendClient(QMainWindow):
                 header.setSectionHidden(COLUMN_INDEX[key], not visible)
         finally:
             header.blockSignals(False)
-        self._progress_delegate.enabled = self.channel_options['now_progress']
+        self._apply_channel_row_style()
         self._fit_channel_columns(measure=True)
+
+    def _apply_channel_row_style(self):
+        options = self.channel_options
+        delegate = self._channel_delegate
+        delegate.progress = options['now_progress']
+        delegate.two_line = options['two_line']
+        delegate.dividers = options['dividers']
+        delegate.mark_playing = options['mark_playing']
+        table = self.channel_list
+        table.setAlternatingRowColors(options['stripes'])
+        table.set_row_style(options['density'], options['two_line'])
+        table.viewport().update()
 
     def _fit_channel_columns(self, measure=False):
         """Size the columns the user has not resized.
@@ -5101,13 +5138,40 @@ class TVHeadendClient(QMainWindow):
         if key in ('logos', 'hide_disabled'):
             self._reload_channel_rows()
         elif key == 'now_progress':
-            self._progress_delegate.enabled = bool(value)
+            self._apply_channel_row_style()
             self._update_channel_extras()
+        elif key in ('two_line', 'stripes', 'dividers', 'mark_playing'):
+            self._apply_channel_row_style()
         elif key == 'recording_status':
             self._mark_playing_channel()
         elif key == 'tag_filter':
             self.tag_row.setVisible(bool(value) and self.tag_combo.count() > 1)
             self._apply_channel_filter()
+
+    def _set_channel_density(self, density):
+        if density not in DENSITIES:
+            return
+        action = self._channel_density_actions[density]
+        if not action.isChecked():
+            action.setChecked(True)
+        if density == self.channel_options['density']:
+            return
+        self.channel_options['density'] = density
+        self._save_channel_options()
+        # Keep the selected channel where the user can see it as every row moves.
+        table = self.channel_list
+        current = table.currentIndex()
+        self._apply_channel_row_style()
+        if current.isValid():
+            table.scrollTo(current)
+        self._visible_logo_timer.start()
+        self.statusbar.showMessage(f"Channel rows: {action.text().replace('&', '')}", 2000)
+
+    def _step_channel_density(self, step):
+        """One row size taller (+1) or shorter (-1), stopping at the ends."""
+        position = DENSITIES.index(self.channel_options['density']) + step
+        if 0 <= position < len(DENSITIES):
+            self._set_channel_density(DENSITIES[position])
 
     def _reload_channel_rows(self):
         """Rebuild the rows from fetched data, keeping the selection and scroll place."""
@@ -5134,6 +5198,7 @@ class TVHeadendClient(QMainWindow):
             action.blockSignals(True)
             action.setChecked(bool(self.channel_options[key]))
             action.blockSignals(False)
+        self._channel_density_actions[self.channel_options['density']].setChecked(True)
         self._save_channel_options()
         self._apply_channel_columns()
         backend = self._logo_backend() if self._channels else None

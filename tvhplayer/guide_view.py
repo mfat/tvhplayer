@@ -189,7 +189,8 @@ class GuideGrid(QAbstractScrollArea):
 
     CHANNEL_WIDTH = 220
     PX_PER_MINUTE = 5
-    LOGO = QSize(40, 24)
+    # The shape of the logos the window loads, so they scale without stretching.
+    LOGO = QSize(42, 24)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -741,7 +742,11 @@ class GuideGrid(QAbstractScrollArea):
             x += 42
             pixmap = self.logo(channel)
             if pixmap is not None:
-                painter.drawPixmap(int(x), int(y + (self.row_height - pixmap.height()) / 2), pixmap)
+                painter.save()
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                target = QRectF(x, y + (self.row_height - self.LOGO.height()) / 2, self.LOGO.width(), self.LOGO.height())
+                painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+                painter.restore()
                 x += self.LOGO.width() + 8
             painter.setFont(bold if key == playing else font)
             name = channel.name

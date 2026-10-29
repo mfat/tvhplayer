@@ -2671,8 +2671,29 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         window._channel_option_actions['recording_status'].setChecked(False)
         assert _cell(table, _channel_row(table, 'Sport'), ui.COL_STATUS).text() == 'Playing'
 
+        # Row size: the menu and the zoom steps change it, stopping at the ends, and it is saved.
+        comfortable = table.rowHeight(0)
+        window._channel_density_actions['spacious'].trigger()
+        assert table.rowHeight(0) > comfortable
+        assert window.config_store.load()['channel_list']['density'] == 'spacious'
+        table.density_step.emit(1)
+        assert window.channel_options['density'] == 'spacious'
+        table.density_step.emit(-1)
+        table.density_step.emit(-1)
+        assert window.channel_options['density'] == 'compact'
+        assert window._channel_density_actions['compact'].isChecked()
+        assert table.rowHeight(0) < comfortable
+        window._channel_option_actions['stripes'].setChecked(True)
+        assert table.alternatingRowColors()
+        window._channel_option_actions['two_line'].setChecked(True)
+        assert window._channel_delegate.two_line
+        assert window.config_store.load()['channel_list']['two_line'] is True
+
         # Reset brings the defaults back.
         window._reset_channel_list_layout()
+        assert window._channel_density_actions['comfortable'].isChecked()
+        assert table.rowHeight(0) == comfortable
+        assert not table.alternatingRowColors() and not window._channel_delegate.two_line
         assert header.visualIndex(ui.COL_NUMBER) == 0
         assert not header.isSectionHidden(ui.COL_NOW) and header.isSectionHidden(ui.COL_TYPE)
         assert _channel_row(table, 'Off') < 0

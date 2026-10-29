@@ -47,6 +47,11 @@ def test_options_fill_missing_keys_and_ignore_bad_values():
     assert 'bogus' not in options['columns']
     assert options['logos'] is False
     assert options['tag'] == ''
+    assert options['density'] == 'comfortable'
+    assert channel_list_options({'density': 'huge'})['density'] == 'comfortable'
+    styled = channel_list_options({'density': 'compact', 'stripes': 1, 'dividers': 0, 'two_line': True})
+    assert styled['density'] == 'compact'
+    assert styled['stripes'] is True and styled['dividers'] is False and styled['two_line'] is True
     # The defaults are copied, not shared.
     options['columns']['now'] = False
     options['order'].clear()
