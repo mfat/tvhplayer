@@ -207,7 +207,7 @@ def polish_main_window(window):
             pane.setObjectName(name)
     splitter = getattr(window, 'splitter', None)
     if splitter is not None:
-        # Invisible, but wide enough to grab; -1 is the style's own width.
+        # A small grip, on a handle wide enough to grab; -1 is the style's own width.
         splitter.setHandleWidth(6 if _active else -1)
 
 
@@ -271,6 +271,35 @@ def _chevron(painter, rect, points, ink, size):
 
 def _line(painter, x, y, width, height, name):
     painter.fillRect(QRect(x, y, width, height), color(name))
+
+
+def _list_header_rule(painter, rect, view):
+    """Carry the rule under a list's header through the frame's padding to its edge.
+
+    The header sits inside the padding, so its own rule stops short of the frame.
+    """
+    if isinstance(view, QTableView):
+        header = view.horizontalHeader()
+    elif isinstance(view, QTreeView):
+        header = view.header()
+    else:
+        return
+    if header is None or header.isHidden():
+        return
+    _line(painter, rect.left() + 1, header.geometry().bottom(), rect.width() - 2, 1, 'edge')
+
+
+def _header_edge_draggable(option, widget):
+    """Whether the user can drag the right edge of this header section.
+
+    The last section's edge sits against the list's own edge, so it gets no mark.
+    """
+    if not isinstance(widget, QHeaderView):
+        return False
+    if option.position in (QStyleOptionHeader.SectionPosition.End,
+                           QStyleOptionHeader.SectionPosition.OnlyOneSection):
+        return False
+    return widget.sectionResizeMode(option.section) == QHeaderView.ResizeMode.Interactive
 
 
 def _in_combo_popup(widget):
@@ -760,6 +789,8 @@ class ThemeStyle(QProxyStyle):
             if kind is None:
                 return False
             _draw_frame(kind, painter, option.rect)
+            if kind == 'list':
+                _list_header_rule(painter, option.rect, widget)
         elif (element == CE.CE_PushButtonBevel and isinstance(option, QStyleOptionButton)
               and option.features & QStyleOptionButton.ButtonFeature.Flat):
             # The theme gives flat buttons their edge too.
@@ -777,6 +808,9 @@ class ThemeStyle(QProxyStyle):
             r = option.rect
             if option.orientation == Qt.Orientation.Horizontal:
                 _line(painter, r.left(), r.bottom(), r.width(), 1, 'edge')
+                if _header_edge_draggable(option, widget):
+                    inset = r.height() // 4
+                    _line(painter, r.right(), r.top() + inset, 1, r.height() - 2 * inset, 'edge')
         elif element == CE.CE_HeaderLabel and isinstance(option, QStyleOptionHeader):
             label = QStyleOptionHeader(option)
             label.palette = QPalette(option.palette)
@@ -784,13 +818,15 @@ class ThemeStyle(QProxyStyle):
                 label.palette.setColor(group, QPalette.ColorRole.ButtonText, color('muted'))
             super().drawControl(element, label, painter, widget)
         elif element == CE.CE_HeaderEmptyArea:
-            pass
+            if isinstance(widget, QHeaderView) and widget.orientation() == Qt.Orientation.Horizontal:
+                r = option.rect
+                _line(painter, r.left(), r.bottom(), r.width(), 1, 'edge')
         elif element == CE.CE_ProgressBar and isinstance(option, QStyleOptionProgressBar):
             if option.textVisible or not state & State.State_Horizontal:
                 return False
             self._thin_progress(option, painter, widget)
         elif element == CE.CE_Splitter:
-            pass
+            self._splitter_grip(option, painter)
         elif element in (CE.CE_MenuBarEmptyArea, CE.CE_MenuBarItem) and isinstance(option, QStyleOptionMenuItem):
             self._menu_bar(element, option, painter, widget)
         elif element == CE.CE_MenuItem:
@@ -802,6 +838,21 @@ class ThemeStyle(QProxyStyle):
         else:
             return False
         return True
+
+    @staticmethod
+    def _splitter_grip(option, painter):
+        """A short bar across the middle of the handle, in the accent while hovered or dragged."""
+        r = option.rect
+        state = option.state
+        active = state & State.State_Enabled and state & (State.State_MouseOver | State.State_Sunken)
+        # A horizontal splitter puts its panes side by side: the bar stands upright.
+        if state & State.State_Horizontal:
+            length = min(32, r.height())
+            grip = QRect(r.center().x(), r.center().y() - length // 2, 2, length)
+        else:
+            length = min(32, r.width())
+            grip = QRect(r.center().x() - length // 2, r.center().y(), length, 2)
+        _box(painter, grip, 1, color('accent' if active else 'edge'))
 
     def _thin_progress(self, option, painter, widget):
         """The thin bar shown without a percentage: a track and an accent fill."""
