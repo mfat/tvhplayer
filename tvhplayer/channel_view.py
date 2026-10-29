@@ -582,7 +582,7 @@ class ChannelDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.progress = True
         self.two_line = False
-        self.dividers = True
+        self.dividers = False
         self.mark_playing = True
 
     def paint(self, painter, option, index):

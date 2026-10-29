@@ -50,7 +50,7 @@ CHANNEL_LIST_DEFAULTS = {
     # The programme on now, in smaller text under the channel's name.
     'two_line': False,
     'stripes': False,
-    'dividers': True,
+    'dividers': False,
     # An accent bar at the start of the playing channel's row, and its name in bold.
     'mark_playing': True,
     'tag': '',

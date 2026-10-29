@@ -48,6 +48,7 @@ def test_options_fill_missing_keys_and_ignore_bad_values():
     assert options['logos'] is False
     assert options['tag'] == ''
     assert options['density'] == 'comfortable'
+    assert options['dividers'] is False
     assert channel_list_options({'density': 'huge'})['density'] == 'comfortable'
     styled = channel_list_options({'density': 'compact', 'stripes': 1, 'dividers': 0, 'two_line': True})
     assert styled['density'] == 'compact'
