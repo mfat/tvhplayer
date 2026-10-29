@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from PyQt6.QtCore import QByteArray, QEasingCurve, QPoint, QRectF, QSize, Qt, QTimer, QVariantAnimation, pyqtSignal
+from PyQt6.QtCore import QByteArray, QPoint, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
@@ -459,48 +459,46 @@ class PlayerBar(QWidget):
 
 
 class _PulseDot(QWidget):
-    """A dot that breathes while something records."""
+    """A dot that blinks on and off while something records."""
 
     SIZE = 8
+    BLINK_MS = 600
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(self.SIZE, self.SIZE)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.color = QColor('#ffffff')
-        self._level = 1.0
-        self._pulse = QVariantAnimation(self)
-        self._pulse.setDuration(1600)
-        # Fade out and back in one loop, so it never snaps from dim to bright.
-        self._pulse.setStartValue(1.0)
-        self._pulse.setKeyValueAt(0.5, 0.35)
-        self._pulse.setEndValue(1.0)
-        self._pulse.setEasingCurve(QEasingCurve.Type.InOutSine)
-        self._pulse.setLoopCount(-1)
-        self._pulse.valueChanged.connect(self._set_level)
+        self._lit = True
+        self._blink = QTimer(self)
+        self._blink.setInterval(self.BLINK_MS)
+        self._blink.timeout.connect(self._toggle)
 
-    def _set_level(self, value):
-        self._level = float(value)
+    def _toggle(self):
+        self._lit = not self._lit
         self.update()
 
     def start(self):
-        if self._pulse.state() != QVariantAnimation.State.Running:
-            self._pulse.start()
+        if not self._blink.isActive():
+            self._lit = True
+            self.update()
+            self._blink.start()
 
     def stop(self):
-        self._pulse.stop()
-        self._set_level(1.0)
+        self._blink.stop()
+        self._lit = True
+        self.update()
 
     def is_pulsing(self):
-        return self._pulse.state() == QVariantAnimation.State.Running
+        return self._blink.isActive()
 
     def paintEvent(self, event):
+        if not self._lit:
+            return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        color = QColor(self.color)
-        color.setAlphaF(self._level)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
+        painter.setBrush(self.color)
         painter.drawEllipse(QRectF(self.rect()))
         painter.end()
 
