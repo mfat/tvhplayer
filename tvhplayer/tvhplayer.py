@@ -76,6 +76,7 @@ try:
     )
     from .player_bar import (
         DOT_SVG,
+        MENU_DOT_SVG,
         PILL_DARK,
         PILL_DARK_HOVER,
         RECORD_RED,
@@ -173,6 +174,7 @@ except ImportError:
     )
     from player_bar import (
         DOT_SVG,
+        MENU_DOT_SVG,
         PILL_DARK,
         PILL_DARK_HOVER,
         RECORD_RED,
@@ -6349,8 +6351,8 @@ class TVHeadendClient(QMainWindow):
         muted = bool(self.player and self.player.is_muted())
         text_color = menu.palette().color(QPalette.ColorRole.WindowText).name()
 
-        def tinted(name):
-            return file_icon(self.icons_dir / name, text_color, 16)
+        def tinted(name, pad=0):
+            return file_icon(self.icons_dir / name, text_color, 16, pad=pad)
 
         play_action = menu.addAction(tinted('play-fill.svg'), "Play")
         play_action.setEnabled(channel is not None)
@@ -6369,19 +6371,19 @@ class TVHeadendClient(QMainWindow):
         mute_action.triggered.connect(self.toggle_mute)
 
         fullscreen_action = menu.addAction(
-            tinted('fullscreen-exit.svg' if self.is_fullscreen else 'fullscreen.svg'),
+            tinted('fullscreen-exit.svg' if self.is_fullscreen else 'fullscreen.svg', pad=3),
             with_keys("Exit Fullscreen" if self.is_fullscreen else "Fullscreen", FULLSCREEN_KEY),
         )
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
 
         menu.addSeparator()
 
-        record_action = menu.addAction(QIcon(f"{self.icons_dir}/record.svg"), with_keys("Record", "Ctrl+R"))
+        record_action = menu.addAction(svg_icon(MENU_DOT_SVG, RECORD_RED, 16), with_keys("Record", "Ctrl+R"))
         record_action.setEnabled(channel is not None)
         record_action.triggered.connect(self.start_recording)
 
         local_action = menu.addAction(
-            tinted('save-fill.svg'),
+            tinted('save-fill.svg', pad=4),
             with_keys("Record Locally", "Ctrl+Shift+R"),
         )
         local_action.setEnabled(channel is not None)

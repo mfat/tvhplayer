@@ -458,7 +458,7 @@ class PlayerBar(QWidget):
     def set_fullscreen(self, fullscreen):
         self.fullscreen_btn.setChecked(bool(fullscreen))
         name = 'fullscreen-exit.svg' if fullscreen else 'fullscreen.svg'
-        self.fullscreen_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24))
+        self.fullscreen_btn.setIcon(file_icon(self._icons_dir / name, self._icon_color(), 24, pad=3))
 
 
 class FloatingBar(QWidget):
