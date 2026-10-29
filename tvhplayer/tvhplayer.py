@@ -3820,6 +3820,11 @@ class TVHeadendClient(QMainWindow):
         self.reload_channels_action.triggered.connect(lambda: self.fetch_channels(keep_place=True))
         view_menu.addAction(self.reload_channels_action)
 
+        manage_servers_action = QAction("&Manage Servers…", self)
+        manage_servers_action.setStatusTip("Add, edit, or remove Tvheadend servers")
+        manage_servers_action.triggered.connect(self.manage_servers)
+        file_menu.addAction(manage_servers_action)
+
         setup_action = QAction("Set &Up Channels…", self)
         setup_action.setStatusTip("Add channels from a TV tuner or an IPTV playlist")
         setup_action.triggered.connect(self.show_setup_wizard)

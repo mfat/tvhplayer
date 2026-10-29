@@ -16,7 +16,7 @@ Click the gear button (**Manage servers**) beside the server picker to see its s
 
 ### Connecting to your own Tvheadend server
 
-1. Click the gear button (**Manage servers**) above the channel list.
+1. Choose **File → Manage Servers…**, or click the gear button (**Manage servers**) above the channel list.
 2. Click **Add Server…**.
 3. Enter a name and the server address, for example `192.168.1.10`. Omitted schemes default to `http://`, and HTTP defaults to port 9981. Include `https://` for HTTPS or an explicit port for a reverse proxy, for example `http://myserver:80`.
 4. Choose the **Connection method**. **HTSP (recommended)** (port 9982) is the default and provides live channel and recording updates. Use **HTTP / HTTPS** when HTSP is unavailable.
