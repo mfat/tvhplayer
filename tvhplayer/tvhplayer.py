@@ -3834,7 +3834,7 @@ class TVHeadendClient(QMainWindow):
         import_playlist_action.setShortcut("Ctrl+I")
         import_playlist_action.triggered.connect(self.import_playlist)
         file_menu.addAction(import_playlist_action)
-        playlists_action = QAction("&Playlists…", self)
+        playlists_action = QAction("Manage &Playlists…", self)
         playlists_action.triggered.connect(self.show_playlists)
         file_menu.addAction(playlists_action)
         guide_sources_action = QAction("&Guide Sources…", self)

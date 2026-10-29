@@ -95,7 +95,7 @@ You can add internet TV channels from an M3U playlist or an Xtream Codes provide
 
 The channels appear in the channel list when the import finishes.
 
-The server keeps the channels, so TVHplayer does not read the playlist again by itself. When your provider adds or removes channels, or changes their addresses, refresh it. To manage your playlists, choose **File → Playlists…**:
+The server keeps the channels, so TVHplayer does not read the playlist again by itself. When your provider adds or removes channels, or changes their addresses, refresh it. To manage your playlists, choose **File → Manage Playlists…**:
 
 - **Refresh** reads the playlist again now: new channels are added, channels that left the playlist are removed, and channels whose address changed are tested again.
 - **Settings…** changes provider headers or an Xtream Codes password, then refreshes the same playlist without adding it twice.
