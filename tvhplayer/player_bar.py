@@ -70,6 +70,10 @@ def svg_icon(markup, color, size):
     data = markup.replace('{c}', color)
     if 'xmlns' not in data:
         data = data.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ', 1)
+    # Qt renders an SVG at its own width and height; a 16px icon scaled up would blur.
+    data = re.sub(r'<svg\b[^>]*>', lambda tag: re.sub(r'\s(width|height)="[^"]*"', '', tag.group(0)),
+                  data, count=1)
+    data = data.replace('<svg ', f'<svg width="{size * 2}" height="{size * 2}" ', 1)
     pixmap = QPixmap()
     pixmap.loadFromData(QByteArray(data.encode()), 'SVG')
     if pixmap.isNull():
