@@ -51,7 +51,7 @@ HIDE_HELP = (
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
 FAST_START_HELP = (
     'Sets mpv --demuxer-lavf-analyzeduration=0.5. Turn off if sound or a sound track is missing. '
-    'Applies from the next channel.'
+    'Applies the next time a channel starts.'
 )
 LIVE_RESIZE_HELP = (
     'Show new video size in real time when resizing the sidebar. '

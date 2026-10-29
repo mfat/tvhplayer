@@ -7617,7 +7617,7 @@ class TVHeadendClient(QMainWindow):
         return self.config['fast_channel_start']
 
     def set_starts_channels_fast(self, on):
-        """Applies from the next channel that starts."""
+        """Applies the next time a channel starts."""
         self.config['fast_channel_start'] = bool(on)
         self.save_config()
         self.player.set_fast_start(bool(on))

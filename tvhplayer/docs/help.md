@@ -167,7 +167,7 @@ While this computer is recording, TVHplayer keeps it from going to sleep. It als
 
 TVHplayer plays with **mpv** (libmpv), drawing into the window on Wayland and X11 so the interface stays sharp at fractional scale.
 
-**Settings → Playback → Start channels faster** sets mpv's `--demuxer-lavf-analyzeduration=0.5`, for a slightly quicker picture. Turn it off if sound or a sound track goes missing. Applies from the next channel.
+**Settings → Playback → Start channels faster** sets mpv's `--demuxer-lavf-analyzeduration=0.5`, for a slightly quicker picture. Turn it off if sound or a sound track goes missing. Applies the next time a channel starts.
 
 ## Keyboard shortcuts
 
