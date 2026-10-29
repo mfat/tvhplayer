@@ -1693,7 +1693,7 @@ def local_recording_name(channel_name, when, extension=DEFAULT_FORMAT):
 
 
 SERVER_STATUS_ROLE = Qt.ItemDataRole.UserRole + 1
-URL_HINT = "Include http:// or https://. HTTP defaults to port 9981; for a reverse proxy, enter its port explicitly."
+URL_HINT = "Defaults to http:// and port 9981. For HTTPS, include https://; for a reverse proxy, enter its port explicitly."
 UNTITLED_SERVER = "Untitled server"
 # Status dot colours. The status is always spelled out too.
 STATUS_CONNECTED = '#27ae60'
@@ -1708,14 +1708,17 @@ NEGATIVE_TEXT = '#da4453'
 
 def validate_server_url(url):
     """What is wrong with a server address, or '' when it looks usable."""
+    url = url.strip()
     if not url:
         return "Enter the server address"
     if url.startswith('http://'):
         rest = url[7:]
     elif url.startswith('https://'):
         rest = url[8:]
+    elif '://' in url:
+        return "Use http:// or https://"
     else:
-        return "Must start with http:// or https://"
+        rest = url
     host = rest.split('/', 1)[0]
     if ':' in host:
         host, port = host.split(':', 1)
@@ -1725,6 +1728,8 @@ def validate_server_url(url):
             return "Port must be between 1 and 65535"
     if not host:
         return "Enter a host name or IP address"
+    if any(c.isspace() for c in host):
+        return "Host name must not contain spaces"
     if all(c in '0123456789.' for c in host):
         parts = host.split('.')
         if len(parts) != 4 or not all(parts):
@@ -2015,8 +2020,10 @@ class ServerDialog(QDialog):
         form.addRow("", self.url_hint)
 
         self.protocol_combo = QComboBox()
-        self.protocol_combo.addItem("HTTP JSON API", PROTOCOL_HTTP)
-        self.protocol_combo.addItem("HTSP", PROTOCOL_HTSP)
+        self.protocol_combo.addItem("HTTP / HTTPS", PROTOCOL_HTTP)
+        self.protocol_combo.addItem("HTSP (recommended)", PROTOCOL_HTSP)
+        connection_hint = "HTSP provides live channel and recording updates. Use HTTP / HTTPS when HTSP is unavailable."
+        describe(self.protocol_combo, "Connection method", connection_hint)
         self.htsp_port_input = QSpinBox()
         self.htsp_port_input.setRange(1, 65535)
         self.htsp_port_input.setValue(9982)
@@ -2027,7 +2034,12 @@ class ServerDialog(QDialog):
         protocol_row.addWidget(self.port_label)
         protocol_row.addWidget(self.htsp_port_input)
         protocol_row.addStretch(1)
-        form.addRow(buddy_label("&Protocol:", self.protocol_combo), protocol_row)
+        form.addRow(buddy_label("Connection &method:", self.protocol_combo), protocol_row)
+        method_hint = QLabel(connection_hint)
+        method_hint.setWordWrap(True)
+        method_hint.setFont(_smaller_font(method_hint.font()))
+        _text_color(method_hint, 'palette(placeholder-text)')
+        form.addRow("", method_hint)
 
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("Optional")

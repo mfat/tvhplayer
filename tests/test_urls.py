@@ -1,4 +1,5 @@
 import base64
+import pytest
 from urllib.parse import unquote, urlparse
 
 from requests import Request
@@ -24,12 +25,18 @@ def test_htsp_port_defaults_to_9982():
 
 
 def test_missing_http_port_defaults_to_tvheadend_port():
+    assert http_base_url('myserver') == 'http://myserver:9981'
     assert http_base_url('http://tvh.example') == 'http://tvh.example:9981'
     assert http_base_url('http://tvh.example/tvh/') == 'http://tvh.example:9981/tvh'
     assert http_base_url('http://tvh.example:80/tvh') == 'http://tvh.example:80/tvh'
     assert http_base_url('https://tvh.example/tvh') == 'https://tvh.example/tvh'
     assert http_base_url('http://[::1]') == 'http://[::1]:9981'
     assert htsp_host_port('http://tvh.example') == ('tvh.example', 9982)
+
+
+def test_unsupported_scheme_is_rejected():
+    with pytest.raises(ValueError, match='Use http:// or https://'):
+        http_base_url('ftp://myserver')
 
 
 def test_insert_basic_auth():

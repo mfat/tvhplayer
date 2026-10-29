@@ -25,6 +25,8 @@ def http_base_url(url):
     if not url:
         raise ValueError('Server URL is empty')
     if not url.startswith(('http://', 'https://')):
+        if '://' in url:
+            raise ValueError('Use http:// or https://')
         url = 'http://' + url
     parsed = urlparse(url)
     if not parsed.hostname:

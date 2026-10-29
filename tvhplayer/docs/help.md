@@ -18,8 +18,8 @@ Click the gear button (**Manage servers**) beside the server picker to see its s
 
 1. Click the gear button (**Manage servers**) above the channel list.
 2. Click **Add Server…**.
-3. Enter a name and the server address, including `http://` or `https://` and the port, for example `http://192.168.1.10:9981`.
-4. Choose the protocol. **HTSP** (port 9982) is the default and gets channel and recording changes as they happen; **HTTP JSON API** works where HTSP is blocked.
+3. Enter a name and the server address, for example `192.168.1.10`. Omitted schemes default to `http://`, and HTTP defaults to port 9981. Include `https://` for HTTPS or an explicit port for a reverse proxy, for example `http://myserver:80`.
+4. Choose the **Connection method**. **HTSP (recommended)** (port 9982) is the default and provides live channel and recording updates. Use **HTTP / HTTPS** when HTSP is unavailable.
 5. Enter your Tvheadend username and password, if the server asks for one.
 6. Click **Test Connection**, then **Apply** to save and keep editing, or **OK** to save and close. A failed connection test does not prevent saving an offline server.
 

@@ -41,7 +41,9 @@ def _wait(condition, timeout=3.0):
 def test_address_check_messages(ui):
     check = ui.validate_server_url
     assert check('') == "Enter the server address"
-    assert check('192.168.1.20:9981') == "Must start with http:// or https://"
+    assert check('192.168.1.20:9981') == ""
+    assert check('myserver') == ""
+    assert check('ftp://myserver') == "Use http:// or https://"
     assert check('http://host:99999') == "Port must be between 1 and 65535"
     assert check('http://host:abc') == "Invalid port number"
     assert check('http://:9981') == "Enter a host name or IP address"
@@ -99,7 +101,7 @@ def test_close_discards_invalid_draft_without_saving(ui):
     saved = []
     dialog.applied.connect(saved.append)
     dialog.show()
-    dialog.url_input.setText('invalid')
+    dialog.url_input.setText('ftp://invalid')
     dialog.apply_btn.click()
     assert dialog.isVisible()
     assert not saved
@@ -137,11 +139,30 @@ def test_portless_address_is_normalized_on_edit_and_close(ui):
     assert dialog.servers[0]['url'] == 'http://other.example:9981'
 
 
+@pytest.mark.parametrize('address, expected', [
+    ('myserver', 'http://myserver:9981'),
+    ('127.0.0.1', 'http://127.0.0.1:9981'),
+    ('myserver:8080/tvh', 'http://myserver:8080/tvh'),
+    ('  myserver  ', 'http://myserver:9981'),
+    ('https://myserver', 'https://myserver'),
+])
+def test_scheme_is_normalized_on_focus_loss_and_apply(ui, address, expected):
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote()])
+    dialog.url_input.setText(address)
+    dialog.url_input.editingFinished.emit()
+    assert dialog.url_input.text() == expected
+    dialog.url_input.setText(address)
+    assert dialog.apply_changes()
+    assert dialog.servers[0]['url'] == expected
+    assert dialog.url_input.text() == expected
+
+
 def test_bad_address_is_flagged_and_blocks_closing(ui):
     dialog = ui.ServerDialog()
     dialog.load_servers([_remote()])
-    dialog.url_input.setText('192.168.1.20:9981')
-    assert dialog.url_hint.text() == "Must start with http:// or https://"
+    dialog.url_input.setText('ftp://192.168.1.20:9981')
+    assert dialog.url_hint.text() == "Use http:// or https://"
     assert dialog.status_label.text() == "Address needs fixing"
     assert not dialog.test_btn.isEnabled()
     assert not dialog.open_web_btn.isEnabled()
