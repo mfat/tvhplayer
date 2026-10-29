@@ -23,6 +23,15 @@ def test_htsp_port_defaults_to_9982():
     assert htsp_host_port('http://192.168.8.1:9981', 9983) == ('192.168.8.1', 9983)
 
 
+def test_missing_http_port_defaults_to_tvheadend_port():
+    assert http_base_url('http://tvh.example') == 'http://tvh.example:9981'
+    assert http_base_url('http://tvh.example/tvh/') == 'http://tvh.example:9981/tvh'
+    assert http_base_url('http://tvh.example:80/tvh') == 'http://tvh.example:80/tvh'
+    assert http_base_url('https://tvh.example/tvh') == 'https://tvh.example/tvh'
+    assert http_base_url('http://[::1]') == 'http://[::1]:9981'
+    assert htsp_host_port('http://tvh.example') == ('tvh.example', 9982)
+
+
 def test_insert_basic_auth():
     url = insert_basic_auth('http://127.0.0.1:9981/stream/channel/abc', 'user', 'secret')
     assert url == 'http://user:secret@127.0.0.1:9981/stream/channel/abc'

@@ -73,6 +73,17 @@ def test_edits_apply_live_and_closing_keeps_them(ui):
     assert dialog.result() == ui.QDialog.DialogCode.Accepted
 
 
+def test_portless_address_is_normalized_on_edit_and_close(ui):
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote(url='http://tvh.example/tvh')])
+    dialog.url_input.editingFinished.emit()
+    assert dialog.url_input.text() == 'http://tvh.example:9981/tvh'
+    assert dialog.servers[0]['url'] == 'http://tvh.example:9981/tvh'
+    dialog.url_input.setText('http://other.example')
+    dialog.accept()
+    assert dialog.servers[0]['url'] == 'http://other.example:9981'
+
+
 def test_bad_address_is_flagged_and_blocks_closing(ui):
     dialog = ui.ServerDialog()
     dialog.load_servers([_remote()])

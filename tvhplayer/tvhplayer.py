@@ -54,6 +54,7 @@ try:
     from .core.errors import TvhAuthError, TvhError
     from .core.server_log import ServerLogFeed
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
+    from .core.urls import http_base_url
     from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from .core import convert
     from .core import frozen_libs
@@ -146,6 +147,7 @@ except ImportError:
     from core.errors import TvhAuthError, TvhError
     from core.server_log import ServerLogFeed
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
+    from core.urls import http_base_url
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from core import convert
     from core import frozen_libs
@@ -1691,7 +1693,7 @@ def local_recording_name(channel_name, when, extension=DEFAULT_FORMAT):
 
 
 SERVER_STATUS_ROLE = Qt.ItemDataRole.UserRole + 1
-URL_HINT = "Include http:// or https:// and the port."
+URL_HINT = "Include http:// or https://. HTTP defaults to port 9981; for a reverse proxy, enter its port explicitly."
 UNTITLED_SERVER = "Untitled server"
 # Status dot colours. The status is always spelled out too.
 STATUS_CONNECTED = '#27ae60'
@@ -2028,6 +2030,7 @@ class ServerDialog(QDialog):
 
         self.name_input.textChanged.connect(lambda text: self._edit('name', text))
         self.url_input.textChanged.connect(lambda text: self._edit('url', text))
+        self.url_input.editingFinished.connect(self._normalize_address)
         self.protocol_combo.currentIndexChanged.connect(
             lambda _index: self._edit('protocol', self.protocol_combo.currentData() or PROTOCOL_HTTP)
         )
@@ -2235,6 +2238,14 @@ class ServerDialog(QDialog):
         self.test_results.pop(id(server), None)
         self._refresh_selected()
 
+    def _normalize_address(self):
+        server = self._selected_server()
+        if server is None or server.get('builtin'):
+            return
+        url = server.get('url') or ''
+        if not validate_server_url(url):
+            self.url_input.setText(http_base_url(url))
+
     def _edit_selected(self):
         server = self._selected_server()
         if server is None:
@@ -2347,6 +2358,10 @@ class ServerDialog(QDialog):
                 )
                 field.setFocus()
                 return
+        for server in self.servers:
+            if not server.get('builtin'):
+                server['url'] = http_base_url(server['url'])
+        self._show_selected()
         super().accept()
 
     def reject(self):

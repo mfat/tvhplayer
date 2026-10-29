@@ -30,7 +30,10 @@ def http_base_url(url):
     if not parsed.hostname:
         raise ValueError('Server URL has no host')
     path = parsed.path.rstrip('/')
-    base = f'{parsed.scheme}://{parsed.netloc}'
+    netloc = parsed.netloc
+    if parsed.scheme == 'http' and parsed.port is None:
+        netloc += ':9981'
+    base = f'{parsed.scheme}://{netloc}'
     return base + path if path else base
 
 
