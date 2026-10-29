@@ -3012,11 +3012,10 @@ class NowNextFetch(QObject):
         backend = None
         try:
             backend = self._open_backend(self.server)
-            # An HTSP channel's eventId/nextEventId may have changed since
-            # the channel list was loaded. Get a fresh snapshot on this worker
-            # connection before querying the current programmes.
-            channels = backend.get_channels()
-            result = backend.get_now_next(channels)
+            # Refresh directly from the current EPG grid. For HTSP this avoids
+            # enableAsyncMetadata and a full channel sync every two minutes.
+            live = getattr(backend, 'get_now_next_live', None)
+            result = live(self._channels) if live is not None else backend.get_now_next(self._channels)
         except Exception as e:
             print(f"Debug: Could not refresh now and next: {e}")
         finally:
