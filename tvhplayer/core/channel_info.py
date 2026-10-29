@@ -123,12 +123,13 @@ def next_event_ids(events: Iterable[EpgEvent]) -> List[int]:
     return [event.next_event_id for event in events if event.next_event_id]
 
 
-def match_now_next(channels: Iterable[Channel], events: Iterable[EpgEvent]) -> Dict[str, NowNext]:
+def match_now_next(channels: Iterable[Channel], events: Iterable[EpgEvent],
+                   use_channel_event_ids=True) -> Dict[str, NowNext]:
     """Pair each channel with its current and next programme.
 
-    A channel's own ``eventId`` / ``nextEventId`` (HTSP) wins. Otherwise
-    the current programme is the event whose ``channelUuid`` matches and
-    whose time covers now, and the next one is its ``nextEventId``.
+    A channel's own ``eventId`` / ``nextEventId`` (HTSP) wins unless
+    ``use_channel_event_ids`` is false, as in a live now-grid refresh. Then
+    match the fresh events by channel UUID and their ``nextEventId``.
     """
     events = list(events)
     by_id = {event.event_id: event for event in events if event.event_id is not None}
@@ -138,7 +139,7 @@ def match_now_next(channels: Iterable[Channel], events: Iterable[EpgEvent]) -> D
             current_by_channel.setdefault(event.channel_uuid, []).append(event)
     result = {}
     for channel in channels:
-        raw = channel.raw or {}
+        raw = (channel.raw or {}) if use_channel_event_ids else {}
         now_event = by_id.get(_optional_int(raw.get('eventId')))
         if now_event is None:
             candidates = current_by_channel.get(channel.uuid) or []
