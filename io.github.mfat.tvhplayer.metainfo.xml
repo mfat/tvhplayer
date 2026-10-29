@@ -34,6 +34,21 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.2.2" date="2026-10-29">
+      <description>
+        <ul>
+          <li>Add File → Manage Servers to add, edit and test servers in one place</li>
+          <li>Check saved remote servers in the background and update their status dots automatically</li>
+          <li>Add an Apply button to the connection dialog</li>
+          <li>Verify the HTTP playback endpoint when testing HTSP servers</li>
+          <li>Normalize server addresses to http:// and keep the right default port for port-less addresses</li>
+          <li>Don't discard the config when a saved server address can't be parsed</li>
+          <li>Add a Live resize setting; panes resize only on release by default before Qt 6.11</li>
+          <li>Update the built-in log viewer live and keep log viewers in front of Server Management</li>
+          <li>Rename File → Playlists to Manage Playlists</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.2.1" date="2026-10-29">
       <description>
         <ul>
