@@ -17,6 +17,7 @@ channels of disabled ones, and the channels of a mux go before the mux.
 
 from __future__ import annotations
 
+import re
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ CHECK_MUX_FIELDS = ('scan_result', 'scan_state', 'name', 'iptv_sname')
 CHECK_SERVICE_FIELDS = ('enabled',)
 NOT_WORKING = 'It is not working right now.'
 NETWORK_GONE = 'The channels from this playlist are no longer on the server. Import it again.'
+_HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
 # mpegts_mux_t scan_state and scan_result values.
 SCAN_IDLE = 0
@@ -82,6 +84,15 @@ class PlaylistSource:
     chosen_groups: Optional[List[str]] = None
     # Keys of channels left out of the chosen groups.
     left_out: List[str] = field(default_factory=list)
+    # ``m3u`` or ``xc``. Older saved sources default to M3U.
+    source_type: str = 'm3u'
+    # Sent while fetching the provider and while ffmpeg opens its streams.
+    request_headers: Dict[str, str] = field(default_factory=dict)
+    # Latest Tvheadend scan verdict per stable channel key.
+    health: Dict[str, dict] = field(default_factory=dict)
+    # All statuses are counted, while ``health`` keeps only channels needing attention.
+    health_totals: Dict[str, int] = field(default_factory=dict)
+    last_checked: float = 0.0
 
     @classmethod
     def from_dict(cls, data):
@@ -99,6 +110,12 @@ class PlaylistSource:
             max_streams=_count(data.get('max_streams')),
             chosen_groups=[str(group) for group in chosen] if isinstance(chosen, list) else None,
             left_out=[str(key) for key in data.get('left_out') or [] if key],
+            source_type='xc' if data.get('source_type') == 'xc' else 'm3u',
+            request_headers=_request_headers(data.get('request_headers')),
+            health={str(key): value for key, value in (data.get('health') or {}).items() if isinstance(value, dict)}
+            if isinstance(data.get('health'), dict) else {},
+            health_totals=_health_totals(data.get('health_totals')),
+            last_checked=_seconds(data.get('last_checked')),
         )
 
     def to_dict(self):
@@ -113,6 +130,11 @@ class PlaylistSource:
             'max_streams': self.max_streams,
             'chosen_groups': list(self.chosen_groups) if self.chosen_groups is not None else None,
             'left_out': list(self.left_out),
+            'source_type': self.source_type,
+            'request_headers': dict(self.request_headers),
+            'health': dict(self.health),
+            'health_totals': dict(self.health_totals),
+            'last_checked': self.last_checked,
         }
 
     def stream_limit(self) -> int:
@@ -125,6 +147,30 @@ def _count(value) -> int:
         return max(int(value), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _seconds(value) -> float:
+    try:
+        return max(float(value), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _request_headers(value) -> Dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): str(item) for key, item in value.items()
+        if _HTTP_HEADER_NAME.match(str(key)) and str(item).strip()
+        and '\r' not in str(item) and '\n' not in str(item)
+    }
+
+
+def _health_totals(value) -> Dict[str, int]:
+    if not isinstance(value, dict):
+        return {}
+    counts = {key: _count(value.get(key)) for key in ('working', 'failed', 'untested', 'checking')}
+    return counts if any(counts.values()) else {}
 
 
 @dataclass
@@ -450,6 +496,7 @@ def sync_playlist(
     for plan in plans:
         tags.update(plan.groups)
     source.tags = sorted(tags)
+    source.health = {key: value for key, value in source.health.items() if key in source.muxes}
     checkpoint()
     if check and retest and not result.cancelled:
         admin.scan_muxes(retest)
@@ -541,6 +588,7 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
         row for row in admin.list_muxes(source.network_uuid, fields=CHECK_MUX_FIELDS)
         if row.get('uuid') in ours
     ]
+    _update_health(source, rows)
     wanted = {}
     checked = 0
     untested = 0
@@ -564,6 +612,54 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
     if changes:
         admin.save(changes)
     return checked, len(rows), failed, len(changes), untested
+
+
+def health_counts(source: PlaylistSource) -> Dict[str, int]:
+    """Counts of the persisted stream-check states for display."""
+    counts = {'working': 0, 'failed': 0, 'untested': 0, 'checking': 0}
+    if source.health_totals:
+        counts.update({key: _count(value) for key, value in source.health_totals.items() if key in counts})
+        return counts
+    for item in source.health.values():
+        status = item.get('status')
+        if status in counts:
+            counts[status] += 1
+    return counts
+
+
+def _update_health(source: PlaylistSource, rows) -> None:
+    now = time.time()
+    key_for_uuid = {uuid: key for key, uuid in source.muxes.items()}
+    health = {}
+    counts = {'working': 0, 'failed': 0, 'untested': 0, 'checking': 0}
+    for row in rows:
+        key = key_for_uuid.get(row.get('uuid'))
+        if not key:
+            continue
+        state = row.get('scan_state', SCAN_IDLE)
+        result = row.get('scan_result', SCAN_NONE)
+        if state != SCAN_IDLE:
+            status = 'checking'
+        elif result in SCAN_PASSED:
+            status = 'working'
+        elif result == SCAN_NONE:
+            status = 'untested'
+        else:
+            status = 'failed'
+        counts[status] += 1
+        # Healthy rows are represented by the aggregate. This keeps the config
+        # small even for providers with hundreds of thousands of channels.
+        if status in ('failed', 'untested'):
+            health[key] = {
+                'name': row.get('name') or row.get('iptv_sname') or key,
+                'status': status,
+                'scan_result': result,
+                'checked': now,
+            }
+    source.health = health
+    source.health_totals = counts
+    if rows and not counts['checking']:
+        source.last_checked = now
 
 
 def wait_for_checks(

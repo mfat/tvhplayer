@@ -26,6 +26,7 @@ from tvhplayer.core.playlist_sync import (
     error_message,
     ffmpeg_for_server,
     find_source,
+    health_counts,
     mux_conf,
     remove_playlist,
     result_message,
@@ -364,6 +365,19 @@ def test_network_streams_follow_the_account_limit():
     assert admin.networks[source.network_uuid]['max_streams'] == MAX_STREAMS
     assert PlaylistSource.from_dict(dict(source.to_dict(), max_streams='2')).max_streams == 2
     assert PlaylistSource.from_dict({'max_streams': 'x'}).max_streams == 0
+
+
+def test_stream_health_is_saved_per_channel():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST))
+    assert health_counts(source) == {'working': 0, 'failed': 0, 'untested': 0, 'checking': 2}
+    wait_for_checks(admin, source, result, sleep=lambda _seconds: admin.finish_scans())
+    assert health_counts(source) == {'working': 1, 'failed': 1, 'untested': 0, 'checking': 0}
+    assert 'id:a' not in source.health
+    assert source.health['id:b']['status'] == 'failed'
+    assert source.last_checked > 0
+    assert PlaylistSource.from_dict(source.to_dict()).health == source.health
 
 
 def test_server_values_compare_equal_to_planned_values():

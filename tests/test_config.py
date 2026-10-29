@@ -130,6 +130,11 @@ def test_playlists_are_saved_and_cleaned(tmp_path):
         'max_streams': 0,
         'chosen_groups': None,
         'left_out': [],
+        'source_type': 'm3u',
+        'request_headers': {},
+        'health': {},
+        'health_totals': {},
+        'last_checked': 0.0,
     }]
 
 

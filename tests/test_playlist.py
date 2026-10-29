@@ -16,6 +16,7 @@ from tvhplayer.core.playlist import (
     ffmpeg_command,
     ffmpeg_input,
     load_playlist,
+    load_xtream,
     parse_playlist,
     plan_channels,
     playlist_commands,
@@ -23,6 +24,7 @@ from tvhplayer.core.playlist import (
     shell_command,
     tvh_split,
     xtream_connections,
+    xtream_playlist_url,
 )
 
 KODI = (
@@ -241,6 +243,77 @@ def test_load_playlist_reads_files(tmp_path):
     with pytest.raises(PlaylistError) as info:
         load_playlist(str(tmp_path / 'missing.m3u'))
     assert str(info.value) == FILE_FAILED
+
+
+def test_provider_headers_apply_to_download_and_streams():
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append((self.headers.get('User-Agent'), self.headers.get('X-Token')))
+            body = b'#EXTM3U\n#EXTINF:-1,A\nhttp://x/a.ts|X-Token=entry\n'
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        playlist = load_playlist(
+            f'http://127.0.0.1:{server.server_address[1]}/list.m3u',
+            headers={'User-Agent': 'TV provider', 'X-Token': 'default', 'Referer': 'https://provider/'},
+        )
+        assert seen == [('TV provider', 'default')]
+        assert playlist.entries[0].headers == {
+            'User-Agent': 'TV provider', 'X-Token': 'entry', 'Referer': 'https://provider/',
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_native_xtream_live_channels_are_ingested(monkeypatch):
+    calls = []
+
+    class Reply:
+        status_code = 200
+
+        def __init__(self, data):
+            self.data = data
+
+        def json(self):
+            return self.data
+
+    replies = [
+        {'user_info': {'max_connections': '2'}},
+        [{'category_id': '7', 'category_name': 'News'}],
+        [{
+            'stream_id': 42, 'name': 'World News', 'category_id': '7', 'epg_channel_id': 'world.news',
+            'stream_icon': 'https://img/news.png', 'num': 11, 'container_extension': 'm3u8',
+        }],
+    ]
+
+    def get(session, url, params=None, timeout=None):
+        calls.append((url, params, dict(session.headers)))
+        return Reply(replies.pop(0))
+
+    monkeypatch.setattr(requests.Session, 'get', get)
+    location = xtream_playlist_url('https://xc.example:8080/base/', 'u@x', 'p a')
+    playlist = load_xtream(location, headers={'User-Agent': 'XC client'})
+    assert location == 'https://xc.example:8080/base/get.php?username=u%40x&password=p+a'
+    assert playlist.max_connections == 2
+    assert playlist.guide_url == 'https://xc.example:8080/base/xmltv.php?username=u%40x&password=p+a'
+    entry = playlist.entries[0]
+    assert entry.name == 'World News'
+    assert entry.url == 'https://xc.example:8080/base/live/u%40x/p%20a/42.m3u8'
+    assert entry.groups == ['News']
+    assert entry.attrs['tvg-id'] == 'world.news'
+    assert entry.headers == {'User-Agent': 'XC client'}
+    assert [call[1].get('action') for call in calls] == [None, 'get_live_categories', 'get_live_streams']
 
 
 def test_load_playlist_downloads_and_stops_when_cancelled():

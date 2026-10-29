@@ -222,6 +222,46 @@ def test_import_again_refreshes_the_same_playlist(app, tmp_path):
     assert dialog.status_label.text() == 'The channels from news are up to date.'
 
 
+def test_xtream_provider_and_headers_reuse_the_playlist_pipeline(app, monkeypatch):
+    from tvhplayer.core.playlist import parse_playlist
+
+    loaded = []
+
+    def load(location, cancelled=None, headers=None):
+        loaded.append((location, headers))
+        playlist = parse_playlist(TWO)
+        playlist.max_connections = 1
+        return playlist
+
+    monkeypatch.setattr(dialogs, 'load_xtream', load)
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    dialog = dialogs.ImportPlaylistDialog(host)
+    dialog.source_type_combo.setCurrentIndex(1)
+    dialog.location_input.setText('https://provider.example:8080')
+    dialog.username_input.setText('user')
+    dialog.password_input.setText('secret')
+    dialog.user_agent_input.setText('Provider App')
+    dialog.headers_input.setText('{"Referer":"https://provider.example/"}')
+    _run(app, dialog)
+    assert loaded == [(
+        'https://provider.example:8080/get.php?username=user&password=secret',
+        {'Referer': 'https://provider.example/', 'User-Agent': 'Provider App'},
+    )]
+    source = PlaylistSource.from_dict(host.stored[-1])
+    assert source.source_type == 'xc'
+    assert source.request_headers['User-Agent'] == 'Provider App'
+
+
+def test_import_rejects_unsafe_provider_headers(app):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    dialog = dialogs.ImportPlaylistDialog(host)
+    dialog.location_input.setText('https://provider.example/list.m3u')
+    dialog.headers_input.setText('{"X-Test":"ok\\nInjected: yes"}')
+    dialog.import_btn.click()
+    assert dialog._job is None
+    assert dialog.status_label.text().startswith('Other headers must be a JSON object')
+
+
 def test_other_server_offers_to_show_its_channels(app, tmp_path):
     host = FakeHost([BUILTIN, OTHER], current=BUILTIN)
     dialog = dialogs.ImportPlaylistDialog(host)
@@ -287,6 +327,8 @@ def test_playlists_dialog_refreshes_and_removes(app, tmp_path, monkeypatch):
     dialog = dialogs.PlaylistsDialog(host)
     assert dialog.playlist_list.count() == 1
     assert dialog.playlist_list.item(0).text() == 'news'
+    assert dialog.health_label.text().startswith('Stream health: 2 working')
+    assert dialog.health_btn.isEnabled()
     dialog.refresh_btn.click()
     _wait_job(app, dialog)
     assert dialog.status_label.text() == 'The channels from news are up to date.'

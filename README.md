@@ -19,7 +19,7 @@ A desktop app for watching and recording live TV, with its own built-in Tvheaden
 **Built-in server (Linux)**
 - Comes with its own Tvheadend that starts and stops with the app, so no separate server is needed
 - **Set Up Channels** finds your tuners (USB, PCIe, SAT>IP and HDHomeRun) and scans for channels
-- Add internet TV from M3U playlists, pick the groups and channels you want, and hide the ones that do not work
+- Add internet TV from M3U playlists or Xtream Codes providers, including provider HTTP headers; pick the groups and channels you want, and inspect saved stream-health results
 - TV guide for internet channels from XMLTV guides, found for your channels or added by address or file
 
 **TV guide**

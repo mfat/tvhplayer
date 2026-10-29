@@ -83,18 +83,20 @@ These need a login that may change the server's settings. The built-in server al
 
 ### Adding channels from a playlist
 
-You can add internet TV channels from an M3U playlist.
+You can add internet TV channels from an M3U playlist or an Xtream Codes provider.
 
 1. Choose **File → Import Playlist…** (Ctrl+I).
-2. Paste the playlist's web address, or click **Browse…** to pick a playlist file.
-3. If you have more than one server, choose where the channels go. The built-in server is chosen for you.
-4. Click **Import**.
+2. Choose **M3U playlist** and paste its web address or pick a file, or choose **Xtream Codes** and enter the provider server, username, and password.
+3. If the provider requires them, add its user agent and other HTTP headers. These are used both to fetch the channel list and to open its streams; headers attached to an individual M3U entry take precedence.
+4. If you have more than one server, choose where the channels go. The built-in server is chosen for you.
+5. Click **Import**.
 
 The channels appear in the channel list when the import finishes.
 
 The server keeps the channels, so TVHplayer does not read the playlist again by itself. When your provider adds or removes channels, or changes their addresses, refresh it. To manage your playlists, choose **File → Playlists…**:
 
 - **Refresh** reads the playlist again now: new channels are added, channels that left the playlist are removed, and channels whose address changed are tested again.
+- **Health…** shows the latest saved Tvheadend check result and completion time for every channel.
 - **Remove** removes the playlist and its channels.
 
 ### TV guide for internet channels
