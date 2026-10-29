@@ -2972,6 +2972,16 @@ def test_player_bar_play_stop_and_record_controls(monkeypatch, tmp_path):
         bar.stop_both_action.trigger()
         assert calls == ['server', 'server', 'local']
 
+        # Another channel: its own Record button, the recordings stay in Tasks.
+        other = Channel(uuid='o', name='Other')
+        window.active_channel = lambda: other
+        window._sync_record_controls()
+        assert window.record_btn.isVisible()
+        assert not window.stop_record_btn.isVisible()
+        assert bar.record_server_action.isEnabled() is True
+        assert bar.record_local_action.isEnabled() is True
+        window.active_channel = lambda: channel
+
         # Only this computer: Stop ends the local recording.
         window.channel_recordings_changed([])
         window.stop_record_btn.click()

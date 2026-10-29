@@ -5489,20 +5489,29 @@ class TVHeadendClient(QMainWindow):
                 bool(getattr(self, '_playback_active', False) or getattr(self, '_awaiting_playback', False))
             )
 
-    def _server_recordings_to_stop(self):
-        return recordings_to_stop(getattr(self, '_dvr_entries', None) or [], self.active_channel())
+    def _server_recordings_for(self, channel):
+        """Running server recordings of channel."""
+        if channel is None:
+            return []
+        return [
+            entry for entry in getattr(self, '_dvr_entries', None) or []
+            if entry.category() == 'recording' and entry.matches_channel(channel)
+        ]
 
     def _sync_record_controls(self):
-        """Show Stop recording while the server records the active channel or this computer records."""
+        """Show Stop recording only while the active channel records.
+
+        Recordings of other channels are listed, and stopped, in Tasks.
+        """
         bar = getattr(self, 'controls_bar', None)
         if bar is None:
             return
-        server = bool(self._server_recordings_to_stop())
-        local = self.local_recording_running()
         channel = self.active_channel()
+        local = bool(self._local_jobs_for(channel))
         bar.set_recording(
-            server, local, channel.name if channel is not None else '',
-            local_here=bool(self._local_jobs_for(channel)),
+            bool(self._server_recordings_for(channel)), local,
+            channel.name if channel is not None else '',
+            local_here=local,
         )
 
     def local_recording_running(self):
@@ -5519,9 +5528,10 @@ class TVHeadendClient(QMainWindow):
         ]
 
     def stop_any_recording(self):
-        """Stop recording ends whichever recording runs, and asks only when both do."""
-        server = bool(self._server_recordings_to_stop())
-        local = self.local_recording_running()
+        """Stop recording ends the active channel's recording, and asks only when both kinds run."""
+        channel = self.active_channel()
+        server = bool(self._server_recordings_for(channel))
+        local = bool(self._local_jobs_for(channel))
         if server and local:
             bar = self.controls_bar
             bar.popup_above(bar.stop_menu, bar.recording_group)
