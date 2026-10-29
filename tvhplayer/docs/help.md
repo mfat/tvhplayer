@@ -25,7 +25,7 @@ Click the gear button (**Manage servers**) beside the server picker to see its s
 
 **Cancel**, Escape, or closing the window discards changes since the last Apply. The built-in server's **Start with TVHplayer** setting follows the same save behavior; **Start Server** and **Stop Server** take effect immediately.
 
-Each server in the list shows whether it can be reached. Pick a server in the picker above the channel list to load its channels; TVHplayer starts on the server you used last.
+Saved servers are checked automatically when this dialog opens. **Connected** means the connection checks passed; it does not guarantee playback. **Partially connected** means HTSP connected but the HTTP/HTTPS API check failed; the details explain why. Renaming a server keeps its connection result. Pick a server in the picker above the channel list to load its channels; TVHplayer starts on the server you used last.
 
 ### Setting up channels
 

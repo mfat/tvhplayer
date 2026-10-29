@@ -1715,6 +1715,19 @@ def validate_server_url(url):
     return ""
 
 
+def server_connection_key(server):
+    if server is None:
+        return None
+    try:
+        url = http_base_url(server.get('url'))
+    except ValueError:
+        # The built-in server has no address until its ports are chosen.
+        url = (server.get('url') or '').strip()
+    return (url, server.get('username') or '',
+            server.get('password') or '', (server.get('protocol') or PROTOCOL_HTTP).lower(),
+            int(server.get('htsp_port') or 9982), bool(server.get('builtin')))
+
+
 def status_dot(color, size=10):
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -1817,14 +1830,14 @@ class ConnectionTest(QObject):
             backend = create_backend(self._server)
             backend.ping()
             if (self._server.get('protocol') or PROTOCOL_HTTP).lower() == PROTOCOL_HTSP:
+                backend.close()
+                backend = None
                 http_backend = None
                 try:
                     http_backend = create_backend(dict(self._server, protocol=PROTOCOL_HTTP))
                     http_backend.ping()
                 except Exception as exc:
-                    raise ConnectionError(
-                        f'HTSP connected, but the HTTP/HTTPS playback endpoint failed: {exc}'
-                    ) from exc
+                    error = f'HTSP connected, but the HTTP/HTTPS API check failed: {exc}. Playback has not been verified.'
                 finally:
                     if http_backend is not None:
                         try:
@@ -2134,6 +2147,8 @@ class ServerDialog(QDialog):
         if result['phase'] == 'testing':
             return STATUS_TESTING, "Testing…"
         if result['ok']:
+            if result['error']:
+                return STATUS_INVALID, "Partially connected"
             return STATUS_CONNECTED, "Connected"
         return STATUS_UNREACHABLE, "Unreachable"
 
@@ -2233,8 +2248,8 @@ class ServerDialog(QDialog):
         elif result['phase'] == 'testing':
             text = f"Connecting to {server.get('url')}…"
         elif result['ok']:
-            text = f"Connected to Tvheadend in {result['ms']} ms."
-            color = POSITIVE_TEXT
+            text = result['error'] or f"Connected to Tvheadend in {result['ms']} ms. Playback has not been verified."
+            color = STATUS_INVALID if result['error'] else POSITIVE_TEXT
         else:
             text = f"Could not connect: {result['error'].rstrip('.')}."
             color = NEGATIVE_TEXT
@@ -2248,8 +2263,10 @@ class ServerDialog(QDialog):
         server = self._selected_server()
         if server is None or server.get('builtin'):
             return
+        changed = server.get(key) != value
         server[key] = value
-        self.test_results.pop(id(server), None)
+        if changed and key != 'name':
+            self.test_results.pop(id(server), None)
         self._refresh_selected()
 
     def _normalize_address(self):
@@ -2393,9 +2410,10 @@ class ServerDialog(QDialog):
         for server in self.servers:
             if not server.get('builtin'):
                 server['url'] = http_base_url(server['url'])
-        if self._supervisor is not None and self.autostart.isChecked() != self._saved_autostart:
+        autostart_changed = self._supervisor is not None and self.autostart.isChecked() != self._saved_autostart
+        if autostart_changed:
             self.parent()._set_builtin_autostart(self.autostart.isChecked())
-        if self.servers != self._saved_servers:
+        if self.servers != self._saved_servers or autostart_changed:
             self.applied.emit([dict(server) for server in self.servers])
         self._saved_servers = [dict(server) for server in self.servers]
         self._saved_autostart = self.autostart.isChecked()
@@ -2441,7 +2459,7 @@ class ServerDialog(QDialog):
         if server.get('builtin'):
             self.parent().open_builtin_web()
         else:
-            QDesktopServices.openUrl(QUrl(server['url']))
+            QDesktopServices.openUrl(QUrl(http_base_url(server['url'])))
 
 class ServerStatusDialog(QDialog):
     def __init__(self, backend, parent=None):
@@ -6194,6 +6212,8 @@ class TVHeadendClient(QMainWindow):
         dialog.server_list.setCurrentRow(self.server_combo.currentIndex())
         print(f"Debug: Loaded {len(self.servers)} servers into dialog")
         def apply_servers(servers):
+            previous = self.server_combo.currentIndex()
+            previous_key = server_connection_key(self.current_server())
             self.servers = ensure_builtin_server(
                 servers,
                 self.config['builtin_http_port'],
@@ -6203,21 +6223,21 @@ class TVHeadendClient(QMainWindow):
             )
             self.config_store.servers = self.servers
             print(f"Debug: Updated servers list, now has {len(self.servers)} servers")
-            self.save_config()
-            self.close_backend()
-
-            previous = self.server_combo.currentIndex()
+            selected = next((index for index, server in enumerate(self.servers)
+                             if server_connection_key(server) == previous_key),
+                            min(max(previous, 0), len(self.servers) - 1))
             self.server_combo.blockSignals(True)
             self.server_combo.clear()
             for server in self.servers:
                 print(f"Debug: Adding server to combo: {server['name']}")
                 self.server_combo.addItem(server['name'])
             if self.servers:
-                self.server_combo.setCurrentIndex(min(max(previous, 0), len(self.servers) - 1))
+                self.server_combo.setCurrentIndex(selected)
             self.server_combo.blockSignals(False)
-            
-            # Refresh channels
-            self.fetch_channels()
+            self.save_config()
+            if server_connection_key(self.current_server()) != previous_key:
+                self.close_backend()
+                self.fetch_channels()
         dialog.applied.connect(apply_servers)
         dialog.exec()
     

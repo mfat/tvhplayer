@@ -265,7 +265,7 @@ def test_opening_checks_all_valid_remote_servers_once(ui, monkeypatch):
     assert len(started) == 2
     dialog.test_connection()
     assert len(started) == 3
-    dialog.name_input.setText('Edited')
+    dialog.username_input.setText('Edited')
     started[2].done.emit(started[2].token, True, 10, '')
     assert dialog.status_label.text() == 'Not checked'
     dialog.reject()
@@ -314,6 +314,8 @@ def test_htsp_connection_requires_working_http_endpoint(ui, monkeypatch, http_er
 
         def ping(self):
             checked.append(dict(self.server))
+            if self.server['protocol'] == 'http':
+                assert closed == ['htsp']
             if self.server['protocol'] == 'http' and http_error:
                 raise ConnectionError(http_error)
 
@@ -329,10 +331,111 @@ def test_htsp_connection_requires_working_http_endpoint(ui, monkeypatch, http_er
     assert all(entry['url'] == server['url'] for entry in checked)
     assert sorted(closed) == ['htsp', 'http']
     assert server['protocol'] == 'htsp'
-    assert results[0][1] is (http_error is None)
+    assert results[0][1] is True
     if http_error:
         assert 'HTSP connected' in results[0][3]
         assert http_error in results[0][3]
+        dialog = ui.ServerDialog()
+        dialog.load_servers([server])
+        dialog.test_results[id(dialog.servers[0])] = {
+            'phase': 'done', 'ok': True, 'ms': 10, 'error': results[0][3],
+        }
+        dialog._refresh_selected()
+        assert dialog.status_label.text() == 'Partially connected'
+        assert 'Playback has not been verified' in dialog.test_label.text()
+
+
+@pytest.mark.parametrize('change, reloads, selected', [
+    ('rename_other', 0, 0), ('rename_active', 0, 0),
+    ('remove_other', 0, 0), ('move_active', 0, 1),
+    ('change_active', 1, 0), ('autostart', 0, 0),
+])
+def test_apply_persists_and_only_reloads_changed_active_connection(ui, monkeypatch, change, reloads, selected):
+    from types import SimpleNamespace
+    from PyQt6.QtWidgets import QWidget, QComboBox
+
+    class Window(QWidget):
+        current_server = ui.TVHeadendClient.current_server
+
+        def __init__(self):
+            super().__init__()
+            self.servers = [_remote('A'), _remote('B', 'http://other:9981')]
+            self.server_combo = QComboBox()
+            self.server_combo.addItems(['A', 'B'])
+            self.builtin = None
+            self.config = {'builtin_http_port': 9981, 'builtin_htsp_port': 9982, 'builtin_autostart': True}
+            self.config_store = SimpleNamespace(servers=self.servers)
+            self.saved = []
+            self.closed = self.fetched = 0
+
+        def _builtin_credentials(self):
+            return ('', '')
+
+        def save_config(self):
+            self.saved.append((dict(self.config), [dict(s) for s in self.servers]))
+
+        def close_backend(self):
+            self.closed += 1
+
+        def fetch_channels(self):
+            self.fetched += 1
+
+    class Dialog(ui.ServerDialog):
+        def exec(self):
+            if change == 'rename_other':
+                self.servers[1]['name'] = 'Renamed'
+            elif change == 'rename_active':
+                self.servers[0]['name'] = 'Renamed'
+            elif change == 'remove_other':
+                self.servers.pop()
+            elif change == 'move_active':
+                self.servers.reverse()
+            elif change == 'change_active':
+                self.servers[0]['url'] = 'http://new:9981'
+            else:
+                self.parent().config['builtin_autostart'] = False
+            self.applied.emit(self.servers)
+            return self.DialogCode.Rejected
+
+    monkeypatch.setattr(ui, 'ServerDialog', Dialog)
+    window = Window()
+    ui.TVHeadendClient.manage_servers(window)
+    assert len(window.saved) == 1
+    assert window.closed == window.fetched == reloads
+    assert window.server_combo.currentIndex() == selected
+    if change == 'autostart':
+        assert window.saved[0][0]['builtin_autostart'] is False
+
+
+def test_connection_key_accepts_builtin_without_address(ui):
+    builtin = {'name': 'Built-in', 'url': '', 'builtin': True, 'protocol': 'htsp'}
+    assert ui.server_connection_key(builtin)[0] == ''
+    assert ui.server_connection_key(_remote(url='http://tvh.example'))[0] == 'http://tvh.example:9981'
+
+
+def test_name_edit_keeps_connection_result(ui):
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote()])
+    result = {'phase': 'done', 'ok': True, 'ms': 10, 'error': ''}
+    dialog.test_results[id(dialog.servers[0])] = result
+    dialog.name_input.setText('Renamed')
+    assert dialog.status_label.text() == 'Connected'
+    assert dialog.test_results[id(dialog.servers[0])] is result
+
+
+@pytest.mark.parametrize('url, expected', [
+    ('myserver', 'http://myserver:9981'),
+    ('http://myserver', 'http://myserver:9981'),
+    ('http://myserver:80', 'http://myserver:80'),
+    ('https://[::1]/tvh', 'https://[::1]/tvh'),
+])
+def test_open_web_normalizes_without_requiring_save(ui, monkeypatch, url, expected):
+    opened = []
+    monkeypatch.setattr(ui.QDesktopServices, 'openUrl', lambda value: opened.append(value.toString()))
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote(url=url)])
+    dialog._open_web()
+    assert opened == [expected]
 
 
 @pytest.mark.parametrize('builtin', [False, True])
@@ -444,7 +547,10 @@ def test_builtin_server_page(ui):
 
     dialog.autostart.setChecked(False)
     assert window.config['builtin_autostart'] is True
+    applied = []
+    dialog.applied.connect(applied.append)
     dialog.apply_btn.click()
+    assert len(applied) == 1
     assert window.config['builtin_autostart'] is False
     dialog.autostart.setChecked(True)
     dialog.reject()
