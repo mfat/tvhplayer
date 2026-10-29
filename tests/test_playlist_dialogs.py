@@ -693,6 +693,8 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert dialog.nav.item(0).text() == 'Appearance'
     assert dialog.pages.currentWidget().widget().findChild(QLabel, 'pageTitle').text() == 'Appearance'
     assert dialog.title_bar_check.isVisibleTo(dialog)
+    assert dialog._title_bar_row.description.text() == 'Takes effect the next time TVHplayer starts.'
+    assert dialog.title_bar_check.accessibleDescription() == 'Takes effect the next time TVHplayer starts.'
     assert not dialog.title_bar_check.isChecked()
     dialog.title_bar_check.click()
     assert host.title_bar is True

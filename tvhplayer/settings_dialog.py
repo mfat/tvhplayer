@@ -82,6 +82,7 @@ PICON_HELP = (
 LOGOS_HELP = "Each channel's logo is shown next to its name in the channel list and the guide."
 CHECK_HELP = 'Test every imported channel now and hide the ones that do not work.'
 DELETE_HELP = 'Only after a successful conversion. Recordings converted by hand are always kept.'
+TITLE_BAR_HELP = 'Takes effect the next time TVHplayer starts.'
 
 
 class SettingsDialog(QDialog):
@@ -359,8 +360,10 @@ class SettingsDialog(QDialog):
         # as the next start will be, since the engine chosen decides Wayland or X11.
         self.title_bar_check = ToggleSwitch("Use TVHplayer's own title bar")
         self.title_bar_check.setChecked(host.draws_title_bar())
+        describe(self.title_bar_check, description=TITLE_BAR_HELP)
         self._title_bar_group = group
-        self._title_bar_row = group.add_row(SettingRow("Use TVHplayer's own title &bar", control=self.title_bar_check))
+        self._title_bar_row = group.add_row(SettingRow(
+            "Use TVHplayer's own title &bar", TITLE_BAR_HELP, self.title_bar_check))
         self.title_bar_check.toggled.connect(host.set_draws_title_bar)
         self._show_title_bar_row()
         self.theme_combo.currentIndexChanged.connect(self._theme_chosen)

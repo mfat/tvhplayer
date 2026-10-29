@@ -159,7 +159,7 @@ While this computer is recording, TVHplayer keeps it from going to sleep. It als
 
 - **Application style**: TVHplayer, the app's own look, or any style Qt offers on your computer, such as Breeze or Fusion.
 - **Theme**: Follow System, Light or Dark.
-- **Use TVHplayer's own title bar** (GNOME and KDE on Wayland, and KDE on X11): a title bar drawn by TVHplayer in place of the desktop's.
+- **Use TVHplayer's own title bar** (GNOME and KDE on Wayland, and KDE on X11): a title bar drawn by TVHplayer in place of the desktop's. Takes effect the next time TVHplayer starts.
 
 ## Playback
 
