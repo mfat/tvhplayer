@@ -336,7 +336,10 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
         )
 
         menu = window._video_context_menu()
-        labels = [action.text() for action in menu.actions() if not action.isSeparator()]
+        assert [action.text().split('\t')[1:] for action in menu.actions()[:6]] == [
+            [], ['Ctrl+.'], [], ['M'], ['F11'], [],
+        ]
+        labels = [action.text().split('\t')[0] for action in menu.actions() if not action.isSeparator()]
         assert labels == [
             'Play',
             'Stop',
@@ -352,7 +355,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             '&Deinterlace',
         ]
         enabled = {
-            action.text(): action.isEnabled()
+            action.text().split('\t')[0]: action.isEnabled()
             for action in menu.actions()
             if not action.isSeparator()
         }
@@ -367,7 +370,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
         window.is_fullscreen = True
         playing_menu = window._video_context_menu()
         playing_labels = [
-            action.text()
+            action.text().split('\t')[0]
             for action in playing_menu.actions()
             if not action.isSeparator()
         ]
@@ -1074,6 +1077,7 @@ def test_status_dialogs_fill_window_width(monkeypatch):
 def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
     from PyQt6.QtCore import QEvent, Qt
     from PyQt6.QtGui import QKeyEvent
+    from PyQt6.QtTest import QTest
     from tvhplayer.core.models import Channel, EpgEvent
 
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
@@ -1221,15 +1225,37 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         window.keyPressEvent(typed)
         assert window.search_box.text() == ""
 
-        louder = QKeyEvent(
-            QEvent.Type.KeyPress,
-            Qt.Key.Key_Up,
-            Qt.KeyboardModifier.ControlModifier,
-        )
-        window.keyPressEvent(louder)
+        # Ctrl+Up in the channel list changes the volume and leaves the list's row.
+        window.channel_model.set_channels([
+            ui.Channel(uuid="abc", name="News", number=4),
+            ui.Channel(uuid="def", name="Sport", number=5),
+        ])
+        window.channel_list.setCurrentCell(1, 1)
+        window.activateWindow()
+        QTest.qWaitForWindowActive(window)
+        window.channel_list.setFocus()
+        QTest.keyClick(window.channel_list, Qt.Key.Key_Up, Qt.KeyboardModifier.ControlModifier)
         assert window.volume_slider.value() == 55
         assert window.status_label.text() == "Volume 55"
         assert window.config['volume'] == 55
+        assert window.channel_list.currentRow() == 1
+
+        playback_labels = [action.text().replace("&", "") for action in window.playback_menu.actions()]
+        assert playback_labels[:4] == ["Play or Stop\tP", "Stop Playback", "", "Mute or Unmute\tM"]
+        shortcuts = {
+            action.text().replace("&", ""): action.shortcut().toString()
+            for action in window.playback_menu.actions()
+            if not action.shortcut().isEmpty()
+        }
+        assert shortcuts == {
+            "Stop Playback": "Ctrl+.",
+            "Volume Up": "Ctrl+Up",
+            "Volume Down": "Ctrl+Down",
+            "Record on Server": "Ctrl+R",
+            "Stop Server Recording": "Ctrl+E",
+            "Record on This Computer": "Ctrl+Shift+R",
+            "Stop Local Recording": "Ctrl+Shift+E",
+        }
 
         window.channel_model.set_channels([ui.Channel(uuid="abc", name="News", number=4)])
         window.channel_list.setCurrentCell(0, 1)
@@ -3199,7 +3225,8 @@ def test_playback_menu_lists_tracks_and_deinterlace(monkeypatch, tmp_path):
         assert fake_player.deinterlace() == 'off'
         # Filled again when it opens, so the list follows the stream.
         window._fill_playback_menu(menu)
-        assert len(menu.actions()) == 3
+        assert len(menu.actions()) == len(window.playback_actions) + 3
+        assert menu.actions()[0] is window.playback_actions[0]
     finally:
         window.close()
         app.processEvents()

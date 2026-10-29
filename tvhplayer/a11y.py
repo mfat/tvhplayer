@@ -62,7 +62,7 @@ TV guide
 Menus
   Alt+F            File menu
   Alt+V            View menu
-  Alt+P            Playback menu: sound track, subtitles, deinterlace
+  Alt+P            Playback menu: play, volume, recording, sound track, subtitles
   Alt+H            Help menu
   Ctrl+I           Import a playlist
   Ctrl+Q           Quit (Cmd+Q on macOS)
@@ -168,6 +168,14 @@ def quality_colors(percent):
     if percent >= 40:
         return QColor("#9a3412"), QColor("#ffffff")
     return QColor("#7f1d1d"), QColor("#ffffff")
+
+
+def with_keys(text, keys):
+    """Menu item text that shows keys handled outside the menu, where a shortcut shows.
+
+    A real shortcut on a letter key would take it from typing and type-ahead.
+    """
+    return f"{text}\t{keys}"
 
 
 def find_shortcut():

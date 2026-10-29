@@ -234,6 +234,7 @@ try:
         quality_colors,
         quality_phrase,
         set_item_access,
+        with_keys,
     )
 except ImportError:
     from a11y import (
@@ -248,6 +249,7 @@ except ImportError:
         quality_colors,
         quality_phrase,
         set_item_access,
+        with_keys,
     )
 # or
 #from tvhplayer import resources_rc  # Use absolute import
@@ -3835,6 +3837,7 @@ class TVHeadendClient(QMainWindow):
         file_menu = menubar.addMenu("&File")
         view_menu = menubar.addMenu("&View")
         self.playback_menu = menubar.addMenu("&Playback")
+        self._build_playback_actions()
         self.playback_menu.aboutToShow.connect(lambda: self._fill_playback_menu(self.playback_menu))
         # Filled each time it opens: the tracks belong to the stream playing then.
         self._fill_playback_menu(self.playback_menu)
@@ -6312,7 +6315,7 @@ class TVHeadendClient(QMainWindow):
         play_action.setEnabled(channel is not None)
         play_action.triggered.connect(lambda: self.play_channel_by_data(channel))
 
-        stop_action = menu.addAction(QIcon(f"{self.icons_dir}/stop.svg"), "Stop")
+        stop_action = menu.addAction(QIcon(f"{self.icons_dir}/stop.svg"), with_keys("Stop", "Ctrl+."))
         stop_action.setEnabled(playing)
         stop_action.triggered.connect(self.stop_playback)
 
@@ -6320,25 +6323,25 @@ class TVHeadendClient(QMainWindow):
 
         mute_action = menu.addAction(
             QIcon(f"{self.icons_dir}/unmute.svg" if muted else f"{self.icons_dir}/mute.svg"),
-            "Unmute" if muted else "Mute",
+            with_keys("Unmute" if muted else "Mute", "M"),
         )
         mute_action.triggered.connect(self.toggle_mute)
 
         fullscreen_action = menu.addAction(
             QIcon(f"{self.icons_dir}/fullscreen.svg"),
-            "Exit Fullscreen" if self.is_fullscreen else "Fullscreen",
+            with_keys("Exit Fullscreen" if self.is_fullscreen else "Fullscreen", "F11"),
         )
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
 
         menu.addSeparator()
 
-        record_action = menu.addAction(QIcon(f"{self.icons_dir}/record.svg"), "Record")
+        record_action = menu.addAction(QIcon(f"{self.icons_dir}/record.svg"), with_keys("Record", "Ctrl+R"))
         record_action.setEnabled(channel is not None)
         record_action.triggered.connect(self.start_recording)
 
         local_action = menu.addAction(
             file_icon(self.icons_dir / 'save.svg', menu.palette().color(QPalette.ColorRole.WindowText).name(), 16),
-            "Record Locally",
+            with_keys("Record Locally", "Ctrl+Shift+R"),
         )
         local_action.setEnabled(channel is not None)
         local_action.triggered.connect(lambda: self.start_local_recording(channel))
@@ -6347,11 +6350,11 @@ class TVHeadendClient(QMainWindow):
         epg_action.setEnabled(channel is not None)
         epg_action.triggered.connect(lambda: self.show_channel_epg(channel))
 
-        guide_action = menu.addAction("Show in TV Guide")
+        guide_action = menu.addAction(with_keys("Show in TV Guide", "Ctrl+G"))
         guide_action.setEnabled(channel is not None)
         guide_action.triggered.connect(lambda: self.show_guide(channel))
 
-        go_action = menu.addAction("Go to Playing Channel")
+        go_action = menu.addAction(with_keys("Go to Playing Channel", "Ctrl+J"))
         go_action.setEnabled(self._playing_channel() is not None)
         go_action.triggered.connect(self.show_playing_channel)
 
@@ -6359,10 +6362,50 @@ class TVHeadendClient(QMainWindow):
         self._fill_playback_menu(menu)
         return menu
 
+    def _build_playback_actions(self):
+        """Play, sound, and recording commands for the Playback menu, with their keys.
+
+        The actions belong to the window, so their shortcuts work wherever the
+        focus is, the channel list included, and take the key from it: Ctrl+Up
+        changes the volume without moving the list.
+        """
+        def action(text, slot, shortcut=None):
+            item = QAction(text, self)
+            if shortcut:
+                item.setShortcut(shortcut)
+            item.triggered.connect(slot)
+            self.addAction(item)
+            return item
+
+        # P and M are handled in keyPressEvent, which leaves them to typing.
+        self.playback_actions = [
+            action(with_keys("&Play or Stop", "P"), lambda: self.toggle_playback()),
+            action("S&top Playback", lambda: self.stop_playback(), "Ctrl+."),
+            None,
+            action(with_keys("&Mute or Unmute", "M"), lambda: self.toggle_mute()),
+            action("Volume &Up", lambda: self._adjust_volume(5), "Ctrl+Up"),
+            action("Volume Do&wn", lambda: self._adjust_volume(-5), "Ctrl+Down"),
+            None,
+            action("&Record on Server", lambda: self.start_recording(), "Ctrl+R"),
+            action("Stop Server R&ecording", lambda: self.stop_recording(), "Ctrl+E"),
+            action(
+                "Record on This &Computer",
+                lambda: self.start_local_recording(self.selected_channel()),
+                "Ctrl+Shift+R",
+            ),
+            action("Stop &Local Recording", lambda: self.stop_local_recording(), "Ctrl+Shift+E"),
+            None,
+        ]
+
     def _fill_playback_menu(self, menu):
-        """Audio Track, Subtitles, and Deinterlace submenus for the stream playing now."""
+        """Playback commands, then Audio Track, Subtitles, and Deinterlace for the stream playing now."""
         if menu is getattr(self, 'playback_menu', None):
             menu.clear()
+            for item in self.playback_actions:
+                if item is None:
+                    menu.addSeparator()
+                else:
+                    menu.addAction(item)
         if self.cast_manager.is_connected:
             menu.addAction("Use the Cast menu to choose a stream profile").setEnabled(False)
             return
@@ -6573,30 +6616,8 @@ class TVHeadendClient(QMainWindow):
             super().keyPressEvent(event)
             return
 
-        if ctrl and shift and key == Qt.Key.Key_R:
-            self.start_local_recording(self.selected_channel())
-            event.accept()
-            return
-        if ctrl and shift and key == Qt.Key.Key_E:
-            self.stop_local_recording()
-            event.accept()
-            return
-        if ctrl and not shift and key == Qt.Key.Key_R:
-            self.start_recording()
-            event.accept()
-            return
-        if ctrl and not shift and key == Qt.Key.Key_E:
-            self.stop_recording()
-            event.accept()
-            return
-        if ctrl and not shift and key == Qt.Key.Key_Period:
-            self.stop_playback()
-            event.accept()
-            return
-        if key in (Qt.Key.Key_VolumeUp, Qt.Key.Key_VolumeDown) or (
-            ctrl and not shift and key in (Qt.Key.Key_Up, Qt.Key.Key_Down)
-        ):
-            self._adjust_volume(5 if key in (Qt.Key.Key_VolumeUp, Qt.Key.Key_Up) else -5)
+        if key in (Qt.Key.Key_VolumeUp, Qt.Key.Key_VolumeDown):
+            self._adjust_volume(5 if key == Qt.Key.Key_VolumeUp else -5)
             event.accept()
             return
         if key in (Qt.Key.Key_VolumeMute, Qt.Key.Key_MediaTogglePlayPause):
@@ -8004,18 +8025,18 @@ class TVHeadendClient(QMainWindow):
                 return
             
             # Add menu actions
-            play_action = menu.addAction("Play")
+            play_action = menu.addAction(with_keys("Play", "Enter"))
             play_action.triggered.connect(lambda: self.play_channel_by_data(channel_data))
-            record_action = menu.addAction("Record")
+            record_action = menu.addAction(with_keys("Record", "Ctrl+R"))
             record_action.triggered.connect(lambda: self.start_recording())
-            local_record_action = menu.addAction("Record Locally")
+            local_record_action = menu.addAction(with_keys("Record Locally", "Ctrl+Shift+R"))
             local_record_action.triggered.connect(
                 lambda: self.start_local_recording(channel_data))
             
             # Add EPG action
             epg_action = menu.addAction("Show EPG")
             epg_action.triggered.connect(lambda: self.show_channel_epg(channel_data))
-            guide_action = menu.addAction("Show in TV Guide")
+            guide_action = menu.addAction(with_keys("Show in TV Guide", "Ctrl+G"))
             guide_action.triggered.connect(lambda: self.show_guide(channel_data))
 
             menu.addSeparator()
