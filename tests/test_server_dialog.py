@@ -270,6 +270,35 @@ def test_htsp_connection_requires_working_http_endpoint(ui, monkeypatch, http_er
         assert http_error in results[0][3]
 
 
+@pytest.mark.parametrize('builtin', [False, True])
+def test_log_viewer_is_modal_child_of_server_management(ui, monkeypatch, builtin):
+    from PyQt6.QtWidgets import QWidget
+
+    class Window(QWidget):
+        builtin = None
+        show_builtin_log = ui.TVHeadendClient.show_builtin_log
+        show_server_log = ui.TVHeadendClient.show_server_log
+
+    class RemoteLog(ui.QDialog):
+        def __init__(self, server, parent):
+            super().__init__(parent)
+
+    # Exercise the real opening methods without starting a remote log watcher.
+    monkeypatch.setattr(ui, 'ServerLogDialog', RemoteLog)
+    opened = []
+
+    def inspect_exec(viewer):
+        opened.append((viewer.parentWidget(), viewer.windowModality()))
+        return ui.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(ui.QDialog, 'exec', inspect_exec)
+    window = Window()
+    dialog = ui.ServerDialog(window)
+    dialog.load_servers([_remote(builtin=builtin)])
+    dialog._show_log()
+    assert opened == [(dialog, ui.Qt.WindowModality.WindowModal)]
+
+
 def test_builtin_server_page(ui):
     from PyQt6.QtCore import QObject, pyqtSignal
     from PyQt6.QtWidgets import QWidget

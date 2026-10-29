@@ -2441,9 +2441,9 @@ class ServerDialog(QDialog):
         if server is None:
             return
         if server.get('builtin'):
-            self.parent().show_builtin_log()
+            self.parent().show_builtin_log(dialog_parent=self)
         else:
-            self.parent().show_server_log(server)
+            self.parent().show_server_log(server, dialog_parent=self)
 
     def _open_web(self):
         server = self._selected_server()
@@ -7569,10 +7569,11 @@ class TVHeadendClient(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
         self.statusbar.showMessage(f"Logs are in {folder}")
 
-    def show_builtin_log(self):
+    def show_builtin_log(self, *, dialog_parent=None):
         supervisor = getattr(self, 'builtin', None)
         text = supervisor.log_text() if supervisor is not None else ''
-        dialog = QDialog(self)
+        dialog = QDialog(dialog_parent if dialog_parent is not None else self)
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
         dialog.setWindowTitle("Built-in server log")
         layout = QVBoxLayout(dialog)
         where = QLabel(f"The full log is saved in {log_dir() / SERVER_LOG}")
@@ -7588,9 +7589,11 @@ class TVHeadendClient(QMainWindow):
         layout.addWidget(close_btn)
         dialog.resize(640, 360)
         dialog.exec()
+        dialog.deleteLater()
 
-    def show_server_log(self, server):
-        dialog = ServerLogDialog(server, self)
+    def show_server_log(self, server, *, dialog_parent=None):
+        dialog = ServerLogDialog(server, dialog_parent if dialog_parent is not None else self)
+        dialog.setWindowModality(Qt.WindowModality.WindowModal)
         dialog.exec()
         dialog.deleteLater()
 
