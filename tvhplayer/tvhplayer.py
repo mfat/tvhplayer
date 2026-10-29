@@ -5558,12 +5558,12 @@ class TVHeadendClient(QMainWindow):
                 "Nothing more buffered to go back to" if seconds < 0 else "Already live")
         self._sync_timeshift()
 
-    def seek_timeshift(self, seconds):
-        """Go to ``seconds`` after the oldest buffered picture, as the seek bar counts."""
+    def seek_timeshift(self, behind):
+        """Go to this many seconds behind live, as the seek bar counts."""
         state = self._timeshift_state()
         if state is None:
             return
-        self.player.skip(seconds - (state.span - state.behind))
+        self.player.skip(state.behind - behind)
         self._sync_timeshift()
 
     def go_live(self):

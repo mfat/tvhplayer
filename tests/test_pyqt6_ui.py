@@ -3294,7 +3294,11 @@ def test_timeshift_controls_follow_the_player(monkeypatch, tmp_path):
         assert bar.pause_btn.accessibleName() == 'Resume'
         fake_player.timeshift_state = Timeshift(True, 75.4, 120.0)
         window._sync_timeshift()
-        assert bar.seek_slider.value() == 44
+        assert bar.seek_slider.value() == 45
+        # mpv dropping old packets must not yank the handle left.
+        fake_player.timeshift_state = Timeshift(True, 75.4, 90.0)
+        window._sync_timeshift()
+        assert (bar.seek_slider.maximum(), bar.seek_slider.value()) == (120, 45)
         # The player cannot say for a moment, as while a seek settles: the controls stay.
         fake_player.timeshift_state = None
         window._sync_timeshift()

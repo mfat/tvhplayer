@@ -145,7 +145,7 @@ class PlayerBar(QWidget):
     set_playing(), set_timeshift(), set_recording(), set_muted() and set_fullscreen().
     """
 
-    # Seconds after the oldest buffered picture, chosen on the seek bar.
+    # Seconds behind live, chosen on the seek bar.
     seek_requested = pyqtSignal(int)
 
     def __init__(self, icons_dir, parent=None):
@@ -224,6 +224,7 @@ class PlayerBar(QWidget):
             layout.addWidget(control)
         self._paused = None
         self._behind = None
+        self._seek_span = 0
         self._timeshift_visible = None
 
         # Shown while nothing records: a dark pill that opens the Record menu.
@@ -471,7 +472,7 @@ class PlayerBar(QWidget):
 
     def _seek_moved(self, value):
         if not self._seek_updating:
-            self.seek_requested.emit(value)
+            self.seek_requested.emit(self._seek_span - value)
 
     def set_timeshift(self, state):
         """The player's ``(paused, behind, span)``, or None to hide the timeshift controls."""
@@ -482,12 +483,16 @@ class PlayerBar(QWidget):
                 control.setVisible(visible)
         if state is None:
             self._paused = self._behind = None
+            self._seek_span = 0
             return
         paused, behind, span = state
+        # Keep the longest span seen this channel. mpv drops old packets as you
+        # play, which would otherwise shrink the bar and yank the handle left.
+        self._seek_span = max(self._seek_span, int(span), int(behind))
         if not self.seek_slider.isSliderDown():
             self._seek_updating = True
-            self.seek_slider.setRange(0, max(int(span), 0))
-            self.seek_slider.setValue(int(span - behind))
+            self.seek_slider.setRange(0, self._seek_span)
+            self.seek_slider.setValue(self._seek_span - int(behind))
             self._seek_updating = False
         if paused != self._paused:
             self._paused = paused
