@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.2.1
+Version:        4.2.2
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,17 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.2.2-1
+- Add File → Manage Servers to add, edit and test servers in one place
+- Check saved remote servers in the background and update their status dots automatically
+- Add an Apply button to the connection dialog
+- Verify the HTTP playback endpoint when testing HTSP servers
+- Normalize server addresses to http:// and keep the right default port for port-less addresses
+- Don't discard the config when a saved server address can't be parsed
+- Add a Live resize setting; panes resize only on release by default before Qt 6.11
+- Update the built-in log viewer live and keep log viewers in front of Server Management
+- Rename File → Playlists to Manage Playlists
+
 * Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.2.1-1
 - Add provider-aware IPTV imports
 - Let IPTV source settings update credentials without duplicating playlists
