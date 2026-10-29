@@ -51,7 +51,7 @@ def test_address_check_messages(ui):
     assert check('http://127.0.0.1:9981') == ""
 
 
-def test_edits_apply_live_and_closing_keeps_them(ui):
+def test_edits_are_drafts_and_ok_saves_them(ui):
     original = [_remote()]
     dialog = ui.ServerDialog()
     dialog.load_servers(original)
@@ -69,8 +69,61 @@ def test_edits_apply_live_and_closing_keeps_them(ui):
     dialog.protocol_combo.setCurrentIndex(dialog.protocol_combo.findData('http'))
     assert dialog.htsp_port_input.isHidden()
 
-    dialog.reject()
+    dialog.accept()
     assert dialog.result() == ui.QDialog.DialogCode.Accepted
+
+
+def test_apply_saves_without_closing_and_cancel_discards_later_edits(ui):
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote()])
+    saved = []
+    dialog.applied.connect(saved.append)
+    dialog.show()
+    assert not dialog.apply_btn.isEnabled()
+    dialog.name_input.setText('Home')
+    assert dialog.apply_btn.isEnabled()
+    dialog.apply_btn.click()
+    assert dialog.isVisible()
+    assert saved[0][0]['name'] == 'Home'
+    assert not dialog.apply_btn.isEnabled()
+    dialog.name_input.setText('Unsaved')
+    dialog.reject()
+    assert dialog.result() == ui.QDialog.DialogCode.Rejected
+    assert dialog.servers[0]['name'] == 'Home'
+    assert len(saved) == 1
+
+
+def test_close_discards_invalid_draft_without_saving(ui):
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote()])
+    saved = []
+    dialog.applied.connect(saved.append)
+    dialog.show()
+    dialog.url_input.setText('invalid')
+    dialog.apply_btn.click()
+    assert dialog.isVisible()
+    assert not saved
+    dialog.close()
+    assert not dialog.isVisible()
+    assert dialog.servers == [_remote()]
+
+
+def test_reverting_edits_disables_apply_and_ok_does_not_resave(ui):
+    dialog = ui.ServerDialog()
+    dialog.load_servers([_remote()])
+    saved = []
+    dialog.applied.connect(saved.append)
+    dialog.name_input.setText('Changed')
+    dialog.name_input.setText('UK')
+    assert not dialog.apply_btn.isEnabled()
+    dialog.add_server()
+    assert dialog.apply_btn.isEnabled()
+    dialog.remove_server()
+    assert not dialog.apply_btn.isEnabled()
+    dialog.name_input.setText('Saved')
+    dialog.apply_btn.click()
+    dialog.accept()
+    assert len(saved) == 1
 
 
 def test_portless_address_is_normalized_on_edit_and_close(ui):
@@ -245,6 +298,11 @@ def test_builtin_server_page(ui):
     assert dialog.server_list.item(0).data(ui.SERVER_STATUS_ROLE) == "Running on this computer"
 
     dialog.autostart.setChecked(False)
+    assert window.config['builtin_autostart'] is True
+    dialog.apply_btn.click()
+    assert window.config['builtin_autostart'] is False
+    dialog.autostart.setChecked(True)
+    dialog.reject()
     assert window.config['builtin_autostart'] is False
 
     dialog.remove_server()

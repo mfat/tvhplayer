@@ -21,7 +21,9 @@ Click the gear button (**Manage servers**) beside the server picker to see its s
 3. Enter a name and the server address, including `http://` or `https://` and the port, for example `http://192.168.1.10:9981`.
 4. Choose the protocol. **HTSP** (port 9982) is the default and gets channel and recording changes as they happen; **HTTP JSON API** works where HTSP is blocked.
 5. Enter your Tvheadend username and password, if the server asks for one.
-6. Click **Test Connection**, then save.
+6. Click **Test Connection**, then **Apply** to save and keep editing, or **OK** to save and close. A failed connection test does not prevent saving an offline server.
+
+**Cancel**, Escape, or closing the window discards changes since the last Apply. The built-in server's **Start with TVHplayer** setting follows the same save behavior; **Start Server** and **Stop Server** take effect immediately.
 
 Each server in the list shows whether it can be reached. Pick a server in the picker above the channel list to load its channels; TVHplayer starts on the server you used last.
 

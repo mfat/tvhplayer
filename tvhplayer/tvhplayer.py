@@ -1864,15 +1864,18 @@ class ConnectionTest(QObject):
 class ServerDialog(QDialog):
     """Servers on the left, the selected one's settings on the right.
 
-    Edits apply as they are typed. Closing keeps them once every server has
-    a name and a usable address.
+    Apply or OK saves edits; Cancel discards edits since the last save.
     """
+
+    applied = pyqtSignal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Server Management")
         self.setModal(True)
         self.servers = []
+        self._saved_servers = []
+        self._saved_autostart = False
         # id(server) -> {'phase': 'testing'|'done', 'ok', 'ms', 'error', 'token'}
         self.test_results = {}
         self._tests = set()
@@ -1886,7 +1889,7 @@ class ServerDialog(QDialog):
         layout = QVBoxLayout(self)
         self.setAccessibleName("Server Management")
         self.setAccessibleDescription(
-            "Add, edit, or remove TVHeadend servers. Changes are kept when the window closes."
+            "Add, edit, or remove TVHeadend servers. Use Apply or OK to save changes, or Cancel to discard them."
         )
         columns = QHBoxLayout()
         columns.setSpacing(12)
@@ -1973,10 +1976,14 @@ class ServerDialog(QDialog):
         detail.addLayout(footer)
         columns.addWidget(self.detail_panel, 1)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        close_btn = buttons.button(QDialogButtonBox.StandardButton.Close)
-        close_btn.setText("&Close")
-        close_btn.setDefault(True)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+            | QDialogButtonBox.StandardButton.Apply
+        )
+        self.apply_btn = buttons.button(QDialogButtonBox.StandardButton.Apply)
+        self.apply_btn.clicked.connect(self.apply_changes)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setDefault(True)
+        buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
@@ -2080,7 +2087,8 @@ class ServerDialog(QDialog):
         parent = self.parent()
         if self._supervisor is not None:
             self.autostart.setChecked(bool(parent.config.get('builtin_autostart')))
-            self.autostart.toggled.connect(parent._set_builtin_autostart)
+            self._saved_autostart = self.autostart.isChecked()
+            self.autostart.toggled.connect(self._update_apply)
         else:
             self.autostart.setEnabled(False)
         form.addRow("", self.autostart)
@@ -2091,8 +2099,9 @@ class ServerDialog(QDialog):
         return page
 
     def load_servers(self, servers):
-        # A copy, so the main window's list changes only when the dialog closes.
+        # Keep drafts separate from the last applied settings.
         self.servers = [dict(server) for server in servers]
+        self._saved_servers = [dict(server) for server in servers]
         self.test_results.clear()
         self.server_list.blockSignals(True)
         self.server_list.clear()
@@ -2183,6 +2192,7 @@ class ServerDialog(QDialog):
 
     def _refresh_selected(self):
         """Update the status, hints, and buttons for the selected server."""
+        self._update_apply()
         server = self._selected_server()
         if server is None:
             self.title_label.setText("No server selected")
@@ -2353,7 +2363,13 @@ class ServerDialog(QDialog):
             self._supervisor.start()
         self._refresh_selected()
 
-    def accept(self):
+    def _update_apply(self):
+        self.apply_btn.setEnabled(
+            self.servers != self._saved_servers
+            or self.autostart.isChecked() != self._saved_autostart
+        )
+
+    def apply_changes(self):
         for row, server in enumerate(self.servers):
             if server.get('builtin'):
                 continue
@@ -2372,16 +2388,27 @@ class ServerDialog(QDialog):
                     f"{server.get('name') or UNTITLED_SERVER}: {problem}",
                 )
                 field.setFocus()
-                return
+                return False
         for server in self.servers:
             if not server.get('builtin'):
                 server['url'] = http_base_url(server['url'])
+        if self._supervisor is not None and self.autostart.isChecked() != self._saved_autostart:
+            self.parent()._set_builtin_autostart(self.autostart.isChecked())
+        if self.servers != self._saved_servers:
+            self.applied.emit([dict(server) for server in self.servers])
+        self._saved_servers = [dict(server) for server in self.servers]
+        self._saved_autostart = self.autostart.isChecked()
         self._show_selected()
-        super().accept()
+        return True
+
+    def accept(self):
+        if self.apply_changes():
+            super().accept()
 
     def reject(self):
-        # Edits apply as they are typed, so every way of closing keeps them.
-        self.accept()
+        self.servers = [dict(server) for server in self._saved_servers]
+        self.autostart.setChecked(self._saved_autostart)
+        super().reject()
 
     def done(self, result):
         for test in self._tests:
@@ -6112,9 +6139,9 @@ class TVHeadendClient(QMainWindow):
         dialog.load_servers(self.servers)
         dialog.server_list.setCurrentRow(self.server_combo.currentIndex())
         print(f"Debug: Loaded {len(self.servers)} servers into dialog")
-        if dialog.exec() == QDialog.DialogCode.Accepted:
+        def apply_servers(servers):
             self.servers = ensure_builtin_server(
-                dialog.servers,
+                servers,
                 self.config['builtin_http_port'],
                 self.config['builtin_htsp_port'],
                 *self._builtin_credentials(),
@@ -6137,6 +6164,8 @@ class TVHeadendClient(QMainWindow):
             
             # Refresh channels
             self.fetch_channels()
+        dialog.applied.connect(apply_servers)
+        dialog.exec()
     
     def save_config(self):
         """Save current configuration"""
