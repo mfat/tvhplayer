@@ -73,7 +73,7 @@ def test_live_now_grid_uses_current_events_not_stale_htsp_event_ids():
     result = TvhBackend.get_now_next_live(Backend(), [old])
     assert result['channel'].now is current
     assert result['channel'].next is following
-    assert calls == [('grid', 'now', 10000), ('load', [201])]
+    assert calls == [('grid', 'now', None), ('load', [201])]
 
 
 def test_background_refresh_failure_does_not_query_stale_ids():
