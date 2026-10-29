@@ -81,6 +81,8 @@ LIGHT = {
     'scroll': 'rgba(35,38,41,70)', 'scroll_hover': 'rgba(35,38,41,110)', 'track': 'rgba(35,38,41,31)',
     'disabled': 'rgba(35,38,41,110)', 'disabled_soft': 'rgba(35,38,41,90)',
     'selected': 'rgba(61,174,233,51)', 'selected_ink': '#124a6a',
+    # A selected row in a list or table; menus and dropdown lists use 'selected'.
+    'row': 'rgba(61,174,233,51)', 'row_ink': '#124a6a',
     'tooltip': '#232629', 'tooltip_ink': '#ffffff',
     'arrow': '#5d6166', 'arrow_off': '#b8babc',
 }
@@ -98,6 +100,7 @@ DARK = {
     'scroll': 'rgba(252,252,252,70)', 'scroll_hover': 'rgba(252,252,252,120)', 'track': 'rgba(252,252,252,31)',
     'disabled': 'rgba(252,252,252,100)', 'disabled_soft': 'rgba(252,252,252,80)',
     'selected': 'rgba(61,174,233,64)', 'selected_ink': '#d4eefc',
+    'row': 'rgba(61,174,233,64)', 'row_ink': '#d4eefc',
     'tooltip': '#31363b', 'tooltip_ink': '#fcfcfc',
     'arrow': '#a1a9b1', 'arrow_off': '#5c6166',
 }
@@ -341,12 +344,18 @@ def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT, organic=False):
             })
         else:
             c['pressed'] = _rgba(c['accent'], 61) if dark else ACCENTS[accent][2]
+        # Rows in lists and tables take the soft accent with the accent's dark or
+        # light ink; menus and dropdown lists are filled with the accent itself.
+        c['row'] = c['pressed']
+        c['row_ink'] = c['ink'] if accent == ACCENT_DEFAULT else c['selected_ink']
         c['selected'] = c['accent']
         c['selected_ink'] = c['on_accent']
     elif accent != ACCENT_DEFAULT or window != WINDOW_DEFAULT:
         # Hover and pressed fills are the accent faintly over the fields' color.
         c['hover'] = _blend(c['accent'], c['base'], 0.11 if dark else 0.05)
         c['pressed'] = _blend(c['accent'], c['base'], 0.24 if dark else 0.13)
+    if not organic:
+        c['row'], c['row_ink'] = c['selected'], c['selected_ink']
     return c
 
 
@@ -710,9 +719,10 @@ def _dress(widget):
         _keep(widget)
         palette = QPalette(widget.property('theme_palette'))
         # ThemeStyle draws the selected row as a light tint, so its text is dark, not white;
-        # Organic fills it with the accent.
+        # Organic fills a dropdown list's with the accent.
         popup = _in_combo_popup(widget)
-        _set_ink(palette, QPalette.ColorRole.HighlightedText, 'ink' if popup and not _organic else 'selected_ink')
+        _set_ink(palette, QPalette.ColorRole.HighlightedText,
+                 ('selected_ink' if _organic else 'ink') if popup else 'row_ink')
         if popup:
             _set_ink(palette, QPalette.ColorRole.Base, 'popover', ALL)
         if name == 'settingsNav':
@@ -1044,7 +1054,7 @@ class ThemeStyle(QProxyStyle):
 
     @staticmethod
     def _selected_row(option, painter, widget):
-        """A selected row is one fill, rounded at its two ends.
+        """A selected row is one tint, rounded at its two ends; Organic fills a dropdown list's.
 
         A table counts hidden columns, so with its first column hidden no
         visible cell would start the row: the ends are the visible ones.
@@ -1061,7 +1071,7 @@ class ThemeStyle(QProxyStyle):
             rect.setRight(rect.right() + radius + 4)
         painter.save()
         painter.setClipRect(option.rect)
-        _box(painter, rect, radius, color('selected'))
+        _box(painter, rect, radius, color('selected' if _in_combo_popup(widget) else 'row'))
         painter.restore()
 
     def drawControl(self, element, option, painter, widget=None):

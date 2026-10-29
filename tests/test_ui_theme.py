@@ -131,6 +131,9 @@ def test_organic_colors_are_jottr_s_paper_with_selections_filled_by_the_accent(q
     assert light['accent'] == ORGANIC_ACT['paper'][0][0]
     assert light['on_accent'] == ORGANIC_ACT['paper'][0][3]
     assert (light['selected'], light['selected_ink']) == (light['accent'], light['on_accent'])
+    # Rows in lists and tables take the soft accent with the ordinary ink.
+    assert (light['row'], light['row_ink']) == (ORGANIC_ACT['paper'][0][2], light['ink'])
+    assert compose(False, 'teal', organic=True)['row'] == ACCENTS['teal'][2]
     assert compose(True, 'teal', 'cream', organic=True)['selected'] == ACCENTS['teal'][3]
     for accent, _label in accent_choices():
         for window, _label in window_color_choices():
