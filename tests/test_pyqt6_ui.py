@@ -2628,9 +2628,10 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         _wait_for_channels(app, window)
         assert header.textElideMode() == ui.Qt.TextElideMode.ElideRight
 
-        # Defaults: number, name, now, and status show; disabled channels are left out.
+        # Defaults: name, now, and status show; disabled channels are left out.
         assert [_cell(table, row, ui.COL_NAME).text() for row in range(table.rowCount())] == ['News', 'Sport']
         assert not header.isSectionHidden(ui.COL_NOW)
+        assert header.isSectionHidden(ui.COL_NUMBER)
         assert header.isSectionHidden(ui.COL_NEXT) and header.isSectionHidden(ui.COL_TYPE)
         news_row = _channel_row(table, 'News')
         now_item = _cell(table, news_row, ui.COL_NOW)

@@ -35,7 +35,7 @@ _FLAG_OPTIONS = (
 
 CHANNEL_LIST_DEFAULTS = {
     'columns': {
-        COLUMN_NUMBER: True,
+        COLUMN_NUMBER: False,
         COLUMN_NOW: True,
         COLUMN_NEXT: False,
         COLUMN_TYPE: False,
