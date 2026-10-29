@@ -223,6 +223,8 @@ except ImportError:
     )
 try:
     from .a11y import (
+        FULLSCREEN_KEY,
+        HELP_KEY,
         ShortcutHelpDialog,
         announce,
         announce_label,
@@ -230,6 +232,7 @@ try:
         button_stylesheet,
         describe,
         find_shortcut,
+        keys_text,
         prefers_high_contrast,
         quality_colors,
         quality_phrase,
@@ -238,6 +241,8 @@ try:
     )
 except ImportError:
     from a11y import (
+        FULLSCREEN_KEY,
+        HELP_KEY,
         ShortcutHelpDialog,
         announce,
         announce_label,
@@ -245,6 +250,7 @@ except ImportError:
         button_stylesheet,
         describe,
         find_shortcut,
+        keys_text,
         prefers_high_contrast,
         quality_colors,
         quality_phrase,
@@ -3826,10 +3832,11 @@ class TVHeadendClient(QMainWindow):
 
         
         self.setAccessibleName("TVHplayer")
-        self.setAccessibleDescription(
+        self.setAccessibleDescription(keys_text(
             "Watch and record TVHeadend channels. "
-            "Press F11 or F for fullscreen, Ctrl+F to search, and F1 for keyboard shortcuts."
-        )
+            f"Press {FULLSCREEN_KEY} or F for fullscreen, Ctrl+F to search, "
+            f"and {HELP_KEY} for keyboard shortcuts."
+        ))
 
         # Create menu bar. Where the desktop leaves the title bar to the app, it goes in ours.
         menubar = QMenuBar(self)
@@ -3850,7 +3857,7 @@ class TVHeadendClient(QMainWindow):
         help_menu.addAction(user_guide_action)
 
         shortcuts_action = QAction("Keyboard &Shortcuts", self)
-        shortcuts_action.setShortcut("F1")
+        shortcuts_action.setShortcut(HELP_KEY)
         shortcuts_action.triggered.connect(self.show_keyboard_shortcuts)
         help_menu.addAction(shortcuts_action)
         
@@ -3868,9 +3875,10 @@ class TVHeadendClient(QMainWindow):
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
         
-        # F11 is the menu shortcut. Plain F is handled when it will not interrupt typing.
+        # F11 (Control+Command+F on macOS) is the menu shortcut. Plain F is
+        # handled when it will not interrupt typing.
         self.fullscreen_action = QAction("Fullscreen", self)
-        self.fullscreen_action.setShortcut("F11")
+        self.fullscreen_action.setShortcut(FULLSCREEN_KEY)
         self.fullscreen_action.setCheckable(True)
         self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(self.fullscreen_action)
@@ -3917,10 +3925,9 @@ class TVHeadendClient(QMainWindow):
 
         # Create actions
         exit_action = QAction("E&xit", self)
-        if sys.platform == "darwin":  # macOS
-            exit_action.setShortcut("Cmd+Q")
-        else:  # Windows/Linux
-            exit_action.setShortcut("Ctrl+Q")
+        # Qt's Ctrl is Command on macOS: Ctrl+Q is ⌘Q there. "Cmd+Q" is no key at all.
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.setMenuRole(QAction.MenuRole.QuitRole)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         self.window_frame = window_frame.install(self, menubar, self.config['own_title_bar'])
@@ -3987,7 +3994,7 @@ class TVHeadendClient(QMainWindow):
             "TV guide",
             "Show what is on every channel, now and later. Keyboard: Ctrl+G.",
         )
-        self.guide_btn.setToolTip("TV guide (Ctrl+G)")
+        self.guide_btn.setToolTip(keys_text("TV guide (Ctrl+G)"))
         server_layout.addWidget(self.guide_btn)
         left_layout.addLayout(server_layout)
         
@@ -4130,7 +4137,7 @@ class TVHeadendClient(QMainWindow):
         describe(
             self.video_frame,
             "Video player",
-            "Playback picture. F or F11 toggles fullscreen, Escape leaves fullscreen, "
+            f"Playback picture. F or {FULLSCREEN_KEY} toggles fullscreen, Escape leaves fullscreen, "
             "M mutes, P plays, and Ctrl+. stops. Shift+F10 opens the playback menu.",
         )
         self.video_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -4185,8 +4192,12 @@ class TVHeadendClient(QMainWindow):
 
         self.fullscreen_btn = bar.fullscreen_btn
         self.fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        describe(self.fullscreen_btn, "Fullscreen", "Fill the screen with the picture. Keyboard: F11 or F. Escape leaves fullscreen.")
-        self.fullscreen_btn.setToolTip("Fullscreen (F11)")
+        describe(
+            self.fullscreen_btn,
+            "Fullscreen",
+            f"Fill the screen with the picture. Keyboard: {FULLSCREEN_KEY} or F. Escape leaves fullscreen.",
+        )
+        self.fullscreen_btn.setToolTip(keys_text(f"Fullscreen ({FULLSCREEN_KEY})"))
         self.right_layout.addWidget(self.controls_bar)
         # In fullscreen the bar is a child overlay on the picture.
         self.floating_bar = FloatingBar(self)
@@ -6294,10 +6305,18 @@ class TVHeadendClient(QMainWindow):
         if hasattr(self, 'fullscreen_btn'):
             if self.is_fullscreen:
                 self.fullscreen_btn.setToolTip("Exit fullscreen (Esc)")
-                describe(self.fullscreen_btn, "Exit fullscreen", "Return to the window. Keyboard: Escape, F11, or F.")
+                describe(
+                    self.fullscreen_btn,
+                    "Exit fullscreen",
+                    f"Return to the window. Keyboard: Escape, {FULLSCREEN_KEY}, or F.",
+                )
             else:
-                self.fullscreen_btn.setToolTip("Fullscreen (F11)")
-                describe(self.fullscreen_btn, "Fullscreen", "Fill the screen with the picture. Keyboard: F11 or F.")
+                self.fullscreen_btn.setToolTip(keys_text(f"Fullscreen ({FULLSCREEN_KEY})"))
+                describe(
+                    self.fullscreen_btn,
+                    "Fullscreen",
+                    f"Fill the screen with the picture. Keyboard: {FULLSCREEN_KEY} or F.",
+                )
             self.controls_bar.set_fullscreen(self.is_fullscreen)
         if hasattr(self, 'video_frame'):
             announce(
@@ -6331,7 +6350,7 @@ class TVHeadendClient(QMainWindow):
 
         fullscreen_action = menu.addAction(
             QIcon(f"{self.icons_dir}/fullscreen.svg"),
-            with_keys("Exit Fullscreen" if self.is_fullscreen else "Fullscreen", "F11"),
+            with_keys("Exit Fullscreen" if self.is_fullscreen else "Fullscreen", FULLSCREEN_KEY),
         )
         fullscreen_action.triggered.connect(self.toggle_fullscreen)
 

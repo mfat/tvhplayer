@@ -8,6 +8,9 @@ to notify assistive technology. A QLabel sends it on each new text while it
 has no accessible name; other widgets send it when their name is set.
 """
 
+import re
+import sys
+
 from PyQt6.QtGui import QColor, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
@@ -65,8 +68,50 @@ Menus
   Alt+P            Playback menu: play, volume, recording, sound track, subtitles
   Alt+H            Help menu
   Ctrl+I           Import a playlist
-  Ctrl+Q           Quit (Cmd+Q on macOS)
+  Ctrl+Q           Quit
 """
+
+MAC = sys.platform == "darwin"
+# F11 shows the desktop on macOS; Control+Command+F is its fullscreen key.
+MAC_FULLSCREEN_KEY = "Ctrl+Meta+F"
+FULLSCREEN_KEY = MAC_FULLSCREEN_KEY if MAC else "F11"
+HELP_KEY = "Ctrl+?" if MAC else "F1"
+
+# Ctrl+R, Ctrl+Shift+E, Ctrl+., Shift+F10: modifiers, then a word or one symbol.
+_KEY_COMBO = re.compile(r"\b(?:(?:Ctrl|Shift|Alt|Meta)\+)+(?:[A-Za-z0-9]+|[^\sA-Za-z0-9])")
+
+
+def keys_text(text):
+    """Write the key combinations in text as this platform shows them.
+
+    Qt's Ctrl is Command on macOS, where menus show ⌘R for Ctrl+R; text
+    written by hand would say Ctrl+R next to it. Elsewhere it is unchanged
+    (or translated, as the menus are).
+    """
+    def native(match):
+        sequence = QKeySequence(match.group())
+        return sequence.toString(QKeySequence.SequenceFormat.NativeText) or match.group()
+    return _KEY_COMBO.sub(native, text)
+
+
+def shortcut_help(mac=MAC):
+    """The keyboard shortcut list, with this platform's keys."""
+    lines = []
+    for line in SHORTCUT_HELP.splitlines():
+        if not line.startswith("  "):
+            lines.append(line)
+            continue
+        keys, text = line[2:19].rstrip(), line[19:]
+        if mac and keys.startswith("Alt+"):
+            # macOS menus have no Alt letters; Control+F2 moves to the menu bar.
+            if keys == "Alt+F":
+                lines.append(f"  {keys_text('Meta+F2'):<17}Move to the menu bar (Fn+Control+F2 on a laptop)")
+            continue
+        if mac:
+            keys = keys.replace("F11", MAC_FULLSCREEN_KEY)
+        keys = keys_text(keys)
+        lines.append(f"  {keys:<16} {text}")
+    return "\n".join(lines) + "\n"
 
 
 def prefers_high_contrast():
@@ -90,6 +135,7 @@ def describe(widget, name=None, description=""):
     if name:
         widget.setAccessibleName(name)
     if description:
+        description = keys_text(description)
         widget.setAccessibleDescription(description)
         if hasattr(widget, "setWhatsThis"):
             widget.setWhatsThis(description)
@@ -175,7 +221,7 @@ def with_keys(text, keys):
 
     A real shortcut on a letter key would take it from typing and type-ahead.
     """
-    return f"{text}\t{keys}"
+    return f"{text}\t{keys_text(keys)}"
 
 
 def find_shortcut():
@@ -194,7 +240,7 @@ class ShortcutHelpDialog(QDialog):
         layout = QVBoxLayout(self)
         self.help_text = QTextEdit()
         self.help_text.setReadOnly(True)
-        self.help_text.setPlainText(SHORTCUT_HELP)
+        self.help_text.setPlainText(shortcut_help())
         self.help_text.setAccessibleName("Keyboard shortcuts")
         self.help_text.setAccessibleDescription("List of TVHplayer keyboard shortcuts")
         layout.addWidget(self.help_text)

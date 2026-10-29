@@ -24,9 +24,9 @@ from PyQt6.QtWidgets import (
 )
 
 try:
-    from .a11y import button_stylesheet, describe, prefers_high_contrast
+    from .a11y import button_stylesheet, describe, keys_text, prefers_high_contrast, with_keys
 except ImportError:
-    from a11y import button_stylesheet, describe, prefers_high_contrast
+    from a11y import button_stylesheet, describe, keys_text, prefers_high_contrast, with_keys
 
 BAR_BACKGROUND = '#141414'
 FLOATING_BACKGROUND = QColor(20, 20, 20, 224)
@@ -199,7 +199,7 @@ class PlayerBar(QWidget):
             "Open the record menu: record on the server or on this computer. "
             "Keyboard: Ctrl+R records on the server, Ctrl+Shift+R on this computer.",
         )
-        self.record_btn.setToolTip("Record (Ctrl+R / Ctrl+Shift+R)")
+        self.record_btn.setToolTip(keys_text("Record (Ctrl+R / Ctrl+Shift+R)"))
         layout.addWidget(self.record_btn)
 
         # Shown while recording: a red pill. Stop on the left, the Record menu on the right.
@@ -262,11 +262,11 @@ class PlayerBar(QWidget):
         self.record_menu.setAccessibleName("Record")
         self.record_menu.setStyleSheet(_menu_stylesheet())
         self.record_server_action = self.record_menu.addAction(
-            svg_icon(MENU_DOT_SVG, RECORD_RED, 18), "Record on server…\tCtrl+R"
+            svg_icon(MENU_DOT_SVG, RECORD_RED, 18), with_keys("Record on server…", "Ctrl+R")
         )
         self.record_local_action = self.record_menu.addAction(
             local_icon,
-            "Record on this computer\tCtrl+Shift+R",
+            with_keys("Record on this computer", "Ctrl+Shift+R"),
         )
 
         self.stop_menu = QMenu(self)
@@ -289,11 +289,11 @@ class PlayerBar(QWidget):
         heading_action.setEnabled(False)
         self.stop_menu.addAction(heading_action)
         self.stop_server_action = self.stop_menu.addAction(
-            svg_icon(MENU_DOT_SVG, RECORD_RED, 18), "Stop server recording\tCtrl+E"
+            svg_icon(MENU_DOT_SVG, RECORD_RED, 18), with_keys("Stop server recording", "Ctrl+E")
         )
         self.stop_local_action = self.stop_menu.addAction(
             local_icon,
-            "Stop local recording\tCtrl+Shift+E",
+            with_keys("Stop local recording", "Ctrl+Shift+E"),
         )
         self.stop_both_action = self.stop_menu.addAction(
             svg_icon(MENU_SQUARE_SVG, '#ff6b6f', 18), "Stop both"
@@ -418,10 +418,10 @@ class PlayerBar(QWidget):
                 "Recording on the server and on this computer. Asks which to stop.",
             )
         elif self._server:
-            self.stop_record_btn.setToolTip("Stop the server recording (Ctrl+E)")
+            self.stop_record_btn.setToolTip(keys_text("Stop the server recording (Ctrl+E)"))
             describe(self.stop_record_btn, "Stop recording", "Stop the recording on the server. Keyboard: Ctrl+E.")
         else:
-            self.stop_record_btn.setToolTip("Stop the recording on this computer (Ctrl+Shift+E)")
+            self.stop_record_btn.setToolTip(keys_text("Stop the recording on this computer (Ctrl+Shift+E)"))
             describe(
                 self.stop_record_btn,
                 "Stop recording",
@@ -432,12 +432,12 @@ class PlayerBar(QWidget):
         if self._server:
             self.record_server_action.setText("Record on server\tRecording")
         else:
-            self.record_server_action.setText("Record on server…\tCtrl+R")
+            self.record_server_action.setText(with_keys("Record on server…", "Ctrl+R"))
         self.record_server_action.setEnabled(not self._server)
         if local_here:
             self.record_local_action.setText("Record on this computer\tRecording")
         else:
-            self.record_local_action.setText("Record on this computer\tCtrl+Shift+R")
+            self.record_local_action.setText(with_keys("Record on this computer", "Ctrl+Shift+R"))
         self.record_local_action.setEnabled(not local_here)
 
     def set_muted(self, muted):
