@@ -289,6 +289,7 @@ GUIDE_AFTER_CHANNELS_MS = 3000
 GUIDE_START_FALLBACK_MS = 60000
 # How long a server's tuner count and channel muxes are trusted before reading them again.
 TUNER_USE_REFRESH_SECONDS = 600
+STATUS_BAR_HEIGHT = 34
 DEINTERLACE_CHOICES = (
     (DEINTERLACE_AUTO, "&Automatic", "Deinterlace streams marked as interlaced, such as 1080i broadcasts"),
     (DEINTERLACE_ON, "Al&ways", "Deinterlace every stream, for channels that are interlaced but not marked as such"),
@@ -4243,12 +4244,13 @@ class TVHeadendClient(QMainWindow):
         # Status bar setup
         self.statusbar = QStatusBar()
         self.statusbar.setAccessibleName("Status bar")
+        self.statusbar.setMinimumHeight(STATUS_BAR_HEIGHT)
         self.setStatusBar(self.statusbar)
         
         # Create a container widget for status bar items
         status_container = QWidget()
         status_layout = QHBoxLayout(status_container)
-        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setContentsMargins(4, 4, 4, 4)
         status_layout.setSpacing(10)  # Space between indicator and text
         
         # Text plus a red pill, so recording state is not color alone.
