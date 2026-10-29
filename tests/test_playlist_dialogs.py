@@ -552,6 +552,12 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_plays_on_start(self, on):
             self.play = on
 
+        def starts_channels_fast(self):
+            return False
+
+        def set_starts_channels_fast(self, on):
+            self.fast_start = on
+
         def uses_live_resize(self):
             return getattr(self, 'live_resize', False)
 
@@ -750,6 +756,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert not dialog.play_check.isChecked()
     dialog.play_check.click()
     assert host.play is True
+    assert not dialog.fast_start_check.isChecked()
+    dialog.fast_start_check.click()
+    assert host.fast_start is True
     assert not dialog.live_resize_check.isChecked()
     dialog.live_resize_check.click()
     assert host.live_resize is True

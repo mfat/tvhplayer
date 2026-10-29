@@ -143,6 +143,9 @@ class _FakePlayer:
         self._deinterlace = mode
         return True
 
+    def set_fast_start(self, on):
+        self.fast_start = on
+
     def show_message(self, text, duration_ms=3000):
         return None
 
@@ -2517,6 +2520,12 @@ def test_last_channel_plays_at_start_when_asked(monkeypatch, tmp_path):
 
         window.set_plays_on_start(True)
         assert window.plays_on_start()
+
+        assert not window.starts_channels_fast()
+        assert window.player.fast_start is False
+        window.set_starts_channels_fast(True)
+        assert window.config['fast_channel_start'] is True
+        assert window.player.fast_start is True
 
         window.set_uses_live_resize(True)
         assert window.uses_live_resize()

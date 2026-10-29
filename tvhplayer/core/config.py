@@ -88,6 +88,8 @@ def default_config():
         # Block sleep until scheduled recordings on this computer are done, not only while recording.
         'stay_awake_for_scheduled': True,
         'deinterlace': DEINTERLACE_AUTO,
+        # Probe a new stream for less time, so a channel's picture comes sooner.
+        'fast_channel_start': False,
         # TVHplayer's own look, or the name of a Qt style. Read before the window is built.
         'ui_theme': THEME_TVHPLAYER,
         'color_scheme': SCHEME_SYSTEM,
@@ -161,7 +163,7 @@ def _normalize(data):
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
     for key in (
         'play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original',
-        'stay_awake_for_scheduled', 'setup_offered', 'own_title_bar', 'check_for_updates',
+        'stay_awake_for_scheduled', 'setup_offered', 'own_title_bar', 'check_for_updates', 'fast_channel_start',
     ):
         cfg[key] = bool(cfg.get(key))
     try:

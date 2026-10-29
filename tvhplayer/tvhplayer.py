@@ -3742,6 +3742,7 @@ class TVHeadendClient(QMainWindow):
         try:
             self.player = self._new_player()
             self.player.set_deinterlace(self.config['deinterlace'])
+            self.player.set_fast_start(self.config['fast_channel_start'])
             print("Debug: Media player created successfully")
         except Exception as e:
             print(f"Error initializing {self.engine}: {str(e)}")
@@ -7611,6 +7612,15 @@ class TVHeadendClient(QMainWindow):
     def set_plays_on_start(self, on):
         self.config['play_on_start'] = bool(on)
         self.save_config()
+
+    def starts_channels_fast(self):
+        return self.config['fast_channel_start']
+
+    def set_starts_channels_fast(self, on):
+        """Applies from the next channel that starts."""
+        self.config['fast_channel_start'] = bool(on)
+        self.save_config()
+        self.player.set_fast_start(bool(on))
 
     def uses_live_resize(self):
         """The picture changes size while a divider moves. Off before Qt 6.11 until chosen."""

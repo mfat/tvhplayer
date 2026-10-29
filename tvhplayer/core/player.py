@@ -102,6 +102,12 @@ class Player(ABC):
         """
         return False
 
+    def set_fast_start(self, on: bool):
+        """Probe new streams briefly, for a quicker first picture. Applies from the next stream.
+
+        The default does nothing.
+        """
+
     def show_message(self, text: str, duration_ms: int = 3000):
         """Draw short text over the picture, then let it fade. The default does nothing."""
 

@@ -49,6 +49,10 @@ HIDE_HELP = (
     'Channels that fail are hidden and come back once a later test finds them working.'
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
+FAST_START_HELP = (
+    'Sets mpv --demuxer-lavf-analyzeduration=0.5. Turn off if sound or a sound track is missing. '
+    'Applies from the next channel.'
+)
 LIVE_RESIZE_HELP = (
     'Show new video size in real time when resizing the sidebar. '
     'Turn this off if resizing is slow.'
@@ -108,7 +112,7 @@ class SettingsDialog(QDialog):
 
     PAGES = (
         ('Appearance', 'Theme, light or dark'),
-        ('Playback', 'Startup, panes'),
+        ('Playback', 'Startup, channels, panes'),
         ('Channels', 'Logos, imported playlists'),
         ('Recordings', 'Folder, format, padding'),
         ('Conversion', 'Edit-friendly copies'),
@@ -173,6 +177,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(footer)
 
         self.play_check.toggled.connect(host.set_plays_on_start)
+        self.fast_start_check.toggled.connect(host.set_starts_channels_fast)
         self.live_resize_check.toggled.connect(host.set_uses_live_resize)
         self.folder_btn.clicked.connect(self._choose_folder)
         self.format_combo.currentIndexChanged.connect(self._format_chosen)
@@ -207,6 +212,11 @@ class SettingsDialog(QDialog):
         self.play_check.setChecked(host.plays_on_start())
         describe(self.play_check, description=PLAY_HELP)
         startup.add_row(SettingRow('&Play the last channel when TVHplayer starts', PLAY_HELP, self.play_check))
+        channels = page.add(SettingsGroup('Channels'))
+        self.fast_start_check = ToggleSwitch('Start channels faster')
+        self.fast_start_check.setChecked(host.starts_channels_fast())
+        describe(self.fast_start_check, description=FAST_START_HELP)
+        channels.add_row(SettingRow('Start channels &faster', FAST_START_HELP, self.fast_start_check))
         panes = page.add(SettingsGroup('Panes'))
         self.live_resize_check = ToggleSwitch('Live resize')
         self.live_resize_check.setChecked(host.uses_live_resize())

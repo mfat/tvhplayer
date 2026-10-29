@@ -30,6 +30,9 @@ MPV_OPTIONS = {
 # without Lua, as in the Flatpak, has neither the scripts nor these options.
 LUA_SCRIPT_OPTIONS = {'osc': False, 'ytdl': False}
 DEINTERLACE_VALUES = {DEINTERLACE_AUTO: 'auto', DEINTERLACE_ON: 'yes', DEINTERLACE_OFF: 'no'}
+# Seconds of stream ffmpeg reads to learn the tracks; 0 leaves it to ffmpeg. Much
+# shorter can leave a sound track without the details it needs to play.
+FAST_START_ANALYZE_SECONDS = 0.5
 
 
 class MpvPlayer(Player):
@@ -166,6 +169,9 @@ class MpvPlayer(Player):
         except Exception:
             return True
         return 'auto' in choices
+
+    def set_fast_start(self, on):
+        self._mpv['demuxer-lavf-analyzeduration'] = FAST_START_ANALYZE_SECONDS if on else 0
 
     def show_message(self, text: str, duration_ms: int = 3000):
         """mpv's on-screen text: drawn into the picture, so it shows in fullscreen too.
