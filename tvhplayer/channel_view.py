@@ -315,6 +315,11 @@ class ChannelTableModel(QAbstractTableModel):
         current, following = self._programmes(position, now)
         return current if column == COL_NOW else following
 
+    def _missing_epg(self, position):
+        """An actual empty server answer, not a locally expired known event."""
+        entry = self._now_next.get(self._keys[position])
+        return entry is None or entry.now is None
+
     def _display(self, position, column):
         channel = self._channels[position]
         if column == COL_NAME:
@@ -326,7 +331,7 @@ class ChannelTableModel(QAbstractTableModel):
         if column in (COL_NOW, COL_NEXT):
             now = int(time.time())
             event = self._programme(position, column, now)
-            if column == COL_NOW and event is None and self._epg_loaded:
+            if column == COL_NOW and self._epg_loaded and self._missing_epg(position):
                 return 'No EPG'
             return programme_text(event, now, with_start=column == COL_NEXT)[0]
         if column == COL_TYPE:
@@ -346,7 +351,8 @@ class ChannelTableModel(QAbstractTableModel):
             if role == _ACCESSIBLE_DESCRIPTION:
                 return None
             if event is None:
-                if column == COL_NOW and self._epg_loaded and role in (_TOOLTIP, _ACCESSIBLE_TEXT):
+                if (column == COL_NOW and self._epg_loaded
+                        and self._missing_epg(position) and role in (_TOOLTIP, _ACCESSIBLE_TEXT)):
                     return 'No EPG available for this channel'
                 return None
             _, tooltip, spoken = programme_text(event, now, with_start=column == COL_NEXT)
