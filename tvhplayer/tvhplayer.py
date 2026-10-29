@@ -255,7 +255,7 @@ CHANNEL_RELOAD_SECONDS = 30
 # A reload of a big list freezes the window a while: space them by a second per this many channels.
 CHANNELS_PER_RELOAD_SECOND = 100
 # Now/next is asked for again this often, and sooner when a programme ends.
-NOW_NEXT_REFRESH_SECONDS = 600
+NOW_NEXT_REFRESH_SECONDS = 120
 NOW_NEXT_TICK_MS = 30000
 # How often to check whether a recording needs the computer awake.
 AWAKE_CHECK_MS = 30000
@@ -3012,7 +3012,10 @@ class NowNextFetch(QObject):
         backend = None
         try:
             backend = self._open_backend(self.server)
-            result = backend.get_now_next(self._channels)
+            # Refresh directly from the current EPG grid. For HTSP this avoids
+            # enableAsyncMetadata and a full channel sync every two minutes.
+            live = getattr(backend, 'get_now_next_live', None)
+            result = live(self._channels) if live is not None else backend.get_now_next(self._channels)
         except Exception as e:
             print(f"Debug: Could not refresh now and next: {e}")
         finally:
@@ -3447,6 +3450,7 @@ class TVHeadendClient(QMainWindow):
         self._channel_fetch = None
         self._channel_tags = []
         self._now_next = {}
+        self._now_next_loaded = False
         self._now_next_fetched = 0.0
         self._now_next_fetch = None
         self._channel_kinds = {}
@@ -4399,9 +4403,11 @@ class TVHeadendClient(QMainWindow):
     def _fetch_now_next(self, backend):
         if not self._wants_now_next() or not self._channels:
             self._now_next = {}
+            self._now_next_loaded = False
             return
         try:
             self._now_next = backend.get_now_next(self._channels)
+            self._now_next_loaded = True
         except Exception as e:
             print(f"Debug: Could not load now and next: {e}")
         self._now_next_fetched = time.monotonic()
@@ -4440,11 +4446,14 @@ class TVHeadendClient(QMainWindow):
         self._now_next_fetched = time.monotonic()
         if result is not None:
             self._now_next = result
+            self._now_next_loaded = True
             self._update_programme_cells()
 
     def _update_programme_cells(self):
         """Redraw now and next, and the progress bars, from the last fetch."""
-        self.channel_model.set_programmes(self._now_next, self.channel_options['now_progress'])
+        self.channel_model.set_programmes(
+            self._now_next, self.channel_options['now_progress'], self._now_next_loaded
+        )
 
     def _fill_channel_rows(self):
         """Rebuild the table from the fetched channels and the current settings."""
@@ -4459,7 +4468,7 @@ class TVHeadendClient(QMainWindow):
         logos = bool(references) and any(references)
         model.set_logos(logos, self._logo_pixmaps, self._logo_placeholder() if logos else None)
         model.set_kinds(self._channel_kinds)
-        model.set_programmes(self._now_next, options['now_progress'])
+        model.set_programmes(self._now_next, options['now_progress'], self._now_next_loaded)
         model.set_channels(shown, references)
         self._apply_channel_filter()
         self._visible_logo_timer.start()
@@ -4923,6 +4932,9 @@ class TVHeadendClient(QMainWindow):
         if fetch is not self._channel_fetch:
             return
         self._channel_fetch = None
+        # A background refresh for the previous channel snapshot must not
+        # overwrite EPG data obtained by this Reload.
+        self._now_next_fetch = None
         self.channel_busy.hide()
         # Any load counts: a reload for shown or hidden channels waits its turn after it.
         self._last_channel_reload = time.monotonic()
@@ -4938,6 +4950,11 @@ class TVHeadendClient(QMainWindow):
         self._channel_kinds = channel_kinds(self._channels, result['services'], self._channel_tags)
         if result['now_next'] is not None:
             self._now_next = result['now_next']
+            self._now_next_loaded = bool(fetch._now_next and self._channels)
+        elif not reload:
+            # Another server: never show stale programme data from the old one.
+            self._now_next = {}
+            self._now_next_loaded = False
         self._now_next_fetched = time.monotonic()
         self._recording_keys = recording_channel_keys(self._channels, getattr(self, '_dvr_entries', []))
         self._refresh_tag_combo()
@@ -5002,6 +5019,7 @@ class TVHeadendClient(QMainWindow):
         self._channel_tags = []
         self._channel_kinds = {}
         self._now_next = {}
+        self._now_next_loaded = False
         self.channel_model.set_channels([])
         self._refresh_tag_combo()
         self._guide_channels_changed()

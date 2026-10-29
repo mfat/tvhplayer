@@ -97,13 +97,23 @@ class TvhBackend(ABC):
         """
         ids = event_ids_for_channels(channels)
         if ids:
-            events = self.load_events(ids)
-        else:
-            events = self.query_epg(EpgQuery(mode='now', limit=10000))
-            following = next_event_ids(events)
-            if following:
-                events = events + self.load_events(following)
-        return match_now_next(channels, events)
+            return match_now_next(channels, self.load_events(ids))
+        return self.get_now_next_live(channels)
+
+    def get_now_next_live(self, channels: List[Channel]) -> Dict[str, NowNext]:
+        """Refresh from the server's current EPG grid without a channel sync.
+
+        HTSP eventId/nextEventId in the previously loaded channel list can be
+        stale. The mode=now API proxy works over a normal authenticated HTSP
+        connection (without enableAsyncMetadata). HTTP likewise avoids a
+        redundant full channel/grid request. The next programme is retrieved
+        using the current event's nextEventId.
+        """
+        events = self.query_epg(EpgQuery(mode='now', limit=10000))
+        following = next_event_ids(events)
+        if following:
+            events = events + self.load_events(following)
+        return match_now_next(channels, events, use_channel_event_ids=False)
 
     def list_channel_services(self) -> List[dict]:
         """Service rows that tell radio, HD, and encrypted channels apart.

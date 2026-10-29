@@ -35,6 +35,7 @@ A desktop app for watching and recording live TV, with its own built-in Tvheaden
 
 **Channel list**
 - Choose the columns: number, now and next with a progress bar, type, and status
+- The Now column refreshes every two minutes and shows **No EPG** only after the server has answered without a current programme; pending or failed guide requests are left blank
 - Groups, favourites, search, and channel editing (rename, renumber, hide) saved on the server
 - Stays quick with lists of hundreds of thousands of channels
 
