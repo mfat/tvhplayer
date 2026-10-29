@@ -4983,10 +4983,12 @@ class TVHeadendClient(QMainWindow):
             self._channel_density_actions[density] = action
         size_menu.addSeparator()
         taller = size_menu.addAction("&Taller Rows")
-        taller.setShortcuts([QKeySequence(QKeySequence.StandardKey.ZoomIn), QKeySequence("Ctrl+=")])
+        # Ctrl+= is Ctrl++ without Shift. Each key once: a key listed twice is
+        # ambiguous and does nothing.
+        taller.setShortcuts([QKeySequence("Ctrl++"), QKeySequence("Ctrl+=")])
         taller.triggered.connect(lambda: self._step_channel_density(1))
         shorter = size_menu.addAction("Sh&orter Rows")
-        shorter.setShortcuts([QKeySequence(QKeySequence.StandardKey.ZoomOut), QKeySequence("Ctrl+-")])
+        shorter.setShortcut(QKeySequence("Ctrl+-"))
         shorter.triggered.connect(lambda: self._step_channel_density(-1))
         menu.addSeparator()
         self._channel_option_actions = {}

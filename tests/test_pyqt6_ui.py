@@ -2709,6 +2709,19 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
         assert window.channel_options['density'] == 'compact'
         assert window._channel_density_actions['compact'].isChecked()
         assert table.rowHeight(0) < comfortable
+        # A key bound twice is ambiguous and does nothing.
+        from PyQt6.QtGui import QAction
+        from PyQt6.QtTest import QTest
+        keys = [key.toString() for action in window.findChildren(QAction) for key in action.shortcuts()]
+        assert sorted({key for key in keys if keys.count(key) > 1}) == []
+        window.show()
+        window.activateWindow()
+        assert QTest.qWaitForWindowActive(window)
+        table.setFocus()
+        QTest.keyClick(table, Qt.Key.Key_Equal, Qt.KeyboardModifier.ControlModifier)
+        assert window.channel_options['density'] == 'comfortable'
+        QTest.keyClick(table, Qt.Key.Key_Minus, Qt.KeyboardModifier.ControlModifier)
+        assert window.channel_options['density'] == 'compact'
         window._channel_option_actions['stripes'].setChecked(True)
         assert table.alternatingRowColors()
         window._channel_option_actions['two_line'].setChecked(True)
