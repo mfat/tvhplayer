@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.3.0
+Version:        4.4.0
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,17 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.4.0-1
+- Add pause, skip, a seek bar and an opt-in disk timeshift buffer
+- Add previous and next channel controls with Ctrl+PgUp/PgDown
+- Add a Start channels faster setting that shortens mpv's stream probe
+- Replace the blinking REC label with a Recording pill that opens Tasks
+- Show the player bar's recording state for the active channel only
+- Mark the playing channel with a play icon instead of an accent bar, and hide Status by default
+- Put Play first in the player bar and add channel buttons to the tab order
+- Switch to Material Symbols Outlined icons with an outlined play button
+- Make the status bar taller and pad its contents
+
 * Thu Oct 29 2026 mFat <newmfat@gmail.com> - 4.3.0-1
 - Add an Organic look in Settings > Appearance, beside TVHplayer and the Qt styles
 - Add Accent color and Window color settings, with GNOME blue as the default accent

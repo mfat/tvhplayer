@@ -34,6 +34,21 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.4.0" date="2026-10-29">
+      <description>
+        <ul>
+          <li>Add pause, skip, a seek bar and an opt-in disk timeshift buffer</li>
+          <li>Add previous and next channel controls with Ctrl+PgUp/PgDown</li>
+          <li>Add a Start channels faster setting that shortens mpv's stream probe</li>
+          <li>Replace the blinking REC label with a Recording pill that opens Tasks</li>
+          <li>Show the player bar's recording state for the active channel only</li>
+          <li>Mark the playing channel with a play icon instead of an accent bar, and hide Status by default</li>
+          <li>Put Play first in the player bar and add channel buttons to the tab order</li>
+          <li>Switch to Material Symbols Outlined icons with an outlined play button</li>
+          <li>Make the status bar taller and pad its contents</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.3.0" date="2026-10-29">
       <description>
         <ul>
