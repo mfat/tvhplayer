@@ -6665,7 +6665,7 @@ class TVHeadendClient(QMainWindow):
                 "or run: flatpak update io.github.mfat.tvhplayer")
             open_page = None
         else:
-            open_page = box.addButton("&Open Release Page", QMessageBox.ButtonRole.AcceptRole)
+            open_page = box.addButton("&Download", QMessageBox.ButtonRole.AcceptRole)
         skip = box.addButton("&Skip This Version", QMessageBox.ButtonRole.DestructiveRole)
         later = box.addButton("OK" if flatpak else "&Later", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(open_page or later)
