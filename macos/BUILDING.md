@@ -27,7 +27,7 @@ The output is `macos/dist/TVHplayer.app` on both architectures. The build stops 
 bash macos/package-dmg.sh
 ```
 
-The `.dmg` holds the app, an Applications shortcut, and installation instructions; a `.dmg.sha256` file sits next to it.
+The `.dmg` holds the app, an Applications shortcut, and installation instructions.
 
 Start the app from Terminal to see diagnostic output:
 

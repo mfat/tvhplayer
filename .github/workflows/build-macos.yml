@@ -110,7 +110,6 @@ jobs:
           mkdir -p release-assets
           name="tvhplayer-${{ steps.version.outputs.label }}-macos-${{ matrix.arch }}.dmg"
           cp 'macos/dist/TVHplayer.dmg' "release-assets/$name"
-          cd release-assets && shasum -a 256 "$name" > "$name.sha256"
 
       - uses: actions/upload-artifact@v7
         with:

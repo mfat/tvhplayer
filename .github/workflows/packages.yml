@@ -113,7 +113,6 @@ jobs:
           fi
           name="tvhplayer-${{ steps.version.outputs.label }}-ubuntu24.04-${{ matrix.arch }}.deb"
           cp "$1" "release-assets/$name"
-          cd release-assets && sha256sum "$name" > "$name.sha256"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -182,7 +181,7 @@ jobs:
           dnf builddep -y ~/rpmbuild/SPECS/tvhplayer.spec
 
       - name: Build package
-        run: rpmbuild -ba ~/rpmbuild/SPECS/tvhplayer.spec
+        run: rpmbuild -bb ~/rpmbuild/SPECS/tvhplayer.spec
 
       - name: Run rpmlint
         run: rpmlint -r tvhplayer.rpmlintrc ~/rpmbuild/RPMS/*/tvhplayer-*.rpm
@@ -204,12 +203,6 @@ jobs:
             exit 1
           fi
           cp "$1" "release-assets/tvhplayer-${label}-${suffix}.rpm"
-          # The source RPM is the same on every architecture; publish it once.
-          if [ "${{ matrix.arch }}" = x86_64 ]; then
-            cp ~/rpmbuild/SRPMS/tvhplayer-*.src.rpm "release-assets/tvhplayer-${label}-fedora${{ matrix.fedora }}.src.rpm"
-          fi
-          cd release-assets
-          for package in *.rpm; do sha256sum "$package" > "$package.sha256"; done
 
       - uses: actions/upload-artifact@v7
         with:
@@ -255,11 +248,6 @@ jobs:
 
       - name: Check AppImage
         run: packaging/appimage/check-appimage.sh release-assets/*.AppImage
-
-      - name: Checksum
-        run: |
-          cd release-assets
-          for image in *.AppImage; do sha256sum "$image" > "$image.sha256"; done
 
       - uses: actions/upload-artifact@v7
         with:

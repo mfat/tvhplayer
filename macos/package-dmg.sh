@@ -62,5 +62,4 @@ codesign --verify --deep "$MOUNT/$APP_NAME.app"
 hdiutil detach "$MOUNT" >/dev/null
 mounted=0
 
-(cd "$ROOT/dist" && shasum -a 256 "$APP_NAME.dmg" > "$APP_NAME.dmg.sha256")
 echo "DMG OK: $OUTPUT"

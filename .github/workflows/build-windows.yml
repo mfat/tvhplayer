@@ -70,12 +70,6 @@ jobs:
           if (-not (Select-String -Path $log -Pattern 'Media player created successfully' -Quiet)) { throw 'mpv did not start' }
           if (Select-String -Path $log -Pattern 'Error starting application' -Quiet) { throw 'The app reported a startup error' }
 
-      - name: Checksum
-        shell: bash
-        run: |
-          cd windows/dist
-          for file in *.exe *.zip; do sha256sum "$file" > "$file.sha256"; done
-
       - uses: actions/upload-artifact@v7
         with:
           name: windows-x86_64
