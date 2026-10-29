@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QGraphicsOpacityEffect, QFileDialog,
     QMenu, QMenuBar, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
     QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
-    QInputDialog,
+    QInputDialog, QSpacerItem,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QPropertyAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
 from PyQt6.QtGui import (
@@ -6615,7 +6615,9 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: Update check failed: {error}")
             if not quiet:
                 self.statusbar.showMessage("Could not check for updates")
-                QMessageBox.warning(self, "Check for Updates", f"Could not check for updates.\n\n{error}")
+                box = self._update_box(QMessageBox.Icon.Warning, "Check for Updates", "Could not check for updates.")
+                box.setInformativeText(error)
+                box.exec()
             return
         self.config['last_update_check'] = time.time()
         self.save_config()
@@ -6623,8 +6625,10 @@ class TVHeadendClient(QMainWindow):
             print(f"Debug: TVHplayer {APP_VERSION} is up to date (latest release {release.version})")
             if not quiet:
                 self.statusbar.showMessage("TVHplayer is up to date")
-                QMessageBox.information(
-                    self, "Check for Updates", f"You have the latest version of TVHplayer ({APP_VERSION}).")
+                self._update_box(
+                    QMessageBox.Icon.Information, "Check for Updates",
+                    f"You have the latest version of TVHplayer ({APP_VERSION}).",
+                ).exec()
             return
         if quiet and release.version == self.config['skipped_update_version']:
             print(f"Debug: TVHplayer {release.version} is available but was skipped")
@@ -6632,11 +6636,28 @@ class TVHeadendClient(QMainWindow):
         self.statusbar.showMessage(f"TVHplayer {release.version} is available")
         self._show_update_available(release)
 
+    def _update_box(self, icon, title, text):
+        # Settings is not modal: a box on the main window can open behind it.
+        settings = self._settings_dialog
+        parent = settings if settings is not None and settings.isVisible() else self
+        box = QMessageBox(parent)
+        box.setIcon(icon)
+        box.setWindowTitle(title)
+        box.setText(text)
+        # QMessageBox fits its text only; the title bar also needs room for its buttons.
+        title_font = QFont(box.font())
+        title_font.setBold(True)
+        width = QFontMetrics(title_font).horizontalAdvance(title) + 200
+        layout = box.layout()
+        layout.addItem(
+            QSpacerItem(width, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding),
+            layout.rowCount(), 0, 1, layout.columnCount(),
+        )
+        return box
+
     def _show_update_available(self, release):
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle("Update Available")
-        box.setText(f"TVHplayer {release.version} is available.")
+        box = self._update_box(
+            QMessageBox.Icon.Information, "Update Available", f"TVHplayer {release.version} is available.")
         flatpak = installed_by_flatpak()
         if flatpak:
             box.setInformativeText(
