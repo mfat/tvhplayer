@@ -95,13 +95,21 @@ class MpvVideoWidget(QOpenGLWidget):
         )
 
     def release(self):
-        """Free the render context while its OpenGL context still exists."""
+        """Free the renderer without replacing a live native callback.
+
+        Assigning update_cb = None in python-mpv replaces a ctypes closure.
+        libmpv can still be executing that closure on its VO thread, so
+        replacing it during shutdown can leave a dangling C callback.
+        mpv_render_context_free() synchronizes with that thread: keep the
+        existing callback alive on the context until free() returns.
+        """
         context, self._render_context = self._render_context, None
         if context is not None:
-            context.update_cb = None
             self.makeCurrent()
-            context.free()
-            self.doneCurrent()
+            try:
+                context.free()
+            finally:
+                self.doneCurrent()
         wayland, self._wayland = self._wayland, None
         if wayland is not None:
             wayland.close()

@@ -283,6 +283,10 @@ def test_close_frees_the_widget_render_context_before_mpv(engine):
     player.close()
     assert order == [('bind', player), ('release', False)]
     assert mpv.terminated
+    assert mpv.commands == [('stop',)]
+    assert player._on_playing is None
+    assert player._on_stopped is None
+    assert player._on_error is None
 
 
 def test_real_libmpv_reports_failure_and_playback(monkeypatch):
