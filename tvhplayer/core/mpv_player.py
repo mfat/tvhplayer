@@ -223,8 +223,12 @@ class MpvPlayer(Player):
     def timeshift(self):
         mpv = self._mpv
         buffered = self._buffered()
-        if mpv is None or buffered is None:
+        if mpv is None or mpv.idle_active:
             return None
+        if buffered is None:
+            # Pausing works before a seekable range exists (and on streams
+            # without one). Report the real pause state so Resume works too.
+            return Timeshift(bool(mpv.pause), 0.0, 0.0)
         position, start, end = buffered
         behind = end - position
         return Timeshift(bool(mpv.pause), 0.0 if behind < LIVE_SLACK_SECONDS else behind, end - start)

@@ -320,6 +320,31 @@ def test_real_libmpv_reports_failure_and_playback(monkeypatch):
         player.close()
 
 
+@pytest.mark.parametrize('position', [None, 0.5])
+def test_pause_and_resume_without_a_seekable_buffer(engine, position):
+    player, mpv, _seen = engine
+    assert player.timeshift() is None
+    player.play('http://localhost/live')
+    mpv.time_pos = position
+    mpv.demuxer_cache_state = {'seekable-ranges': []}
+
+    state = player.timeshift()
+    assert state is not None and not state.paused
+    assert state.behind == 0 and state.span == 0
+    assert not player.skip(-10)
+
+    # Use the same state-based toggle as the window's Pause/Resume command.
+    player.set_paused(not player.timeshift().paused)
+    assert mpv.pause is True and player.timeshift().paused
+    player.set_paused(not player.timeshift().paused)
+    assert mpv.pause is False and not player.timeshift().paused
+
+    player.stop()
+    assert player.timeshift() is None
+    player.close()
+    assert player.timeshift() is None
+
+
 def test_disk_timeshift_stops_writes_at_limit_and_rearms_next_channel(engine, tmp_path):
     player, mpv, _seen = engine
     player.set_timeshift_store(str(tmp_path), 1000)
