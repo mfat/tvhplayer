@@ -107,8 +107,7 @@ DARK = {
 # Light schemes use main, soft and deep; dark ones the bright step.
 ACCENT_DEFAULT = 'default'
 ACCENTS = {
-    'terracotta': ('Terracotta', '#c67139', '#ffe1d0', '#f6a06b', '#643312'),
-    'orange': ('Orange', '#d2690f', '#ffe3c4', '#f5a04a', '#6b3408'),
+    'terracotta': ('Terracotta', '#c23b2b', '#fdd9d2', '#f2735d', '#651a12'),
     'clay': ('Clay', '#a4552d', '#e9d3c2', '#d6916a', '#5c2c14', {
         'light': {'act': '#a4552d', 'hover': '#884423', 'soft': '#e9d3c2', 'ink': '#5c2c14', 'on_act': '#fffaf3'},
         'dark': {'act': '#d6916a', 'hover': '#e3a986', 'ink': '#f1cbb3', 'on_act': '#2e2b25'},
@@ -120,11 +119,17 @@ ACCENTS = {
     'sage': ('Sage', '#7a8a5e', '#e1eecc', '#aebf92', '#3d472b'),
     'ink': ('Ink', '#2e2b25', '#eee7db', '#f9f4ed', '#2e2b25'),
     'ocean': ('Ocean', '#3f6f9e', '#d6e4f2', '#7fa7d0', '#1f3a56'),
+    # GNOME's (libadwaita's) blue accent, the same in light and dark, with its standalone text colors.
+    'blue': ('Blue', '#3584e4', '#d0e3fa', '#3584e4', '#0461be', {
+        'light': {'act': '#3584e4', 'hover': '#1c71d8', 'soft': '#d0e3fa', 'ink': '#0461be', 'on_act': '#ffffff'},
+        'dark': {'act': '#3584e4', 'hover': '#62a0ea', 'ink': '#81d0ff', 'on_act': '#ffffff'},
+    }),
     'teal': ('Teal', '#2f8578', '#cdeae4', '#6fbfb1', '#174840'),
     'plum': ('Plum', '#8a4f7d', '#f0dcea', '#c68fb9', '#4a2442'),
     'rose': ('Rose', '#c0506a', '#fad7df', '#e88ea2', '#6b2334'),
-    'ochre': ('Ochre', '#a0741f', '#f5e6c4', '#e0b660', '#5e4210'),
 }
+# Accents taken out for looking too much like another; a saved one becomes that one.
+RETIRED_ACCENTS = {'orange': 'terracotta', 'ochre': 'marigold'}
 
 # Window colors, Jottr's Organic grounds, for the TVHplayer theme only:
 # label, then light and dark as (window, base, alt, nav, ink, muted, placeholder, edge).
@@ -279,6 +284,7 @@ def _blend(value, under, amount):
 
 def normalize_accent(key):
     key = str(key or '').strip().casefold()
+    key = RETIRED_ACCENTS.get(key, key)
     return key if key in ACCENTS else ACCENT_DEFAULT
 
 

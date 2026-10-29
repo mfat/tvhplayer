@@ -121,6 +121,17 @@ def test_every_accent_and_window_color_gives_every_color(qapp):
                 assert all(_qcolor(value).isValid() for value in colors.values()), (accent, window, dark)
 
 
+def test_a_retired_accent_becomes_the_one_it_looked_like():
+    from tvhplayer.ui_theme import ACCENTS, RETIRED_ACCENTS, compose, normalize_accent
+
+    assert normalize_accent('orange') == 'terracotta'
+    assert normalize_accent(' Ochre ') == 'marigold'
+    assert compose(False, 'orange') == compose(False, 'terracotta')
+    assert not set(RETIRED_ACCENTS) & set(ACCENTS)
+    assert set(RETIRED_ACCENTS.values()) <= set(ACCENTS)
+    assert ACCENTS['blue'][1] == '#3584e4'
+
+
 def test_organic_colors_are_jottr_s_paper_with_selections_filled_by_the_accent(qapp):
     from tvhplayer.ui_theme import (
         ACCENTS, LIGHT, ORGANIC_ACT, WINDOW_COLORS, _qcolor, accent_choices, compose, window_color_choices,

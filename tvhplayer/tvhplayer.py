@@ -71,8 +71,8 @@ try:
     from . import window_frame
     from .file_manager import show_in_file_manager
     from .ui_theme import (
-        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, polish_main_window,
-        set_accent, set_color_scheme, set_window_color, style_key,
+        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, normalize_accent,
+        polish_main_window, set_accent, set_color_scheme, set_window_color, style_key,
     )
     from .player_bar import (
         DOT_SVG,
@@ -168,8 +168,8 @@ except ImportError:
     import window_frame
     from file_manager import show_in_file_manager
     from ui_theme import (
-        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, polish_main_window,
-        set_accent, set_color_scheme, set_window_color, style_key,
+        THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, normalize_accent,
+        polish_main_window, set_accent, set_color_scheme, set_window_color, style_key,
     )
     from player_bar import (
         DOT_SVG,
@@ -7634,7 +7634,7 @@ class TVHeadendClient(QMainWindow):
         set_color_scheme(QApplication.instance(), mode)
 
     def accent_choice(self):
-        return self.config['accent_color']
+        return normalize_accent(self.config['accent_color'])
 
     def set_accent_choice(self, key):
         self.config['accent_color'] = key
