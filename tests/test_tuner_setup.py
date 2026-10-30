@@ -161,6 +161,38 @@ def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
     app.processEvents()
 
 
+def test_wizard_picks_which_server_receives_the_channels(monkeypatch):
+    import os
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+
+    from tvhplayer import setup_wizard
+
+    app = QApplication.instance() or QApplication([])
+    servers = [
+        {'name': 'Built-in', 'builtin': True},
+        {'name': 'Living room', 'url': 'http://tv.local:9981'},
+    ]
+    seen = []
+
+    def fake_call(self, fn, slot):
+        seen.append(self.server['name'])
+        slot([], '')
+
+    monkeypatch.setattr(setup_wizard.SetupWizard, 'call', fake_call)
+    wizard = setup_wizard.SetupWizard(servers[0], lambda _server: None, lambda _server: None, servers=servers)
+    wizard.show()
+    page = wizard.source_page
+    assert page.server_combo.count() == 2
+    assert page.server_combo.currentText() == 'Built-in'
+    assert any(label.text().replace('&', '') == 'Channels will be added to' for label in page.findChildren(type(page.status)))
+    page.server_combo.setCurrentIndex(1)
+    assert wizard.server['name'] == 'Living room'
+    assert seen[-1] == 'Living room'
+    app.processEvents()
+
+
 def test_wizard_hands_iptv_to_the_playlist_import(monkeypatch):
     import os
 

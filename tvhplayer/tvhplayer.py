@@ -7447,6 +7447,7 @@ class TVHeadendClient(QMainWindow):
                 on_iptv=lambda server: ImportPlaylistDialog(self, self, server=server).exec(),
                 on_done=self.playlist_imported,
                 parent=self,
+                servers=self.import_targets(),
             )
             self._setup_wizard = wizard
             wizard.open()

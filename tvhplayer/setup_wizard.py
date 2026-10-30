@@ -36,7 +36,7 @@ from PyQt6.QtWidgets import (
 )
 
 try:
-    from .a11y import announce_label, describe
+    from .a11y import announce_label, buddy_label, describe
     from .ui_theme import color as theme_color, is_active as theme_is_active, is_organic
     from .core.errors import TvhAuthError
     from .core.tuner_setup import (
@@ -54,7 +54,7 @@ try:
     from .core.tuners import read_tuners
     from .core.tvh_admin import TvhAdmin
 except ImportError:
-    from a11y import announce_label, describe
+    from a11y import announce_label, buddy_label, describe
     from ui_theme import color as theme_color, is_active as theme_is_active, is_organic
     from core.errors import TvhAuthError
     from core.tuner_setup import (
@@ -113,15 +113,37 @@ class _Title(QLabel):
         super().changeEvent(event)
 
 
-def _heading(layout, title, subtitle):
+def _heading(layout, title, subtitle=''):
     heading = _Title(title)
+    layout.addWidget(heading)
+    if not subtitle:
+        return heading
     intro = QLabel(subtitle)
     intro.setObjectName('pageIntro')
     intro.setWordWrap(True)
-    layout.addWidget(heading)
     layout.addSpacing(2)
     layout.addWidget(intro)
     return heading
+
+
+def _server_id(server):
+    """The built-in server, or a remote server's address and name."""
+    if server.get('builtin'):
+        return ('builtin',)
+    return ('remote', (server.get('url') or '').strip().rstrip('/'), server.get('name') or '')
+
+
+def _server_choices(server, servers):
+    """Copies of ``servers``, with ``server`` in the list and the index to select."""
+    chosen = dict(server)
+    items = [dict(item) for item in servers or []]
+    identity = _server_id(chosen)
+    for index, item in enumerate(items):
+        if _server_id(item) == identity:
+            items[index] = chosen
+            return items, index
+    items.insert(0, chosen)
+    return items, 0
 
 
 def _section_font(label):
@@ -294,11 +316,17 @@ class ServerCall(QObject):
 
 
 class SetupWizard(QWizard):
-    """``server`` is a ready server entry; ``on_iptv`` opens the playlist import, ``on_done`` reloads channels."""
+    """``server`` is a ready server entry; ``on_iptv`` opens the playlist import, ``on_done`` reloads channels.
 
-    def __init__(self, server, on_iptv, on_done, parent=None):
+    ``servers`` is every server the channels can go to. The first page picks one.
+    """
+
+    def __init__(self, server, on_iptv, on_done, parent=None, servers=None):
         super().__init__(parent)
-        self.server = dict(server)
+        self.servers, self._server_index = _server_choices(server, servers)
+        self.server = dict(self.servers[self._server_index])
+        self.server_ready = True
+        self._server_generation = 0
         self.on_iptv = on_iptv
         self.on_done = on_done
         self.calls = []
@@ -329,12 +357,16 @@ class SetupWizard(QWizard):
         self.finished.connect(self._finished)
 
     def call(self, fn, slot):
+        generation = self._server_generation
         call = ServerCall(self.server, fn, self)
         self.calls.append(call)
 
-        def done(result, error, call=call):
+        def done(result, error, call=call, generation=generation):
             if call in self.calls:
                 self.calls.remove(call)
+            # A server change started a newer call. This result is for the previous one.
+            if generation != self._server_generation:
+                return
             slot(result, error)
 
         call.done.connect(done)
@@ -377,13 +409,31 @@ class SourcePage(QWizardPage):
     def __init__(self, wizard):
         super().__init__()
         self._wizard = wizard
-        server = wizard.server.get('name') or 'the server'
         self.setTitle('How do you get TV?')
-        self.setSubTitle(f'Channels are added to {server}.')
+        self.setSubTitle('Channels will be added to the server you choose.')
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 16, 8, 8)
         layout.setSpacing(14)
-        _heading(layout, self.title(), self.subTitle())
+        _heading(layout, self.title())
+        layout.addSpacing(2)
+        self.server_combo = QComboBox()
+        self.server_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        self.server_combo.setMinimumWidth(140)
+        self.server_combo.setMaximumWidth(280)
+        for entry in wizard.servers:
+            self.server_combo.addItem(entry.get('name') or 'Server')
+        self.server_combo.setCurrentIndex(wizard._server_index)
+        describe(self.server_combo, 'Server', 'The server that receives the channels.')
+        prompt = buddy_label('Channels will be added &to', self.server_combo)
+        prompt.setObjectName('pageIntro')
+        server_row = QHBoxLayout()
+        server_row.setContentsMargins(0, 0, 0, 0)
+        server_row.setSpacing(8)
+        server_row.addWidget(prompt)
+        server_row.addWidget(self.server_combo)
+        server_row.addStretch(1)
+        layout.addLayout(server_row)
+        self.server_combo.currentIndexChanged.connect(self._choose_server)
         self.group = QButtonGroup(self)
         self.tuner_radio = QRadioButton('&TV tuner')
         self.iptv_radio = QRadioButton('&IPTV playlist')
@@ -420,6 +470,53 @@ class SourcePage(QWizardPage):
     def initializePage(self):
         if not self._looked:
             self._read_tuners()
+
+    def _choose_server(self, index):
+        if index < 0 or index >= len(self._wizard.servers):
+            return
+        chosen = self._wizard.servers[index]
+        if _server_id(chosen) == _server_id(self._wizard.server) and self._wizard.server_ready:
+            return
+        self._wizard._server_generation += 1
+        self._wizard._server_index = index
+        self._wizard.server = dict(chosen)
+        self._looking = False
+        generation = self._wizard._server_generation
+        host = self._wizard.parent()
+        ensure = getattr(host, 'ensure_server_ready', None) if host is not None else None
+        if ensure is None:
+            self._wizard.server_ready = True
+            self._read_tuners()
+            return
+        self._wizard.server_ready = False
+        self.completeChanged.emit()
+        self.server_combo.setEnabled(False)
+        self.look_btn.setEnabled(False)
+        self._show_found([])
+        announce_label(self.status, f'Starting {chosen.get("name") or "the server"}…')
+
+        def ready(server):
+            if generation != self._wizard._server_generation:
+                return
+            updated = dict(server)
+            self._wizard.servers[index] = updated
+            self._wizard.server = updated
+            self._wizard.server_ready = True
+            self.server_combo.setEnabled(True)
+            self._read_tuners()
+
+        def failed(message):
+            if generation != self._wizard._server_generation:
+                return
+            self._wizard.server_ready = False
+            self._looking = False
+            self.server_combo.setEnabled(True)
+            self.look_btn.setEnabled(True)
+            self._show_found([])
+            announce_label(self.status, message)
+            self.completeChanged.emit()
+
+        ensure(dict(chosen), ready, failed)
 
     def look_again(self):
         if self._looking:
@@ -500,6 +597,8 @@ class SourcePage(QWizardPage):
         return ''
 
     def isComplete(self):
+        if not self._wizard.server_ready:
+            return False
         if self.iptv_radio.isChecked():
             return True
         return self.tuner_radio.isChecked() and bool(self._wizard.tuners)
