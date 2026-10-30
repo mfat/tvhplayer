@@ -21,6 +21,7 @@ But if you use linux, you can use this as a normal TV and PVR app, even without 
 **Watch**
 - Live TV and radio from one or more Tvheadend servers
 - Cast live channels to Chromecast and Cast-enabled televisions from the player bar
+- Timeshif
 
 **Built-in server (Linux only)**
 - Comes with its own optional Tvheadend out of the box (optional, you can use any server), no need to set up a server to watch IPTV or use a USB tuner
@@ -28,6 +29,7 @@ But if you use linux, you can use this as a normal TV and PVR app, even without 
 **TV guide**
 - Browse EPG
 - Fetch missing program guides from online sources
+- Pause, rewind, and replay live TV in real time (timeshift)
 
 **Record**
 - Instant and scheduled recordings
