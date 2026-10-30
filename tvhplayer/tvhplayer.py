@@ -3919,7 +3919,7 @@ class TVHeadendClient(QMainWindow):
         self.fullscreen_action.triggered.connect(self.toggle_fullscreen)
         view_menu.addAction(self.fullscreen_action)
 
-        self.go_to_playing_action = QAction("Go to &Playing Channel", self)
+        self.go_to_playing_action = QAction("&Jump to Now Playing", self)
         self.go_to_playing_action.setShortcut("Ctrl+J")
         self.go_to_playing_action.setStatusTip("Select the channel that is on in the channel list")
         self.go_to_playing_action.triggered.connect(self.show_playing_channel)
@@ -6528,7 +6528,7 @@ class TVHeadendClient(QMainWindow):
         guide_action.setEnabled(channel is not None)
         guide_action.triggered.connect(lambda: self.show_guide(channel))
 
-        go_action = menu.addAction(with_keys("Go to Playing Channel", "Ctrl+J"))
+        go_action = menu.addAction(with_keys("Jump to Now Playing", "Ctrl+J"))
         go_action.setEnabled(self._playing_channel() is not None)
         go_action.triggered.connect(self.show_playing_channel)
 

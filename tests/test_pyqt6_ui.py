@@ -372,7 +372,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             'Record Locally',
             'Show EPG',
             'Show in TV Guide',
-            'Go to Playing Channel',
+            'Jump to Now Playing',
             'Stream Pro&file',
             '&Audio Track',
             '&Subtitles',
@@ -384,7 +384,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             if not action.isSeparator()
         }
         assert enabled['Play'] is False
-        assert enabled['Go to Playing Channel'] is False
+        assert enabled['Jump to Now Playing'] is False
         assert enabled['Stop'] is False
         assert enabled['Mute'] is True
         assert enabled['Fullscreen'] is True
@@ -846,7 +846,7 @@ def test_channel_list_marks_the_playing_channel(monkeypatch, tmp_path):
         assert _cell(window.channel_list, sport_row, 2).text() == "Playing"
         assert _cell(window.channel_list, news_row, 2).text() == ""
 
-        # Go to Playing Channel clears a search that hides the row and selects it.
+        # Jump to Now Playing clears a search that hides the row and selects it.
         window.search_box.setText("News")
         app.processEvents()
         assert _channel_row(window.channel_list, 'Sport') < 0

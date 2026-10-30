@@ -42,7 +42,7 @@ Double-click a channel, press Enter on it, or press the round play button under 
 
 While a channel starts, a spinner shows what the server is doing. For tuner channels it also shows the reception, for example **Signal weak (SNR 11 dB)**. If a channel will not start or stops, the reason the server gives, such as **No free adapter**, shows on the picture and in the status bar.
 
-Press F or F11 for fullscreen and Escape to leave it. Right-click the picture for playback, recording and channel options. **View → Go to Playing Channel** (Ctrl+J) selects the playing channel in the list.
+Press F or F11 for fullscreen and Escape to leave it. Right-click the picture for playback, recording and channel options. **View → Jump to Now Playing** (Ctrl+J) selects the playing channel in the list.
 
 To start the channel you watched last whenever TVHplayer starts, turn on **Settings → Playback → Play the last channel when TVHplayer starts**.
 
@@ -188,7 +188,7 @@ Press F1 (**Help → Keyboard Shortcuts**) for the full list. The most used ones
 | Ctrl+Up / Ctrl+Down | Volume |
 | F or F11, Escape | Fullscreen, leave fullscreen |
 | Ctrl+F or S | Search channels |
-| Ctrl+J | Go to the playing channel |
+| Ctrl+J | Jump to now playing |
 | F5 | Reload the channel list |
 | Ctrl+G | TV guide |
 | Ctrl+R, Ctrl+E | Record on the server, stop it |
