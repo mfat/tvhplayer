@@ -392,7 +392,7 @@ class PlayerBar(QWidget):
         ))
         layout.addWidget(self.mute_btn)
 
-        self.volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self.volume_slider = SeekSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(50)
         self.volume_slider.setFixedWidth(96)
