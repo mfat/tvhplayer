@@ -3,7 +3,7 @@
   </a>
 
 # TVHplayer
-A desktop app for watching and recording live TV, with its own built-in Tvheadend server or any Tvheadend server you already have.
+A cross-platform desktop app for watching and recording live TV using [Tvheadend](https://tvheadend.org/)
 
 <img width="1418" height="894" alt="main" src="https://github.com/user-attachments/assets/95471032-de4f-4778-a984-722bd2d10dbf" />
 
@@ -14,10 +14,11 @@ A desktop app for watching and recording live TV, with its own built-in Tvheaden
 - Cast live channels to Chromecast and Cast-enabled televisions from the player bar
 
 **Built-in server (Linux)**
-- Comes with its own Tvheadend out of the box, no need to set up a server to watch IPTV or use a USB tuner
+- Comes with its own optional Tvheadend out of the box (optional, you can use any server), no need to set up a server to watch IPTV or use a USB tuner
 
 **TV guide**
-- Fetch guides from online sources
+- Browse EPG
+- Fetch missing program guides from online sources
 
 **Record**
 - Instant and scheduled recordings
