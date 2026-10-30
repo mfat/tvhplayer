@@ -457,3 +457,60 @@ def test_htsp_reads_the_channel_list_only_for_calls_that_need_it():
     backend.list_channel_tags()
     assert [method for method, _ in conn.calls] == ['api', 'getTicket', 'enableAsyncMetadata']
     assert logins == ['connect']
+
+
+def test_live_now_grid_reads_every_page_using_total_count(monkeypatch):
+    """Current programmes beyond the first server page must not show No EPG."""
+    from tvhplayer.core import dvr
+
+    monkeypatch.setattr(dvr, 'GRID_LIMIT', 2)
+    backend = _http()
+    rows = [
+        {'eventId': 100 + i, 'channelUuid': f'channel-{i}',
+         'title': f'Current {i}', 'start': 1000, 'stop': 2000}
+        for i in range(5)
+    ]
+    backend._session.queue = [
+        {'totalCount': 5, 'entries': rows[0:2]},
+        {'totalCount': 5, 'entries': rows[2:4]},
+        {'totalCount': 5, 'entries': rows[4:5]},
+    ]
+    channels = [
+        Channel(uuid=f'channel-{i}', name=f'Channel {i}', number=i)
+        for i in range(5)
+    ]
+    result = backend.get_now_next_live(channels)
+    assert len(result) == 5
+    assert [result[ch.uuid].now.title for ch in channels] == [
+        f'Current {i}' for i in range(5)
+    ]
+    calls = backend._session.calls
+    assert len(calls) == 3
+    assert all(call[1].endswith('/api/epg/events/grid') for call in calls)
+    assert [call[2]['params']['start'] for call in calls] == [0, 2, 4]
+    assert [call[2]['params']['limit'] for call in calls] == [2, 2, 2]
+    assert all(call[2]['params']['mode'] == 'now' for call in calls)
+
+
+def test_live_now_grid_includes_channel_beyond_10000_event_limit():
+    """The old explicit limit silently dropped channel 10001's Now programme."""
+    backend = _http()
+    rows = [
+        {'eventId': i + 1, 'channelUuid': f'ch-{i}', 'title': f'On now {i}',
+         'start': 1000, 'stop': 2000}
+        for i in range(10001)
+    ]
+    backend._session.queue = [
+        {'totalCount': len(rows), 'entries': rows[:10000]},
+        {'totalCount': len(rows), 'entries': rows[10000:]},
+    ]
+    channels = [Channel(uuid=f'ch-{i}', name=f'TV {i}') for i in range(len(rows))]
+    result = backend.get_now_next_live(channels)
+
+    assert len(result) == 10001
+    assert result['ch-10000'].now.title == 'On now 10000'
+    requests = [call[2]['params'] for call in backend._session.calls]
+    assert len(requests) == 2
+    assert [p['start'] for p in requests] == [0, 10000]
+    assert [p['limit'] for p in requests] == [10000, 10000]
+    assert all(p['mode'] == 'now' for p in requests)
