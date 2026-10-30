@@ -11,11 +11,14 @@ from __future__ import annotations
 import threading
 import time
 
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QPainter, QPalette, QPen
 from PyQt6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,13 +27,17 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QRadioButton,
+    QStyle,
+    QStyleOptionButton,
     QVBoxLayout,
+    QWidget,
     QWizard,
     QWizardPage,
 )
 
 try:
     from .a11y import announce_label, describe
+    from .ui_theme import color as theme_color, is_active as theme_is_active, is_organic
     from .core.errors import TvhAuthError
     from .core.tuner_setup import (
         KIND_WORDS,
@@ -48,6 +55,7 @@ try:
     from .core.tvh_admin import TvhAdmin
 except ImportError:
     from a11y import announce_label, describe
+    from ui_theme import color as theme_color, is_active as theme_is_active, is_organic
     from core.errors import TvhAuthError
     from core.tuner_setup import (
         KIND_WORDS,
@@ -72,6 +80,191 @@ SCAN_STALL_SECONDS = 600
 # SAT>IP servers answer discovery within a few seconds. The server looks for HDHomeRun
 # tuners by itself every 15 seconds.
 DISCOVERY_WAIT_SECONDS = 4
+
+
+def _is_under(widget, ancestor):
+    while widget is not None:
+        if widget is ancestor:
+            return True
+        widget = widget.parentWidget()
+    return False
+
+
+def _title_font(label):
+    """A demibold heading when a Qt style is in use. The TVHplayer theme sets its own."""
+    if theme_is_active():
+        return
+    font = QFont(QApplication.font())
+    font.setWeight(QFont.Weight.DemiBold)
+    font.setPointSizeF(font.pointSizeF() * 1.35)
+    label.setFont(font)
+
+
+class _Title(QLabel):
+    def __init__(self, text):
+        super().__init__(text)
+        self.setObjectName('pageTitle')
+        self.setAccessibleName(text)
+        _title_font(self)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.StyleChange:
+            _title_font(self)
+        super().changeEvent(event)
+
+
+def _heading(layout, title, subtitle):
+    heading = _Title(title)
+    intro = QLabel(subtitle)
+    intro.setObjectName('pageIntro')
+    intro.setWordWrap(True)
+    layout.addWidget(heading)
+    layout.addSpacing(2)
+    layout.addWidget(intro)
+    return heading
+
+
+def _section_font(label):
+    """Bold section names when a Qt style is in use. The TVHplayer theme sets its own."""
+    if theme_is_active():
+        return
+    font = QFont(QApplication.font())
+    font.setWeight(QFont.Weight.DemiBold)
+    label.setFont(font)
+
+
+class _Section(QLabel):
+    def __init__(self, text, buddy=None):
+        super().__init__(text)
+        self.setObjectName('groupTitle')
+        if buddy is not None:
+            self.setBuddy(buddy)
+        _section_font(self)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.StyleChange:
+            _section_font(self)
+        super().changeEvent(event)
+
+
+def _tuner_detail(tuner):
+    """Where the tuner is, and what it receives, when the name does not already say so."""
+    parts = []
+    name = tuner.name or ''
+    hardware = (tuner.hardware or '').strip()
+    if hardware and hardware not in name:
+        parts.append(hardware)
+    if tuner.kind and tuner.kind not in name:
+        parts.append(tuner.kind)
+    return ' · '.join(parts)
+
+
+class _TunerRow(QWidget):
+    """One found tuner: its name, then where it is and what it receives."""
+
+    def __init__(self, tuner):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        name = QLabel(tuner.name)
+        name.setObjectName('rowTitle')
+        name.setWordWrap(True)
+        detail = QLabel(_tuner_detail(tuner))
+        detail.setObjectName('rowDesc')
+        detail.setWordWrap(True)
+        if not detail.text():
+            detail.hide()
+        layout.addWidget(name)
+        layout.addWidget(detail)
+        self.setAccessibleName(f'{tuner.name} ({tuner.kind})' if tuner.kind else tuner.name)
+
+
+class ChoiceCard(QFrame):
+    """A radio option drawn as a card. Clicking the card selects it."""
+
+    def __init__(self, radio, detail):
+        super().__init__()
+        self.radio = radio
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(4)
+        self._detail = QLabel(detail)
+        self._detail.setObjectName('rowDesc')
+        self._detail.setWordWrap(True)
+        layout.addWidget(radio)
+        layout.addWidget(self._detail)
+        self.body = QVBoxLayout()
+        self.body.setSpacing(8)
+        layout.addLayout(self.body)
+        radio.toggled.connect(self.update)
+        radio.installEventFilter(self)
+        self._restyle()
+        self._align()
+        self._sync_cursor()
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.StyleChange:
+            self._restyle()
+            self._align()
+        super().changeEvent(event)
+
+    def showEvent(self, event):
+        self._align()
+        super().showEvent(event)
+
+    def _align(self):
+        """The note and the tuner list start where the radio's text does."""
+        option = QStyleOptionButton()
+        self.radio.initStyleOption(option)
+        indent = self.style().subElementRect(QStyle.SubElement.SE_RadioButtonContents, option, self.radio).x()
+        if indent <= 0:
+            return
+        self._detail.setContentsMargins(indent, 0, 0, 0)
+        self.body.setContentsMargins(indent, 8, 0, 0)
+
+    def eventFilter(self, watched, event):
+        if watched is self.radio and event.type() == QEvent.Type.EnabledChange:
+            self._sync_cursor()
+            self.update()
+        return super().eventFilter(watched, event)
+
+    def _restyle(self):
+        self.setFrameShape(QFrame.Shape.NoFrame if theme_is_active() else QFrame.Shape.StyledPanel)
+
+    def _sync_cursor(self):
+        cursor = Qt.CursorShape.PointingHandCursor if self.radio.isEnabled() else Qt.CursorShape.ArrowCursor
+        self.setCursor(cursor)
+
+    def _selected(self):
+        return self.radio.isEnabled() and self.radio.isChecked()
+
+    def mousePressEvent(self, event):
+        if self.radio.isEnabled() and event.button() == Qt.MouseButton.LeftButton:
+            self.radio.setChecked(True)
+            self.radio.setFocus(Qt.FocusReason.MouseFocusReason)
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        if not theme_is_active():
+            super().paintEvent(event)
+            if not self._selected():
+                return
+            self._stroke(self.palette().color(QPalette.ColorRole.Highlight), 6, 2)
+            return
+        selected = self._selected()
+        width = 2 if selected else 1
+        radius = 14 if is_organic() else 8
+        self._stroke(theme_color('accent' if selected else 'edge_soft'), radius, width, theme_color('base'))
+
+    def _stroke(self, edge, radius, width, fill=None):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = QRectF(self.rect()).adjusted(width / 2, width / 2, -width / 2, -width / 2)
+        painter.setPen(QPen(edge, width))
+        painter.setBrush(fill if fill is not None else Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(rect, max(0, radius - width / 2), max(0, radius - width / 2))
 
 
 class ServerCall(QObject):
@@ -113,8 +306,20 @@ class SetupWizard(QWizard):
         self.setWindowTitle('Set Up Channels')
         self.setAccessibleName('Set Up Channels')
         self.setWizardStyle(QWizard.WizardStyle.ClassicStyle)
+        self.setOption(QWizard.WizardOption.NoBackButtonOnStartPage, True)
         self.setOption(QWizard.WizardOption.NoBackButtonOnLastPage, True)
-        self.setMinimumSize(560, 460)
+        self.setOption(QWizard.WizardOption.CancelButtonOnLeft, True)
+        self.setMinimumSize(600, 520)
+        self.setButtonText(QWizard.WizardButton.BackButton, '&Back')
+        self.setButtonText(QWizard.WizardButton.NextButton, '&Next')
+        self.setButtonText(QWizard.WizardButton.CancelButton, 'Cancel')
+        for which in (
+            QWizard.WizardButton.NextButton,
+            QWizard.WizardButton.CommitButton,
+            QWizard.WizardButton.FinishButton,
+        ):
+            self.button(which).setProperty('primary', True)
+        self.currentIdChanged.connect(lambda _page: QTimer.singleShot(0, self._tuck_header))
         self.source_page = SourcePage(self)
         self.tuner_page = TunerPage(self)
         self.scan_page = ScanPage(self)
@@ -141,36 +346,74 @@ class SetupWizard(QWizard):
         elif self.scan_page.added:
             self.on_done(self.server)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._tuck_header()
+        QTimer.singleShot(0, self._tuck_header)
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.StyleChange:
+            QTimer.singleShot(0, self._tuck_header)
+
+    def _tuck_header(self):
+        """The classic wizard heading is a small bold line. Each page draws its own."""
+        page = self.currentPage()
+        title = page.title() if page is not None else ''
+        if not title:
+            return
+        for label in self.findChildren(QLabel):
+            if label.text() != title or _is_under(label, page):
+                continue
+            header = label.parentWidget()
+            if header is None:
+                continue
+            header.hide()
+            header.setMaximumHeight(0)
+            return
+
 
 class SourcePage(QWizardPage):
     def __init__(self, wizard):
         super().__init__()
         self._wizard = wizard
+        server = wizard.server.get('name') or 'the server'
         self.setTitle('How do you get TV?')
-        self.setSubTitle(f"TVHplayer adds the channels to {wizard.server.get('name') or 'the server'}.")
+        self.setSubTitle(f'Channels are added to {server}.')
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 16, 8, 8)
+        layout.setSpacing(14)
+        _heading(layout, self.title(), self.subTitle())
         self.group = QButtonGroup(self)
-        self.tuner_radio = QRadioButton('A &TV tuner, with an aerial, cable, or satellite dish')
-        self.iptv_radio = QRadioButton('An &IPTV playlist: a web address or file ending in .m3u')
+        self.tuner_radio = QRadioButton('&TV tuner')
+        self.iptv_radio = QRadioButton('&IPTV playlist')
+        describe(self.tuner_radio, 'TV tuner', 'An aerial, cable, or a satellite dish.')
+        describe(self.iptv_radio, 'IPTV playlist', 'A web address or a file ending in .m3u.')
         self.group.addButton(self.tuner_radio)
         self.group.addButton(self.iptv_radio)
-        layout.addWidget(self.tuner_radio)
-        self.tuner_radio.toggled.connect(self._changed)
+        self.tuner_card = ChoiceCard(self.tuner_radio, 'An aerial, cable, or a satellite dish.')
+        self.iptv_card = ChoiceCard(self.iptv_radio, 'A web address or a file ending in .m3u.')
         self.status = QLabel('Looking for tuners…')
         self.status.setWordWrap(True)
-        self.status.setContentsMargins(24, 8, 0, 0)
-        layout.addWidget(self.status)
-        row = QHBoxLayout()
-        row.setContentsMargins(24, 0, 0, 0)
-        self.look_btn = QPushButton('&Look Again')
-        describe(self.look_btn, 'Look Again', 'Look for tuners again, including SAT>IP and HDHomeRun tuners on the network.')
+        self.found = QWidget()
+        self._found_rows = QVBoxLayout(self.found)
+        self._found_rows.setContentsMargins(0, 0, 0, 0)
+        self._found_rows.setSpacing(10)
+        self.found.hide()
+        self.look_btn = QPushButton('&Look again')
+        describe(self.look_btn, 'Look again', 'Look for tuners again, including SAT>IP and HDHomeRun tuners on the network.')
         self.look_btn.clicked.connect(self.look_again)
-        row.addWidget(self.look_btn)
-        row.addStretch(1)
-        layout.addLayout(row)
-        layout.addWidget(self.iptv_radio)
-        self.iptv_radio.toggled.connect(self._changed)
+        actions = QHBoxLayout()
+        actions.addWidget(self.look_btn)
+        actions.addStretch(1)
+        self.tuner_card.body.addWidget(self.status)
+        self.tuner_card.body.addWidget(self.found)
+        self.tuner_card.body.addLayout(actions)
+        layout.addWidget(self.tuner_card)
+        layout.addWidget(self.iptv_card)
         layout.addStretch(1)
+        self.tuner_radio.toggled.connect(self._changed)
+        self.iptv_radio.toggled.connect(self._changed)
         self._looking = False
         self._looked = False
 
@@ -183,6 +426,8 @@ class SourcePage(QWizardPage):
             return
         self._looking = True
         self.look_btn.setEnabled(False)
+        # Show the line first: a hidden label is not announced.
+        self._show_found([])
         announce_label(self.status, 'Looking for tuners, including SAT>IP and HDHomeRun tuners on the network…')
 
         def discover(admin):
@@ -220,12 +465,26 @@ class SourcePage(QWizardPage):
                 announce_label(
                     self.status,
                     'No tuner found. Plug in a USB tuner, or turn on a SAT>IP or HDHomeRun tuner on this '
-                    'network, then choose Look Again.',
+                    'network, then choose Look again.',
                 )
+        self._show_found(self._wizard.tuners)
         self.tuner_radio.setEnabled(bool(self._wizard.tuners))
         if self.group.checkedButton() is None or not self._wizard.tuners:
             (self.tuner_radio if self._wizard.tuners else self.iptv_radio).setChecked(True)
         self._changed()
+
+    def _show_found(self, tuners):
+        while self._found_rows.count():
+            item = self._found_rows.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        for tuner in tuners or []:
+            self._found_rows.addWidget(_TunerRow(tuner))
+        self.found.setVisible(bool(tuners))
+        # The sentence stays for assistive technology. The rows say the same thing on screen.
+        self.status.setVisible(not tuners)
 
     def _changed(self, *_args):
         iptv = self.iptv_radio.isChecked()
@@ -262,35 +521,40 @@ class TunerPage(QWizardPage):
         self.setCommitPage(True)
         self.setButtonText(QWizard.WizardButton.CommitButton, '&Scan')
         layout = QVBoxLayout(self)
-        kind_row = QHBoxLayout()
-        kind_label = QLabel('&Signal:')
+        layout.setContentsMargins(8, 16, 8, 8)
+        layout.setSpacing(4)
+        _heading(layout, self.title(), self.subTitle())
+        layout.addSpacing(10)
         self.kind_combo = QComboBox()
-        kind_label.setBuddy(self.kind_combo)
-        kind_row.addWidget(kind_label)
-        kind_row.addWidget(self.kind_combo, 1)
-        layout.addLayout(kind_row)
-        tuner_label = QLabel('T&uners to use:')
+        kind_label = _Section('&Signal', self.kind_combo)
         self.tuner_list = QListWidget()
         self.tuner_list.setAccessibleName('Tuners to use')
-        self.tuner_list.setMaximumHeight(90)
-        tuner_label.setBuddy(self.tuner_list)
-        layout.addWidget(tuner_label)
-        layout.addWidget(self.tuner_list)
-        region_label = QLabel('&Region or satellite:')
+        self.tuner_list.setMaximumHeight(140)
+        tuner_label = _Section('T&uners to use', self.tuner_list)
         self.region_filter = QLineEdit()
         self.region_filter.setPlaceholderText('Type to narrow the list, such as a country or city')
         self.region_filter.setClearButtonEnabled(True)
         describe(self.region_filter, 'Find region', 'Narrows the list of regions below.')
-        region_label.setBuddy(self.region_filter)
+        region_label = _Section('&Region or satellite', self.region_filter)
         self.region_list = QListWidget()
         self.region_list.setAccessibleName('Regions')
-        layout.addWidget(region_label)
-        layout.addWidget(self.region_filter)
-        layout.addWidget(self.region_list, 1)
         self.region_status = QLabel('')
         self.region_status.setWordWrap(True)
-        layout.addWidget(self.region_status)
+        self.region_status.setObjectName('rowDesc')
+        self.region_status.hide()
         self.encrypted_check = QCheckBox('Also add &encrypted channels (they need a subscription card)')
+        for index, (label, widget) in enumerate((
+            (kind_label, self.kind_combo),
+            (tuner_label, self.tuner_list),
+            (region_label, self.region_filter),
+        )):
+            if index:
+                layout.addSpacing(12)
+            layout.addWidget(label)
+            layout.addWidget(widget)
+        layout.addWidget(self.region_list, 1)
+        layout.addWidget(self.region_status)
+        layout.addSpacing(6)
         layout.addWidget(self.encrypted_check)
         self.kind_combo.currentIndexChanged.connect(self._kind_changed)
         self.tuner_list.itemChanged.connect(lambda _item: self.completeChanged.emit())
@@ -325,6 +589,7 @@ class TunerPage(QWizardPage):
         if not kind:
             return
         announce_label(self.region_status, 'Reading the list of regions…')
+        self.region_status.show()
         self._wizard.call(lambda admin: scan_regions(admin, kind), lambda regions, error: self._regions_read(kind, regions, error))
 
     def _regions_read(self, kind, regions, error):
@@ -332,9 +597,11 @@ class TunerPage(QWizardPage):
             return
         if error:
             announce_label(self.region_status, f'Could not read the regions: {error}')
+            self.region_status.show()
             return
         self._regions = regions or []
         self.region_status.setText('' if self._regions else 'The server has no scan tables for this signal.')
+        self.region_status.setVisible(bool(self.region_status.text()))
         self._fill_regions()
 
     def _fill_regions(self, *_args):
@@ -379,18 +646,38 @@ class ScanPage(QWizardPage):
         self.setTitle('Scanning')
         self.setSubTitle('This takes a few minutes. You can keep watching other channels meanwhile.')
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 16, 8, 8)
+        layout.setSpacing(14)
+        _heading(layout, self.title(), self.subTitle())
+        self._card = QFrame()
+        self._card.setObjectName('groupCard')
+        self._restyle_card()
+        card = self._card
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(18, 16, 18, 16)
+        inner.setSpacing(14)
         self.status = QLabel('')
         self.status.setWordWrap(True)
-        layout.addWidget(self.status)
         self.progress = QProgressBar()
+        self.progress.setTextVisible(False)
         self.progress.setAccessibleName('Scan progress')
-        layout.addWidget(self.progress)
+        inner.addWidget(self.status)
+        inner.addWidget(self.progress)
+        layout.addWidget(card)
         layout.addStretch(1)
         self._timer = QTimer(self)
         self._timer.setInterval(POLL_MS)
         self._timer.timeout.connect(self._poll)
         self._polling = False
         self._step = ''
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.Type.StyleChange:
+            self._restyle_card()
+        super().changeEvent(event)
+
+    def _restyle_card(self):
+        self._card.setFrameShape(QFrame.Shape.NoFrame if theme_is_active() else QFrame.Shape.StyledPanel)
 
     def initializePage(self):
         page = self._wizard.tuner_page

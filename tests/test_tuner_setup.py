@@ -139,6 +139,7 @@ def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
     page = wizard.source_page
     assert page.tuner_radio.isChecked()
     assert 'DVB-T #0' in page.status.text()
+    assert any(label.text() == 'DVB-T #0' for label in page.findChildren(type(page.status)))
     wizard.next()
     tuners = wizard.tuner_page
     assert tuners.kind() == 'DVB-T'
