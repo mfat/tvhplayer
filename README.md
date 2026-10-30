@@ -12,36 +12,17 @@ A desktop app for watching and recording live TV, with its own built-in Tvheaden
 **Watch**
 - Live TV and radio from one or more Tvheadend servers
 - Cast live channels to Chromecast and Cast-enabled televisions from the player bar
-- Sound tracks, DVB and teletext subtitles, and deinterlacing from the Playback menu
-- Fullscreen with on-screen controls and messages
-- Says why a channel will not start, in the server's own words, and shows a tuner's reception while it starts
 
 **Built-in server (Linux)**
-- Comes with its own Tvheadend that starts and stops with the app, so no separate server is needed
-- **Set Up Channels** finds your tuners (USB, PCIe, SAT>IP and HDHomeRun) and scans for channels
-- Add internet TV from M3U playlists or Xtream Codes providers, including provider HTTP headers; pick the groups and channels you want, and inspect saved stream-health results
-- TV guide for internet channels from XMLTV guides, found for your channels or added by address or file
+- Comes with its own Tvheadend out of the box, no need to set up a server to watch IPTV or use a USB tuner
 
 **TV guide**
-- Every channel against time in one window, with watch and record from the guide
-- Channel logos from the server, or from the picons project for channels without one
+- Fetch guides from online sources
 
 **Record**
-- Record on the server, now or scheduled from the guide
-- Record on this computer, several channels at once, as MPEG-TS, MP4 or Matroska
+- Instant and scheduled recordings
+- Record directly on local computer
 - Convert recordings into edit-friendly MP4 files
-- Warns about scheduled recordings that need more tuners than the server has
-- Keeps the computer awake while recording or with a recording coming up
-
-**Channel list**
-- Choose the columns: number, now and next with a progress bar, type, and status
-- The Now column refreshes every two minutes and shows **No EPG** only after the server has answered without a current programme; pending or failed guide requests are left blank
-- Groups, favourites, search, and channel editing (rename, renumber, hide) saved on the server
-- Stays quick with lists of hundreds of thousands of channels
-
-**Look and access**
-- TVHplayer's own theme in light and dark, or any Qt style on your computer
-- Keyboard shortcuts for everything (F1 lists them) and screen reader support
 
 ## Download
 - **Flatpak:** [Flathub](https://flathub.org/apps/io.github.mfat.tvhplayer)
@@ -51,12 +32,9 @@ A desktop app for watching and recording live TV, with its own built-in Tvheaden
 - **macOS:** [Apple silicon](https://mfat.github.io/tvhplayer/download.html?format=macos-arm64) · [Intel](https://mfat.github.io/tvhplayer/download.html?format=macos-x86_64)
 - **Windows:** [installer](https://mfat.github.io/tvhplayer/download.html?format=windows-setup) · [portable zip](https://mfat.github.io/tvhplayer/download.html?format=windows-zip)
 
-The download links automatically get the latest version. The Flatpak, AppImage, deb and rpm include the built-in server, mpv and ffmpeg, or pull them in as dependencies. The macOS and Windows builds connect to an existing Tvheadend server; the built-in server is part of the Linux packages only. You can also [browse all releases](https://github.com/mfat/tvhplayer/releases).
+The download links automatically get the latest version. The Flatpak, AppImage, deb and rpm include the built-in server, mpv and ffmpeg, or pull them in as dependencies. The macOS and Windows builds connect to an existing Tvheadend server; the built-in server is a Linux-only feature.
 
-## Getting started
-- **Built-in server**: on first start with no channels, TVHplayer opens **Set Up Channels**. Choose a TV tuner or an IPTV playlist and follow the steps.
-- **Your own server**: click the gear button (Manage servers) above the channel list, choose **Add Server…**, and enter the server's address with `http://` and the port (usually `http://server:9981`), plus your username and password. HTSP is the default and gets channel and recording changes as they happen.
-- **Chromecast**: put the computer and receiver on the same network, then use the Cast button beside volume. TVHplayer shares the selected stream through a temporary LAN URL, including streams from its built-in server or a server configured as `localhost`. Keep TVHplayer running while casting and allow its incoming network connection through the firewall. The Cast menu also offers connection by IP address and **Stream profile → Automatic (recommended)**. Automatic mode prefers compatible video/audio/container combinations, tries another candidate when playback fails, and remembers the working choice separately for each server and receiver. Manual choices remain available; select Automatic once if you previously saved a manual profile. The relay does not transcode media itself.
+You can also [browse all releases](https://github.com/mfat/tvhplayer/releases).
 
 See the [User Guide](https://github.com/mfat/tvhplayer/wiki/User-Guide) (Help → User Guide) for everything else.
 
