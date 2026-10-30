@@ -125,18 +125,17 @@ class ToggleSwitch(QCheckBox):
         # On the accent, the accent's own ink: Organic's dark accent is near white.
         p.setBrush(pal.color(QPalette.ColorRole.HighlightedText) if self.isChecked() else QColor('#ffffff'))
         p.drawEllipse(knob)
+        # This control is a compact settings switch: a separate focus outline
+        # reads as a broken outer arc at this size. Keep focus indication on
+        # the thumb instead, where it follows the moving knob cleanly.
         if self.hasFocus():
-            pen = p.pen()
-            pen.setStyle(Qt.PenStyle.SolidLine)
-            pen.setColor(accent)
-            pen.setWidthF(2)
-            p.setPen(pen)
+            p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            # Center the 2px stroke inside the 40x24 switch bounds. Expanding
-            # the track by 2px put half the stroke outside the widget and
-            # caused Qt to clip the corners of the focus ring.
-            ring = track.adjusted(-1, -1, 1, 1)
-            p.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
+            focus_pen = p.pen()
+            focus_pen.setColor(accent)
+            focus_pen.setWidthF(2)
+            p.setPen(focus_pen)
+            p.drawEllipse(knob.adjusted(-1, -1, 1, 1))
 
 
 class SettingRow(QWidget):
