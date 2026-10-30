@@ -152,10 +152,10 @@ class SourcePage(QWizardPage):
         self.group = QButtonGroup(self)
         self.tuner_radio = QRadioButton('A &TV tuner, with an aerial, cable, or satellite dish')
         self.iptv_radio = QRadioButton('An &IPTV playlist: a web address or file ending in .m3u')
-        for button in (self.tuner_radio, self.iptv_radio):
-            self.group.addButton(button)
-            layout.addWidget(button)
-            button.toggled.connect(self._changed)
+        self.group.addButton(self.tuner_radio)
+        self.group.addButton(self.iptv_radio)
+        layout.addWidget(self.tuner_radio)
+        self.tuner_radio.toggled.connect(self._changed)
         self.status = QLabel('Looking for tuners…')
         self.status.setWordWrap(True)
         self.status.setContentsMargins(24, 8, 0, 0)
@@ -168,6 +168,8 @@ class SourcePage(QWizardPage):
         row.addWidget(self.look_btn)
         row.addStretch(1)
         layout.addLayout(row)
+        layout.addWidget(self.iptv_radio)
+        self.iptv_radio.toggled.connect(self._changed)
         layout.addStretch(1)
         self._looking = False
         self._looked = False
