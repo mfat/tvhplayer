@@ -2,6 +2,8 @@
     <img width='240' alt='Get it on Flathub' src='https://flathub.org/api/badge?locale=en'/>
   </a>
 
+
+
 # TVHplayer
 Watch and record your favorite shows right on your PC or laptop. Supports IPTV, HDHomerun, USB TV tuners and more. 
 
@@ -10,6 +12,9 @@ Watch and record your favorite shows right on your PC or laptop. Supports IPTV, 
 
 ## About
 TVHplayer is a cross-platform desktop app for watching and recording live TV using [Tvheadend](https://tvheadend.org/), a mature and feature-rich streaming server and recorder for Linux. It supports IPTV, satellite receivers, USB tuners and HDHomerun. This application is a client for Tvheadend.
+
+<img width="1965" height="1055" alt="image" src="https://github.com/user-attachments/assets/fe5fae0a-90df-45f0-9bcd-a272cefd76ba" />
+
 
 ## Who is this for
 This is for people who already have a Tvheadend server.
