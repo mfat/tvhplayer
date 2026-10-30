@@ -13,7 +13,8 @@ TVHplayer is a cross-platform desktop app for watching and recording live TV usi
 
 ## Who is this for
 This is for people who already have a Tvheadend server.
-If you use linux, you can use this as a normal TV and PVR app, even without a server. You just need an IPTV playlist, or a TV tuner. 
+
+But if you use linux, you can use this as a normal TV and PVR app, even without a server. You just need an IPTV playlist, or a TV tuner. 
 
 ## Features
 
