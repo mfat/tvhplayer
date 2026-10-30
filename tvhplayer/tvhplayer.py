@@ -6800,6 +6800,16 @@ class TVHeadendClient(QMainWindow):
 
         modifiers = event.modifiers()
         key = event.key()
+        # Space belongs to the focused control unless focus is on the player
+        # surface (or the window itself). Avoid a window-wide shortcut, which
+        # would steal it from buttons, editors, lists, and sliders.
+        if key == Qt.Key.Key_Space and modifiers == Qt.KeyboardModifier.NoModifier:
+            focus = QApplication.focusWidget()
+            if focus is None or focus is self or focus is self.video_frame:
+                if not event.isAutoRepeat():
+                    self.toggle_pause()
+                event.accept()
+                return
         ctrl = bool(modifiers & Qt.KeyboardModifier.ControlModifier)
         shift = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
         if modifiers & Qt.KeyboardModifier.AltModifier:

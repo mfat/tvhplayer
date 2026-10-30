@@ -36,6 +36,7 @@ Channels
   Ctrl+= or Ctrl+- Taller or shorter channel rows (also Ctrl+mouse wheel)
 
 Playback
+  Space            Pause or resume when the player has focus
   P                Play the selected channel, or stop playback
   Ctrl+.           Stop playback
   Ctrl+PgUp        Play the previous channel in the list
