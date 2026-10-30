@@ -132,7 +132,11 @@ class ToggleSwitch(QCheckBox):
             pen.setWidthF(2)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawRoundedRect(track.adjusted(-2, -2, 2, 2), 12, 12)
+            # Center the 2px stroke inside the 40x24 switch bounds. Expanding
+            # the track by 2px put half the stroke outside the widget and
+            # caused Qt to clip the corners of the focus ring.
+            ring = track.adjusted(-1, -1, 1, 1)
+            p.drawRoundedRect(ring, ring.height() / 2, ring.height() / 2)
 
 
 class SettingRow(QWidget):
