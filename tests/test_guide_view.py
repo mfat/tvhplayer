@@ -145,7 +145,7 @@ def test_guide_window_reads_spans_moves_by_keyboard_and_records(monkeypatch):
 
         _key(grid, Qt.Key.Key_Right)
         assert grid.current_event().title == 'Midday'
-        assert window.description_label.text() == 'A long chat.'
+        assert window.description_text.toPlainText() == 'A long chat.'
         assert window.series_btn.isEnabled()
         _key(grid, Qt.Key.Key_Down)
         assert grid.current_channel().name == 'Bravo'
@@ -233,5 +233,40 @@ def test_guide_window_reports_a_failed_read_until_reload(monkeypatch):
         assert window.title_label.text() == 'No programme information'
     finally:
         window.shutdown()
+        window.deleteLater()
+        app.processEvents()
+
+
+def test_long_description_is_scrollable_without_refresh_jumping(monkeypatch):
+    """Keep every line available and do not reset a user's reading position."""
+    app = _app()
+    import tvhplayer.guide_view as guide_view
+    from tvhplayer.core.models import Channel, EpgEvent
+
+    now = int(time.time())
+    channel = Channel(uuid='earth', name='Earth HD', number=17)
+    long_description = 'Documentary exploring wildlife across the Arctic. ' * 70
+    event = EpgEvent(
+        start=now - 120, stop=now + 3600, title='Arctic wildlife',
+        channel_uuid='earth', event_id=42, description=long_description,
+    )
+    backend = _Backend([event])
+    monkeypatch.setattr(guide_view, 'create_backend', lambda server: backend)
+    window = guide_view.GuideWindow(_Host([channel], [], backend))
+    try:
+        window.show()
+        window.show_channel(channel)
+        assert _wait(app, lambda: window.description_text.toPlainText() == long_description)
+        assert window.description_text.isReadOnly()
+        scrollbar = window.description_text.verticalScrollBar()
+        assert scrollbar.maximum() > 0
+        scrollbar.setValue(scrollbar.maximum())
+        bottom = scrollbar.value()
+        window._on_tick()
+        assert window.description_text.toPlainText() == long_description
+        assert scrollbar.value() == bottom
+    finally:
+        window.shutdown()
+        window.close()
         window.deleteLater()
         app.processEvents()
