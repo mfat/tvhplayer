@@ -60,6 +60,11 @@ try:
     from .core import frozen_libs
     from .core.engine import mpv_missing
     from .core.mpv_player import MpvPlayer
+    from .core.subtitle_preferences import (
+        SUBTITLE_LANGUAGES, normalize_subtitle_language,
+        preferred_subtitle_track, subtitle_track_language,
+    )
+    from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from .core.playlist_sync import PlaylistSource, same_source, server_key, source_key
     from .core.playback_status import (
@@ -159,6 +164,11 @@ except ImportError:
     from core import frozen_libs
     from core.engine import mpv_missing
     from core.mpv_player import MpvPlayer
+    from core.subtitle_preferences import (
+        SUBTITLE_LANGUAGES, normalize_subtitle_language,
+        preferred_subtitle_track, subtitle_track_language,
+    )
+    from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from core.playlist_sync import PlaylistSource, same_source, server_key, source_key
     from core.playback_status import (
@@ -1948,7 +1958,7 @@ class ServerDialog(QDialog):
         self._loading = False
         self._supervisor = getattr(parent, 'builtin', None)
         self.setup_ui()
-        self.setMinimumSize(780, 480)
+        self.setMinimumSize(780, 545)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -2110,6 +2120,27 @@ class ServerDialog(QDialog):
         describe(self.password_input, description="Password is hidden while you type.")
         form.addRow(buddy_label("Pass&word:", self.password_input), self.password_input)
 
+        self.subtitle_language_combo = QComboBox()
+        self.subtitle_language_combo.addItem("Off — choose manually during playback", "")
+        for code, title, _aliases in SUBTITLE_LANGUAGES:
+            self.subtitle_language_combo.addItem(title, code)
+        describe(
+            self.subtitle_language_combo, "Default subtitles",
+            "Automatically enable the selected language for each channel when available. "
+            "Off disables automatic subtitles and allows manual selection during playback.",
+        )
+        form.addRow(
+            buddy_label("Default &subtitles:", self.subtitle_language_combo),
+            self.subtitle_language_combo,
+        )
+        self.remember_subtitle_checkbox = QCheckBox("Remember subtitle changes made in the player")
+        describe(
+            self.remember_subtitle_checkbox, "Remember subtitle choices",
+            "When checked, choosing a subtitle language or Off in Playback updates "
+            "this server's default subtitle language.",
+        )
+        form.addRow("", self.remember_subtitle_checkbox)
+
         self.test_btn = QPushButton("&Test Connection")
         describe(self.test_btn, "Test connection", "Check that TVHplayer can reach this server")
         self.test_btn.clicked.connect(self.test_connection)
@@ -2131,6 +2162,12 @@ class ServerDialog(QDialog):
         self.htsp_port_input.valueChanged.connect(lambda value: self._edit('htsp_port', value))
         self.username_input.textChanged.connect(lambda text: self._edit('username', text))
         self.password_input.textChanged.connect(lambda text: self._edit('password', text))
+        self.subtitle_language_combo.currentIndexChanged.connect(
+            lambda _index: self._edit('subtitle_language', self.subtitle_language_combo.currentData() or '')
+        )
+        self.remember_subtitle_checkbox.toggled.connect(
+            lambda enabled: self._edit('remember_subtitle_selection', bool(enabled))
+        )
         return page
 
     def _builtin_page(self):
@@ -2260,6 +2297,10 @@ class ServerDialog(QDialog):
                     self.htsp_port_input.setValue(9982)
                 self.username_input.setText(server.get('username') or '')
                 self.password_input.setText(server.get('password') or '')
+                language = normalize_subtitle_language(server.get('subtitle_language'))
+                subtitle_index = self.subtitle_language_combo.findData(language)
+                self.subtitle_language_combo.setCurrentIndex(max(0, subtitle_index))
+                self.remember_subtitle_checkbox.setChecked(server.get('remember_subtitle_selection') is True)
             finally:
                 self._loading = False
         self._refresh_selected()
@@ -2338,7 +2379,7 @@ class ServerDialog(QDialog):
         else:
             changed = server.get(key) != value
         server[key] = value
-        if changed and key != 'name':
+        if changed and key not in ('name', 'subtitle_language', 'remember_subtitle_selection'):
             self.test_results.pop(id(server), None)
         self._refresh_selected()
 
@@ -2373,6 +2414,8 @@ class ServerDialog(QDialog):
             'password': '',
             'protocol': PROTOCOL_HTSP,
             'htsp_port': 9982,
+            'subtitle_language': '',
+            'remember_subtitle_selection': False,
         })
         self.name_input.setFocus()
         self.name_input.selectAll()
@@ -3714,6 +3757,16 @@ class TVHeadendClient(QMainWindow):
         self._now_next_timer = QTimer(self)
         self._now_next_timer.timeout.connect(self._tick_now_next)
         self._now_next_timer.start(NOW_NEXT_TICK_MS)
+        # DVB subtitle tracks can appear after the first video frame. Recheck
+        # briefly on the Qt thread until the chosen language is discoverable.
+        self._subtitle_default_timer = QTimer(self)
+        self._subtitle_default_timer.setInterval(400)
+        self._subtitle_default_timer.timeout.connect(self._apply_subtitle_default)
+        self._subtitle_preference = None
+        self._subtitle_manual_override = False
+        self._subtitle_auto_applied = False
+        self._subtitle_attempts = 0
+        self._subtitle_playback_server_key = None
         # Recordings to this computer, finished ones too so Tasks can list them.
         self.local_jobs = []
         self.new_local_recorder = LocalRecorder
@@ -5659,6 +5712,7 @@ class TVHeadendClient(QMainWindow):
     def stop_playback(self):
         """Stop current playback"""
         print("Debug: Stopping playback")
+        self._reset_subtitle_default()
         self._stream = None
         self._stop_start_watch()
         self._awaiting_playback = False
@@ -5818,6 +5872,115 @@ class TVHeadendClient(QMainWindow):
         ):
             self.player.show_message(text)
 
+    def _reset_subtitle_default(self, for_live_channel=False):
+        """Read the server's subtitle language for each new live channel."""
+        self._subtitle_default_timer.stop()
+        self._subtitle_attempts = 0
+        self._subtitle_manual_override = False
+        self._subtitle_auto_applied = False
+        server = self.current_server() if for_live_channel else None
+        self._subtitle_preference = (
+            normalize_subtitle_language(server.get('subtitle_language'))
+            if server is not None else None
+        )
+        self._subtitle_playback_server_key = server_key(server) if server is not None else None
+
+    def _subtitle_live_server(self):
+        """Only change settings for the actual live-TV playback server."""
+        if self.cast_manager.is_connected or self._playback_channel is None:
+            return None
+        server = self.current_server()
+        if (server is None or self._subtitle_playback_server_key is None
+                or server_key(server) != self._subtitle_playback_server_key):
+            return None
+        return server
+
+    def _start_subtitle_default(self):
+        """The embedded MPV player discovers DVB subtitles after a channel starts."""
+        if self._subtitle_preference is None or self._subtitle_manual_override:
+            return
+        self._apply_subtitle_default()
+        if not self._subtitle_auto_applied and self._subtitle_attempts < 30:
+            self._subtitle_default_timer.start()
+
+    def _apply_subtitle_default(self):
+        """Apply only a matching language, or explicitly keep subtitles off.
+
+        Retry for up to 12 seconds, without guessing by track ID or allowing
+        automatic MPV selection to override the server's preference.
+        """
+        if (self._subtitle_preference is None or self._subtitle_manual_override
+                or self._subtitle_auto_applied or self._subtitle_live_server() is None):
+            self._subtitle_default_timer.stop()
+            return
+        player = self.player
+        try:
+            if player is None or not player.is_playing():
+                return
+            self._subtitle_attempts += 1
+            if self._subtitle_attempts > 30:
+                self._subtitle_default_timer.stop()
+                return
+            language = self._subtitle_preference
+            if not language:
+                # MPV can report "auto" as no numeric track; explicitly
+                # disable subtitles so the server's Off setting is respected.
+                player.set_subtitle_track(NO_TRACK)
+                self._subtitle_auto_applied = True
+            else:
+                tracks = player.subtitle_tracks()
+                track_id = preferred_subtitle_track(tracks, language)
+                if track_id is None:
+                    # An unmatched stream must not silently show another language.
+                    if player.subtitle_track() != NO_TRACK:
+                        player.set_subtitle_track(NO_TRACK)
+                    return
+                if player.subtitle_track() != track_id:
+                    player.set_subtitle_track(track_id)
+                self._subtitle_auto_applied = True
+                print(f"Debug: Applied default subtitle language {language} on "
+                      f"{self._playback_channel.name}")
+        except Exception as exc:
+            print(f"Debug: Default subtitle selection failed: {type(exc).__name__}")
+            self._subtitle_default_timer.stop()
+            return
+        if self._subtitle_auto_applied:
+            self._subtitle_default_timer.stop()
+
+    def _choose_subtitle_track(self, track_id):
+        """Select subtitles manually; optionally remember their language for this server."""
+        try:
+            player = self.player
+            if player is None:
+                return
+            player.set_subtitle_track(track_id)
+            self._subtitle_manual_override = True
+            self._subtitle_default_timer.stop()
+            notice = "Subtitles off" if track_id == NO_TRACK else "Subtitles selected"
+            if track_id != NO_TRACK:
+                label = next((name for tid, name in player.subtitle_tracks() if tid == track_id), "")
+                notice = f"Subtitles: {label or track_id}"
+            server = self._subtitle_live_server()
+            if server is not None and server.get('remember_subtitle_selection') is True:
+                language = '' if track_id == NO_TRACK else subtitle_track_language(label)
+                if language is None:
+                    notice += " (language unknown; server default unchanged)"
+                else:
+                    old = server.get('subtitle_language', '')
+                    server['subtitle_language'] = language
+                    if self.save_config():
+                        self._subtitle_preference = language
+                        notice += " (server default saved)"
+                    else:
+                        server['subtitle_language'] = old
+                        notice += " (default not saved)"
+            self.statusbar.showMessage(notice)
+            print(f"Debug: {notice}")
+        except Exception as exc:
+            # Unhandled PyQt6 menu callbacks can terminate macOS app processes.
+            print(f"Debug: Subtitle choice failed: {type(exc).__name__}")
+            self.statusbar.showMessage("Could not change subtitles")
+
     def _on_playback_started(self, casting=False):
         if self.cast_manager.is_connected and not casting:
             return
@@ -5838,10 +6001,13 @@ class TVHeadendClient(QMainWindow):
         if channel is not None:
             self.statusbar.showMessage(f"Playing: {channel.name}")
             self._show_on_picture(f"{channel.number}  {channel.name}" if channel.number else channel.name)
+        if not casting and not self.cast_manager.is_connected:
+            self._start_subtitle_default()
 
     def _on_playback_failed(self, casting=False):
         if self.cast_manager.is_connected and not casting:
             return
+        self._reset_subtitle_default()
         if not self._awaiting_playback and not self._playback_active:
             # Already stopped, for example by the server's reason; keep that message.
             return
@@ -6611,7 +6777,7 @@ class TVHeadendClient(QMainWindow):
         tracks = player.subtitle_tracks() if player is not None else []
         current = player.subtitle_track() if tracks else NO_TRACK
         self._add_track_choices(subtitles, [(NO_TRACK, "Off")] + tracks, current,
-                                lambda track_id: self.player.set_subtitle_track(track_id))
+                                self._choose_subtitle_track)
         if not tracks:
             subtitles.actions()[0].setEnabled(False)
             subtitles.addAction("No Subtitles in This Channel").setEnabled(False)
@@ -6669,7 +6835,11 @@ class TVHeadendClient(QMainWindow):
         print(f"Debug: Loaded {len(self.servers)} servers into dialog")
         def apply_servers(servers):
             previous = self.server_combo.currentIndex()
-            previous_key = server_connection_key(self.current_server())
+            previous_server = self.current_server()
+            previous_key = server_connection_key(previous_server)
+            previous_subtitles = normalize_subtitle_language(
+                (previous_server or {}).get('subtitle_language')
+            )
             self.servers = ensure_builtin_server(
                 servers,
                 self.config['builtin_http_port'],
@@ -6694,6 +6864,15 @@ class TVHeadendClient(QMainWindow):
             if server_connection_key(self.current_server()) != previous_key:
                 self.close_backend()
                 self.fetch_channels()
+            elif (getattr(self, '_playback_channel', None) is not None
+                  and not self.cast_manager.is_connected
+                  and normalize_subtitle_language(
+                      (self.current_server() or {}).get('subtitle_language')
+                  ) != previous_subtitles
+                  and self._subtitle_live_server() is not None):
+                # Apply a changed default to the channel currently playing.
+                self._reset_subtitle_default(for_live_channel=True)
+                self._start_subtitle_default()
         dialog.applied.connect(apply_servers)
         dialog.exec()
     
@@ -6714,10 +6893,12 @@ class TVHeadendClient(QMainWindow):
             self.config = self.config_store.data
             self.servers = self.config_store.servers
             print("Debug: Configuration saved successfully")
+            return True
         except Exception as e:
             print(f"Debug: Error saving config: {str(e)}")
 
             print(f"Debug: Traceback: {traceback.format_exc()}")
+            return False
 
     def on_server_changed(self, index):
         """
@@ -8435,6 +8616,7 @@ class TVHeadendClient(QMainWindow):
             self._remember_channel(channel)
             server = self.current_server()
             casting = self.cast_manager.is_connected
+            self._reset_subtitle_default(for_live_channel=not casting)
             profiles = self.config.get('cast_profiles' if casting else 'stream_profiles', {})
             profile = profiles.get(server_key(server), AUTO_PROFILE if casting else '') if server else ''
             if casting:
@@ -8456,6 +8638,12 @@ class TVHeadendClient(QMainWindow):
                     f"Starting {channel.name} on {self.cast_manager.connected_name}"
                 )
             else:
+                # A new stream gets fresh track IDs: start disabled, then
+                # activate the server's preferred language once discovered.
+                try:
+                    self.player.set_subtitle_track(NO_TRACK)
+                except Exception as exc:
+                    print(f"Debug: Could not reset subtitle track: {type(exc).__name__}")
                 self.player.play(stream_url)
                 self.statusbar.showMessage(f"Starting: {channel.name}")
         except Exception as e:
@@ -8465,6 +8653,7 @@ class TVHeadendClient(QMainWindow):
                 self._playback_active = False
                 self._set_playback_spinner(False)
                 self._protect_video_surface(False)
+            self._reset_subtitle_default()
             self._playback_channel = None
             self._mark_playing_channel()
             self.statusbar.showMessage(f"Playback error: {str(e)}")
