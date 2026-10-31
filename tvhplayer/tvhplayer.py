@@ -60,6 +60,11 @@ try:
     from .core import frozen_libs
     from .core.engine import mpv_missing
     from .core.mpv_player import MpvPlayer
+    from .core.subtitle_preferences import (
+        SUBTITLE_LANGUAGES, normalize_subtitle_language,
+        preferred_subtitle_track, subtitle_track_language,
+    )
+    from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from .core.playlist_sync import PlaylistSource, same_source, server_key, source_key
     from .core.playback_status import (
@@ -159,6 +164,11 @@ except ImportError:
     from core import frozen_libs
     from core.engine import mpv_missing
     from core.mpv_player import MpvPlayer
+    from core.subtitle_preferences import (
+        SUBTITLE_LANGUAGES, normalize_subtitle_language,
+        preferred_subtitle_track, subtitle_track_language,
+    )
+    from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
     from core.playlist_sync import PlaylistSource, same_source, server_key, source_key
     from core.playback_status import (
@@ -1948,7 +1958,7 @@ class ServerDialog(QDialog):
         self._loading = False
         self._supervisor = getattr(parent, 'builtin', None)
         self.setup_ui()
-        self.setMinimumSize(780, 480)
+        self.setMinimumSize(780, 545)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -2110,6 +2120,27 @@ class ServerDialog(QDialog):
         describe(self.password_input, description="Password is hidden while you type.")
         form.addRow(buddy_label("Pass&word:", self.password_input), self.password_input)
 
+        self.subtitle_language_combo = QComboBox()
+        self.subtitle_language_combo.addItem("Off — choose manually during playback", "")
+        for code, title, _aliases in SUBTITLE_LANGUAGES:
+            self.subtitle_language_combo.addItem(title, code)
+        describe(
+            self.subtitle_language_combo, "Default subtitles",
+            "Automatically enable the selected language for each channel when available. "
+            "Off disables automatic subtitles and allows manual selection during playback.",
+        )
+        form.addRow(
+            buddy_label("Default &subtitles:", self.subtitle_language_combo),
+            self.subtitle_language_combo,
+        )
+        self.remember_subtitle_checkbox = QCheckBox("Remember subtitle changes made in the player")
+        describe(
+            self.remember_subtitle_checkbox, "Remember subtitle choices",
+            "When checked, choosing a subtitle language or Off in Playback updates "
+            "this server's default subtitle language.",
+        )
+        form.addRow("", self.remember_subtitle_checkbox)
+
         self.test_btn = QPushButton("&Test Connection")
         describe(self.test_btn, "Test connection", "Check that TVHplayer can reach this server")
         self.test_btn.clicked.connect(self.test_connection)
@@ -2131,6 +2162,12 @@ class ServerDialog(QDialog):
         self.htsp_port_input.valueChanged.connect(lambda value: self._edit('htsp_port', value))
         self.username_input.textChanged.connect(lambda text: self._edit('username', text))
         self.password_input.textChanged.connect(lambda text: self._edit('password', text))
+        self.subtitle_language_combo.currentIndexChanged.connect(
+            lambda _index: self._edit('subtitle_language', self.subtitle_language_combo.currentData() or '')
+        )
+        self.remember_subtitle_checkbox.toggled.connect(
+            lambda enabled: self._edit('remember_subtitle_selection', bool(enabled))
+        )
         return page
 
     def _builtin_page(self):
@@ -2260,6 +2297,10 @@ class ServerDialog(QDialog):
                     self.htsp_port_input.setValue(9982)
                 self.username_input.setText(server.get('username') or '')
                 self.password_input.setText(server.get('password') or '')
+                language = normalize_subtitle_language(server.get('subtitle_language'))
+                subtitle_index = self.subtitle_language_combo.findData(language)
+                self.subtitle_language_combo.setCurrentIndex(max(0, subtitle_index))
+                self.remember_subtitle_checkbox.setChecked(server.get('remember_subtitle_selection') is True)
             finally:
                 self._loading = False
         self._refresh_selected()
@@ -2338,7 +2379,7 @@ class ServerDialog(QDialog):
         else:
             changed = server.get(key) != value
         server[key] = value
-        if changed and key != 'name':
+        if changed and key not in ('name', 'subtitle_language', 'remember_subtitle_selection'):
             self.test_results.pop(id(server), None)
         self._refresh_selected()
 
@@ -2373,6 +2414,8 @@ class ServerDialog(QDialog):
             'password': '',
             'protocol': PROTOCOL_HTSP,
             'htsp_port': 9982,
+            'subtitle_language': '',
+            'remember_subtitle_selection': False,
         })
         self.name_input.setFocus()
         self.name_input.selectAll()
@@ -3714,6 +3757,16 @@ class TVHeadendClient(QMainWindow):
         self._now_next_timer = QTimer(self)
         self._now_next_timer.timeout.connect(self._tick_now_next)
         self._now_next_timer.start(NOW_NEXT_TICK_MS)
+        # DVB subtitle tracks can appear after the first video frame. Recheck
+        # briefly on the Qt thread until the chosen language is discoverable.
+        self._subtitle_default_timer = QTimer(self)
+        self._subtitle_default_timer.setInterval(400)
+        self._subtitle_default_timer.timeout.connect(self._apply_subtitle_default)
+        self._subtitle_preference = None
+        self._subtitle_manual_override = False
+        self._subtitle_auto_applied = False
+        self._subtitle_attempts = 0
+        self._subtitle_playback_server_key = None
         # Recordings to this computer, finished ones too so Tasks can list them.
         self.local_jobs = []
         self.new_local_recorder = LocalRecorder
@@ -6611,7 +6664,7 @@ class TVHeadendClient(QMainWindow):
         tracks = player.subtitle_tracks() if player is not None else []
         current = player.subtitle_track() if tracks else NO_TRACK
         self._add_track_choices(subtitles, [(NO_TRACK, "Off")] + tracks, current,
-                                lambda track_id: self.player.set_subtitle_track(track_id))
+                                self._choose_subtitle_track)
         if not tracks:
             subtitles.actions()[0].setEnabled(False)
             subtitles.addAction("No Subtitles in This Channel").setEnabled(False)
