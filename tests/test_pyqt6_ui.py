@@ -755,6 +755,9 @@ def test_channel_fetch_hands_its_connection_to_the_window(monkeypatch, tmp_path)
                 self.closed = True
 
         window._open_channel_backend = lambda server: Backend()
+        # This test covers connection ownership only; the separate initial
+        # Now/Next refresh intentionally opens an additional backend.
+        window._start_now_next_fetch = lambda: None
         window.servers = [{'name': 'Home', 'url': 'http://127.0.0.1:9981', 'protocol': 'http'}]
         window.server_combo.blockSignals(True)
         window.server_combo.addItem('Home')
