@@ -1487,6 +1487,166 @@ def test_tasks_panel_reads_the_server_without_blocking(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def test_tasks_stop_remains_responsive_while_server_is_blocked(monkeypatch, tmp_path):
+    """Stop from Tasks must not execute its RPC on the Qt event loop."""
+    import threading
+    import time
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    panel = window.tasks_pane
+    panel.update_timer.stop()
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    running = DvrEntry(
+        uuid='blocked', title='Film', channel_name='FILMBOX+ one',
+        start=int(time.time()) - 100, duration=300,
+        status='Running', sched_status='recording', htsp_id=15,
+    )
+
+    class Backend:
+        def list_dvr_entries(self):
+            return [running] if not calls else []
+
+        def stop_dvr_entry(self, entry):
+            calls.append(entry.uuid)
+            entered.set()
+            release.wait(5)
+
+        def close(self):
+            pass
+
+    backend = Backend()
+    window.current_server = lambda: {'name': 'TVH', 'url': 'http://127.0.0.1:9981'}
+    panel.open_backend = lambda server: backend
+    try:
+        panel.refresh()
+        _wait_for_tasks(app, panel)
+        _select_task(panel, 'Film')
+        before = time.monotonic()
+        panel.run_action()
+        assert time.monotonic() - before < 0.5
+        assert entered.wait(2)
+        assert window._dvr_operation is not None
+        assert not panel.action_btn.isEnabled()
+        # The UI must remain available even while stopDvrEntry is waiting.
+        responded = []
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: responded.append(True))
+        app.processEvents()
+        assert responded == [True]
+        assert window._request_dvr_operation('stop_entry', entry=running) is False
+        assert calls == ['blocked']
+        release.set()
+        deadline = time.monotonic() + 5
+        while window._dvr_operation is not None:
+            assert time.monotonic() < deadline
+            app.processEvents()
+            time.sleep(0.01)
+        _wait_for_tasks(app, panel)
+        assert calls == ['blocked']
+        assert 'Stop acknowledged' in window.status_label.text()
+    finally:
+        release.set()
+        window.close()
+        app.processEvents()
+
+
+def test_server_stop_timeout_does_not_repeat_an_uncertain_rpc(monkeypatch, tmp_path):
+    import threading
+    import time
+    from tvhplayer.core.models import DvrEntry, Channel
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+    sent = []
+    slow = threading.Event()
+    release = threading.Event()
+    recording = DvrEntry(
+        uuid='one', title='Movie', channel_name='FILMBOX+ one',
+        start=int(time.time()) - 20, duration=90,
+        status='Running', sched_status='recording', htsp_id=42,
+        raw={'channelName': 'FILMBOX+ one'},
+    )
+    extra = DvrEntry(
+        uuid='two', title='Other', channel_name='TVR 1',
+        start=int(time.time()) - 20, duration=90,
+        status='Running', sched_status='recording', htsp_id=43,
+    )
+    class Backend:
+        def list_dvr_entries(self):
+            return [recording, extra]
+
+        def stop_dvr_entry(self, entry):
+            sent.append(entry.uuid)
+            slow.set()
+            release.wait(5)
+            raise TimeoutError("No acknowledgement")
+
+        def close(self):
+            pass
+
+    window.current_server = lambda: {'name': 'TVH', 'url': 'http://127.0.0.1:9981'}
+    window._dvr_backend_factory = lambda server: Backend()
+    channel = Channel(uuid='other', name='FILMBOX+ one', number=313)
+    window.active_channel = lambda: channel
+    try:
+        before = time.monotonic()
+        window.stop_recording()
+        assert time.monotonic() - before < 0.5
+        assert slow.wait(2)
+        assert sent == ['one']
+        window.stop_recording()
+        assert sent == ['one']
+        release.set()
+        deadline = time.monotonic() + 5
+        while window._dvr_operation is not None:
+            assert time.monotonic() < deadline
+            app.processEvents()
+            time.sleep(0.01)
+        assert sent == ['one']
+        assert 'not confirmed' in window.status_label.text()
+        assert 'refresh Tasks' in window.status_label.text()
+    finally:
+        release.set()
+        window.close()
+        app.processEvents()
+
+
+def test_blocked_dvr_operation_does_not_prevent_normal_window_close(monkeypatch, tmp_path):
+    import threading
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+    entered = threading.Event()
+    release = threading.Event()
+    entry = DvrEntry(uuid='run', title='News', channel_name='TVR 1',
+                     start=1, duration=5, status='Running', sched_status='recording')
+    class Backend:
+        def stop_dvr_entry(self, value):
+            entered.set()
+            release.wait(5)
+
+        def close(self):
+            pass
+
+    window.current_server = lambda: {'name':'TVH', 'url':'http://127.0.0.1:9981'}
+    window._dvr_backend_factory = lambda server: Backend()
+    try:
+        window._request_dvr_operation('stop_entry', entry=entry)
+        assert entered.wait(2)
+        assert window._dvr_operation is not None
+        # No synchronous RPC is invoked while the window closes.
+        window.close()
+        app.processEvents()
+        assert not window.isVisible()
+    finally:
+        release.set()
+        app.processEvents()
+
+
 def test_tasks_panel_opens_when_a_task_is_added(monkeypatch, tmp_path):
     import time
 
@@ -1754,6 +1914,12 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.action_btn.isEnabled() is True
         assert panel.reveal_btn.isEnabled() is False
         panel.run_action()
+        assert window._dvr_operation is not None
+        deadline = time.monotonic() + 5
+        while window._dvr_operation is not None:
+            assert time.monotonic() < deadline, "stop operation did not finish"
+            app.processEvents()
+            time.sleep(0.01)
         _wait_for_tasks(app, panel)
         assert backend.stopped == ['run']
         assert recorder.running is True
@@ -1837,6 +2003,13 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.action_btn.accessibleName() == 'Cancel'
         assert panel.action_btn.text() == 'Cancel'
         panel.run_action()
+        assert window._dvr_operation is not None
+        deadline = time.monotonic() + 5
+        while window._dvr_operation is not None:
+            assert time.monotonic() < deadline, "cancel operation did not finish"
+            app.processEvents()
+            time.sleep(0.01)
+        _wait_for_tasks(app, panel)
         assert backend.cancelled == ['soon']
         assert window.is_recording is True
         assert any('Old' in text for text in _task_texts(panel))
