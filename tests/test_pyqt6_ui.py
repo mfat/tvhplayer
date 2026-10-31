@@ -1027,6 +1027,85 @@ def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
         app.processEvents()
 
 
+
+def test_dvr_status_dialog_stops_without_blocking_the_window(monkeypatch, tmp_path):
+    """The real hosted DVR Status dialog must use the same nonblocking RPC."""
+    import threading
+    import time
+    from PyQt6.QtCore import QTimer
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+    running = DvrEntry(
+        uuid="dvr-one", title="Movie", channel_name="Film HD",
+        start=int(time.time()) - 30, duration=120,
+        status="Running", sched_status="recording", htsp_id=25,
+    )
+    enter = threading.Event()
+    release = threading.Event()
+    calls = []
+
+    class Backend:
+        def list_dvr_entries(self):
+            return [running] if not calls else []
+
+        def stop_dvr_entry(self, entry):
+            calls.append(entry.uuid)
+            enter.set()
+            release.wait(5)
+
+        def close(self):
+            pass
+
+    backend = Backend()
+    window.current_server = lambda: {
+        "name": "test", "url": "http://127.0.0.1:9981", "protocol": "http",
+    }
+    window._dvr_backend_factory = lambda server: backend
+    window.tasks_pane.open_backend = lambda server: backend
+    dialog = ui.DVRStatusDialog(backend, window)
+    dialog.update_timer.stop()
+    try:
+        dialog.upcoming_table.selectRow(0)
+        app.processEvents()
+        assert dialog.stop_btn.isEnabled()
+        before = time.monotonic()
+        dialog.stop_selected()
+        assert time.monotonic() - before < 0.5
+        assert enter.wait(2)
+        assert not dialog.stop_btn.isEnabled()
+        assert not dialog.update_timer.isActive()
+        assert "Stop requested" in dialog.action_label.text()
+
+        # A scheduled Qt callback still runs while the server's stop RPC waits.
+        ui_ran = []
+        QTimer.singleShot(0, lambda: ui_ran.append(True))
+        app.processEvents()
+        assert ui_ran == [True]
+        assert calls == ["dvr-one"]
+
+        release.set()
+        deadline = time.monotonic() + 5
+        while window._dvr_operation is not None:
+            assert time.monotonic() < deadline
+            app.processEvents()
+            time.sleep(0.01)
+        app.processEvents()
+        assert calls == ["dvr-one"]
+        assert "Stop acknowledged" in dialog.action_label.text()
+        assert dialog.update_timer.isActive()
+        dialog.update_timer.stop()
+        dialog.update_status()
+        assert dialog.upcoming_table.rowCount() == 0
+    finally:
+        release.set()
+        dialog.update_timer.stop()
+        dialog.close()
+        window.close()
+        app.processEvents()
+
+
 def _column_widths_fill_viewport(table):
     header = table.horizontalHeader()
     widths = sum(header.sectionSize(column) for column in range(table.columnCount()))
