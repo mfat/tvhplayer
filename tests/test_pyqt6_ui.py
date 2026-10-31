@@ -3455,6 +3455,119 @@ def test_playback_menu_lists_tracks_and_deinterlace(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def test_server_dialog_exposes_default_subtitle_language(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        dialog = ui.ServerDialog(window)
+        dialog.load_servers([{
+            'name': 'TVH', 'url': 'http://127.0.0.1:9981',
+            'protocol': 'htsp', 'subtitle_language': 'ron',
+            'remember_subtitle_selection': True,
+        }])
+        assert dialog.subtitle_language_combo.currentData() == 'ron'
+        assert dialog.remember_subtitle_checkbox.isChecked()
+        dialog.subtitle_language_combo.setCurrentIndex(dialog.subtitle_language_combo.findData('eng'))
+        assert dialog.servers[0]['subtitle_language'] == 'eng'
+        dialog.remember_subtitle_checkbox.setChecked(False)
+        assert dialog.servers[0]['remember_subtitle_selection'] is False
+        assert dialog.apply_btn.isEnabled()
+        assert dialog.apply_changes()
+        dialog.close()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_server_subtitle_language_auto_applies_after_late_track_discovery(monkeypatch, tmp_path):
+    from tvhplayer.core.models import Channel
+
+    (tmp_path / 'tvhplayer.conf').write_text(json.dumps({
+        'servers': [{
+            'name': 'TVH', 'url': 'http://127.0.0.1:9981',
+            'protocol': 'htsp', 'subtitle_language': 'ron',
+            'remember_subtitle_selection': True,
+        }],
+    }), encoding='utf-8')
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    try:
+        window._playback_channel = Channel(uuid='one', name='One', number=1)
+        player._playing = True
+        player.spu = []
+        window._reset_subtitle_default(for_live_channel=True)
+        window._start_subtitle_default()
+        assert player.spu_id == ui.NO_TRACK
+        assert window._subtitle_default_timer.isActive()
+
+        # MPV returns the tracks after the first frame; never select English
+        # just because it was reported first.
+        player.spu = [(3, 'DVB Subtitles - eng'), (7, 'DVB Subtitles - rum')]
+        window._apply_subtitle_default()
+        assert player.spu_id == 7
+        assert not window._subtitle_default_timer.isActive()
+
+        # A manual selection can update the same server's saved language.
+        window._choose_subtitle_track(3)
+        assert player.spu_id == 3
+        assert window.current_server()['subtitle_language'] == 'eng'
+        with (tmp_path / 'tvhplayer.conf').open(encoding='utf-8') as handle:
+            assert json.load(handle)['servers'][0]['subtitle_language'] == 'eng'
+
+        # Switching channels restores the chosen language, not the previous
+        # stream's numerical track ID.
+        window._playback_channel = Channel(uuid='two', name='Two', number=2)
+        player.spu = [(9, 'DVB Subtitles - rum'), (2, 'DVB Subtitles - eng')]
+        player.spu_id = ui.NO_TRACK
+        window._reset_subtitle_default(for_live_channel=True)
+        window._start_subtitle_default()
+        assert player.spu_id == 2
+
+        # Explicit Off, with remember enabled, is just as persistent.
+        window._choose_subtitle_track(ui.NO_TRACK)
+        assert window.current_server()['subtitle_language'] == ''
+        window._playback_channel = Channel(uuid='one', name='One', number=1)
+        player.spu_id = 2
+        window._reset_subtitle_default(for_live_channel=True)
+        window._start_subtitle_default()
+        assert player.spu_id == ui.NO_TRACK
+        assert not window._subtitle_default_timer.isActive()
+    finally:
+        window._reset_subtitle_default()
+        window.close()
+        app.processEvents()
+
+
+def test_server_subtitle_language_does_not_choose_the_wrong_track(monkeypatch, tmp_path):
+    from tvhplayer.core.models import Channel
+
+    (tmp_path / 'tvhplayer.conf').write_text(json.dumps({
+        'servers': [{
+            'name': 'TVH', 'url': 'http://127.0.0.1:9981',
+            'subtitle_language': 'ron',
+        }],
+    }), encoding='utf-8')
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    try:
+        window._playback_channel = Channel(uuid='one', name='One')
+        player._playing = True
+        player.spu = [(1, 'English'), (2, 'DVB Subtitles')]
+        player.spu_id = 1
+        window._reset_subtitle_default(for_live_channel=True)
+        window._start_subtitle_default()
+        assert player.spu_id == ui.NO_TRACK
+        assert window._subtitle_default_timer.isActive()
+        # The user can still select an unlabelled track manually, but an
+        # automatic later retry must not overwrite that choice.
+        window._choose_subtitle_track(2)
+        assert player.spu_id == 2
+        window._apply_subtitle_default()
+        assert player.spu_id == 2
+        assert window.current_server()['subtitle_language'] == 'ron'
+    finally:
+        window._reset_subtitle_default()
+        window.close()
+        app.processEvents()
+
+
 def test_spinner_shows_tuner_signal(monkeypatch, tmp_path):
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
     try:
