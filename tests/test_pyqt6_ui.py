@@ -755,6 +755,9 @@ def test_channel_fetch_hands_its_connection_to_the_window(monkeypatch, tmp_path)
                 self.closed = True
 
         window._open_channel_backend = lambda server: Backend()
+        # This test covers connection ownership only; the separate initial
+        # Now/Next refresh intentionally opens an additional backend.
+        window._start_now_next_fetch = lambda: None
         window.servers = [{'name': 'Home', 'url': 'http://127.0.0.1:9981', 'protocol': 'http'}]
         window.server_combo.blockSignals(True)
         window.server_combo.addItem('Home')
@@ -785,6 +788,67 @@ def test_channel_fetch_hands_its_connection_to_the_window(monkeypatch, tmp_path)
         assert window.get_backend() is opened[2]
         assert not opened[2].closed
     finally:
+        window.close()
+        app.processEvents()
+
+
+def test_first_channels_render_before_initial_epg_completes(monkeypatch, tmp_path):
+    """A slow live EPG query must not keep the channel list hidden."""
+    import threading
+    from tvhplayer.core.channel_info import NowNext
+    from tvhplayer.core.models import EpgEvent
+
+    # Use real channel-loading methods but an in-memory backend.
+    app, ui, window, player = _make_player(monkeypatch, tmp_path, prepare=lambda _ui: None)
+    channel = ui.Channel(uuid='news', name='News', number=1)
+    now = int(time.time())
+    event = EpgEvent(start=now - 60, stop=now + 3600, title='Headlines',
+                     channel_uuid='news', event_id=12)
+    reading = threading.Event()
+    release = threading.Event()
+
+    class Backend:
+        def get_channels(self):
+            return [channel]
+
+        def list_channel_tags(self):
+            return []
+
+        def get_now_next(self, channels):
+            raise AssertionError("Initial channels must not wait for get_now_next")
+
+        def get_now_next_live(self, channels):
+            assert channels == [channel]
+            reading.set()
+            if not release.wait(5):
+                raise TimeoutError("EPG test gate was not released")
+            return {'news': NowNext(event, None)}
+
+        def close(self):
+            pass
+
+    try:
+        window._open_channel_backend = lambda _server: Backend()
+        window.servers = [
+            {'name': 'TVH', 'url': 'http://127.0.0.1:9981', 'protocol': 'http'}
+        ]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('TVH')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+        window.fetch_channels()
+        _wait_for_channels(app, window)
+        assert reading.wait(5)
+        assert window.channel_stack.currentWidget() is window.channel_list
+        row = _channel_row(window.channel_list, 'News')
+        assert row >= 0
+        assert _cell(window.channel_list, row, ui.COL_NOW).text() == ''
+        assert window._now_next_fetch is not None
+        release.set()
+        _wait_for_now_next(app, window)
+        assert _cell(window.channel_list, row, ui.COL_NOW).text() == 'Headlines'
+    finally:
+        release.set()
         window.close()
         app.processEvents()
 
