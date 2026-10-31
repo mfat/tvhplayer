@@ -310,6 +310,16 @@ class PlayerBar(QWidget):
         )
         self.record_more_btn.setToolTip("Start another recording")
         group_layout.addWidget(self.record_more_btn)
+        # Record and Stop recording replace each other in the same spot.
+        # Use the wider contents for both so adjacent controls do not jump.
+        record_width = max(
+            inner.sizeHint().width(),
+            self.record_btn.sizeHint().width(),
+            group_layout.sizeHint().width(),
+            self.recording_group.sizeHint().width(),
+        )
+        self.record_btn.setFixedWidth(record_width)
+        self.recording_group.setFixedWidth(record_width)
         self.recording_group.hide()
         layout.addWidget(self.recording_group)
 
