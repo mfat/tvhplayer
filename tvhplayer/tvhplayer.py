@@ -3076,7 +3076,7 @@ class ChannelListState(QWidget):
 
 
 class ChannelFetch(QObject):
-    """Fetch a server's channels and what is shown beside them, off the UI thread.
+    """Fetch a server's channel metadata off the UI thread.
 
     It uses its own backend connection, so it never shares one with the window
     while it runs. After loaded, ``backend`` holds that connection, already in
@@ -3107,7 +3107,12 @@ class ChannelFetch(QObject):
             channels = backend.get_channels()
             # Everything after the channels is optional. A server that refuses
             # one (the service grid needs admin rights) leaves that part empty.
-            result = {'channels': channels, 'tags': [], 'services': [], 'now_next': {}}
+            # Leave programme lookup to NowNextFetch so channels can be shown
+            # before the EPG grid has been queried.
+            result = {
+                'channels': channels, 'tags': [], 'services': [],
+                'now_next': None if self._now_next and channels else {},
+            }
             try:
                 result['tags'] = [tag for tag in backend.list_channel_tags() if tag.enabled]
             except Exception as e:
@@ -3117,13 +3122,6 @@ class ChannelFetch(QObject):
                     result['services'] = backend.list_channel_services()
                 except Exception as e:
                     print(f"Debug: Could not load channel services: {e}")
-            if self._now_next and channels:
-                try:
-                    result['now_next'] = backend.get_now_next(channels)
-                except Exception as e:
-                    # None keeps what was shown before.
-                    result['now_next'] = None
-                    print(f"Debug: Could not load now and next: {e}")
         except Exception as e:
             print(f"Debug: Could not fetch channels: {e}")
             if backend is not None:
@@ -5384,6 +5382,8 @@ class TVHeadendClient(QMainWindow):
         else:
             self._show_channel_state("This server has no channels yet.")
         self.statusbar.showMessage("Channels loaded successfully")
+        if fetch._now_next and self._channels:
+            self._start_now_next_fetch()
         self._guide_channels_changed()
         self._channel_list_settled()
         if self._show_playing_on_load:
