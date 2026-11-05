@@ -3,10 +3,17 @@ ARG BASE_IMAGE=debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687
 FROM ${BASE_IMAGE} AS builder
 COPY windows/backend/apt-snapshot.conf /etc/apt/apt.conf.d/80tvhplayer-snapshot
 COPY windows/backend/debian.sources /etc/apt/sources.list.d/debian.sources
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
-    build-essential pkg-config gettext bzip2 curl ca-certificates python3 \
-    libssl-dev zlib1g-dev libpcre2-dev libdbus-1-dev libdvbcsa-dev \
-    && rm -rf /var/lib/apt/lists/*
+# snapshot.debian.org is flaky from CI; retry the whole install, not only single GETs.
+RUN set -eu; n=0; \
+    until apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+        build-essential pkg-config gettext bzip2 curl ca-certificates python3 \
+        libssl-dev zlib1g-dev libpcre2-dev libdbus-1-dev libdvbcsa-dev \
+        && rm -rf /var/lib/apt/lists/*; do \
+      n=$((n + 1)); \
+      if [ "$n" -ge 6 ]; then exit 1; fi; \
+      echo "apt install failed (attempt $n); retrying in $((n * 30))s"; \
+      sleep $((n * 30)); \
+    done
 COPY packaging/tvheadend /build/packaging
 RUN sed -i 's/\r$//' /build/packaging/*.sh /build/packaging/pins.env \
     && sh /build/packaging/build-tvheadend.sh fetch /build/sources \
@@ -16,9 +23,15 @@ RUN sed -i 's/\r$//' /build/packaging/*.sh /build/packaging/pins.env \
 FROM ${BASE_IMAGE} AS runtime
 COPY windows/backend/apt-snapshot.conf /etc/apt/apt.conf.d/80tvhplayer-snapshot
 COPY windows/backend/debian.sources /etc/apt/sources.list.d/debian.sources
-RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
-    ca-certificates ffmpeg libssl3 zlib1g libpcre2-8-0 libdbus-1-3 libdvbcsa1 \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eu; n=0; \
+    until apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+        ca-certificates ffmpeg libssl3 zlib1g libpcre2-8-0 libdbus-1-3 libdvbcsa1 \
+        && rm -rf /var/lib/apt/lists/*; do \
+      n=$((n + 1)); \
+      if [ "$n" -ge 6 ]; then exit 1; fi; \
+      echo "apt install failed (attempt $n); retrying in $((n * 30))s"; \
+      sleep $((n * 30)); \
+    done
 COPY --from=builder /out/ /
 COPY windows/backend/entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod 755 /entrypoint.sh
