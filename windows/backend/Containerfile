@@ -45,12 +45,18 @@ COPY windows/backend/base-sources.sources /etc/apt/sources.list.d/base-sources.s
 RUN mkdir -p /export /corresponding-source/debian \
     && dpkg-query -W -f='${Package}\t${Version}\t${source:Package}\t${source:Version}\t${Architecture}\n' > /export/packages.tsv \
     && tar -czf /export/licenses.tar.gz -C /usr/share doc \
-    && apt-get update && apt-get install -y --no-install-recommends dpkg-dev \
-    && cut -f3,4 /export/packages.tsv | sort -u > /tmp/source-packages \
-    && true
+    && ( set -eu; n=0; \
+         until apt-get update && apt-get install -y --no-install-recommends dpkg-dev; do \
+           n=$((n + 1)); \
+           if [ "$n" -ge 6 ]; then exit 1; fi; \
+           echo "apt source indexes failed (attempt $n); retrying in $((n * 30))s"; \
+           sleep $((n * 30)); \
+         done ) \
+    && cut -f3,4 /export/packages.tsv | sort -u > /tmp/source-packages
+# Fewer parallel fetches against snapshot.debian.org; retry each source package.
 RUN --mount=type=cache,id=tvhplayer-debian-source-20261104,target=/source-cache \
     cd /source-cache \
-    && xargs -r -P 6 -n 2 sh -c 'apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=2 source --download-only --only-source "$0=$1"' < /tmp/source-packages \
+    && xargs -r -P 2 -n 2 sh -c 'n=0; until apt-get source --download-only --only-source "$0=$1"; do n=$((n + 1)); if [ "$n" -ge 6 ]; then exit 1; fi; echo "source $0=$1 failed (attempt $n); retrying"; sleep $((n * 20)); done' < /tmp/source-packages \
     && cp -a /source-cache/. /corresponding-source/debian/
 COPY --from=builder /build/sources /corresponding-source/tvheadend
 COPY packaging/tvheadend /corresponding-source/build-instructions
