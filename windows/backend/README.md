@@ -43,9 +43,60 @@ For a Windows release build, set `TVHPLAYER_BACKEND_BUNDLE` to that output direc
 before running `windows/build-windows.sh`. Both installer and ZIP receive the same
 verified runtime files next to the EXE in `backend/`. Corresponding source is a
 separate release asset. The installer copies the backend directory recursively
-and preserves AppData and recordings on upgrades and uninstall. Windows CI builds
-the Linux image first, verifies the complete bundle, and passes it to both Windows
-release formats. No WSL setup is performed as an installer side effect.
+and preserves AppData and recordings on upgrades and uninstall. Windows CI resolves
+a content-addressed backend artifact (see below), verifies it, and packages the same
+bundle into both Windows release formats. No WSL setup is performed as an installer
+side effect. The app never downloads a backend at runtime.
+
+## Backend fingerprint and reusable CI artifacts
+
+Backend identity is a SHA-256 fingerprint of the inputs that affect the image and
+release bundle, plus a deliberate `BUILDER_POLICY` string
+(`ubuntu-24.04-docker-v1` in `windows/backend/fingerprint.py`). Hashed inputs
+include the Containerfile, apt snapshot config and sources, entrypoint,
+`build-bundle.py`, `fingerprint.py`, `artifact_store.py`, and
+`packaging/tvheadend` pins/scripts. Application UI or Windows packaging-only
+changes do not change the fingerprint. Outputs are not hashed: SBOM UUIDs and
+image export timestamps differ between builds.
+
+Print the current fingerprint:
+
+```sh
+python windows/backend/ci_artifact.py fingerprint
+```
+
+Published backends are immutable GitHub prereleases tagged
+`backend-<fingerprint>`. Each release holds the verified bundle
+(`tvheadend.tar`, `manifest.json`, SBOM, licenses, corresponding source, and
+`inputs.json`). Tags are never retagged or have assets replaced. They are not
+marked as the repository's latest release. Retain them until an operator deletes
+a tag that is no longer referenced by supported application releases; there is
+no automatic garbage collection.
+
+CI behavior (`backend-bundle.yml`, also called from `build-windows.yml`):
+
+1. Compute the fingerprint.
+2. If a matching `backend-<fingerprint>` release exists and rebuild was not
+   forced, download it and run `verify-bundle.py`. Verification failure fails
+   the job; CI does not fall back to another fingerprint.
+3. On a miss, build with Docker on Ubuntu 24.04, verify, and publish the new
+   tag when the workflow has write access (push/tag/same-repo PR or dispatch).
+4. Fork PRs may build for testing but do not publish.
+5. Concurrent publish races keep the first successful release; the loser adopts
+   that immutable bundle unless `--force-rebuild` kept a local build for the run.
+
+Explicit rebuild (does not overwrite an existing tag):
+
+- Actions → **Backend bundle** → Run workflow → enable force rebuild, or
+- Actions → **Windows build** → enable force backend rebuild.
+
+Application releases reuse whatever backend fingerprint the tree currently
+computes. Promote a backend change by merging input changes so CI publishes a
+new `backend-<fingerprint>` tag, then cut a normal `v*` app release. If a
+backend release is deleted or corrupted, restore it by running Backend bundle
+with force rebuild on a commit that still produces that fingerprint, or bump
+an input / `BUILDER_POLICY` to publish a new fingerprint and ship a new app
+build that references it.
 
 For a local portable-only build without Inno Setup, set
 `TVHPLAYER_PORTABLE_ONLY=1`. `TVHPLAYER_BUILD_LABEL=wslc` uses separate

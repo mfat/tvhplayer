@@ -13,8 +13,12 @@ import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+BACKEND_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(BACKEND_DIR))
 from tvhplayer.core.backend_bundle import TVHEADEND_COMMIT, RELEASE_ARTIFACTS, file_digest, verify_bundle
+import artifact_store
+import fingerprint
 
 
 def build(engine, output, dns=None):
@@ -102,13 +106,16 @@ def build(engine, output, dns=None):
                 'tvheadend_commit': TVHEADEND_COMMIT, 'architecture': 'amd64', 'artifacts': artifacts}
     manifest['base_image'] = re.search(r'^ARG BASE_IMAGE=(.+)$', (ROOT / 'windows/backend/Containerfile').read_text(), re.M)[1]
     manifest['ffmpeg_version'] = next(package['versionInfo'] for package in packages if package['name'] == 'ffmpeg')
-    manifest['debian_snapshot'] = '20261104T000000Z'
-    manifest['base_sources_snapshot'] = '20261105T000000Z'
+    debian_snapshot, base_sources_snapshot = fingerprint.manifest_snapshots(ROOT)
+    manifest['debian_snapshot'] = debian_snapshot
+    manifest['base_sources_snapshot'] = base_sources_snapshot
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2), encoding='utf-8')
     shutil.copy2(ROOT / 'LICENSE', output / 'TVHplayer-LICENSE.txt')
     shutil.copy2(ROOT / 'docs/tvheadend-source.md', output / 'tvheadend-source.md')
+    artifact_store.write_inputs_document(output, ROOT)
     verify_bundle(output, release=True)
     print('Verified offline backend bundle:', output)
+    print('Backend fingerprint:', fingerprint.compute_fingerprint(ROOT))
 
 
 if __name__ == '__main__':

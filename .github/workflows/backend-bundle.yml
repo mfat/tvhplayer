@@ -1,0 +1,142 @@
+name: Backend bundle
+
+# Produces the offline Windows TVHeadend bundle, reusing backend-<fingerprint>
+# GitHub Releases when inputs are unchanged. Called by the Windows workflow and
+# runnable alone to publish a backend without packaging the app.
+on:
+  workflow_call:
+    inputs:
+      force_rebuild:
+        description: Rebuild and attempt publish even when a matching release exists
+        type: boolean
+        default: false
+    outputs:
+      fingerprint:
+        description: SHA-256 fingerprint of backend build inputs
+        value: ${{ jobs.provide.outputs.fingerprint }}
+      tag:
+        description: backend-<fingerprint> release tag
+        value: ${{ jobs.provide.outputs.tag }}
+      reused:
+        description: true when an existing verified release was reused
+        value: ${{ jobs.provide.outputs.reused }}
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: Rebuild and attempt publish even when a matching release exists
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'windows/backend/Containerfile'
+      - 'windows/backend/apt-snapshot.conf'
+      - 'windows/backend/debian.sources'
+      - 'windows/backend/base-sources.sources'
+      - 'windows/backend/entrypoint.sh'
+      - 'windows/backend/build-bundle.py'
+      - 'windows/backend/fingerprint.py'
+      - 'windows/backend/artifact_store.py'
+      - 'windows/backend/ci_artifact.py'
+      - 'packaging/tvheadend/**'
+      - '.github/workflows/backend-bundle.yml'
+  pull_request:
+    paths:
+      - 'windows/backend/Containerfile'
+      - 'windows/backend/apt-snapshot.conf'
+      - 'windows/backend/debian.sources'
+      - 'windows/backend/base-sources.sources'
+      - 'windows/backend/entrypoint.sh'
+      - 'windows/backend/build-bundle.py'
+      - 'windows/backend/fingerprint.py'
+      - 'windows/backend/artifact_store.py'
+      - 'windows/backend/ci_artifact.py'
+      - 'packaging/tvheadend/**'
+      - '.github/workflows/backend-bundle.yml'
+      - 'tests/test_backend_fingerprint.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-bundle-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fingerprint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      fingerprint: ${{ steps.fp.outputs.fingerprint }}
+      tag: ${{ steps.fp.outputs.tag }}
+      force_rebuild: ${{ steps.force.outputs.value }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Test backend fingerprint and bundle contracts
+        run: |
+          python -m pip install -c windows/requirements-build.txt pytest requests
+          python -m pytest --noconftest tests/test_backend_bundle.py tests/test_backend_fingerprint.py -q
+      - name: Compute backend fingerprint
+        id: fp
+        run: python windows/backend/ci_artifact.py fingerprint
+      - name: Resolve force-rebuild flag
+        id: force
+        run: |
+          value=false
+          if [ "${{ inputs.force_rebuild }}" = "true" ]; then
+            value=true
+          fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+  provide:
+    needs: fingerprint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    concurrency:
+      group: backend-${{ needs.fingerprint.outputs.fingerprint }}
+      cancel-in-progress: false
+    outputs:
+      fingerprint: ${{ steps.resolve.outputs.fingerprint }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      reused: ${{ steps.resolve.outputs.hit }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Resolve offline backend bundle
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          can_publish=0
+          if [ "${{ github.event_name }}" != "pull_request" ] || \
+             [ "${{ github.event.pull_request.head.repo.full_name }}" = "${{ github.repository }}" ]; then
+            can_publish=1
+          fi
+          args=(--output windows/backend/dist --fingerprint "${{ needs.fingerprint.outputs.fingerprint }}" --target-commitish "${{ github.sha }}")
+          if [ "${{ needs.fingerprint.outputs.force_rebuild }}" = "true" ]; then
+            args+=(--force-rebuild)
+          fi
+          if [ "$can_publish" = 1 ]; then
+            args+=(--publish)
+          fi
+          python windows/backend/ci_artifact.py resolve "${args[@]}"
+
+      - name: Validate release bundle
+        run: python windows/backend/verify-bundle.py windows/backend/dist
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-backend
+          path: windows/backend/dist/*
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 14
