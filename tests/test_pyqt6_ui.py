@@ -3639,6 +3639,57 @@ def _dvr_entry(category, htsp_id):
     )
 
 
+def test_recording_indicator_follows_task_refreshes(monkeypatch, tmp_path):
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        pane = window.tasks_pane
+        pane.update_timer.stop()
+        badge = window.recording_indicator
+
+        def refresh(entries, error=None):
+            pane._on_server_fetched(pane._generation, entries, error)
+
+        refresh([_dvr_entry('recording', 1), _dvr_entry('recording', 2)])
+        assert window.is_recording
+        assert badge.count() == 2
+        assert not badge.isHidden()
+        assert badge.dot.is_pulsing()
+
+        pane.search_box.setText('no matching task')
+        assert window.is_recording
+        refresh([], RuntimeError('offline'))
+        assert window.is_recording
+        assert badge.count() == 2
+
+        refresh([_dvr_entry('finished', 1), _dvr_entry('recording', 2)])
+        assert window.is_recording
+        assert badge.count() == 1
+        refresh([_dvr_entry('finished', 1), _dvr_entry('upcoming', 3)])
+        assert not window.is_recording
+        assert badge.count() == 0
+        assert badge.isHidden()
+        assert not badge.dot.is_pulsing()
+        assert badge.accessibleName() == 'Not recording'
+
+        job = types.SimpleNamespace(
+            recorder=types.SimpleNamespace(), is_running=True,
+            channel=ui.Channel(uuid='local', name='Local'), end=None,
+        )
+        window.local_jobs.append(job)
+        pane.refresh(server=False)
+        assert window.is_recording
+        refresh([])
+        assert window.is_recording
+        job.is_running = False
+        pane.refresh(server=False)
+        assert not window.is_recording
+        assert badge.isHidden()
+        window.local_jobs.remove(job)
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_tasks_stay_hidden_when_the_server_starts_with_only_completed_recordings(monkeypatch, tmp_path):
     # The built-in server is not ready on the first refresh, so the pane sees no
     # recordings; its first real answer lists old recordings, which are not new.

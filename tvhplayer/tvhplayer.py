@@ -4298,7 +4298,7 @@ class TVHeadendClient(QMainWindow):
         # Text plus a red pill, so recording state is not color alone.
         self.recording_indicator = RecordingBadge()
         self.recording_indicator.clicked.connect(self._show_recordings_in_tasks)
-        self.tasks_pane.recordings_changed.connect(self.recording_indicator.set_count)
+        self.tasks_pane.recordings_changed.connect(self._recording_count_changed)
         
         # Shown while the recordings folder runs low on space.
         self.space_warning = QLabel("")
@@ -7082,6 +7082,15 @@ class TVHeadendClient(QMainWindow):
                 self.sync_recording_indicator()
         finally:
             self._refresh_tasks()
+
+    def _recording_count_changed(self, count):
+        """Keep the indicator in sync with the unfiltered server and local tasks."""
+        self.recording_indicator.set_count(count)
+        if count > 0:
+            if not self.is_recording:
+                self.start_recording_indicator()
+        elif self.is_recording:
+            self.stop_recording_indicator()
 
     def start_recording_indicator(self):
         """Show the Recording pill in the status bar."""
