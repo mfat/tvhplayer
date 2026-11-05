@@ -48,9 +48,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - name: Test backend bundle and APT snapshot handling
+        run: |
+          python -m pip install -c windows/requirements-build.txt pytest requests
+          python -m pytest --noconftest tests/test_backend_bundle.py -q
       - name: Build pinned offline backend and corresponding source
         run: |
-          python -m pip install -c windows/requirements-build.txt requests
           python windows/backend/build-bundle.py
       - name: Validate release bundle
         run: python windows/backend/verify-bundle.py windows/backend/dist

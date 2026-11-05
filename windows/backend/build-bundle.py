@@ -47,7 +47,7 @@ def build(engine, output, dns=None):
                 shutil.copy2(path, packaging / path.name)
         backend = context / 'windows/backend'
         backend.mkdir(parents=True)
-        for name in ('Containerfile', 'debian.sources', 'base-sources.sources', 'entrypoint.sh'):
+        for name in ('Containerfile', 'apt-snapshot.conf', 'debian.sources', 'base-sources.sources', 'entrypoint.sh'):
             # Normalize Windows checkouts before sending the context to Linux.
             data = (ROOT / 'windows/backend' / name).read_text(encoding='utf-8')
             (backend / name).write_text(data, encoding='utf-8', newline='\n')

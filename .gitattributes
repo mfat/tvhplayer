@@ -3,3 +3,4 @@
 *.env text eol=lf
 windows/backend/Containerfile text eol=lf
 windows/backend/*.sources text eol=lf
+windows/backend/*.conf text eol=lf

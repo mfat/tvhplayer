@@ -23,6 +23,12 @@ This pins inputs; it does not claim bit-for-bit reproducibility of timestamps an
 build output. The source export includes exact Debian source versions plus the
 TVHeadend, HDHomeRun and scan-table inputs and their build instructions.
 
+Build and runtime stages fetch only binary package indexes. Source indexes are
+added in the corresponding-source export stage, including the later snapshot
+needed for packages inherited from the pinned base. APT retries transient archive
+failures and rejects incomplete index updates, so missing security metadata cannot
+silently change dependency resolution.
+
 Windows build hosts can use the installed WSLc instead of Docker:
 
 ```powershell
