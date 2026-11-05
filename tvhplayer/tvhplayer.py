@@ -20,6 +20,10 @@ from PyQt6.QtGui import (
 import html
 import json
 import re
+try:
+    from .core.recording_folder import validate_recording_folder
+except ImportError:
+    from core.recording_folder import validate_recording_folder
 # Replace this line:
 #from . import resources_rc
 
@@ -1738,17 +1742,16 @@ def default_recording_dir():
 
 def ensure_recording_dir(folder):
     """Make ``folder`` if needed; True when recordings can be written there."""
-    if not folder:
-        return False
-    if not os.path.isdir(folder):
-        # A folder made inside the Flatpak sandbox's home would vanish on exit.
-        if in_flatpak():
-            return False
-        try:
-            os.makedirs(folder, exist_ok=True)
-        except OSError:
-            return False
-    return os.access(folder, os.W_OK)
+    return not recording_dir_error(folder)
+
+
+def recording_dir_error(folder):
+    """An actionable filesystem error, or '' after a successful write probe."""
+    try:
+        validate_recording_folder(folder, create_missing=not in_flatpak())
+    except OSError as exc:
+        return str(exc)
+    return ''
 
 
 def local_recording_name(channel_name, when, extension=DEFAULT_FORMAT):
@@ -7439,6 +7442,13 @@ class TVHeadendClient(QMainWindow):
         if is_builtin_server(self.current_server()):
             self.fetch_channels()
         self._load_guides_after_start(find_builtin_server(self.servers))
+        if (self.builtin is not None and hasattr(self.builtin, 'applied_recordings_dir')
+                and self.builtin.recordings_dir
+                and self.builtin.applied_recordings_dir != self.builtin.recordings_dir):
+            self.statusbar.showMessage(
+                'The built-in server is available, but its recordings folder could not be applied. '
+                'Check the folder in Settings before recording.'
+            )
 
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
@@ -7953,9 +7963,14 @@ class TVHeadendClient(QMainWindow):
     def local_recording_dir(self):
         return self.config.get('local_recording_dir') or default_recording_dir()
 
+    def recording_folder_problem(self):
+        folder = self.local_recording_dir()
+        return recording_dir_error(folder) if folder else ''
+
     def set_local_recording_dir(self, folder):
-        if not ensure_recording_dir(folder):
-            QMessageBox.warning(self, "Recordings Folder", f"TVHplayer cannot save recordings in {folder}.")
+        error = recording_dir_error(folder)
+        if error:
+            QMessageBox.warning(self, "Recordings Folder", f"TVHplayer cannot save recordings in {folder}.\n\n{error}")
             return False
         self.config['local_recording_dir'] = folder
         self.save_config()
@@ -7963,6 +7978,8 @@ class TVHeadendClient(QMainWindow):
             self._settings_dialog.folder_edit.setText(folder)
         if self.builtin is not None and not self.builtin.set_recordings_dir(folder):
             self.statusbar.showMessage("The built-in server keeps its old recordings folder until it starts again.")
+        if self._settings_dialog is not None:
+            self._settings_dialog._refresh_folder_status()
         self._check_disk_space()
         return True
 
@@ -8090,6 +8107,9 @@ class TVHeadendClient(QMainWindow):
         if previous:
             text = (f"TVHplayer cannot save recordings in {previous}. "
                     "Choose another folder; recordings go there from now on.")
+            error = recording_dir_error(previous)
+            if error:
+                text += f"\n\n{error}"
         else:
             text = ("Choose a folder for recordings. "
                     "Recordings go there from now on; you can change it in Settings.")
@@ -8103,11 +8123,7 @@ class TVHeadendClient(QMainWindow):
         folder = QFileDialog.getExistingDirectory(self, "Recordings Folder", str(Path.home()))
         if not folder:
             return ''
-        if not ensure_recording_dir(folder):
-            QMessageBox.warning(self, "Recordings Folder", f"TVHplayer cannot save recordings in {folder}.")
-            return ''
-        self.set_local_recording_dir(folder)
-        return folder
+        return folder if self.set_local_recording_dir(folder) else ''
 
     def _remember_channel(self, channel):
         last = {'server': self._channels_server, 'key': channel_key(channel), 'name': channel.name}

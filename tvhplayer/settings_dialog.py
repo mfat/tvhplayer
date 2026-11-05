@@ -310,6 +310,15 @@ class SettingsDialog(QDialog):
         folder_row.addWidget(self.folder_edit, 1)
         folder_row.addWidget(self.folder_btn)
         storage.add_row(SettingRow('&Save recordings in', folder_text, folder, stacked=True))
+        self.folder_status = QLabel()
+        self.folder_status.setWordWrap(True)
+        storage.add_row(self.folder_status)
+        self._folder_storage = storage
+        supervisor = getattr(host, 'builtin', None)
+        if supervisor is not None and hasattr(supervisor, 'recordings_dir_changed'):
+            supervisor.recordings_dir_changed.connect(self._refresh_folder_status)
+            supervisor.status_changed.connect(self._refresh_folder_status)
+        self._refresh_folder_status()
         self.space_spin = QSpinBox()
         self.space_spin.setRange(0, 10000)
         self.space_spin.setSuffix(' GB')
@@ -582,6 +591,22 @@ class SettingsDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, 'Recordings Folder', self.folder_edit.text())
         if folder and self._host.set_local_recording_dir(folder):
             self.folder_edit.setText(folder)
+            self._refresh_folder_status()
+
+    def _refresh_folder_status(self, *_args):
+        supervisor = getattr(self._host, 'builtin', None)
+        problem = getattr(self._host, 'recording_folder_problem', lambda: '')()
+        text = f'Cannot save recordings here: {problem}' if problem else ''
+        if not problem and supervisor is not None and hasattr(supervisor, 'applied_recordings_dir'):
+            requested = self._host.local_recording_dir()
+            if requested and supervisor.applied_recordings_dir != requested:
+                if supervisor.is_running():
+                    text = ('The built-in server has not accepted this folder. '
+                            'TVHplayer cannot schedule new recordings until the folder can be applied.')
+                else:
+                    text = 'The built-in server will check this folder when it starts.'
+        self.folder_status.setText(text)
+        self._folder_storage.set_row_visible(self.folder_status, bool(text))
 
     def _show_format_help(self):
         description = RECORDING_FORMATS[self.format_combo.currentData()][1]

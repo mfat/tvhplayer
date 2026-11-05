@@ -2068,7 +2068,7 @@ def test_recordings_folder_rejects_unwritable_settings_and_persists_selection(mo
         dialog = window.show_settings()
         rejected = str(tmp_path / 'read-only')
         monkeypatch.setattr(ui.QFileDialog, 'getExistingDirectory', lambda *_a: rejected)
-        monkeypatch.setattr(ui, 'ensure_recording_dir', lambda folder: folder != rejected)
+        monkeypatch.setattr(ui, 'recording_dir_error', lambda folder: 'Read-only filesystem' if folder == rejected else '')
         updates = []
         window.builtin = types.SimpleNamespace(set_recordings_dir=lambda folder: updates.append(folder) or True)
         dialog._choose_folder()
@@ -2103,6 +2103,91 @@ def test_server_recordings_retry_failed_folder_updates(monkeypatch, tmp_path):
         assert warnings
         assert window.server_recordings_ready()
         assert calls == [str(tmp_path), str(tmp_path)]
+    finally:
+        window.builtin = None
+        window.close()
+        app.processEvents()
+
+
+def test_settings_folder_change_shows_server_acceptance(monkeypatch, tmp_path):
+    from tvhplayer import builtin_supervisor as module
+
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    supervisor = module.BuiltinSupervisor(tmp_path / 'tvheadend', tmp_path / 'server-config')
+    monkeypatch.setattr(supervisor, '_child_alive', lambda: True)
+    supervisor._status = 'running'
+    accepted = True
+    monkeypatch.setattr(module, 'set_recordings_dir', lambda *_a: accepted)
+    first, second = tmp_path / 'first', tmp_path / 'second'
+    first.mkdir()
+    second.mkdir()
+    try:
+        window.builtin = supervisor
+        window.set_local_recording_dir(str(first))
+        dialog = window.show_settings()
+        monkeypatch.setattr(ui.QFileDialog, 'getExistingDirectory', lambda *_a: str(second))
+        accepted = False
+        dialog._choose_folder()
+        assert dialog.folder_edit.text() == str(second)
+        assert window.config_store.load()['local_recording_dir'] == str(second)
+        assert supervisor.recordings_dir == str(second)
+        assert supervisor.applied_recordings_dir == str(first)
+        assert 'has not accepted' in dialog.folder_status.text()
+        accepted = True
+        assert supervisor.set_recordings_dir(str(second))
+        assert supervisor.applied_recordings_dir == str(second)
+        assert dialog.folder_status.text() == ''
+    finally:
+        window.builtin = None
+        window.close()
+        app.processEvents()
+
+
+@pytest.mark.parametrize('stale', ['deleted', 'access_revoked'])
+def test_flatpak_stale_saved_folder_is_replaced_before_server_recording(monkeypatch, tmp_path, stale):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    old, replacement = tmp_path / 'old', tmp_path / 'replacement'
+    old.mkdir()
+    replacement.mkdir()
+    monkeypatch.setattr(ui, 'in_flatpak', lambda: True)
+    monkeypatch.setattr(ui, 'is_builtin_server', lambda _server: True)
+    window.current_server = lambda: {}
+    calls, prompts = [], []
+    try:
+        assert window.set_local_recording_dir(str(old))
+        if stale == 'deleted':
+            old.rmdir()
+        else:
+            validate = ui.validate_recording_folder
+
+            def revoked(folder, **kwargs):
+                if folder == str(old):
+                    raise PermissionError('Portal access was revoked')
+                return validate(folder, **kwargs)
+
+            monkeypatch.setattr(ui, 'validate_recording_folder', revoked)
+
+        dialog = window.show_settings()
+        assert 'Cannot save recordings here:' in dialog.folder_status.text()
+
+        class Box(ui.QMessageBox):
+            def exec(self):
+                prompts.append(self.text())
+
+            def clickedButton(self):
+                return self.defaultButton()
+
+        monkeypatch.setattr(ui, 'QMessageBox', Box)
+        monkeypatch.setattr(ui.QFileDialog, 'getExistingDirectory', lambda *_a: str(replacement))
+        window.builtin = types.SimpleNamespace(set_recordings_dir=lambda folder: calls.append(folder) or True)
+        assert window.server_recordings_ready()
+        assert prompts and str(old) in prompts[0]
+        assert calls and all(folder == str(replacement) for folder in calls)
+        assert window.config_store.load()['local_recording_dir'] == str(replacement)
+        assert dialog.folder_edit.text() == str(replacement)
+        assert dialog.folder_status.text() == ''
+        if stale == 'deleted':
+            assert not old.exists()
     finally:
         window.builtin = None
         window.close()

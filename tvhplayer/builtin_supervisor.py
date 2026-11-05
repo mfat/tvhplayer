@@ -66,7 +66,8 @@ class BuiltinSupervisor(QObject):
     failed = pyqtSignal(str)
     log_output = pyqtSignal(str)
     # From the readiness check's thread: attempt, answered, defaults that failed.
-    _checked = pyqtSignal(int, bool, object)
+    _checked = pyqtSignal(int, bool, object, str)
+    recordings_dir_changed = pyqtSignal()
 
     def __init__(self, binary, config_dir, http_port=0, htsp_port=0, parent=None):
         super().__init__(parent)
@@ -78,6 +79,8 @@ class BuiltinSupervisor(QObject):
         self.password = ''
         # The app's recordings folder, given to the server on every start; '' leaves its own.
         self.recordings_dir = ''
+        # None means no storage setting has been confirmed for this process.
+        self.applied_recordings_dir = None
         # Minutes early and late for recordings, given on every start; None leaves the server's own.
         self.padding = None
         self.startup_timeout = STARTUP_TIMEOUT_SECONDS
@@ -231,7 +234,7 @@ class BuiltinSupervisor(QObject):
         if answered:
             failed = apply_builtin_defaults(http_port, username, password, recordings_dir, padding)
         try:
-            self._checked.emit(attempt, answered, failed)
+            self._checked.emit(attempt, answered, failed, recordings_dir)
         except RuntimeError:
             # The app closed while the server was being asked.
             return
@@ -245,7 +248,7 @@ class BuiltinSupervisor(QObject):
             elif changed:
                 log.info('Updated the ffmpeg command of %d playlist channels', changed)
 
-    def _on_checked(self, attempt, answered, failed) -> None:
+    def _on_checked(self, attempt, answered, failed, recordings_dir='') -> None:
         if attempt != self._check_attempt:
             return
         self._checking = False
@@ -253,6 +256,10 @@ class BuiltinSupervisor(QObject):
             return
         result = startup_result(self._child_alive(), self._lines.watch, True)
         if result == 'ready':
+            self.applied_recordings_dir = (
+                recordings_dir if recordings_dir and 'recordings folder' not in failed else None
+            )
+            self.recordings_dir_changed.emit()
             if failed:
                 log.warning('Could not apply built-in server defaults: %s', ', '.join(failed))
             self._poll.stop()
@@ -303,9 +310,17 @@ class BuiltinSupervisor(QObject):
     def set_recordings_dir(self, folder: str) -> bool:
         """Use ``folder`` from the next start, and now when running. False when the server refused it."""
         self.recordings_dir = folder or ''
-        if not self.recordings_dir or not self.is_running():
+        if not self.is_running():
+            self.recordings_dir_changed.emit()
             return True
-        return set_recordings_dir(self.http_port, self.recordings_dir, self.username, self.password)
+        if not self.recordings_dir:
+            self.recordings_dir_changed.emit()
+            return True
+        accepted = set_recordings_dir(self.http_port, self.recordings_dir, self.username, self.password)
+        if accepted:
+            self.applied_recordings_dir = self.recordings_dir
+        self.recordings_dir_changed.emit()
+        return accepted
 
     def set_padding(self, padding) -> bool:
         """Use ``(minutes early, minutes late)`` from the next start, and now when running."""
@@ -321,4 +336,6 @@ class BuiltinSupervisor(QObject):
         if self._status == status:
             return
         self._status = status
+        if status != 'running':
+            self.applied_recordings_dir = None
         self.status_changed.emit(status)

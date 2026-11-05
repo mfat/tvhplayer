@@ -523,3 +523,37 @@ def test_a_server_stopped_while_playlist_commands_update_gives_no_warning(qapp, 
     monkeypatch.setattr(builtin_supervisor, 'use_ffmpeg_starter', lambda *a, **k: -1)
     supervisor._check_ready(supervisor._check_attempt, 24115, 'u', 'p', '', None)
     assert 'Could not update the ffmpeg command' in caplog.text
+
+
+def test_recording_folder_tracks_confirmed_updates_and_retries(qapp, tmp_path, monkeypatch):
+    from tvhplayer import builtin_supervisor as module
+
+    supervisor = module.BuiltinSupervisor(tmp_path / 'tvheadend', tmp_path / 'config')
+    supervisor._status = 'running'
+    monkeypatch.setattr(supervisor, '_child_alive', lambda: True)
+    answers = iter([True, False, True])
+    monkeypatch.setattr(module, 'set_recordings_dir', lambda *_a: next(answers))
+    assert supervisor.set_recordings_dir('/old')
+    assert supervisor.applied_recordings_dir == '/old'
+    assert not supervisor.set_recordings_dir('/new')
+    assert supervisor.recordings_dir == '/new'
+    assert supervisor.applied_recordings_dir == '/old'
+    assert supervisor.set_recordings_dir('/new')
+    assert supervisor.applied_recordings_dir == '/new'
+    supervisor._set_status('stopped')
+    assert supervisor.applied_recordings_dir is None
+
+
+@pytest.mark.parametrize('failed', [[], ['recordings folder']])
+def test_startup_tracks_the_folder_actually_checked(qapp, tmp_path, monkeypatch, failed):
+    from tvhplayer import builtin_supervisor as module
+
+    supervisor = module.BuiltinSupervisor(tmp_path / 'tvheadend', tmp_path / 'config')
+    supervisor._status = 'starting'
+    supervisor.recordings_dir = '/new-request'
+    monkeypatch.setattr(supervisor, '_child_alive', lambda: True)
+    monkeypatch.setattr(module, 'startup_result', lambda *_a: 'ready')
+    supervisor._on_checked(supervisor._check_attempt, True, failed, '/startup-snapshot')
+    assert supervisor.is_running()  # Playback remains available when storage fails.
+    assert supervisor.applied_recordings_dir == (None if failed else '/startup-snapshot')
+    assert supervisor.recordings_dir == '/new-request'
