@@ -7954,6 +7954,9 @@ class TVHeadendClient(QMainWindow):
         return self.config.get('local_recording_dir') or default_recording_dir()
 
     def set_local_recording_dir(self, folder):
+        if not ensure_recording_dir(folder):
+            QMessageBox.warning(self, "Recordings Folder", f"TVHplayer cannot save recordings in {folder}.")
+            return False
         self.config['local_recording_dir'] = folder
         self.save_config()
         if self._settings_dialog is not None:
@@ -7961,17 +7964,26 @@ class TVHeadendClient(QMainWindow):
         if self.builtin is not None and not self.builtin.set_recordings_dir(folder):
             self.statusbar.showMessage("The built-in server keeps its old recordings folder until it starts again.")
         self._check_disk_space()
+        return True
 
     def server_recordings_ready(self):
         """Before recording on the built-in server: a folder it can save in, asked for if needed."""
         if not is_builtin_server(self.current_server()):
             return True
         folder = self.local_recording_dir()
-        if ensure_recording_dir(folder):
-            if self.builtin is not None and self.builtin.recordings_dir != folder:
-                self.builtin.set_recordings_dir(folder)
-            return True
-        return bool(self._ask_recording_dir(folder))
+        if not ensure_recording_dir(folder):
+            folder = self._ask_recording_dir(folder)
+            if not folder:
+                return False
+        # recordings_dir is the desired folder, including after a failed update.
+        # Confirm the server's profile before scheduling, even when it matches.
+        if self.builtin is not None and not self.builtin.set_recordings_dir(folder):
+            QMessageBox.warning(
+                self, "Recordings Folder",
+                "The built-in server could not use the recordings folder. Try recording again when the server is ready.",
+            )
+            return False
+        return True
 
     def recording_format(self):
         return self.config['local_recording_format']

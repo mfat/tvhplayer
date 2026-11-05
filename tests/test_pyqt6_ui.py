@@ -2057,6 +2057,58 @@ def test_local_recordings_default_to_the_videos_folder(monkeypatch, tmp_path):
     app.processEvents()
 
 
+def test_recordings_folder_rejects_unwritable_settings_and_persists_selection(monkeypatch, tmp_path):
+    from tvhplayer.core.config import ConfigStore
+
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    warnings = []
+    monkeypatch.setattr(ui.QMessageBox, 'warning', lambda *args: warnings.append(args[2]))
+    try:
+        assert window.set_local_recording_dir(str(tmp_path))
+        dialog = window.show_settings()
+        rejected = str(tmp_path / 'read-only')
+        monkeypatch.setattr(ui.QFileDialog, 'getExistingDirectory', lambda *_a: rejected)
+        monkeypatch.setattr(ui, 'ensure_recording_dir', lambda folder: folder != rejected)
+        updates = []
+        window.builtin = types.SimpleNamespace(set_recordings_dir=lambda folder: updates.append(folder) or True)
+        dialog._choose_folder()
+        assert warnings
+        assert dialog.folder_edit.text() == str(tmp_path)
+        assert window.local_recording_dir() == str(tmp_path)
+        assert updates == []
+        # Reopen the configuration from disk, rather than checking in-memory data.
+        assert ConfigStore(window.config_store.path).load()['local_recording_dir'] == str(tmp_path)
+    finally:
+        window.builtin = None
+        window.close()
+        app.processEvents()
+
+
+def test_server_recordings_retry_failed_folder_updates(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    warnings, calls = [], []
+    monkeypatch.setattr(ui.QMessageBox, 'warning', lambda *args: warnings.append(args[2]))
+    monkeypatch.setattr(ui, 'is_builtin_server', lambda _server: True)
+    window.current_server = lambda: {}
+    answers = iter([False, True])
+
+    def update(folder):
+        calls.append(folder)
+        return next(answers)
+
+    try:
+        window.set_local_recording_dir(str(tmp_path))
+        window.builtin = types.SimpleNamespace(recordings_dir=str(tmp_path), set_recordings_dir=update)
+        assert not window.server_recordings_ready()
+        assert warnings
+        assert window.server_recordings_ready()
+        assert calls == [str(tmp_path), str(tmp_path)]
+    finally:
+        window.builtin = None
+        window.close()
+        app.processEvents()
+
+
 def test_flatpak_asks_for_the_recordings_folder_once(monkeypatch, tmp_path):
     from tvhplayer.core.models import Channel
 

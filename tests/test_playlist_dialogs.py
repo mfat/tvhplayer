@@ -593,6 +593,7 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
 
         def set_local_recording_dir(self, folder):
             self.folder = folder
+            return True
 
         def recording_format(self):
             return 'ts'

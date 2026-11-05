@@ -580,9 +580,8 @@ class SettingsDialog(QDialog):
 
     def _choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, 'Recordings Folder', self.folder_edit.text())
-        if folder:
+        if folder and self._host.set_local_recording_dir(folder):
             self.folder_edit.setText(folder)
-            self._host.set_local_recording_dir(folder)
 
     def _show_format_help(self):
         description = RECORDING_FORMATS[self.format_combo.currentData()][1]
