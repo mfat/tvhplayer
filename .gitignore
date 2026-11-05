@@ -32,3 +32,10 @@ __pycache__/
 # Windows build work
 /windows/build/
 /windows/dist/
+/windows/build-*/
+/windows/dist-*/
+/windows/downloads/
+/windows/.venv-*/
+# Locally built offline WSLc image archives
+windows/backend/dist/
+windows/backend/release-bundle/

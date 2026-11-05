@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 
 import pytest
@@ -12,16 +13,17 @@ def test_log_folder_follows_xdg_state_home(monkeypatch, tmp_path):
     assert logs.log_dir() == tmp_path / 'state' / 'tvhplayer'
     monkeypatch.delenv('XDG_STATE_HOME')
     monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('USERPROFILE', str(tmp_path))
     assert logs.log_dir() == tmp_path / '.local' / 'state' / 'tvhplayer'
 
 
 def test_sanitize_hides_secrets():
     text = (
-        '"password": "hunter2", url http://tvhplayer:s3cret@127.0.0.1:9981/stream '
+        '"password": "hunter2", url http://tvhplayer:s3cret@127.0.0.1:9981/stream?ticket=stream-secret '
         'Authorization: Basic dXNlcjpwYXNz password=abc'
     )
     clean = logs.sanitize(text)
-    for secret in ('hunter2', 's3cret', 'dXNlcjpwYXNz', 'abc'):
+    for secret in ('hunter2', 's3cret', 'dXNlcjpwYXNz', 'abc', 'stream-secret'):
         assert secret not in clean
     assert 'http://tvhplayer:***@127.0.0.1:9981/stream' in clean
 
@@ -59,6 +61,7 @@ def test_configure_writes_app_and_server_logs(tmp_path, restore_logging):
     assert 'Starting HTTP server' not in app_log
 
 
+@pytest.mark.skipif(os.name != 'posix', reason='POSIX fd and child-process capture; Windows uses Python stream wrappers')
 def test_everything_the_process_writes_is_logged_and_hidden(tmp_path):
     """print(), a C library writing to fd 2 (like libmpv), and a child program."""
     import subprocess

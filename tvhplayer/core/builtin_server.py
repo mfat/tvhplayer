@@ -27,6 +27,7 @@ from pathlib import Path
 
 from .ffmpeg_starter import install_starter, starter_path
 from .playlist_sync import retarget_commands
+from .playlist_sync import guest_ffmpeg_changes
 from .tvh_admin import ADMIN_GRID_LIMIT, SAVE_BATCH
 
 BUILTIN_NAME = 'Built-in Server'
@@ -46,8 +47,9 @@ _HTSP_STARTED = 'Starting HTSP server'
 
 
 def platform_supports_builtin() -> bool:
-    """Linux only, Flatpak included. Tvheadend has no supported macOS or Windows build."""
-    return sys.platform.startswith('linux')
+    """Native Linux, or the explicitly enabled experimental Windows backend."""
+    from .builtin_runtime import windows_backend_enabled
+    return sys.platform.startswith('linux') or windows_backend_enabled()
 
 
 def is_builtin_server(server) -> bool:
@@ -476,6 +478,21 @@ def use_ffmpeg_starter(
     for start in range(0, len(changes), SAVE_BATCH):
         node = json.dumps(changes[start:start + SAVE_BATCH])
         if not _post(http_port, 'api/idnode/save', {'node': node}, username, password, timeout=30):
+            return -1
+    return len(changes)
+
+
+def use_guest_ffmpeg(http_port, username='', password='', cancel=None):
+    form = {'limit': str(ADMIN_GRID_LIMIT), 'hidemode': 'none', 'list': 'uuid,iptv_url'}
+    grid = _post_json(http_port, 'api/mpegts/mux/grid', form, username, password, timeout=2)
+    if not isinstance(grid, dict):
+        return -1
+    changes = guest_ffmpeg_changes(grid.get('entries') or [])
+    for start in range(0, len(changes), SAVE_BATCH):
+        if cancel is not None and cancel.is_set():
+            return -1
+        node = json.dumps(changes[start:start + SAVE_BATCH])
+        if not _post(http_port, 'api/idnode/save', {'node': node}, username, password, timeout=2):
             return -1
     return len(changes)
 

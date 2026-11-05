@@ -59,6 +59,8 @@ server_log = logging.getLogger(SERVER_LOGGER)
 class BuiltinSupervisor(QObject):
     """Start, watch, and stop the shipped tvheadend child."""
 
+    can_install = False
+
     status_changed = pyqtSignal(str)
     ready = pyqtSignal(int, int)
     failed = pyqtSignal(str)
@@ -98,6 +100,14 @@ class BuiltinSupervisor(QObject):
         self._check_attempt = 0
         self._checking = False
         self._checked.connect(self._on_checked)
+
+    @property
+    def available(self) -> bool:
+        return self.binary is not None
+
+    @property
+    def needs_setup(self) -> bool:
+        return False
 
     @property
     def status(self) -> str:

@@ -1,0 +1,11 @@
+**
+!packaging/
+!packaging/tvheadend/
+!packaging/tvheadend/*.sh
+!packaging/tvheadend/pins.env
+!windows/
+!windows/backend/
+!windows/backend/Containerfile
+!windows/backend/entrypoint.sh
+!windows/backend/debian.sources
+!windows/backend/base-sources.sources

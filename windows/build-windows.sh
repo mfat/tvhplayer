@@ -20,30 +20,49 @@ HERE="$ROOT/windows"
 # shellcheck source=windows/pins.env
 . "$HERE/pins.env"
 PYTHON="${PYTHON:-python}"
+CURL="${CURL:-curl}"
 [[ $# -eq 1 ]] || { echo "usage: $0 VERSION" >&2; exit 2; }
 VERSION=$1
 WORK="$HERE/build"
 DIST="$HERE/dist"
+if [[ -n "${TVHPLAYER_BUILD_LABEL:-}" ]]; then
+  [[ "$TVHPLAYER_BUILD_LABEL" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "Invalid build label" >&2; exit 2; }
+  WORK="$HERE/build-$TVHPLAYER_BUILD_LABEL"
+  DIST="$HERE/dist-$TVHPLAYER_BUILD_LABEL"
+fi
+# Resolve junctions/symlinks before recursively replacing generated output.
+"$PYTHON" -c 'import sys; from pathlib import Path; repo=Path(sys.argv[1]).resolve(); base=(repo/"windows").resolve(); assert base.parent == repo; assert all(Path(p).resolve().parent == base for p in sys.argv[2:]), "Build output escaped the Windows packaging directory"' "$ROOT" "$WORK" "$DIST"
 rm -rf "$WORK" "$DIST"
 mkdir -p "$WORK" "$DIST"
+CACHE="$HERE/downloads"
+mkdir -p "$CACHE"
+fetch() {
+  local url=$1 output=$2 digest=$3 cached="$CACHE/$3"
+  if [[ ! -f "$cached" ]] || ! echo "$digest  $cached" | sha256sum -c --quiet -; then
+    "$CURL" --fail --silent --show-error --location --connect-timeout 20 --max-time 600 --retry 3 -o "$cached.part" "$url"
+    echo "$digest  $cached.part" | sha256sum -c --quiet -
+    mv "$cached.part" "$cached"
+  fi
+  cp "$cached" "$output"
+}
 
 echo "==> libmpv $MPV_DEV_BUILD"
 archive="$WORK/mpv-dev.7z"
-curl --fail --silent --show-error --location --retry 3 -o "$archive" "$MPV_DEV_URL"
+fetch "$MPV_DEV_URL" "$archive" "$MPV_DEV_SHA256"
 echo "$MPV_DEV_SHA256  $archive" | sha256sum -c --quiet -
 7z e -y -o"$WORK" "$archive" libmpv-2.dll >/dev/null
 test -f "$WORK/libmpv-2.dll"
 
 echo "==> Vulkan loader $VULKAN_RT_VERSION"
 vulkan="$WORK/vulkan-runtime.zip"
-curl --fail --silent --show-error --location --retry 3 -o "$vulkan" "$VULKAN_RT_URL"
+fetch "$VULKAN_RT_URL" "$vulkan" "$VULKAN_RT_SHA256"
 echo "$VULKAN_RT_SHA256  $vulkan" | sha256sum -c --quiet -
 7z e -y -o"$WORK/vulkan" "$vulkan" "*/x64/vulkan-1.dll" "*/VulkanRT-License.txt" >/dev/null
 test -f "$WORK/vulkan/vulkan-1.dll"
 
 echo "==> FFmpeg $FFMPEG_BUILD"
 ffmpeg="$WORK/ffmpeg.zip"
-curl --fail --silent --show-error --location --retry 3 -o "$ffmpeg" "$FFMPEG_URL"
+fetch "$FFMPEG_URL" "$ffmpeg" "$FFMPEG_SHA256"
 echo "$FFMPEG_SHA256  $ffmpeg" | sha256sum -c --quiet -
 7z e -y -o"$WORK/ffmpeg" "$ffmpeg" "*/bin/ffmpeg.exe" "*/bin/ffprobe.exe" "*/LICENSE.txt" >/dev/null
 test -f "$WORK/ffmpeg/ffmpeg.exe" && test -f "$WORK/ffmpeg/ffprobe.exe"
@@ -81,6 +100,16 @@ echo "==> PyInstaller"
 
 app="$WORK/dist/TVHplayer"
 test -f "$app/TVHplayer.exe"
+# Optional offline backend artifact. Kept next to the EXE across installer/ZIP builds.
+# Public builds remain gated until Windows-host acceptance tests pass.
+if [[ -n "${TVHPLAYER_BACKEND_BUNDLE:-}" ]]; then
+  "$PYTHON" "$HERE/backend/verify-bundle.py" "$TVHPLAYER_BACKEND_BUNDLE"
+  mkdir -p "$app/backend"
+  for name in tvheadend.tar manifest.json sbom.spdx.json licenses.tar.gz TVHplayer-LICENSE.txt tvheadend-source.md; do
+    cp "$TVHPLAYER_BACKEND_BUNDLE/$name" "$app/backend/"
+  done
+  cp "$TVHPLAYER_BACKEND_BUNDLE/corresponding-source.tar.gz" "$DIST/tvhplayer-$VERSION-backend-source.tar.gz"
+fi
 test -f "$app/_internal/libmpv-2.dll"
 test -f "$app/_internal/vulkan-1.dll"
 # Cast is imported optionally at runtime; fail the build if PyInstaller omitted it.
@@ -94,12 +123,14 @@ case "$VERSION" in
   v[0-9]*) app_version=${VERSION#v} ;;
   *) app_version=$(sed -n 's/^APP_VERSION = "\(.*\)"$/\1/p' "$ROOT/tvhplayer/tvhplayer.py") ;;
 esac
-iscc="${ISCC:-C:/Program Files (x86)/Inno Setup 6/ISCC.exe}"
-"$iscc" -Q \
-  "-DAppVersion=$app_version" "-DVersionLabel=$VERSION" \
-  "-DRepoRoot=$ROOT" "-DBundleDir=$app" "-DOutputDir=$DIST" "-DIconFile=$icon" \
-  "$HERE/tvhplayer.iss"
-test -f "$DIST/tvhplayer-$VERSION-windows-x86_64-setup.exe"
+if [[ "${TVHPLAYER_PORTABLE_ONLY:-0}" != 1 ]]; then
+  iscc="${ISCC:-C:/Program Files (x86)/Inno Setup 6/ISCC.exe}"
+  "$iscc" -Q \
+    "-DAppVersion=$app_version" "-DVersionLabel=$VERSION" \
+    "-DRepoRoot=$ROOT" "-DBundleDir=$app" "-DOutputDir=$DIST" "-DIconFile=$icon" \
+    "$HERE/tvhplayer.iss"
+  test -f "$DIST/tvhplayer-$VERSION-windows-x86_64-setup.exe"
+fi
 
 echo "==> Zip"
 zip="$DIST/tvhplayer-$VERSION-windows-x86_64.zip"

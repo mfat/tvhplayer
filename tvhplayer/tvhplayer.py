@@ -67,6 +67,7 @@ try:
         starting_caption, stream_path, stream_reason,
     )
     from .builtin_supervisor import BuiltinSupervisor
+    from .core.builtin_runtime import create_supervisor, windows_backend_enabled
     from . import cursor_debug
     from . import window_frame
     from .file_manager import show_in_file_manager
@@ -166,6 +167,7 @@ except ImportError:
         starting_caption, stream_path, stream_reason,
     )
     from builtin_supervisor import BuiltinSupervisor
+    from core.builtin_runtime import create_supervisor, windows_backend_enabled
     import cursor_debug
     import window_frame
     from file_manager import show_in_file_manager
@@ -2207,6 +2209,8 @@ class ServerDialog(QDialog):
             return {
                 'running': (STATUS_CONNECTED, "Running on this computer"),
                 'starting': (STATUS_TESTING, "Starting…"),
+                'installing': (STATUS_TESTING, "Loading server image…"),
+                'stopping': (STATUS_TESTING, "Stopping…"),
                 'failed': (STATUS_UNREACHABLE, "Could not start"),
             }.get(self._builtin_state(), (STATUS_STOPPED, "Stopped"))
         if validate_server_url(server.get('url') or ''):
@@ -2282,9 +2286,10 @@ class ServerDialog(QDialog):
         self.status_label.setText(text)
         if server.get('builtin'):
             state = self._builtin_state()
-            active = state in ('starting', 'running')
-            self.run_btn.setText("S&top Server" if active else "S&tart Server")
-            self.run_btn.setEnabled(self._supervisor is not None)
+            active = state in ('starting', 'installing', 'running')
+            setup = getattr(self._supervisor, 'setup_issue', None) is not None
+            self.run_btn.setText("S&top Server" if active else ("Set &up WSL…" if setup else "S&tart Server"))
+            self.run_btn.setEnabled(self._supervisor is not None and state != 'stopping')
             self.builtin_address.setText(self._builtin_url(server) or "Chosen when the server starts")
             self.open_web_btn.setEnabled(state == 'running')
             self.log_btn.setEnabled(self._supervisor is not None)
@@ -2448,8 +2453,10 @@ class ServerDialog(QDialog):
     def _toggle_builtin(self):
         if self._supervisor is None:
             return
-        if self._builtin_state() in ('starting', 'running'):
+        if self._builtin_state() in ('starting', 'installing', 'running'):
             self._supervisor.stop()
+        elif getattr(self._supervisor, 'setup_issue', None) is not None:
+            self.parent().show_windows_backend_setup()
         else:
             self._supervisor.start()
         self._refresh_selected()
@@ -3645,12 +3652,12 @@ class TVHeadendClient(QMainWindow):
         )
         
         # Initialize servers from config. Without a packaged Tvheadend there is no built-in entry.
-        self._builtin_binary = find_bundled_binary() if platform_supports_builtin() else None
+        self._builtin_binary = find_bundled_binary() if platform_supports_builtin() and not windows_backend_enabled() else None
         self.servers = ensure_builtin_server(
             self.config_store.servers,
             self.config['builtin_http_port'],
             self.config['builtin_htsp_port'],
-            available=self._builtin_binary is not None,
+            available=self._builtin_binary is not None or windows_backend_enabled(),
         )
         self._backend = None
         self._backend_key = None
@@ -3723,8 +3730,8 @@ class TVHeadendClient(QMainWindow):
         self._conversion_timer = QTimer(self)
         self._conversion_timer.timeout.connect(self._tick_conversions)
         self.builtin = None
-        if self._builtin_binary is not None:
-            self.builtin = BuiltinSupervisor(
+        if self._builtin_binary is not None or windows_backend_enabled():
+            self.builtin = create_supervisor(
                 self._builtin_binary,
                 builtin_config_dir(self.config_dir),
                 self.config['builtin_http_port'],
@@ -3736,6 +3743,7 @@ class TVHeadendClient(QMainWindow):
             self.builtin.padding = self.recording_padding()
             self.builtin.ready.connect(self._on_builtin_ready)
             self.builtin.failed.connect(self._on_builtin_failed)
+            self.builtin.status_changed.connect(self._on_builtin_phase, Qt.ConnectionType.QueuedConnection)
         # Keep the computer awake while a recording on it is running or waiting.
         self.sleep_inhibitor = SleepInhibitor()
         self._builtin_entries = []
@@ -5299,7 +5307,7 @@ class TVHeadendClient(QMainWindow):
                 self._show_channel_state(message)
                 self.statusbar.showMessage(message)
                 return
-            if supervisor.binary is None:
+            if not supervisor.available:
                 message = "Built-in Tvheadend is not packaged in this build."
                 self._show_channel_state(message)
                 self.statusbar.showMessage(message)
@@ -7437,6 +7445,36 @@ class TVHeadendClient(QMainWindow):
         self.statusbar.showMessage(message)
         if is_builtin_server(self.current_server()) and not self._channels:
             self._show_channel_state(message, retry=True)
+        if getattr(self.builtin, 'setup_issue', None) is not None and is_builtin_server(self.current_server()):
+            self.show_windows_backend_setup()
+
+    def _on_builtin_phase(self, phase):
+        if self.builtin is None or self.builtin.status != phase or not is_builtin_server(self.current_server()):
+            return
+        if phase == 'installing':
+            self._show_channel_state('Preparing the built-in server…', busy=True)
+            self.statusbar.showMessage('Loading the offline server image…')
+        elif phase == 'stopping':
+            self._show_channel_state('Stopping the built-in server…', busy=True)
+        elif phase == 'stopped':
+            self._show_channel_state('The built-in server is stopped.', retry=True)
+            self.statusbar.showMessage('The built-in server is stopped.')
+
+    def show_windows_backend_setup(self):
+        if getattr(self, '_windows_setup_dialog', None) is not None:
+            self._windows_setup_dialog.raise_()
+            return
+        try:
+            from .windows_backend_setup import WindowsBackendSetup
+        except ImportError:
+            from windows_backend_setup import WindowsBackendSetup
+        dialog = WindowsBackendSetup(self.builtin, self)
+        self._windows_setup_dialog = dialog
+        def closed(_result):
+            self._windows_setup_dialog = None
+            dialog.deleteLater()
+        dialog.finished.connect(closed)
+        dialog.show()
 
     def _set_builtin_autostart(self, checked):
         self.config['builtin_autostart'] = bool(checked)
@@ -8142,7 +8180,7 @@ class TVHeadendClient(QMainWindow):
         """Servers a playlist can go to: the built-in server first, then the user's."""
         targets = []
         builtin = find_builtin_server(self.servers)
-        if builtin is not None and self.builtin is not None and self.builtin.binary is not None:
+        if builtin is not None and self.builtin is not None and self.builtin.available:
             targets.append(builtin)
         targets.extend(server for server in self.servers if not is_builtin_server(server))
         return targets
@@ -8176,7 +8214,7 @@ class TVHeadendClient(QMainWindow):
             on_ready(server)
             return
         supervisor = self.builtin
-        if supervisor is None or supervisor.binary is None:
+        if supervisor is None or not supervisor.available:
             on_failed("The built-in server is not part of this version of TVHplayer.")
             return
         current = find_builtin_server(self.servers)
@@ -8185,7 +8223,8 @@ class TVHeadendClient(QMainWindow):
             return
 
         def disconnect():
-            for signal, slot in ((supervisor.ready, ready), (supervisor.failed, failed)):
+            for signal, slot in ((supervisor.ready, ready), (supervisor.failed, failed),
+                                 (supervisor.status_changed, status_changed)):
                 try:
                     signal.disconnect(slot)
                 except TypeError:
@@ -8199,8 +8238,13 @@ class TVHeadendClient(QMainWindow):
             disconnect()
             on_failed(message)
 
+        def status_changed(status):
+            if status == 'stopped':
+                failed('Built-in server startup was cancelled.')
+
         supervisor.ready.connect(ready)
         supervisor.failed.connect(failed)
+        supervisor.status_changed.connect(status_changed)
         self.statusbar.showMessage("Starting built-in server...")
         supervisor.start()
 

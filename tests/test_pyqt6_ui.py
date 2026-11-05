@@ -189,6 +189,10 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
 
     from tvhplayer.core.config import ConfigStore
 
+    # These stand-in player tests must not start a real backend just because
+    # the developer checkout contains an offline Windows bundle.
+    monkeypatch.setattr(ui, 'windows_backend_enabled', lambda: False)
+    monkeypatch.setattr('tvhplayer.core.builtin_runtime.windows_backend_enabled', lambda: False)
     store = ConfigStore(tmp_path / 'tvhplayer.conf')
     monkeypatch.setattr(ui, 'ConfigStore', lambda *a, **k: store)
     # Not the picon pack on this computer: each window read its tens of thousands of logos.
@@ -3860,6 +3864,58 @@ def test_finished_buffer_recording_is_finalized_by_monitor(monkeypatch, tmp_path
             assert 'Cannot write recording' in errors[0]
         window.check_recording_status()
         assert len(errors) == int(failed)
+    finally:
+        window.close()
+        app.processEvents()
+def test_windows_backend_setup_requires_explicit_install_click(tmp_path, monkeypatch):
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import QProcess
+    from tvhplayer.windows_backend_setup import WindowsBackendSetup
+    from tvhplayer.wslc_builtin_supervisor import WslcBuiltinSupervisor
+    from tvhplayer.core.windows_wslc import WslcPrerequisiteError
+    app = QApplication.instance() or QApplication([])
+    calls = []
+    monkeypatch.setattr(QProcess, 'start', lambda self, program, args: calls.append((program, args)))
+    monkeypatch.setattr('tvhplayer.windows_backend_setup.shutil.which', lambda name: 'powershell.exe')
+    supervisor = WslcBuiltinSupervisor(tmp_path / 'config', tmp_path / 'bundle')
+    supervisor.setup_issue = WslcPrerequisiteError('WSL is missing')
+    dialog = WindowsBackendSetup(supervisor)
+    assert calls == [] and not dialog.resume_file.exists()
+    assert not dialog.isModal()
+    dialog.install.click()
+    assert len(calls) == 1 and '--no-distribution' in calls[0][1][-1]
+    assert '-Verb RunAs' in calls[0][1][-1]
+    assert json.loads(dialog.resume_file.read_text())['stage'] == 'installing'
+    dialog._installed(3010, QProcess.ExitStatus.NormalExit)
+    assert 'restart' in dialog.message.text().lower()
+    assert json.loads(dialog.resume_file.read_text())['stage'] == 'restart_or_retry'
+    dialog.reject()
+    app.processEvents()
+def test_cancelling_backend_start_disconnects_queued_actions(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QObject, pyqtSignal
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    class Supervisor(QObject):
+        ready = pyqtSignal(int, int)
+        failed = pyqtSignal(str)
+        status_changed = pyqtSignal(str)
+        available = True
+        username = password = ''
+        def is_running(self):
+            return False
+        def start(self):
+            self.status_changed.emit('stopped')
+        def shut_down(self):
+            pass
+    supervisor = Supervisor()
+    window.builtin = supervisor
+    window.servers = [{'builtin': True, 'url': ''}]
+    ready, failed = [], []
+    try:
+        window.ensure_server_ready(window.servers[0], ready.append, failed.append)
+        assert failed and 'cancelled' in failed[0]
+        supervisor.ready.emit(24111, 24112)
+        assert ready == []
     finally:
         window.close()
         app.processEvents()

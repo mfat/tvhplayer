@@ -1,0 +1,8 @@
+# The pinned base contains apt 2.6.2, published after the main package snapshot.
+# Only source indexes are added here; runtime binary packages stay pinned.
+Types: deb-src
+URIs: http://snapshot.debian.org/archive/debian-security/20261105T000000Z
+Suites: bookworm-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Check-Valid-Until: no

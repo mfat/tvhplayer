@@ -83,3 +83,9 @@ Run the tests with `python3 -m pytest tests`.
 Bitcoin: `bc1qqtsyf0ft85zshsnw25jgsxnqy45rfa867zqk4t`
 
 Doge:  `DRzNb8DycFD65H6oHNLuzyTzY1S5avPHHx`
+
+## Windows built-in server
+
+Windows packages can include an offline WSL Containers backend with native UI,
+automatic credentials and HDHomeRun discovery. Build/setup instructions and
+release qualification notes are in [windows/backend/README.md](windows/backend/README.md).

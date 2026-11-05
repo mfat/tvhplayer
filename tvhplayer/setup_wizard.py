@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
+import sys
 
 from PyQt6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QPainter, QPalette, QPen
@@ -52,6 +53,7 @@ try:
         supported,
     )
     from .core.tuners import read_tuners
+    from .core.hdhomerun import read_windows_builtin_tuners
     from .core.tvh_admin import TvhAdmin
 except ImportError:
     from a11y import announce_label, buddy_label, describe
@@ -70,6 +72,7 @@ except ImportError:
         supported,
     )
     from core.tuners import read_tuners
+    from core.hdhomerun import read_windows_builtin_tuners
     from core.tvh_admin import TvhAdmin
 
 SOURCE_TUNER = 'tuner'
@@ -527,20 +530,28 @@ class SourcePage(QWizardPage):
         self._show_found([])
         announce_label(self.status, 'Looking for tuners, including SAT>IP and HDHomeRun tuners on the network…')
 
+        read = self._tuner_reader()
+
         def discover(admin):
             try:
                 discover_satip(admin)
                 time.sleep(DISCOVERY_WAIT_SECONDS)
             except Exception:
                 pass  # A build without SAT>IP still lists its own tuners.
-            return read_tuners(admin)
+            return read(admin)
 
         self._wizard.call(discover, self._tuners_read)
+
+    def _tuner_reader(self):
+        if sys.platform == 'win32' and self._wizard.server.get('builtin'):
+            return read_windows_builtin_tuners
+        return read_tuners
 
     def _read_tuners(self):
         self._looking = True
         self.look_btn.setEnabled(False)
-        self._wizard.call(read_tuners, self._tuners_read)
+        announce_label(self.status, 'Looking for tuners…')
+        self._wizard.call(self._tuner_reader(), self._tuners_read)
 
     def _tuners_read(self, tuners, error):
         self._looking = False

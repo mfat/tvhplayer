@@ -112,7 +112,8 @@ def test_builtin_entry_is_permanent_and_separate_from_a_local_instance(monkeypat
     assert len(again) == 2
 
 
-def test_windows_and_macos_do_not_list_a_builtin_server(monkeypatch):
+def test_windows_and_macos_do_not_list_a_builtin_server(monkeypatch, tmp_path):
+    monkeypatch.setattr('tvhplayer.core.builtin_runtime.windows_backend_dir', lambda: tmp_path)
     for platform in ('win32', 'darwin'):
         monkeypatch.setattr('tvhplayer.core.builtin_server.sys.platform', platform)
         servers = ensure_builtin_server([
@@ -208,8 +209,9 @@ def test_superuser_login_is_generated_once_and_owner_only(tmp_path):
     path = config_dir / 'superuser'
     assert json.loads(path.read_text()) == {'username': username, 'password': password}
     assert len(password) >= 16
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+    if os.name != 'nt':  # Windows backend protects this tree with an ACL.
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
     assert ensure_superuser(config_dir) == (username, password)
 
 
@@ -278,6 +280,7 @@ def test_serverinfo_check_ignores_a_proxy_from_the_environment(monkeypatch):
         server.server_close()
 
 
+@pytest.mark.skipif(not sys.platform.startswith('linux'), reason='Native Linux shell child')
 def test_supervisor_gives_up_when_the_child_never_answers(tmp_path):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PyQt6.QtCore import QCoreApplication, QEventLoop, QTimer
@@ -328,6 +331,7 @@ def test_finds_servers_on_the_builtin_config_folder(tmp_path):
     assert owned_by_other_app(103, str(proc))
 
 
+@pytest.mark.skipif(not sys.platform.startswith('linux'), reason='Linux /proc process ownership')
 def test_leftover_server_is_stopped_but_another_window_keeps_its_own(tmp_path, monkeypatch):
     import subprocess
 

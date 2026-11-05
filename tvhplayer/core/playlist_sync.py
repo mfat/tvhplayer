@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
@@ -26,6 +27,7 @@ from typing import Callable, Dict, List, Optional
 from .errors import PlaylistError, TvhAuthError, TvhConnectionError
 from .ffmpeg_starter import install_starter
 from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, _quote, ffmpeg_input, xtream_identity
+from .playlist import tvh_split
 
 BUILTIN_SERVER_KEY = 'builtin'
 # Distro packages and the common Docker images install ffmpeg here. A bare
@@ -243,6 +245,8 @@ def ffmpeg_for_server(server, which=shutil.which, starter=install_starter) -> st
     The built-in server runs the app's stand-in, which opens one quality of an HLS stream.
     """
     if server.get('builtin'):
+        if sys.platform == 'win32':
+            return REMOTE_FFMPEG
         path = which('ffmpeg')
         if not path:
             raise PlaylistError(NO_FFMPEG)
@@ -261,6 +265,24 @@ def retarget_commands(rows, ffmpeg: str, others) -> List[dict]:
             if row.get('uuid') and url.startswith(prefix):
                 changes.append({'uuid': row['uuid'], 'iptv_url': wanted + url[len(prefix):]})
                 break
+    return changes
+
+
+def guest_ffmpeg_changes(rows) -> List[dict]:
+    """Idempotently migrate app FFmpeg wrappers to the container's executable."""
+    changes = []
+    for row in rows:
+        url = row.get('iptv_url') or ''
+        if not row.get('uuid') or not url.startswith('pipe://'):
+            continue
+        args = tvh_split(url[7:])
+        if not args or args[0] == '/usr/bin/ffmpeg':
+            continue
+        name = args[0].replace('\\', '/').rsplit('/', 1)[-1].lower()
+        if name not in ('ffmpeg', 'ffmpeg.exe', 'tvhplayer-ffmpeg'):
+            continue
+        args[0] = '/usr/bin/ffmpeg'
+        changes.append({'uuid': row['uuid'], 'iptv_url': 'pipe://' + ' '.join(_quote(arg) for arg in args)})
     return changes
 
 

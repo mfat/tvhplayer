@@ -1,0 +1,48 @@
+# Build from the repository root; all TVHeadend sources/checksums come from pins.env.
+ARG BASE_IMAGE=debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+FROM ${BASE_IMAGE} AS builder
+COPY windows/backend/debian.sources /etc/apt/sources.list.d/debian.sources
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    build-essential pkg-config gettext bzip2 curl ca-certificates python3 \
+    libssl-dev zlib1g-dev libpcre2-dev libdbus-1-dev libdvbcsa-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY packaging/tvheadend /build/packaging
+RUN sed -i 's/\r$//' /build/packaging/*.sh /build/packaging/pins.env \
+    && sh /build/packaging/build-tvheadend.sh fetch /build/sources \
+    && sh /build/packaging/build-tvheadend.sh build /build/sources /build/work --relocatable \
+    && sh /build/packaging/build-tvheadend.sh install /build/work /out
+
+FROM ${BASE_IMAGE} AS runtime
+COPY windows/backend/debian.sources /etc/apt/sources.list.d/debian.sources
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
+    ca-certificates ffmpeg libssl3 zlib1g libpcre2-8-0 libdbus-1-3 libdvbcsa1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/ /
+COPY windows/backend/entrypoint.sh /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod 755 /entrypoint.sh
+EXPOSE 9981 9982
+HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 CMD test -s /config/superuser && kill -0 1
+ENTRYPOINT ["/entrypoint.sh"]
+
+# The source artifact is built separately; users only load the runtime image.
+FROM runtime AS sources
+COPY windows/backend/base-sources.sources /etc/apt/sources.list.d/base-sources.sources
+RUN mkdir -p /export /corresponding-source/debian \
+    && dpkg-query -W -f='${Package}\t${Version}\t${source:Package}\t${source:Version}\t${Architecture}\n' > /export/packages.tsv \
+    && tar -czf /export/licenses.tar.gz -C /usr/share doc \
+    && apt-get update && apt-get install -y --no-install-recommends dpkg-dev \
+    && cut -f3,4 /export/packages.tsv | sort -u > /tmp/source-packages \
+    && true
+RUN --mount=type=cache,id=tvhplayer-debian-source-20261104,target=/source-cache \
+    cd /source-cache \
+    && xargs -r -P 6 -n 2 sh -c 'apt-get -o Acquire::http::Timeout=30 -o Acquire::Retries=2 source --download-only --only-source "$0=$1"' < /tmp/source-packages \
+    && cp -a /source-cache/. /corresponding-source/debian/
+COPY --from=builder /build/sources /corresponding-source/tvheadend
+COPY packaging/tvheadend /corresponding-source/build-instructions
+COPY windows/backend/Containerfile windows/backend/debian.sources windows/backend/base-sources.sources windows/backend/entrypoint.sh /corresponding-source/backend/
+RUN tar -czf /export/corresponding-source.tar.gz -C / corresponding-source
+
+FROM scratch AS source-export
+COPY --from=sources /export/ /
+
+FROM runtime AS final

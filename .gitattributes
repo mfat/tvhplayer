@@ -1,0 +1,5 @@
+# Linux scripts/configuration must also work from Windows checkouts.
+*.sh text eol=lf
+*.env text eol=lf
+windows/backend/Containerfile text eol=lf
+windows/backend/*.sources text eol=lf

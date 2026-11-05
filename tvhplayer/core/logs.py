@@ -31,7 +31,7 @@ SERVER_LOGGER = 'tvhplayer.tvheadend'
 OUTPUT_LOGGER = 'tvhplayer.output'
 
 _SECRET_VALUE = re.compile(
-    r'(?i)(["\']?(?:password|passwd|secret|token|api[_-]?key)["\']?\s*[:=]\s*)'
+    r'(?i)(["\']?(?:password|passwd|secret|token|ticket|api[_-]?key)["\']?\s*[:=]\s*)'
     r'(?:"[^"]*"|\'[^\']*\'|[^\s,;}\]]+)'
 )
 _URL_LOGIN = re.compile(r'(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]+):[^@\s/]+@')

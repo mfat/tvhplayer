@@ -665,7 +665,8 @@ def test_import_plays_refreshes_and_removes(tvheadend, media, monkeypatch):
         assert 'News' not in tags
 
 
-def test_ffmpeg_location_per_server():
+def test_ffmpeg_location_per_server(monkeypatch):
+    monkeypatch.setattr('sys.platform', 'linux')
     no_starter = functools.partial(ffmpeg_for_server, starter=lambda _path: None)
     assert no_starter({'builtin': True}, which=lambda _name: '/app/bin/ffmpeg') == '/app/bin/ffmpeg'
     with pytest.raises(PlaylistError):
