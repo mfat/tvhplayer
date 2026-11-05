@@ -19,6 +19,8 @@ finish-args:
   - --device=all
   - --socket=pulseaudio
   - --env=PYTHONPATH=/app/lib/python3.13/site-packages:/app/share/tvhplayer
+  # Let Qt's folder chooser grant the selected directory through the portal.
+  - --env=QT_USE_PORTAL=1
 
 
 modules:
