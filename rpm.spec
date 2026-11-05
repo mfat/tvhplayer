@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.5.0
+Version:        4.6.0
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Thu Nov 05 2026 mFat <newmfat@gmail.com> - 4.6.0-1
+- Probe recording folder writes and track applied server storage
+- Validate recording folders and retry built-in server updates
+- Add Windows built-in TVHeadend backend using WSL Containers
+- Fix recording indicator remaining active after jobs finish
+- Added Space to pause/resume when the player has focus.
+
 * Fri Oct 30 2026 mFat <newmfat@gmail.com> - 4.5.0-1
 - Let Set Up Channels choose which server receives the channels.
 - Replace the channel setup form with choice cards.
