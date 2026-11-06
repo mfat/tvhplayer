@@ -199,6 +199,58 @@ def _playlist(tmp_path, text):
 TWO = '#EXTM3U\n#EXTINF:-1 tvg-chno="1",A\nhttp://x/a.ts\n#EXTINF:-1,B\nhttp://x/b.m3u8\n'
 
 
+def test_remote_import_works_while_windows_builtin_needs_setup(app, tmp_path):
+    from PyQt6.QtCore import QObject, pyqtSignal
+    class Supervisor(QObject):
+        status_changed = pyqtSignal(str)
+        ready = pyqtSignal(int, int)
+        failed = pyqtSignal(str)
+        setup_issue = RuntimeError('Windows restart required')
+        status = 'failed'
+        def is_running(self):
+            return self.status == 'running'
+        def start(self):
+            pytest.fail('Remote import must not start the Windows server')
+    host = FakeHost([BUILTIN, OTHER], current=OTHER)
+    host.builtin = Supervisor()
+    dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN)
+    assert not dialog.import_btn.isEnabled()
+    assert not dialog.setup_btn.isHidden()
+    dialog._start()
+    assert dialog._job is None
+    dialog.server_combo.setCurrentIndex(1)
+    assert dialog.import_btn.isEnabled()
+    assert dialog.setup_btn.isHidden()
+    dialog.location_input.setText(_playlist(tmp_path, TWO))
+    _run(app, dialog)
+    assert host.imported == [OTHER]
+    dialog.reject()
+
+
+def test_builtin_import_unlocks_only_after_server_ready(app):
+    from PyQt6.QtCore import QObject, pyqtSignal
+    class Supervisor(QObject):
+        status_changed = pyqtSignal(str)
+        ready = pyqtSignal(int, int)
+        failed = pyqtSignal(str)
+        setup_issue = None
+        status = 'starting'
+        def is_running(self):
+            return self.status == 'running'
+    host = FakeHost([BUILTIN, OTHER])
+    host.builtin = Supervisor()
+    dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN)
+    assert not dialog.import_btn.isEnabled()
+    host.builtin.status = 'running'
+    host.builtin.ready.emit(9981, 9982)
+    assert dialog.import_btn.isEnabled()
+    assert dialog.setup_btn.isHidden()
+    host.builtin.status = 'failed'
+    host.builtin.failed.emit('Server failed')
+    assert not dialog.import_btn.isEnabled()
+    dialog.reject()
+
+
 def test_import_to_builtin_server_in_one_step(app, tmp_path):
     host = FakeHost([BUILTIN, OTHER], current=BUILTIN)
     dialog = dialogs.ImportPlaylistDialog(host)

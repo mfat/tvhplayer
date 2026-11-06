@@ -89,3 +89,11 @@ Doge:  `DRzNb8DycFD65H6oHNLuzyTzY1S5avPHHx`
 Windows packages can include an offline WSL Containers backend with native UI,
 automatic credentials and HDHomeRun discovery. Build/setup instructions and
 release qualification notes are in [windows/backend/README.md](windows/backend/README.md).
+
+On first use, TVHplayer checks WSL, Virtual Machine Platform, and hardware
+virtualization before starting the Windows built-in server. Setup offers the
+required installation or repair with administrator permission. After installing
+WSL or enabling Virtual Machine Platform, restart **Windows**, even if Windows
+does not display a reboot prompt. Reopen TVHplayer to resume setup automatically.
+Playlist import into the built-in server becomes available once it is ready;
+import into an existing remote server does not require local WSL setup.

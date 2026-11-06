@@ -4026,7 +4026,7 @@ def test_windows_backend_setup_requires_explicit_install_click(tmp_path, monkeyp
     assert json.loads(dialog.resume_file.read_text())['stage'] == 'installing'
     dialog._installed(3010, QProcess.ExitStatus.NormalExit)
     assert 'restart' in dialog.message.text().lower()
-    assert json.loads(dialog.resume_file.read_text())['stage'] == 'restart_or_retry'
+    assert json.loads(dialog.resume_file.read_text())['stage'] == 'restart_required'
     dialog.reject()
     app.processEvents()
 def test_cancelling_backend_start_disconnects_queued_actions(monkeypatch, tmp_path):

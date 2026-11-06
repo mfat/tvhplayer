@@ -285,6 +285,15 @@ class WslcBuiltinSupervisor(QObject):
         error = ''
         record = self.config_dir / 'wslc-owner.json'
         try:
+            try:
+                from .core.windows_prerequisites import restart_still_required
+            except ImportError:
+                from core.windows_prerequisites import restart_still_required
+            if restart_still_required(self.config_dir):
+                raise WslcPrerequisiteError(
+                    'Restart Windows to finish built-in server setup, even if no reboot prompt appeared. '
+                    'Save your work, use Start > Power > Restart, then reopen TVHplayer. '
+                    'Restarting only the app does not complete setup.', 'reboot')
             self.runtime.check()
             protect_config(self.config_dir)
             # QLockFile ensures no second UI is using this config. A stale record
@@ -384,6 +393,15 @@ class WslcBuiltinSupervisor(QObject):
             error = '' if self._cancel.is_set() else str(exc)
             if isinstance(exc, WslcPrerequisiteError):
                 self.setup_issue = exc
+                try:
+                    from .core.windows_prerequisites import pending_setup, save_setup
+                except ImportError:
+                    from core.windows_prerequisites import pending_setup, save_setup
+                try:
+                    if not pending_setup(self.config_dir):
+                        save_setup(self.config_dir, 'check_required', exc.action)
+                except OSError:
+                    logging.getLogger(__name__).exception('Could not save built-in server setup progress')
             if launched and not self._cancel.is_set():
                 try:
                     self._emit_log(self.runtime.logs_owned(name, owner) + '\n')
@@ -446,6 +464,10 @@ class WslcBuiltinSupervisor(QObject):
         if self._cancel.is_set() or self._closing:
             return
         self._set_status('running')
+        try:
+            (self.config_dir.parent / 'wslc-setup.json').unlink(missing_ok=True)
+        except OSError:
+            logging.getLogger(__name__).exception('Could not clear completed setup progress')
         self.ready.emit(self.http_port, self.htsp_port)
 
     def _finish(self, error):

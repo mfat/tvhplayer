@@ -32,6 +32,26 @@ class Cli:
         return subprocess.CompletedProcess(args, self.code, self.output, '')
 
 
+@pytest.mark.parametrize('command', ['info', 'inspect', 'run'])
+def test_virtualization_failure_opens_setup_from_any_runtime_stage(command):
+    from tvhplayer.core.windows_wslc import WslcPrerequisiteError
+    cli = Cli('WSL2 is unable to start. Error code: HCS_E_HYPERV_NOT_INSTALLED')
+    cli.code = 1
+    with pytest.raises(WslcPrerequisiteError) as error:
+        WslcRuntimeAdapter('wslc.exe', cli).command(command)
+    assert error.value.action == 'repair'
+    assert 'Restart Windows' in str(error.value)
+    assert 'BIOS/UEFI' in str(error.value)
+
+
+def test_unrelated_command_error_does_not_offer_windows_repair():
+    from tvhplayer.core.windows_wslc import WslcCommandError
+    cli = Cli('Access denied')
+    cli.code = 1
+    with pytest.raises(WslcCommandError):
+        WslcRuntimeAdapter('wslc.exe', cli).command('inspect')
+
+
 def bundle(tmp_path):
     archive = tmp_path / 'tvheadend.tar'
     archive.write_bytes(b'image fixture')

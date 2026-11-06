@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -52,6 +53,7 @@ class WslcRuntimeAdapter:
         self.runner = runner
         self.cancel = None
         self.config_storage = None
+        self._prerequisite_state = {}
 
     def command(self, *args, timeout=20, cancellable=True):
         if not self.executable:
@@ -82,6 +84,25 @@ class WslcRuntimeAdapter:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise WslcError(f'WSL container command failed: {args[0]}: {exc}') from exc
         if result.returncode:
+            output = result.stderr or result.stdout
+            if any(marker in output.lower() for marker in (
+                    'hcs_e_hyperv_not_installed', '0x80370102',
+                    'virtualization is not enabled', 'virtualisation is not enabled')):
+                if self._prerequisite_state.get('feature') == 1:
+                    raise WslcPrerequisiteError(
+                        'Virtual Machine Platform is enabled, but the Windows hypervisor could not start. '
+                        'Restart Windows if you have not done so since setup. If the problem persists, '
+                        'open WSL troubleshooting to check hypervisor startup, nested virtualization, '
+                        'and system policy.\n\nDiagnostic details:\n' + output[-2000:], 'diagnose')
+                raise WslcPrerequisiteError(
+                    'Windows is not ready to run the built-in server.\n\n'
+                    '1. Choose Enable Virtual Machine Platform below and accept the administrator prompt.\n'
+                    '2. Restart Windows, then reopen TVHplayer.\n'
+                    '3. If this message returns, enable Intel VT-x or AMD-V / SVM in your '
+                    'computer\'s BIOS/UEFI settings. In Task Manager > Performance > CPU, '
+                    'check that Virtualization says Enabled.\n\n'
+                    'If Windows runs inside a virtual machine, its host must allow nested virtualization. '
+                    'You can also connect to an existing TVheadend server.', 'repair')
             raise WslcCommandError(args[0], result.returncode, result.stderr or result.stdout)
         # WSLc preserves a container's stderr stream for `logs`.
         return (result.stdout + '\n' + result.stderr).strip() if args[0] == 'logs' else result.stdout.strip()
@@ -89,14 +110,29 @@ class WslcRuntimeAdapter:
     def check(self):
         if self.executable is None:
             self.executable = find_wslc()
+        if sys.platform == 'win32' and self.runner is None:
+            from .windows_prerequisites import probe_windows, prerequisite_issue
+            self._prerequisite_state = probe_windows()
+            issue = prerequisite_issue(self._prerequisite_state)
+            if issue and issue[1] == 'repair' and not self.executable:
+                issue = ('Install WSL to set up the built-in server. Setup enables the required '
+                         'Windows features. Restart Windows when setup finishes, even if no reboot '
+                         'prompt appears.', 'install')
+            if issue:
+                raise WslcPrerequisiteError(*issue)
         version = self.command('version')
         match = re.search(r'(\d+)\.(\d+)\.(\d+)', version)
         if not match or tuple(map(int, match.groups())) < (2, 9, 3):
             raise WslcPrerequisiteError('WSL 2.9.3 or newer is required. Update WSL and restart TVHplayer.', 'update')
         try:
             self.command('info')
+        except WslcPrerequisiteError:
+            raise
         except WslcError as exc:
-            raise WslcPrerequisiteError(f'WSL Containers could not start. Virtualization may be disabled, or a Windows restart may be needed.\n{exc}', 'repair') from exc
+            raise WslcPrerequisiteError(
+                'WSL could not start. Open WSL troubleshooting for help checking the Windows '
+                'hypervisor and system policy, or connect to an existing server.\n\n'
+                f'Diagnostic details:\n{exc}', 'diagnose') from exc
 
     def provision(self, directory):
         directory = Path(directory)

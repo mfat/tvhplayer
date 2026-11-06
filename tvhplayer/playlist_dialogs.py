@@ -604,6 +604,50 @@ class ImportPlaylistDialog(QDialog):
         self._build()
         if self._source is not None:
             self._fill_source(self._source)
+        self._setup_supervisor = getattr(host, 'builtin', None)
+        if self._setup_supervisor is not None and hasattr(self._setup_supervisor, 'setup_issue'):
+            self.server_combo.currentIndexChanged.connect(self._server_setup_state)
+            self.server_combo.currentIndexChanged.connect(self._prepare_builtin)
+            self._setup_supervisor.status_changed.connect(self._server_setup_state)
+            self._setup_supervisor.ready.connect(self._server_setup_state)
+            self._setup_supervisor.failed.connect(self._server_setup_state)
+            self.finished.connect(self._detach_setup)
+            self._server_setup_state()
+            QTimer.singleShot(0, self._prepare_builtin)
+
+    def _selected_windows_builtin(self):
+        supervisor = getattr(self, '_setup_supervisor', None)
+        index = self.server_combo.currentIndex()
+        return (supervisor is not None and hasattr(supervisor, 'setup_issue') and
+                0 <= index < len(self._targets) and self._targets[index].get('builtin'))
+
+    def _server_setup_state(self, *_args):
+        blocked = self._selected_windows_builtin() and not self._setup_supervisor.is_running()
+        if self._job is None or not self._job.is_running():
+            self.import_btn.setEnabled(not blocked)
+        self.setup_btn.setVisible(bool(blocked))
+        if blocked:
+            self._set_status('Finish built-in server setup before importing a playlist. '
+                             'You can choose another server to import there instead.')
+        elif self._job is None:
+            self._set_status('')
+
+    def _prepare_builtin(self, *_args):
+        if self._selected_windows_builtin() and not self._setup_supervisor.is_running():
+            if self._setup_supervisor.status == 'stopped':
+                self._setup_supervisor.start()
+
+    def _open_server_setup(self):
+        self._host.show_windows_backend_setup(parent=self)
+        self._prepare_builtin()
+
+    def _detach_setup(self, *_args):
+        for signal in (self._setup_supervisor.status_changed, self._setup_supervisor.ready,
+                       self._setup_supervisor.failed):
+            try:
+                signal.disconnect(self._server_setup_state)
+            except (TypeError, RuntimeError):
+                pass
 
     def event(self, event):
         # Qt sizes a window without asking wrapped text how tall it gets at the
@@ -693,6 +737,10 @@ class ImportPlaylistDialog(QDialog):
         self.status_label = QLabel('')
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
+        self.setup_btn = QPushButton('Set up the built-in server…')
+        self.setup_btn.clicked.connect(self._open_server_setup)
+        self.setup_btn.hide()
+        layout.addWidget(self.setup_btn)
         self.progress_bar = QProgressBar()
         self.progress_bar.setTextVisible(False)
         self.progress_bar.hide()
@@ -777,8 +825,13 @@ class ImportPlaylistDialog(QDialog):
         self.close_btn.setText('Cancel' if running else 'Close')
         self.progress_bar.setVisible(running)
         self.hint_label.hide()
+        if not running and hasattr(self, '_setup_supervisor'):
+            self._server_setup_state()
 
     def _start(self):
+        if self._selected_windows_builtin() and not self._setup_supervisor.is_running():
+            self._server_setup_state()
+            return
         source_type = self.source_type_combo.currentData()
         location = self.location_input.text().strip()
         if source_type == 'xc':

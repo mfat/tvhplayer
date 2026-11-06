@@ -3800,6 +3800,8 @@ class TVHeadendClient(QMainWindow):
 
         if self.builtin is not None and self.config.get('builtin_autostart'):
             self.builtin.start()
+        if self.builtin is not None and hasattr(self.builtin, 'setup_issue'):
+            QTimer.singleShot(0, self._resume_windows_backend_setup)
 
         try:
             self.player.attach(self.video_frame)
@@ -7470,21 +7472,36 @@ class TVHeadendClient(QMainWindow):
             self._show_channel_state('The built-in server is stopped.', retry=True)
             self.statusbar.showMessage('The built-in server is stopped.')
 
-    def show_windows_backend_setup(self):
+    def _resume_windows_backend_setup(self):
+        try:
+            from .core.windows_prerequisites import pending_setup
+        except ImportError:
+            from core.windows_prerequisites import pending_setup
+        if not self.builtin.is_running() and pending_setup(self.builtin.config_dir):
+            self.show_windows_backend_setup()
+            self.builtin.start()
+
+    def show_windows_backend_setup(self, parent=None):
+        parent = parent or QApplication.activeModalWidget() or self
         if getattr(self, '_windows_setup_dialog', None) is not None:
+            if parent is not None and self._windows_setup_dialog.parentWidget() is not parent:
+                dialog = self._windows_setup_dialog
+                dialog.setParent(parent, dialog.windowFlags())
+                dialog.show()
             self._windows_setup_dialog.raise_()
-            return
+            return self._windows_setup_dialog
         try:
             from .windows_backend_setup import WindowsBackendSetup
         except ImportError:
             from windows_backend_setup import WindowsBackendSetup
-        dialog = WindowsBackendSetup(self.builtin, self)
+        dialog = WindowsBackendSetup(self.builtin, parent or self)
         self._windows_setup_dialog = dialog
         def closed(_result):
             self._windows_setup_dialog = None
             dialog.deleteLater()
         dialog.finished.connect(closed)
         dialog.show()
+        return dialog
 
     def _set_builtin_autostart(self, checked):
         self.config['builtin_autostart'] = bool(checked)

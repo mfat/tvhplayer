@@ -172,6 +172,9 @@ def test_setup_commands_are_explicit_fixed_actions():
     assert '--no-distribution' in setup_command('install')[-1]
     assert '-Verb RunAs' in setup_command('install')[-1]
     assert '--update' in setup_command('update')[-1]
+    repair = setup_command('repair')[-1]
+    assert 'dism.exe' in repair and '/featurename:VirtualMachinePlatform' in repair
+    assert '/norestart' in repair and '-Verb RunAs' in repair
     with pytest.raises(ValueError):
         setup_command('arbitrary shell text')
 
