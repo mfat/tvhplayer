@@ -40,6 +40,61 @@ def _private_acl(sddl, sid):
                 sorted(('A;OICI;FA;;;SY', f'A;OICI;FA;;;{sid}')))
 
 
+def _set_private_acl(folder, sid):
+    """Replace the folder DACL with exactly the two inheritable full-control ACEs.
+
+    ``icacls /grant:r`` only replaces grants for the identities named on the
+    command line, so an older explicit ACE for another account can survive.
+    Building the DACL here makes the result exact, and the caller re-reads it.
+    """
+    import ctypes
+    from ctypes import wintypes
+    sddl = f'D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;{sid})'
+    descriptor = ctypes.c_void_p()
+    kernel = None
+    try:
+        security = ctypes.WinDLL('advapi32', use_last_error=True)
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel.LocalFree.restype = ctypes.c_void_p
+        security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+            wintypes.LPWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.ULONG),
+        ]
+        security.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
+        security.GetSecurityDescriptorDacl.argtypes = [
+            ctypes.c_void_p, ctypes.POINTER(wintypes.BOOL),
+            ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(wintypes.BOOL),
+        ]
+        security.GetSecurityDescriptorDacl.restype = wintypes.BOOL
+        security.SetNamedSecurityInfoW.argtypes = [
+            wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD,
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
+        ]
+        security.SetNamedSecurityInfoW.restype = wintypes.DWORD
+        if not security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl, 1, ctypes.byref(descriptor), None):
+            raise ctypes.WinError()
+        present = wintypes.BOOL()
+        dacl = ctypes.c_void_p()
+        defaulted = wintypes.BOOL()
+        if not security.GetSecurityDescriptorDacl(
+                descriptor, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)):
+            raise ctypes.WinError()
+        if not present.value or not dacl.value:
+            raise WslcError('Could not build the backend settings permissions.')
+        # DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION
+        code = security.SetNamedSecurityInfoW(str(folder), 1, 4 | 0x80000000,
+                                              None, None, dacl, None)
+        if code:
+            raise ctypes.WinError(code)
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        raise WslcError(f'Could not secure the backend settings folder: {exc}') from exc
+    finally:
+        if descriptor.value and kernel is not None:
+            kernel.LocalFree(descriptor)
+
+
 def _folder_is_private(folder, sid):
     """Read the current Windows ACL; a marker or an mtime cannot prove protection."""
     import ctypes
@@ -86,8 +141,10 @@ def protect_config(folder):
         raise WslcError('Could not identify the Windows account for backend permissions.')
     if _folder_is_private(folder, sid):
         return
-    subprocess.run(['icacls.exe', str(folder), '/inheritance:r', '/grant:r',
-                    f'*{sid}:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F'], **kwargs)
+    _set_private_acl(folder, sid)
+    # Never continue with an ACL we cannot prove; the folder holds credentials.
+    if not _folder_is_private(folder, sid):
+        raise WslcError('Could not secure the backend settings folder.')
 
 
 def write_record(path, data):

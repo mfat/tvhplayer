@@ -1,5 +1,9 @@
 import contextlib
+import csv
+import io
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -93,7 +97,6 @@ def test_stale_owned_record_is_recovered_before_launch(tmp_path, monkeypatch):
 def test_missing_orphan_does_not_block_restart():
     calls = []
     def runner(args, **kwargs):
-        import subprocess
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, 'Object not found: tvhplayer-' + 'a' * 32, '')
     runtime = WslcRuntimeAdapter('wslc.exe', runner)
@@ -134,15 +137,44 @@ def test_backend_log_redacts_credentials_and_stream_tickets(tmp_path):
 
 @pytest.mark.parametrize('private', [True, False])
 def test_permissions_are_only_reapplied_when_current_acl_needs_it(tmp_path, monkeypatch, private):
-    import subprocess
     calls = []
     def run(args, **kwargs):
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, 'user,S-1-5-21-123\n', '')
     monkeypatch.setattr(module.subprocess, 'run', run)
-    monkeypatch.setattr(module, '_folder_is_private', lambda *a: private)
+    states = iter([private, True])
+    monkeypatch.setattr(module, '_folder_is_private', lambda *args: next(states))
+    applied = []
+    monkeypatch.setattr(module, '_set_private_acl', lambda *args: applied.append(args))
     module.protect_config(tmp_path / 'config')
-    assert [args[0] for args in calls] == (['whoami.exe'] if private else ['whoami.exe', 'icacls.exe'])
+    assert [args[0] for args in calls] == ['whoami.exe']
+    assert bool(applied) is not private
+
+
+def test_protect_config_fails_closed_when_acl_is_still_not_private(tmp_path, monkeypatch):
+    monkeypatch.setattr(module.subprocess, 'run',
+                        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, 'user,S-1-5-21-123\n', ''))
+    monkeypatch.setattr(module, '_folder_is_private', lambda *args: False)
+    monkeypatch.setattr(module, '_set_private_acl', lambda *args: None)
+    with pytest.raises(WslcError, match='secure'):
+        module.protect_config(tmp_path / 'config')
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows ACLs')
+def test_protect_config_removes_unexpected_explicit_grant(tmp_path):
+    folder = tmp_path / 'config'
+    folder.mkdir()
+    result = subprocess.run(['whoami.exe', '/user', '/fo', 'csv', '/nh'],
+                            capture_output=True, text=True, check=True)
+    sid = next(csv.reader(io.StringIO(result.stdout)))[1]
+    try:
+        subprocess.run(['icacls.exe', str(folder), '/grant', '*S-1-1-0:(OI)(CI)R'],
+                       capture_output=True, text=True, check=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        pytest.skip(f'cannot set a test ACL in this environment: {exc}')
+    assert not module._folder_is_private(folder, sid)
+    module.protect_config(folder)
+    assert module._folder_is_private(folder, sid)
 
 
 @pytest.mark.parametrize('sddl,private', [

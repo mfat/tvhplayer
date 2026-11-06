@@ -75,7 +75,7 @@ class NativeConfigStorage:
         _write_json(self.helper_path, {'name': name, 'owner': owner})
         try:
             self.runtime.command(
-                'run', '--rm', '--pull', 'never', '--name', name,
+                'run', '--rm', '--pull', 'never', '--no-healthcheck', '--name', name,
                 '--label', f'tvhplayer.owner={owner}', '--network', 'none',
                 '--mount', f'type=volume,source={self.volume},target=/native',
                 '--mount', bind_mount(str(self.config), '/config'),

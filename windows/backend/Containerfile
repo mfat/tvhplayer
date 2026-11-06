@@ -36,7 +36,7 @@ COPY --from=builder /out/ /
 COPY windows/backend/entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod 755 /entrypoint.sh
 EXPOSE 9981 9982
-HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 CMD test -s /config/superuser && kill -0 1
+HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 CMD test -s /config/data/superuser && kill -0 1
 ENTRYPOINT ["/entrypoint.sh"]
 
 # The source artifact is built separately; users only load the runtime image.

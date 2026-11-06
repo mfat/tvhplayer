@@ -189,3 +189,10 @@ def test_cancelled_migration_preserves_original_files(tmp_path):
         s.prepare()
     assert (s.config / 'channels/one').read_text() == 'initial channel'
     assert not runtime.calls
+
+
+def test_helper_containers_skip_the_live_server_healthcheck(tmp_path):
+    s, runtime = storage(tmp_path)
+    s.prepare()
+    helper = next(call for call in runtime.calls if call[0] == 'run')
+    assert '--no-healthcheck' in helper

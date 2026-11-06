@@ -152,6 +152,17 @@ def test_launch_publishes_only_two_loopback_ports_without_credentials():
     assert '-c /config/data' in args[-1]
 
 
+def test_container_healthcheck_and_entrypoint_use_live_settings_path():
+    root = Path(__file__).resolve().parents[1]
+    containerfile = (root / 'windows' / 'backend' / 'Containerfile').read_text(encoding='utf-8')
+    entrypoint = (root / 'windows' / 'backend' / 'entrypoint.sh').read_text(encoding='utf-8')
+    assert 'test -s /config/data/superuser' in containerfile
+    assert 'test -s /config/data/superuser' in entrypoint
+    assert 'test -s /config/superuser' not in containerfile
+    assert 'test -s /config/superuser' not in entrypoint
+    assert '-c /config/data' in entrypoint
+
+
 def state():
     return {'Name': '/' + NAME, 'Config': {'Labels': {'tvhplayer.owner': OWNER}},
             'State': {'Running': True}, 'NetworkSettings': {'Ports': {
