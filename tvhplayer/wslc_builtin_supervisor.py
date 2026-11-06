@@ -37,11 +37,14 @@ except ImportError:  # PyInstaller/source script imports
 GUEST_FFMPEG_MIGRATION = 1
 
 
-def _private_acl(sddl, sid):
+def _private_acl(sddl, sid, expected_sddl=None):
     """Accept only a protected DACL granting inheritable full access to us/SYSTEM."""
     match = re.fullmatch(r'D:P(?:AI|AR)*((?:\([^()]*\))+)', sddl)
-    return bool(match and sorted(re.findall(r'\(([^()]*)\)', match[1])) ==
-                sorted(('A;OICI;FA;;;SY', f'A;OICI;FA;;;{sid}')))
+    expected = expected_sddl or f'D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;{sid})'
+    expected_match = re.fullmatch(r'D:P(?:AI|AR)*((?:\([^()]*\))+)', expected)
+    return bool(match and expected_match and
+                sorted(re.findall(r'\(([^()]*)\)', match[1])) ==
+                sorted(re.findall(r'\(([^()]*)\)', expected_match[1])))
 
 
 def _set_private_acl(folder, sid):
@@ -105,6 +108,8 @@ def _folder_is_private(folder, sid):
     from ctypes import wintypes
     descriptor = ctypes.c_void_p()
     text = wintypes.LPWSTR()
+    expected_descriptor = ctypes.c_void_p()
+    expected_text = wintypes.LPWSTR()
     try:
         security = ctypes.WinDLL('advapi32', use_last_error=True)
         kernel = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -118,6 +123,11 @@ def _folder_is_private(folder, sid):
             ctypes.POINTER(wintypes.LPWSTR), ctypes.POINTER(wintypes.DWORD),
         ]
         security.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = wintypes.BOOL
+        security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+            wintypes.LPWSTR, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(wintypes.ULONG),
+        ]
+        security.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = wintypes.BOOL
         if security.GetNamedSecurityInfoW(str(folder), 1, 4, None, None, None, None, ctypes.byref(descriptor)):
             return False
         try:
@@ -125,7 +135,23 @@ def _folder_is_private(folder, sid):
                     descriptor, 1, 4, ctypes.byref(text), None):
                 return False
             try:
-                return _private_acl(text.value, sid)
+                # Windows can serialize account SIDs as aliases (e.g. LA for
+                # the local Administrator). Canonicalize the expected ACL with
+                # the same API, preserving exact identities and permissions.
+                expected = f'D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;{sid})'
+                try:
+                    if not security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                            expected, 1, ctypes.byref(expected_descriptor), None):
+                        return False
+                    if not security.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                            expected_descriptor, 1, 4, ctypes.byref(expected_text), None):
+                        return False
+                    return _private_acl(text.value, sid, expected_text.value)
+                finally:
+                    if expected_text:
+                        kernel.LocalFree(ctypes.cast(expected_text, ctypes.c_void_p))
+                    if expected_descriptor.value:
+                        kernel.LocalFree(expected_descriptor)
             finally:
                 kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
         finally:

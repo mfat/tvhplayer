@@ -253,6 +253,19 @@ def test_acl_fast_path_requires_private_inheritable_permissions(sddl, private):
     assert module._private_acl(sddl, 'S-1-5-21-123') is private
 
 
+@pytest.mark.parametrize('actual,private', [
+    ('D:PAI(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)', True),
+    ('D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;LG)', False),
+    ('D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;LA)(A;OICI;FR;;;WD)', False),
+    ('D:AI(A;OICI;FA;;;SY)(A;OICI;FA;;;LA)', False),
+])
+def test_acl_comparison_uses_native_canonical_account_identity(actual, private):
+    sid = 'S-1-5-21-123-456-789-500'
+    expected = 'D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;LA)'
+    assert module._private_acl(actual, sid, expected) is private
+    assert not module._private_acl(actual, sid)
+
+
 def test_playlist_migration_runs_once_and_rechecks_changed_settings(tmp_path, monkeypatch):
     runtime = Runtime()
     s = supervisor(tmp_path, monkeypatch, runtime)
