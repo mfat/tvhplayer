@@ -29,6 +29,10 @@ on:
       - '.github/workflows/backend-bundle.yml'
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: Existing release tag to build and upload Windows assets for (empty builds a CI artifact)
+        type: string
+        default: ''
       run_wslc_acceptance:
         description: Run real WSLc tests on a managed Windows host with the wslc runner label
         type: boolean
@@ -61,6 +65,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - uses: actions/setup-python@v6
         with:
@@ -69,8 +75,15 @@ jobs:
       - name: Resolve version
         id: version
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+          if [ -n "$RELEASE_TAG" ]; then
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo 'Invalid release tag'; exit 1; }
+            gh release view "$RELEASE_TAG" >/dev/null
+            echo "label=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF_TYPE}" = tag ]; then
             echo "label=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
             echo "label=ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
@@ -130,11 +143,12 @@ jobs:
           retention-days: 14
 
       - name: Upload to release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.label }}
           files: windows/dist/*
+          fail_on_unmatched_files: true
 
   acceptance:
     if: github.event_name == 'workflow_dispatch' && inputs.run_wslc_acceptance

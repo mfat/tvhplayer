@@ -93,7 +93,7 @@ jobs:
   provide:
     needs: fingerprint
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 180
     permissions:
       contents: write
     concurrency:
