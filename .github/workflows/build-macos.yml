@@ -10,6 +10,11 @@ on:
       - 'packaging/render_icon.py'
       - '.github/workflows/build-macos.yml'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release to repair (empty builds a CI artifact)
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -27,7 +32,7 @@ jobs:
           # Homebrew's libraries need the macOS they were built for or newer.
           - runner: macos-15-intel
             arch: x86_64
-          - runner: macos-14
+          - runner: macos-15
             arch: arm64
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
@@ -36,11 +41,22 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Resolve version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
         id: version
         run: |
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+          set -euo pipefail
+          if [ -n "$RELEASE_TAG" ]; then
+            [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo 'Invalid release tag'; exit 1; }
+            gh release view "$RELEASE_TAG" >/dev/null
+            python3 -c 'import ast, os; from pathlib import Path; tree = ast.parse(Path("tvhplayer/tvhplayer.py").read_text(encoding="utf-8")); version = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "APP_VERSION" for t in n.targets)); assert version == os.environ["RELEASE_TAG"][1:], "App version does not match the target release"'
+            echo "label=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF_TYPE}" = tag ]; then
             echo "label=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
             echo "label=ci${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
@@ -119,8 +135,8 @@ jobs:
           retention-days: 14
 
       - name: Upload to release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.version.outputs.label }}
           files: release-assets/*
