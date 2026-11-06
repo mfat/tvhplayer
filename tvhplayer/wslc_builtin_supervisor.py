@@ -6,6 +6,7 @@ import io
 import json
 import os
 import logging
+import re
 import socket
 import subprocess
 import threading
@@ -29,15 +30,62 @@ except ImportError:  # PyInstaller/source script imports
     from core.windows_wslc import WslcRuntimeAdapter, WslcError, WslcPrerequisiteError, port_conflict
 
 
+GUEST_FFMPEG_MIGRATION = 1
+
+
+def _private_acl(sddl, sid):
+    """Accept only a protected DACL granting inheritable full access to us/SYSTEM."""
+    match = re.fullmatch(r'D:P(?:AI|AR)*((?:\([^()]*\))+)', sddl)
+    return bool(match and sorted(re.findall(r'\(([^()]*)\)', match[1])) ==
+                sorted(('A;OICI;FA;;;SY', f'A;OICI;FA;;;{sid}')))
+
+
+def _folder_is_private(folder, sid):
+    """Read the current Windows ACL; a marker or an mtime cannot prove protection."""
+    import ctypes
+    from ctypes import wintypes
+    descriptor = ctypes.c_void_p()
+    text = wintypes.LPWSTR()
+    try:
+        security = ctypes.WinDLL('advapi32', use_last_error=True)
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel.LocalFree.restype = ctypes.c_void_p
+        security.GetNamedSecurityInfoW.argtypes = [wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD,
+                                                  *([ctypes.POINTER(ctypes.c_void_p)] * 5)]
+        security.GetNamedSecurityInfoW.restype = wintypes.DWORD
+        security.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+            ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD,
+            ctypes.POINTER(wintypes.LPWSTR), ctypes.POINTER(wintypes.DWORD),
+        ]
+        security.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = wintypes.BOOL
+        if security.GetNamedSecurityInfoW(str(folder), 1, 4, None, None, None, None, ctypes.byref(descriptor)):
+            return False
+        try:
+            if not security.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                    descriptor, 1, 4, ctypes.byref(text), None):
+                return False
+            try:
+                return _private_acl(text.value, sid)
+            finally:
+                kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
+        finally:
+            kernel.LocalFree(descriptor)
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
 def protect_config(folder):
     """Windows chmod does not protect secrets: restrict the dedicated config tree."""
     folder.mkdir(parents=True, exist_ok=True)
     kwargs = dict(capture_output=True, text=True, timeout=10,
-                  creationflags=subprocess.CREATE_NO_WINDOW, check=True)
+                  creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), check=True)
     result = subprocess.run(['whoami.exe', '/user', '/fo', 'csv', '/nh'], **kwargs)
     sid = next(csv.reader(io.StringIO(result.stdout)))[1]
     if not sid.startswith('S-1-'):
         raise WslcError('Could not identify the Windows account for backend permissions.')
+    if _folder_is_private(folder, sid):
+        return
     subprocess.run(['icacls.exe', str(folder), '/inheritance:r', '/grant:r',
                     f'*{sid}:(OI)(CI)F', '*S-1-5-18:(OI)(CI)F'], **kwargs)
 
@@ -203,10 +251,20 @@ class WslcBuiltinSupervisor(QObject):
                                                       '/recordings', self.padding)
                     if failures:
                         raise WslcError('Could not configure backend: ' + ', '.join(failures))
-                    migrated = use_guest_ffmpeg(self.http_port, self.username, self.password, self._cancel)
-                    if migrated < 0 and not self._cancel.is_set():
-                        raise WslcError('Could not migrate playlist commands to Linux FFmpeg.')
-                    write_record(state_path, {'schema': 1, 'image': image})
+                    generation = self.runtime.config_generation
+                    if (previous_state.get('guest_ffmpeg') != GUEST_FFMPEG_MIGRATION
+                            or previous_state.get('config_generation') != generation
+                            or previous_state.get('image') != image):
+                        migrated = use_guest_ffmpeg(self.http_port, self.username, self.password, self._cancel)
+                        if migrated < 0:
+                            if self._cancel.is_set():
+                                return
+                            raise WslcError('Could not migrate playlist commands to Linux FFmpeg.')
+                    if self._cancel.is_set():
+                        return
+                    write_record(state_path, {'schema': 1, 'image': image,
+                                             'guest_ffmpeg': GUEST_FFMPEG_MIGRATION,
+                                             'config_generation': generation})
                     (self.config_dir.parent / 'wslc-setup.json').unlink(missing_ok=True)
                     self._started.emit()
                     break

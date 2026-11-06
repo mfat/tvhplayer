@@ -75,6 +75,7 @@ def storage(tmp_path):
 def test_migration_keeps_original_and_restart_uses_native_settings(tmp_path, monkeypatch):
     s, runtime = storage(tmp_path)
     volume = s.prepare()
+    generation = s.generation
     assert (runtime.native / 'channels/one').read_text() == 'initial channel'
     assert (s.config / 'channels/one').read_text() == 'initial channel'
     assert not (runtime.native / 'wslc-owner.json').exists()
@@ -83,6 +84,7 @@ def test_migration_keeps_original_and_restart_uses_native_settings(tmp_path, mon
     runtime.calls.clear()
     monkeypatch.setattr(s, '_make_seed', lambda: pytest.fail('Must not scan Windows files again'))
     assert s.prepare() == volume
+    assert s.generation == generation
     assert runtime.calls == [('volume', 'inspect', volume)]
     assert (runtime.native / 'channels/one').read_text() == 'edited in Linux'
 
@@ -134,12 +136,14 @@ def test_shutdown_backup_ignores_startup_cancellation(tmp_path):
 def test_missing_volume_restores_latest_backup_instead_of_stale_windows_tree(tmp_path):
     s, runtime = storage(tmp_path)
     s.prepare()
+    generation = s.generation
     (runtime.native / 'channels/one').write_text('latest edit')
     s.backup()
     runtime.volumes.clear()
     (runtime.native / 'superuser').unlink()
     (runtime.native / 'channels/one').unlink()
     s.prepare()
+    assert s.generation != generation
     assert (runtime.native / 'channels/one').read_text() == 'latest edit'
 
 

@@ -155,6 +155,10 @@ class WslcRuntimeAdapter:
     def backup_config(self, *, upgrade=False):
         return self.config_storage.backup(upgrade=upgrade)
 
+    @property
+    def config_generation(self):
+        return self.config_storage.generation
+
     def launch(self, image, name, owner, config, recordings, ports):
         if self.config_storage is None or not self.config_storage.volume:
             raise WslcError('Linux server settings have not been prepared.')

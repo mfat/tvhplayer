@@ -31,6 +31,7 @@ class NativeConfigStorage:
         self.previous = self.folder / 'previous.tar.gz'
         self.volume = None
         self.owner = None
+        self.generation = None
 
     def _cancelled(self):
         if self.runtime.cancel is not None and self.runtime.cancel.is_set():
@@ -139,6 +140,10 @@ class NativeConfigStorage:
         self._recover_helper()
         exists = self._volume_exists()
         if state['ready'] and exists:
+            if not re.fullmatch(r'[0-9a-f]{32}', state.get('generation', '')):
+                state['generation'] = uuid.uuid4().hex
+                _write_json(self.state_path, state)
+            self.generation = state['generation']
             return self.volume
         if state['ready'] or state.get('restoring'):
             # Never silently replace a lost volume with the stale Windows tree.
@@ -169,6 +174,8 @@ class NativeConfigStorage:
             timeout=120,
         )
         state['ready'] = True
+        state['generation'] = uuid.uuid4().hex
+        self.generation = state['generation']
         state.pop('restoring', None)
         _write_json(self.state_path, state)
         transfer.unlink(missing_ok=True)

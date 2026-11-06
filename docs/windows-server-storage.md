@@ -11,6 +11,12 @@ complete only after the import succeeds. Interrupted imports can be retried.
 The original Windows settings are preserved, but are no longer the live settings
 after migration.
 
+Each start checks the Windows settings folder's current permissions, but only
+reapplies them if the expected private permissions are absent. The playlist
+FFmpeg migration runs once per server image and settings generation. Restoring
+settings creates a new generation so a previous migration marker cannot skip
+checking the restored playlists.
+
 Storage records and backups are under
 `%APPDATA%\TVHplayer\tvheadend\.tvhplayer-storage`:
 

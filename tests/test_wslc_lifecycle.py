@@ -12,6 +12,7 @@ IMAGE = 'sha256:' + 'b' * 64
 
 
 class Runtime:
+    config_generation = 'c' * 32
     def __init__(self, collisions=0):
         self.collisions = collisions
         self.starts = []
@@ -129,3 +130,63 @@ def test_backend_log_redacts_credentials_and_stream_tickets(tmp_path):
     s._emit_log('login private-superuser-password stream http://localhost/stream?ticket=secret-ticket\n')
     assert 'private-superuser-password' not in lines[0]
     assert 'secret-ticket' not in lines[0]
+
+
+@pytest.mark.parametrize('private', [True, False])
+def test_permissions_are_only_reapplied_when_current_acl_needs_it(tmp_path, monkeypatch, private):
+    import subprocess
+    calls = []
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, 'user,S-1-5-21-123\n', '')
+    monkeypatch.setattr(module.subprocess, 'run', run)
+    monkeypatch.setattr(module, '_folder_is_private', lambda *a: private)
+    module.protect_config(tmp_path / 'config')
+    assert [args[0] for args in calls] == (['whoami.exe'] if private else ['whoami.exe', 'icacls.exe'])
+
+
+@pytest.mark.parametrize('sddl,private', [
+    ('D:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;S-1-5-21-123)', True),
+    ('D:P(A;OICI;FA;;;S-1-5-21-123)(A;OICI;FA;;;SY)', True),
+    ('D:AI(A;OICI;FA;;;SY)(A;OICI;FA;;;S-1-5-21-123)', False),
+    ('D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;S-1-5-21-123)(A;OICI;FR;;;WD)', False),
+    ('D:P(A;;FA;;;SY)(A;OICI;FA;;;S-1-5-21-123)', False),
+    ('D:P(A;OICI;FR;;;SY)(A;OICI;FA;;;S-1-5-21-123)', False),
+    ('D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;S-1-5-21-456)', False),
+])
+def test_acl_fast_path_requires_private_inheritable_permissions(sddl, private):
+    assert module._private_acl(sddl, 'S-1-5-21-123') is private
+
+
+def test_playlist_migration_runs_once_and_rechecks_changed_settings(tmp_path, monkeypatch):
+    runtime = Runtime()
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    calls = []
+    monkeypatch.setattr(module, 'use_guest_ffmpeg', lambda *a: calls.append('migration') or 0)
+    s._run()
+    assert calls == ['migration']
+    s._cancel.clear()
+    s._run()
+    assert calls == ['migration']
+    runtime.config_generation = 'd' * 32
+    s._cancel.clear()
+    s._run()
+    assert calls == ['migration', 'migration']
+    state_path = s.config_dir / '.tvhplayer-runtime.json'
+    state = json.loads(state_path.read_text())
+    state['image'] = 'sha256:' + 'a' * 64
+    state_path.write_text(json.dumps(state))
+    s._cancel.clear()
+    s._run()
+    assert len(calls) == 3
+
+
+def test_failed_playlist_migration_is_retried(tmp_path, monkeypatch):
+    s = supervisor(tmp_path, monkeypatch, Runtime())
+    monkeypatch.setattr(module, 'use_guest_ffmpeg', lambda *a: -1)
+    s._run()
+    assert not (s.config_dir / '.tvhplayer-runtime.json').exists()
+    assert s.status == 'failed'
+    monkeypatch.setattr(module, 'use_guest_ffmpeg', lambda *a: 0)
+    s._run()
+    assert json.loads((s.config_dir / '.tvhplayer-runtime.json').read_text())['guest_ffmpeg'] == module.GUEST_FFMPEG_MIGRATION
