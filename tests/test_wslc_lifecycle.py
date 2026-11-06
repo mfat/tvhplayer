@@ -1,6 +1,5 @@
 import contextlib
 import json
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -17,10 +16,16 @@ class Runtime:
         self.collisions = collisions
         self.starts = []
         self.stops = []
+        self.backups = []
     def check(self):
         pass
     def provision(self, folder):
         return IMAGE
+    def prepare_config(self, image, config):
+        pass
+    def backup_config(self, *, upgrade=False):
+        self.backups.append(upgrade)
+        return Path('native-backup.tar.gz')
     def launch(self, image, name, owner, config, recordings, ports):
         self.starts.append((name, owner, ports))
         if len(self.starts) <= self.collisions:
@@ -67,11 +72,8 @@ def test_image_upgrade_backs_up_config_without_recordings(tmp_path, monkeypatch)
     Path(s.recordings_dir).mkdir()
     (Path(s.recordings_dir) / 'recording.ts').write_bytes(b'keep media')
     s._run()
-    snapshots = list((tmp_path / 'backend-backups').glob('*.zip'))
-    assert len(snapshots) == 1
-    with zipfile.ZipFile(snapshots[0]) as archive:
-        assert archive.read('channels.json') == b'keep channels'
-        assert not any('recording.ts' in name for name in archive.namelist())
+    assert runtime.backups == [True, False]
+    assert (s.config_dir / 'channels.json').read_text() == 'keep channels'
     assert (Path(s.recordings_dir) / 'recording.ts').read_bytes() == b'keep media'
     assert json.loads((s.config_dir / '.tvhplayer-runtime.json').read_text())['image'] == IMAGE
 

@@ -51,6 +51,7 @@ class WslcRuntimeAdapter:
         self.executable = executable or find_wslc()
         self.runner = runner
         self.cancel = None
+        self.config_storage = None
 
     def command(self, *args, timeout=20, cancellable=True):
         if not self.executable:
@@ -146,14 +147,26 @@ class WslcRuntimeAdapter:
             raise WslcError('Cannot verify the required x86-64 backend image.') from exc
         return True
 
+    def prepare_config(self, image, config):
+        from .windows_backend_storage import NativeConfigStorage
+        self.config_storage = NativeConfigStorage(self, image, config)
+        return self.config_storage.prepare()
+
+    def backup_config(self, *, upgrade=False):
+        return self.config_storage.backup(upgrade=upgrade)
+
     def launch(self, image, name, owner, config, recordings, ports):
+        if self.config_storage is None or not self.config_storage.volume:
+            raise WslcError('Linux server settings have not been prepared.')
         args = ['run', '--detach', '--pull', 'never', '--name', name,
                 '--label', f'tvhplayer.owner={owner}', '--stop-timeout', '5']
         for host, guest in zip(ports, (9981, 9982)):
             args += ['--publish', f'127.0.0.1:{int(host)}:{guest}/tcp']
-        for host, guest in ((config, '/config'), (recordings, '/recordings')):
-            args += ['--mount', bind_mount(str(host), guest)]
-        self.command(*args, image, timeout=60)
+        args += ['--mount', f'type=volume,source={self.config_storage.volume},target=/config',
+                 '--mount', bind_mount(str(recordings), '/recordings'), '--entrypoint', '/bin/sh']
+        self.command(*args, image, '-c',
+                     'umask 077; exec /usr/libexec/tvhplayer/tvheadend -c /config/data -B '
+                     '--bindaddr 0.0.0.0 --http_port 9981 --htsp_port 9982', timeout=60)
 
     def inspect_owned(self, name, owner, cancellable=True, missing_ok=False):
         if not re.fullmatch(r'[0-9a-f]{32}', owner) or name != 'tvhplayer-' + owner:

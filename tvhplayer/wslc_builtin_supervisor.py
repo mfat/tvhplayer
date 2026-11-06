@@ -11,7 +11,6 @@ import subprocess
 import threading
 import time
 import uuid
-import zipfile
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QLockFile, pyqtSignal
@@ -163,19 +162,14 @@ class WslcBuiltinSupervisor(QObject):
             if self._cancel.is_set():
                 return
             self.username, self.password = ensure_superuser(self.config_dir)
+            self.runtime.prepare_config(image, self.config_dir)
+            if self._cancel.is_set():
+                return
             state_path = self.config_dir / '.tvhplayer-runtime.json'
             previous_state = json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
             if previous_state.get('image') and previous_state['image'] != image:
-                backups = self.config_dir.parent / 'backend-backups'
-                protect_config(backups)
-                snapshot = backups / ('config-' + time.strftime('%Y%m%d-%H%M%S') + '-' + owner + '.zip')
+                snapshot = self.runtime.backup_config(upgrade=True)
                 self._emit_log(f'Backing up backend settings to {snapshot}\n')
-                with zipfile.ZipFile(snapshot, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
-                    for path in self.config_dir.rglob('*'):
-                        if self._cancel.is_set():
-                            return
-                        if path.is_file() and not path.is_symlink() and path != record:
-                            archive.write(path, path.relative_to(self.config_dir))
             recordings = Path(self.recordings_dir) if self.recordings_dir else self.config_dir.parent / 'Recordings'
             bind_mount(str(recordings), '/recordings')
             recordings.mkdir(parents=True, exist_ok=True)
@@ -241,6 +235,7 @@ class WslcBuiltinSupervisor(QObject):
                 try:
                     self.runtime.stop_owned(name, owner)
                     record.unlink(missing_ok=True)
+                    self.runtime.backup_config()
                 except Exception as exc:
                     error = (error + '\n' if error else '') + f'Backend cleanup failed ({name}): {exc}'
             self._completed.emit(error)
