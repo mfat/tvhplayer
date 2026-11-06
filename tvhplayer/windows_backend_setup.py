@@ -47,7 +47,13 @@ class WindowsBackendSetup(QDialog):
         self.message = QLabel(str(issue) if issue else 'Check WSL and start the built-in server.')
         self.message.setWordWrap(True)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
-        if pending_setup(supervisor.config_dir):
+        if getattr(supervisor, 'disabled', False):
+            self.action = 'bios'
+            self.message.setText('The built-in server and its automatic checks are disabled because '
+                                 'hardware virtualization is disabled or unavailable. You can use another '
+                                 'TVheadend server. After enabling virtualization in BIOS/UEFI, choose '
+                                 'Enable and check again to retry.')
+        elif pending_setup(supervisor.config_dir):
             self.message.setText('Resuming built-in server setup.\n\n' + self.message.text())
         layout.addWidget(self.message)
         self.progress = QProgressBar()
@@ -58,6 +64,8 @@ class WindowsBackendSetup(QDialog):
         self.install.clicked.connect(self._install)
         layout.addWidget(self.install)
         self.check = QPushButton('Check again and start server')
+        if getattr(supervisor, 'disabled', False):
+            self.check.setText('Enable and check again')
         self.check.clicked.connect(self._check)
         layout.addWidget(self.check)
         help_button = QPushButton('WSL setup help')
@@ -138,7 +146,10 @@ class WindowsBackendSetup(QDialog):
 
     def _check(self):
         self._busy(True)
-        self.supervisor.start()
+        if getattr(self.supervisor, 'disabled', False):
+            self.supervisor.enable_and_check()
+        else:
+            self.supervisor.start()
 
     def _status(self, status):
         if status in ('starting', 'installing'):
@@ -150,6 +161,8 @@ class WindowsBackendSetup(QDialog):
     def _failed(self, message):
         self._update_action()
         self._busy(False)
+        self.check.setText('Enable and check again' if getattr(self.supervisor, 'disabled', False)
+                           else 'Check again and start server')
         self.message.setText(message)
 
     def _ready(self, *_ports):

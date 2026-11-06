@@ -87,3 +87,32 @@ def test_setup_marker_cleared_only_when_server_is_ready(tmp_path, qapp):
     supervisor = WslcBuiltinSupervisor(config, tmp_path / 'bundle')
     supervisor._on_ready()
     assert prerequisites.pending_setup(config) is None
+
+
+def test_virtualization_blocker_disables_future_checks_until_explicit_retry(tmp_path, qapp):
+    from tvhplayer.core.windows_wslc import WslcPrerequisiteError
+    from tvhplayer.wslc_builtin_supervisor import WslcBuiltinSupervisor
+    calls = []
+    class Runtime:
+        def check(self):
+            calls.append('check')
+            raise WslcPrerequisiteError('Firmware virtualization is unavailable', 'bios')
+    config = tmp_path / 'config'
+    supervisor = WslcBuiltinSupervisor(config, tmp_path / 'bundle', runtime=Runtime())
+    supervisor.start()
+    supervisor._thread.join(5)
+    qapp.processEvents()
+    assert supervisor.disabled
+    assert prerequisites.pending_setup(config)['stage'] == 'disabled'
+    supervisor.start()
+    assert calls == ['check']
+    reopened = WslcBuiltinSupervisor(config, tmp_path / 'bundle', runtime=Runtime())
+    assert reopened.disabled
+    reopened.start()
+    assert reopened._thread is None
+    assert calls == ['check']
+    reopened.enable_and_check()
+    reopened._thread.join(5)
+    qapp.processEvents()
+    assert calls == ['check', 'check']
+    assert reopened.disabled  # Still blocked; automatic checks stay off.

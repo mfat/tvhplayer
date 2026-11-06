@@ -206,6 +206,7 @@ def test_remote_import_works_while_windows_builtin_needs_setup(app, tmp_path):
         ready = pyqtSignal(int, int)
         failed = pyqtSignal(str)
         setup_issue = RuntimeError('Windows restart required')
+        disabled = True
         status = 'failed'
         def is_running(self):
             return self.status == 'running'

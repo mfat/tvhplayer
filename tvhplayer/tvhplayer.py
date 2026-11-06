@@ -2209,6 +2209,8 @@ class ServerDialog(QDialog):
     def _status(self, server):
         """Dot colour and words for a server's state."""
         if server.get('builtin'):
+            if getattr(self._supervisor, 'disabled', False):
+                return STATUS_STOPPED, 'Disabled: virtualization unavailable'
             return {
                 'running': (STATUS_CONNECTED, "Running on this computer"),
                 'starting': (STATUS_TESTING, "Starting…"),
@@ -2291,7 +2293,12 @@ class ServerDialog(QDialog):
             state = self._builtin_state()
             active = state in ('starting', 'installing', 'running')
             setup = getattr(self._supervisor, 'setup_issue', None) is not None
+            self.autostart.setEnabled(self._supervisor is not None)
             self.run_btn.setText("S&top Server" if active else ("Set &up WSL…" if setup else "S&tart Server"))
+            if getattr(self._supervisor, 'disabled', False):
+                self.run_btn.setText('Enable and check…')
+                self.autostart.setChecked(False)
+                self.autostart.setEnabled(False)
             self.run_btn.setEnabled(self._supervisor is not None and state != 'stopping')
             self.builtin_address.setText(self._builtin_url(server) or "Chosen when the server starts")
             self.open_web_btn.setEnabled(state == 'running')
@@ -2455,6 +2462,10 @@ class ServerDialog(QDialog):
 
     def _toggle_builtin(self):
         if self._supervisor is None:
+            return
+        if getattr(self._supervisor, 'disabled', False):
+            self._supervisor.enable_and_check()
+            self._refresh_selected()
             return
         if self._builtin_state() in ('starting', 'installing', 'running'):
             self._supervisor.stop()
@@ -5318,6 +5329,14 @@ class TVHeadendClient(QMainWindow):
                 self.statusbar.showMessage(message)
                 print("Debug: Built-in Tvheadend binary was not found in this build.")
                 return
+            if getattr(supervisor, 'disabled', False):
+                message = ('The built-in server is disabled because virtualization is unavailable. '
+                           'Add and select another TVheadend server with the gear button. '
+                           'To retry after changing BIOS/UEFI settings, choose Enable and check '
+                           'in Server Management > Built-in Server.')
+                self._show_channel_state(message)
+                self.statusbar.showMessage(message)
+                return
             self._show_channel_state("Starting built-in server…", busy=True)
             self.statusbar.showMessage("Starting built-in server...")
             supervisor.start()
@@ -7454,10 +7473,14 @@ class TVHeadendClient(QMainWindow):
 
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
+        if getattr(self.builtin, 'disabled', False):
+            self.config['builtin_autostart'] = False
+            self.save_config()
         self.statusbar.showMessage(message)
         if is_builtin_server(self.current_server()) and not self._channels:
-            self._show_channel_state(message, retry=True)
-        if getattr(self.builtin, 'setup_issue', None) is not None and is_builtin_server(self.current_server()):
+            self._show_channel_state(message, retry=not getattr(self.builtin, 'disabled', False))
+        if (getattr(self.builtin, 'setup_issue', None) is not None
+                and not getattr(self.builtin, 'disabled', False) and is_builtin_server(self.current_server())):
             self.show_windows_backend_setup()
 
     def _on_builtin_phase(self, phase):
@@ -7473,6 +7496,8 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage('The built-in server is stopped.')
 
     def _resume_windows_backend_setup(self):
+        if getattr(self.builtin, 'disabled', False):
+            return
         try:
             from .core.windows_prerequisites import pending_setup
         except ImportError:
@@ -8261,6 +8286,10 @@ class TVHeadendClient(QMainWindow):
         supervisor = self.builtin
         if supervisor is None or not supervisor.available:
             on_failed("The built-in server is not part of this version of TVHplayer.")
+            return
+        if getattr(supervisor, 'disabled', False):
+            on_failed('The built-in server is disabled because virtualization is unavailable. '
+                      'Choose another server, or use Enable and check in Server Management > Built-in Server.')
             return
         current = find_builtin_server(self.servers)
         if builtin_requests_ready(current, supervisor.is_running()):

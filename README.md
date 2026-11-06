@@ -97,3 +97,7 @@ WSL or enabling Virtual Machine Platform, restart **Windows**, even if Windows
 does not display a reboot prompt. Reopen TVHplayer to resume setup automatically.
 Playlist import into the built-in server becomes available once it is ready;
 import into an existing remote server does not require local WSL setup.
+If hardware virtualization is disabled or unavailable, TVHplayer disables the
+built-in server and its automatic setup checks, including after relaunch.
+Remote servers remain usable. After enabling virtualization in BIOS/UEFI, use
+the gear button, select Built-in Server, and choose **Enable and check…** to retry.

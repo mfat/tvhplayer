@@ -68,3 +68,17 @@ def test_reopening_app_resumes_saved_setup_even_without_autostart(tmp_path, qapp
     save_setup(supervisor.config_dir, 'restart_required', 'repair')
     TVHeadendClient._resume_windows_backend_setup(host)
     assert calls == ['show_setup', 'verify_and_start']
+
+
+def test_disabled_backend_never_resumes_setup_on_launch(tmp_path, qapp):
+    from types import SimpleNamespace
+    from tvhplayer.tvhplayer import TVHeadendClient
+    from tvhplayer.core.windows_prerequisites import save_setup
+    calls = []
+    supervisor = SimpleNamespace(config_dir=tmp_path / 'config', disabled=True,
+                                 start=lambda: calls.append('start'))
+    host = SimpleNamespace(builtin=supervisor,
+                           show_windows_backend_setup=lambda: calls.append('dialog'))
+    save_setup(supervisor.config_dir, 'disabled', 'bios')
+    TVHeadendClient._resume_windows_backend_setup(host)
+    assert calls == []

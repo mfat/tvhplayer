@@ -217,6 +217,11 @@ class WslcBuiltinSupervisor(QObject):
         self._lock = None
         self.hdhomerun_transport = None
         self.setup_issue = None
+        try:
+            from .core.windows_prerequisites import pending_setup
+        except ImportError:
+            from core.windows_prerequisites import pending_setup
+        self.disabled = (pending_setup(self.config_dir) or {}).get('stage') == 'disabled'
         self._phase.connect(self._set_status)
         self._completed.connect(self._finish)
         self._started.connect(self._on_ready)
@@ -256,7 +261,7 @@ class WslcBuiltinSupervisor(QObject):
         self.status_changed.emit(status)
 
     def start(self):
-        if self._closing or self._thread is not None:
+        if self.disabled or self._closing or self._thread is not None:
             return
         self.setup_issue = None
         try:
@@ -277,6 +282,16 @@ class WslcBuiltinSupervisor(QObject):
         self._set_status('starting')
         self._thread = threading.Thread(target=self._run, name='tvhplayer-wslc', daemon=True)
         self._thread.start()
+
+    def enable_and_check(self):
+        """Explicit user action after changing firmware or choosing to retry setup."""
+        try:
+            from .core.windows_prerequisites import save_setup
+        except ImportError:
+            from core.windows_prerequisites import save_setup
+        save_setup(self.config_dir, 'check_required', 'check')
+        self.disabled = False
+        self.start()
 
     def _run(self):
         owner = uuid.uuid4().hex
@@ -393,12 +408,21 @@ class WslcBuiltinSupervisor(QObject):
             error = '' if self._cancel.is_set() else str(exc)
             if isinstance(exc, WslcPrerequisiteError):
                 self.setup_issue = exc
+                if exc.action == 'bios':
+                    self.disabled = True
+                    error = ('The built-in server has been disabled because hardware virtualization '
+                             'is disabled or unavailable. Automatic setup checks are off. '
+                             'You can add and select another TVheadend server with the gear button. '
+                             'After enabling virtualization in BIOS/UEFI, use Server Management > '
+                             'Built-in Server > Enable and check to try again.\n\n' + str(exc))
                 try:
                     from .core.windows_prerequisites import pending_setup, save_setup
                 except ImportError:
                     from core.windows_prerequisites import pending_setup, save_setup
                 try:
-                    if not pending_setup(self.config_dir):
+                    if self.disabled:
+                        save_setup(self.config_dir, 'disabled', exc.action)
+                    elif not pending_setup(self.config_dir):
                         save_setup(self.config_dir, 'check_required', exc.action)
                 except OSError:
                     logging.getLogger(__name__).exception('Could not save built-in server setup progress')
