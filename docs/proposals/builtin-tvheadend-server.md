@@ -1,5 +1,11 @@
 # Proposal: Built-in Tvheadend Server
 
+> Historical October design: some platform and authentication details below do
+> not describe the shipped implementation. Windows now has a built-in backend;
+> macOS does not yet ship one, and shipped backends retain authentication. For
+> the current background-lifecycle proposal and platform roadmap, see
+> [Keep the built-in server running in the background](background-builtin-server.md).
+
 - **Status:** Proposed
 - **Replaces:** `docs/proposals/local-tvheadend-server.md` in commit `6fb3742` on `testing`
 - **Date:** October 2026
