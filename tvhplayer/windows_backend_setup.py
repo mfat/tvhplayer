@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import shutil
 
-from PyQt6.QtCore import QProcess, QUrl, Qt
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import QProcess, Qt
 from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QPushButton, QProgressBar, QVBoxLayout
 
 try:
-    from .core.windows_prerequisites import pending_setup, save_setup
+    from .core.windows_prerequisites import failed_checks, save_setup
+    from .windows_setup_checks import WindowsSetupChecks
 except ImportError:
-    from core.windows_prerequisites import pending_setup, save_setup
+    from core.windows_prerequisites import failed_checks, save_setup
+    from windows_setup_checks import WindowsSetupChecks
 
 
 def setup_command(action):
@@ -37,44 +38,32 @@ class WindowsBackendSetup(QDialog):
         self.setMinimumWidth(480)
         self.setMaximumWidth(640)
         layout = QVBoxLayout(self)
-        description = QLabel('The built-in server needs WSL 2.9.3 or newer and hardware virtualization. '
-                             'Installing WSL may download files, ask for administrator permission, and require a Windows restart. '
-                             'Your other servers remain available.')
+        description = QLabel('The built-in server needs attention')
+        font = description.font()
+        font.setBold(True)
+        description.setFont(font)
         description.setWordWrap(True)
         layout.addWidget(description)
         issue = supervisor.setup_issue
         self.action = issue.action if issue else 'check'
-        self.message = QLabel(str(issue) if issue else 'Check WSL and start the built-in server.')
+        self.message = QLabel('Fix the items below, then try again.' if issue else 'Check Windows and start the built-in server.')
         self.message.setWordWrap(True)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
         if getattr(supervisor, 'disabled', False):
             self.action = 'bios'
-            self.message.setText('The built-in server and its automatic checks are disabled because '
-                                 'hardware virtualization is disabled or unavailable. You can use another '
-                                 'TVheadend server. After enabling virtualization in BIOS/UEFI, choose '
-                                 'Enable and check again to retry.')
-        elif pending_setup(supervisor.config_dir):
-            self.message.setText('Resuming built-in server setup.\n\n' + self.message.text())
         layout.addWidget(self.message)
+        self.checklist = WindowsSetupChecks(self)
+        self.checklist.action_requested.connect(self._fix)
+        layout.addWidget(self.checklist)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.hide()
         layout.addWidget(self.progress)
         self.install = QPushButton('Update WSL…' if self.action == 'update' else 'Install / repair WSL…')
         self.install.clicked.connect(self._install)
-        layout.addWidget(self.install)
-        self.check = QPushButton('Check again and start server')
-        if getattr(supervisor, 'disabled', False):
-            self.check.setText('Enable and check again')
+        self.check = QPushButton('Check again')
         self.check.clicked.connect(self._check)
         layout.addWidget(self.check)
-        help_button = QPushButton('WSL setup help')
-        help_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl('https://learn.microsoft.com/en-us/windows/wsl/troubleshooting')))
-        layout.addWidget(help_button)
-        virtualization_help = QPushButton('How to enable virtualization in BIOS / UEFI')
-        virtualization_help.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(
-            'https://support.microsoft.com/windows/c5578302-6e43-4b4b-a449-8ced115f58e1')))
-        layout.addWidget(virtualization_help)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -98,6 +87,7 @@ class WindowsBackendSetup(QDialog):
 
     def _busy(self, busy):
         self.progress.setVisible(busy)
+        self.checklist.setEnabled(not busy)
         self.install.setEnabled(not busy and self.action in ('install', 'update', 'repair'))
         self.check.setEnabled(not busy)
 
@@ -109,6 +99,15 @@ class WindowsBackendSetup(QDialog):
                               'reboot': 'Restart Windows to continue', 'diagnose': 'Check WSL troubleshooting',
                               'check': 'Check Windows prerequisites'}[self.action])
         self.install.setVisible(self.action in ('install', 'update', 'repair'))
+        rows = getattr(self.supervisor, 'setup_checks', [])
+        if self.supervisor.setup_issue or getattr(self.supervisor, 'disabled', False):
+            rows = failed_checks(rows, self.action)
+        self.checklist.set_checks(rows, self.install, self.action)
+        self.checklist.setVisible(bool(rows))
+
+    def _fix(self, action):
+        self.action = action
+        self._install()
 
     def _install(self):
         # This slot is reached only after the explicit install/update button click.
@@ -121,6 +120,7 @@ class WindowsBackendSetup(QDialog):
         powershell = shutil.which('powershell.exe')
         if not powershell:
             self._failed('Windows PowerShell was not found. Use the WSL setup help link.')
+            self.message.setText('Windows PowerShell could not be found. Open troubleshooting help to continue.')
             return
         self.process.start(powershell, setup_command(self.action))
 
@@ -132,9 +132,9 @@ class WindowsBackendSetup(QDialog):
                 self._save('restart_required')
                 self.action = 'reboot'
                 self.install.hide()
-                self.message.setText('Restart Windows to finish setup, even if Windows did not show a reboot prompt. '
-                                     'Then reopen TVHplayer; setup will resume automatically. Save your work before restarting. '
-                                     'TVHplayer will not restart your computer automatically.')
+                self.checklist.hide()
+                self.message.setText('Setup finished. Restart Windows, even if Windows did not show a reboot prompt. '
+                                     'Then reopen TVHplayer to continue.')
             else:
                 self._check()
         else:
@@ -143,6 +143,7 @@ class WindowsBackendSetup(QDialog):
 
     def _process_error(self, _error):
         self._failed('Could not launch Windows setup. You can install WSL using the setup help link.')
+        self.message.setText('Windows setup could not start. Try again or open troubleshooting help.')
 
     def _check(self):
         self._busy(True)
@@ -161,9 +162,7 @@ class WindowsBackendSetup(QDialog):
     def _failed(self, message):
         self._update_action()
         self._busy(False)
-        self.check.setText('Enable and check again' if getattr(self.supervisor, 'disabled', False)
-                           else 'Check again and start server')
-        self.message.setText(message)
+        self.message.setText('Fix the items below, then try again.')
 
     def _ready(self, *_ports):
         self.accept()

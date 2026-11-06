@@ -221,7 +221,9 @@ class WslcBuiltinSupervisor(QObject):
             from .core.windows_prerequisites import pending_setup
         except ImportError:
             from core.windows_prerequisites import pending_setup
-        self.disabled = (pending_setup(self.config_dir) or {}).get('stage') == 'disabled'
+        saved_setup = pending_setup(self.config_dir) or {}
+        self.disabled = saved_setup.get('stage') == 'disabled'
+        self.setup_checks = saved_setup.get('checks') or []
         self._phase.connect(self._set_status)
         self._completed.connect(self._finish)
         self._started.connect(self._on_ready)
@@ -406,22 +408,23 @@ class WslcBuiltinSupervisor(QObject):
                     previous_log = current_log
         except Exception as exc:
             error = '' if self._cancel.is_set() else str(exc)
+            try:
+                from .core.windows_prerequisites import failed_checks
+            except ImportError:
+                from core.windows_prerequisites import failed_checks
+            self.setup_checks = failed_checks(getattr(self.runtime, 'setup_checks', []),
+                                               getattr(exc, 'action', 'diagnose'))
             if isinstance(exc, WslcPrerequisiteError):
                 self.setup_issue = exc
                 if exc.action == 'bios':
                     self.disabled = True
-                    error = ('The built-in server has been disabled because hardware virtualization '
-                             'is disabled or unavailable. Automatic setup checks are off. '
-                             'You can add and select another TVheadend server with the gear button. '
-                             'After enabling virtualization in BIOS/UEFI, use Server Management > '
-                             'Built-in Server > Enable and check to try again.\n\n' + str(exc))
                 try:
                     from .core.windows_prerequisites import pending_setup, save_setup
                 except ImportError:
                     from core.windows_prerequisites import pending_setup, save_setup
                 try:
                     if self.disabled:
-                        save_setup(self.config_dir, 'disabled', exc.action)
+                        save_setup(self.config_dir, 'disabled', exc.action, self.setup_checks)
                     elif not pending_setup(self.config_dir):
                         save_setup(self.config_dir, 'check_required', exc.action)
                 except OSError:

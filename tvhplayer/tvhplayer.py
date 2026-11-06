@@ -3071,6 +3071,7 @@ class ChannelListState(QWidget):
     """Shown in place of the channel list while it loads, when it is empty, or when loading failed."""
 
     retry = pyqtSignal()
+    setup_action = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -3084,6 +3085,14 @@ class ChannelListState(QWidget):
         self.message.setWordWrap(True)
         self.message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.message)
+        try:
+            from .windows_setup_checks import WindowsSetupChecks
+        except ImportError:
+            from windows_setup_checks import WindowsSetupChecks
+        self.checklist = WindowsSetupChecks(self)
+        self.checklist.action_requested.connect(self.setup_action)
+        self.checklist.hide()
+        layout.addWidget(self.checklist)
         self.retry_btn = QPushButton("&Retry", self)
         self.retry_btn.clicked.connect(self.retry)
         describe(self.retry_btn, description="Try to load the channel list again")
@@ -3091,6 +3100,7 @@ class ChannelListState(QWidget):
         layout.addStretch(2)
 
     def show_state(self, text, busy=False, retry=False):
+        self.checklist.hide()
         self.ring.setVisible(busy)
         self.retry_btn.setVisible(retry)
         announce_label(self.message, text)
@@ -4149,6 +4159,7 @@ class TVHeadendClient(QMainWindow):
         left_layout.addWidget(self.channel_busy)
         self.channel_state = ChannelListState()
         self.channel_state.retry.connect(lambda: self.fetch_channels())
+        self.channel_state.setup_action.connect(self._fix_builtin_setup)
         self.channel_stack = QStackedWidget()
         self.channel_stack.addWidget(self.channel_list)
         self.channel_stack.addWidget(self.channel_state)
@@ -5330,12 +5341,8 @@ class TVHeadendClient(QMainWindow):
                 print("Debug: Built-in Tvheadend binary was not found in this build.")
                 return
             if getattr(supervisor, 'disabled', False):
-                message = ('The built-in server is disabled because virtualization is unavailable. '
-                           'Add and select another TVheadend server with the gear button. '
-                           'To retry after changing BIOS/UEFI settings, choose Enable and check '
-                           'in Server Management > Built-in Server.')
-                self._show_channel_state(message)
-                self.statusbar.showMessage(message)
+                self._show_builtin_problem()
+                self.statusbar.showMessage('The built-in server needs attention.')
                 return
             self._show_channel_state("Starting built-in server…", busy=True)
             self.statusbar.showMessage("Starting built-in server...")
@@ -7476,12 +7483,34 @@ class TVHeadendClient(QMainWindow):
         if getattr(self.builtin, 'disabled', False):
             self.config['builtin_autostart'] = False
             self.save_config()
-        self.statusbar.showMessage(message)
+        windows_problem = hasattr(self.builtin, 'setup_checks')
+        self.statusbar.showMessage('The built-in server needs attention.' if windows_problem else message)
         if is_builtin_server(self.current_server()) and not self._channels:
-            self._show_channel_state(message, retry=not getattr(self.builtin, 'disabled', False))
+            if windows_problem:
+                self._show_builtin_problem()
+            else:
+                self._show_channel_state(message, retry=True)
         if (getattr(self.builtin, 'setup_issue', None) is not None
                 and not getattr(self.builtin, 'disabled', False) and is_builtin_server(self.current_server())):
             self.show_windows_backend_setup()
+
+    def _show_builtin_problem(self):
+        try:
+            from .core.windows_prerequisites import failed_checks
+        except ImportError:
+            from core.windows_prerequisites import failed_checks
+        issue = getattr(self.builtin, 'setup_issue', None)
+        action = issue.action if issue else ('bios' if getattr(self.builtin, 'disabled', False) else 'diagnose')
+        rows = getattr(self.builtin, 'setup_checks', []) or failed_checks([], action)
+        self._show_channel_state('The built-in server needs attention',
+                                 retry=not getattr(self.builtin, 'disabled', False))
+        self.channel_state.checklist.set_checks(rows)
+        self.channel_state.checklist.show()
+
+    def _fix_builtin_setup(self, action):
+        dialog = self.show_windows_backend_setup()
+        if action in ('install', 'update', 'repair'):
+            dialog._fix(action)
 
     def _on_builtin_phase(self, phase):
         if self.builtin is None or self.builtin.status != phase or not is_builtin_server(self.current_server()):

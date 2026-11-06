@@ -94,6 +94,7 @@ def test_virtualization_blocker_disables_future_checks_until_explicit_retry(tmp_
     from tvhplayer.wslc_builtin_supervisor import WslcBuiltinSupervisor
     calls = []
     class Runtime:
+        setup_checks = prerequisites.setup_checks({'firmware': False, 'feature': 1}, True, (3, 0, 3))
         def check(self):
             calls.append('check')
             raise WslcPrerequisiteError('Firmware virtualization is unavailable', 'bios')
@@ -108,6 +109,7 @@ def test_virtualization_blocker_disables_future_checks_until_explicit_retry(tmp_
     assert calls == ['check']
     reopened = WslcBuiltinSupervisor(config, tmp_path / 'bundle', runtime=Runtime())
     assert reopened.disabled
+    assert reopened.setup_checks == supervisor.setup_checks
     reopened.start()
     assert reopened._thread is None
     assert calls == ['check']
@@ -116,3 +118,29 @@ def test_virtualization_blocker_disables_future_checks_until_explicit_retry(tmp_
     qapp.processEvents()
     assert calls == ['check', 'check']
     assert reopened.disabled  # Still blocked; automatic checks stay off.
+
+
+def test_report_checks_wsl_version_without_starting_vm_when_virtualization_is_off(monkeypatch):
+    from tvhplayer.core.windows_wslc import WslcPrerequisiteError, WslcRuntimeAdapter
+    monkeypatch.setattr('sys.platform', 'win32')
+    monkeypatch.setattr(prerequisites, 'probe_windows', lambda: {'firmware': False, 'feature': 1})
+    runtime = WslcRuntimeAdapter('wslc.exe')
+    calls = []
+    def command(name):
+        calls.append(name)
+        assert name == 'version', 'No VM operations while firmware virtualization is off'
+        return 'WSLc 3.0.3'
+    monkeypatch.setattr(runtime, 'command', command)
+    with pytest.raises(WslcPrerequisiteError) as error:
+        runtime.check()
+    assert error.value.action == 'bios'
+    assert calls == ['version']
+    report = {row['key']: row['status'] for row in runtime.setup_checks}
+    assert report == {'wsl': 'passed', 'version': 'passed', 'virtualization': 'failed',
+                      'platform': 'passed', 'server': 'pending'}
+
+
+def test_unknown_probe_never_reports_virtualization_or_windows_support_passed():
+    report = {row['key']: row['status'] for row in prerequisites.setup_checks({}, True, None)}
+    assert report['wsl'] == 'passed'
+    assert all(report[key] == 'pending' for key in ('version', 'virtualization', 'platform', 'server'))

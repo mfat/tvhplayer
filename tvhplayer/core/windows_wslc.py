@@ -54,6 +54,7 @@ class WslcRuntimeAdapter:
         self.cancel = None
         self.config_storage = None
         self._prerequisite_state = {}
+        self.setup_checks = []
 
     def command(self, *args, timeout=20, cancellable=True):
         if not self.executable:
@@ -108,20 +109,29 @@ class WslcRuntimeAdapter:
         return (result.stdout + '\n' + result.stderr).strip() if args[0] == 'logs' else result.stdout.strip()
 
     def check(self):
+        from .windows_prerequisites import probe_windows, prerequisite_issue, setup_checks
         if self.executable is None:
             self.executable = find_wslc()
+        issue = None
         if sys.platform == 'win32' and self.runner is None:
-            from .windows_prerequisites import probe_windows, prerequisite_issue
             self._prerequisite_state = probe_windows()
             issue = prerequisite_issue(self._prerequisite_state)
             if issue and issue[1] == 'repair' and not self.executable:
                 issue = ('Install WSL to set up the built-in server. Setup enables the required '
                          'Windows features. Restart Windows when setup finishes, even if no reboot '
                          'prompt appears.', 'install')
-            if issue:
-                raise WslcPrerequisiteError(*issue)
-        version = self.command('version')
+        version_error = None
+        try:
+            version = self.command('version')
+        except WslcError as exc:
+            version, version_error = '', exc
         match = re.search(r'(\d+)\.(\d+)\.(\d+)', version)
+        self.setup_checks = setup_checks(self._prerequisite_state, bool(self.executable),
+                                        tuple(map(int, match.groups())) if match else None)
+        if issue:
+            raise WslcPrerequisiteError(*issue)
+        if version_error:
+            raise version_error
         if not match or tuple(map(int, match.groups())) < (2, 9, 3):
             raise WslcPrerequisiteError('WSL 2.9.3 or newer is required. Update WSL and restart TVHplayer.', 'update')
         try:

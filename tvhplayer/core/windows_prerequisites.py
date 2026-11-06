@@ -19,12 +19,12 @@ def pending_setup(config_dir):
         return None
 
 
-def save_setup(config_dir, stage, action):
+def save_setup(config_dir, stage, action, checks=None):
     path = setup_file(config_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps({'schema': 1, 'stage': stage, 'action': action,
-                                     'boot_time': windows_boot_time()}), encoding='utf-8')
+                                     'boot_time': windows_boot_time(), 'checks': checks or []}), encoding='utf-8')
     temporary.replace(path)
 
 
@@ -80,3 +80,29 @@ def prerequisite_issue(state):
         return ('Virtual Machine Platform is disabled. Choose Enable Virtual Machine Platform, '
                 'accept the administrator prompt, then restart Windows even if no reboot prompt appears.', 'repair')
     return None
+
+
+def setup_checks(state=None, installed=None, version=None):
+    """Only report passes established by a probe; unknown is different from failed."""
+    state = state or {}
+    virtualized = True if state.get('hypervisor') is True else state.get('firmware')
+    feature = state.get('feature')
+    values = [('wsl', installed), ('version', version >= (2, 9, 3) if version else None),
+              ('virtualization', virtualized),
+              ('platform', feature == 1 if feature in (1, 2, 3) else None), ('server', None)]
+    return [{'key': key, 'status': 'passed' if value is True else 'failed' if value is False else 'pending'}
+            for key, value in values]
+
+
+def failed_checks(checks, action):
+    rows = [dict(row) for row in (checks or setup_checks())]
+    key = {'install': 'wsl', 'update': 'version', 'bios': 'virtualization',
+           'repair': 'platform'}.get(action, 'server')
+    for row in rows:
+        if row['key'] == key:
+            row['status'] = 'failed'
+            row['action'] = action
+        elif row['status'] == 'failed':
+            row['action'] = {'wsl': 'install', 'version': 'update', 'virtualization': 'bios',
+                             'platform': 'repair'}.get(row['key'], 'diagnose')
+    return rows
