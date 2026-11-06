@@ -58,7 +58,10 @@ jobs:
       contents: write
 
   windows:
-    needs: backend
+    needs: [backend, acceptance]
+    if: >-
+      ${{ !cancelled() && needs.backend.result == 'success' &&
+          (!inputs.run_wslc_acceptance || needs.acceptance.result == 'success') }}
     runs-on: windows-2025
     timeout-minutes: 30
     permissions:

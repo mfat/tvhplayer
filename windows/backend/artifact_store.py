@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from tvhplayer.core.backend_bundle import RELEASE_ARTIFACTS, verify_bundle  # noqa: E402
+from tvhplayer.core.backend_bundle import RELEASE_ARTIFACTS, file_digest, verify_bundle  # noqa: E402
 import fingerprint as backend_fingerprint  # noqa: E402
 
 BUILDER_POLICY = backend_fingerprint.BUILDER_POLICY
@@ -90,8 +90,8 @@ def release_exists(fingerprint: str, *, repository: str | None = None, token: st
     owner, repo = _repo_slug(repository).split('/')
     url = f'https://api.github.com/repos/{owner}/{repo}/releases/tags/{urllib.parse.quote(tag)}'
     try:
-        _request(url, token=token)
-        return True
+        _, body, _ = _request(url, token=token)
+        return not json.loads(body).get('draft', False)
     except LookupError as error:
         if ': 404 ' in str(error):
             return False
@@ -111,6 +111,8 @@ def download_release(fingerprint: str, directory: Path, *, repository: str | Non
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     release = _release_metadata(fingerprint, repository=repository, token=token)
+    if release.get('draft'):
+        raise ValueError('Backend release is still a draft')
     assets = {asset['name']: asset for asset in release.get('assets', [])}
     missing = [name for name in BUNDLE_FILES if name not in assets]
     if missing:
@@ -126,7 +128,11 @@ def download_release(fingerprint: str, directory: Path, *, repository: str | Non
 
 def publish_release(fingerprint: str, directory: Path, *, repository: str | None = None,
                     token: str | None = None, target_commitish: str | None = None) -> str:
-    """Create an immutable backend-<fingerprint> release. Fails if the tag already exists."""
+    """Upload into a resumable draft, then publish the complete immutable bundle.
+
+    Callers serialize publishers for a fingerprint (the backend workflow does so).
+    Published releases are never modified.
+    """
     directory = Path(directory)
     write_inputs_document(directory, fingerprint=fingerprint)
     verify_inputs_document(directory, fingerprint)
@@ -148,36 +154,64 @@ def publish_release(fingerprint: str, directory: Path, *, repository: str | None
             f'- Builder policy: `{BUILDER_POLICY}`\n\n'
             'Do not retag or replace assets. Application releases may reuse this bundle.'
         ),
-        'draft': False,
+        'draft': True,
         'prerelease': True,
         'make_latest': 'false',
     }
     if target_commitish:
         payload['target_commitish'] = target_commitish
+    api = f'https://api.github.com/repos/{owner}/{repo}/releases'
+    # Drafts are not reliably returned by the tag endpoint. Find an interrupted
+    # upload through the authenticated releases listing instead.
+    release = None
+    page = 1
+    while True:
+        _, body, _ = _request(f'{api}?per_page=100&page={page}', token=token)
+        entries = json.loads(body)
+        release = next((item for item in entries if item['tag_name'] == tag), None)
+        if release is not None or len(entries) < 100:
+            break
+        page += 1
+    if release is not None and not release.get('draft'):
+        raise FileExistsError(f'Backend release already exists for {tag}')
     try:
-        _status, body, _headers = _request(
-            f'https://api.github.com/repos/{owner}/{repo}/releases',
-            token=token,
-            method='POST',
-            data=json.dumps(payload).encode('utf-8'),
-            content_type='application/json',
-        )
+        if release is None:
+            _status, body, _headers = _request(
+                api, token=token, method='POST',
+                data=json.dumps(payload).encode('utf-8'),
+                content_type='application/json',
+            )
+            release = json.loads(body)
     except LookupError as error:
         if ': 422 ' in str(error) or ': 409 ' in str(error):
             raise FileExistsError(f'Backend release already exists for {tag}') from error
         raise
-    release = json.loads(body.decode('utf-8'))
+    release_url = f"{api}/{release['id']}"
     upload_url = release['upload_url'].split('{', 1)[0]
+    _, body, _ = _request(f'{release_url}/assets?per_page=100', token=token)
+    existing = {asset['name']: asset for asset in json.loads(body)}
     for name in BUNDLE_FILES:
         path = directory / name
+        digest = 'sha256:' + file_digest(path)
+        asset = existing.get(name)
+        if asset and asset.get('state') == 'uploaded' and asset.get('digest') == digest:
+            continue
+        if asset:
+            _request(asset['url'], token=token, method='DELETE')
         query = urllib.parse.urlencode({'name': name})
-        _request(
-            f'{upload_url}?{query}',
-            token=token,
-            method='POST',
-            data=path.read_bytes(),
-            content_type='application/octet-stream',
+        _, body, _ = _request(
+            f'{upload_url}?{query}', token=token, method='POST',
+            data=path.read_bytes(), content_type='application/octet-stream',
         )
+        uploaded = json.loads(body)
+        if uploaded.get('state') != 'uploaded' or uploaded.get('digest') != digest:
+            raise ValueError(f'Uploaded backend artifact checksum mismatch: {name}')
+    # Only this final transition makes the cache entry available to consumers.
+    _request(
+        release_url, token=token, method='PATCH',
+        data=json.dumps({'draft': False, 'make_latest': 'false'}).encode('utf-8'),
+        content_type='application/json',
+    )
     return tag
 
 

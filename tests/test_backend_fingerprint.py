@@ -187,3 +187,77 @@ def test_line_ending_normalization_keeps_fingerprint_stable(tmp_path):
     path = repo / 'windows' / 'backend' / 'entrypoint.sh'
     path.write_bytes(path.read_text(encoding='utf-8').replace('\n', '\r\n').encode('utf-8'))
     assert fingerprint.compute_fingerprint(repo) == before
+
+
+@pytest.mark.parametrize('failure', ['interrupted', 'checksum'])
+def test_publish_resumes_draft_and_only_exposes_verified_assets(tmp_path, monkeypatch, failure):
+    import hashlib
+    import urllib.parse
+
+    fp = 'a' * 64
+    _fake_bundle(tmp_path, fp)
+    release = None
+    assets = {}
+    uploads = []
+    fail = True
+
+    def request(url, *, method='GET', data=None, **kwargs):
+        nonlocal release, fail
+        if '/tags/' in url:
+            if release is None:
+                raise LookupError(': 404 missing')
+            result = release
+        elif method == 'GET' and '?per_page=100&page=' in url:
+            result = [release] if release else []
+        elif method == 'POST' and '/uploads?' not in url:
+            assert release is None
+            release = dict(json.loads(data), id=1, upload_url='https://example.com/uploads{?name}')
+            assert release['draft'] is True
+            result = release
+        elif method == 'GET' and '/assets?' in url:
+            result = list(assets.values())
+        elif method == 'DELETE':
+            name = next(name for name, asset in assets.items() if asset['url'] == url)
+            del assets[name]
+            result = {}
+        elif method == 'POST':
+            assert release['draft'] is True
+            name = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)['name'][0]
+            uploads.append(name)
+            if fail and len(assets) == 1:
+                fail = False
+                if failure == 'interrupted':
+                    raise LookupError('Upload interrupted')
+                digest = 'sha256:' + '0' * 64
+            else:
+                digest = 'sha256:' + hashlib.sha256(data).hexdigest()
+            result = dict(name=name, state='uploaded', digest=digest, url=f'https://example.com/assets/{name}')
+            assets[name] = result
+        elif method == 'PATCH':
+            assert set(assets) == set(artifact_store.BUNDLE_FILES)
+            for name, asset in assets.items():
+                assert asset['digest'] == 'sha256:' + file_digest(tmp_path / name)
+            release.update(json.loads(data))
+            result = release
+        else:
+            raise AssertionError((url, method))
+        return 200, json.dumps(result).encode(), {}
+
+    monkeypatch.setattr(artifact_store, '_request', request)
+    with pytest.raises((LookupError, ValueError)):
+        artifact_store.publish_release(fp, tmp_path)
+    assert release['draft'] is True
+    assert artifact_store.release_exists(fp) is False
+    first_uploaded = artifact_store.BUNDLE_FILES[0]
+    assert artifact_store.publish_release(fp, tmp_path) == fingerprint.release_tag(fp)
+    assert uploads.count(first_uploaded) == 1
+    assert release['draft'] is False
+    assert artifact_store.release_exists(fp) is True
+    with pytest.raises(FileExistsError):
+        artifact_store.publish_release(fp, tmp_path)
+
+
+def test_download_rejects_unpublished_draft(tmp_path, monkeypatch):
+    monkeypatch.setattr(artifact_store, '_release_metadata', lambda *a, **k: {'draft': True})
+    with pytest.raises(ValueError, match='draft'):
+        artifact_store.download_release('a' * 64, tmp_path)
