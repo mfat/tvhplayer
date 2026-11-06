@@ -82,3 +82,22 @@ def test_disabled_backend_never_resumes_setup_on_launch(tmp_path, qapp):
     save_setup(supervisor.config_dir, 'disabled', 'bios')
     TVHeadendClient._resume_windows_backend_setup(host)
     assert calls == []
+
+
+def test_unexpected_failure_preserves_summary_and_technical_diagnostic(tmp_path, qapp):
+    supervisor = WslcBuiltinSupervisor(tmp_path / 'config', tmp_path / 'bundle')
+    dialog = WindowsBackendSetup(supervisor)
+    supervisor.failed.emit('Could not secure the backend settings folder: Access denied')
+    assert 'settings folder' in dialog.message.text()
+    assert 'Access denied' in dialog.checklist.details_text.toPlainText()
+    dialog.reject()
+
+
+def test_setup_progress_shows_specific_stage_without_marking_server_ready(tmp_path, qapp):
+    supervisor = WslcBuiltinSupervisor(tmp_path / 'config', tmp_path / 'bundle')
+    dialog = WindowsBackendSetup(supervisor)
+    supervisor.setup_progress.emit('Verifying the server files…')
+    assert dialog.message.text() == 'Verifying the server files…'
+    assert not dialog.progress.isHidden()
+    assert dialog.checklist.isHidden()
+    dialog.reject()

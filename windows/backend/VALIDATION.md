@@ -1,5 +1,74 @@
 # Windows backend acceptance record
 
+## First-run review follow-up (2026-11-07)
+
+This section describes new checks, not a claim that every fresh-machine scenario
+has passed. The historical results below apply to their recorded source/host.
+
+Local follow-up evidence:
+
+- A new PyInstaller portable executable and ZIP were built from the changed tree
+  with Python 3.15.0 and the pinned Windows build dependencies.
+- The actual ZIP passed archive verification, missing/corrupt-file rejection,
+  bundled-mpv startup, and an authenticated remote-server connection using an
+  isolated profile. No local container was created during that remote test.
+- The packaged real-backend attempt failed at `wslc info` with `E_ACCESSDENIED`.
+  A source-adapter check and a direct Python subprocess reproduced the same
+  denial, even without the no-console flag. A standalone shell `wslc info`
+  succeeded; this does not establish that subprocess startup is allowed.
+  Backend readiness, crash recovery and reboot acceptance are therefore not
+  recorded as passing for this run. No global WSL settings were changed.
+- GitHub reports zero registered self-hosted runners. A disposable WSL runner
+  must be provisioned before the opt-in package/backend job can run.
+
+`TVHPLAYER_PROFILE_DIR` isolates application configuration/cache/logs without
+redirecting the OS profile used by WSL. Older released installers are exercised
+with redirected app folders only in the remote-server upgrade test; they are not
+used for an isolated backend-upgrade claim.
+
+`windows/test-packages.py --portable ZIP --installer SETUP_EXE
+--previous-installer PREVIOUS_SETUP_EXE` runs the actual distributed executables,
+not a source-imported main window. Run installer tests only on a disposable VM or
+dedicated disposable Windows account: the real installer writes current-user
+installation registration. App profiles and downloads are isolated, but that is
+not a substitute for OS-level isolation.
+
+The default Windows build invokes this test before uploading packages. It checks:
+
+- Real archive verification, plus deliberate missing/corrupt-archive rejection in
+  a private extracted copy (the verifier runs from the checkout).
+- Real ZIP and installed-EXE startup, bundled mpv initialization, and an authenticated
+  connection to a local remote-server fixture.
+- Remote-server operation with local setup disabled, without creating a container.
+- Replacement of the previous released installer while keeping the profile.
+
+The opt-in `run_wslc_acceptance` dispatch also downloads the newly built packages
+and runs `windows/test-packages.py --exercise-backend` on a runner labelled
+`self-hosted, Windows, X64, wslc, disposable`. This launches the packaged server,
+checks authenticated readiness and channel-setup entry, deliberately terminates
+the test app, and verifies orphan recovery and stable credentials. The regular
+build cannot establish this result when the managed runner is unavailable.
+
+| Scenario | Automated coverage | Remaining qualification |
+| --- | --- | --- |
+| No WSL | Source tests cover detection and explicit elevation commands | Fresh VM: install WSL, accept/refuse UAC, restart Windows and resume |
+| Virtualization off | Source tests cover confirmed/unknown results, disabling, and explicit recheck | VM/physical machine: actual firmware-off result and enable/restart |
+| Old WSL | Source tests cover update choice and recheck | VM with an older installed runtime |
+| Missing/corrupt image | Source tests plus actual ZIP archive checks | Clean VM: first import with network disconnected |
+| Installer upgrade | Actual previous/current installer remote-profile test | Opt-in packaged backend run; VM snapshot for release-to-release data preservation |
+| Provisioning cancelled | Source lifecycle cancellation tests; packaged crash/orphan recovery | Clean VM: cancel while a genuinely uncached image imports |
+| No tuner/playlist | Source wizard tests and opt-in packaged empty-server setup | Fresh package UI walkthrough |
+| Wizard abandoned | Source UI tests: cancellation, explicit dismissal, retry next session | Fresh package UI walkthrough |
+| Existing remote server | Actual ZIP/installer remote connection and source import tests | External physical-server playback/recording |
+
+Shared Linux/Windows readiness now requires authenticated HTTP, reachable HTSP,
+and essential defaults. Optional preference failures are logged and exposed as
+degraded operation. See [the behavioral contract](../../docs/builtin-first-run.md).
+
+Known local baseline: three unrelated broad UI tests (tasks-panel recording
+indicator, column resizing, Chromecast test without a selected server) also fail
+on an untouched HEAD snapshot. They are not counted as passing validation.
+
 Validated locally on Windows x86-64 with WSLc 3.0.3. The app remains native;
 the test backend is built from TVHeadend commit
 `40e88d4cef2c81e44474e75fd2f1edb232575ceb`.
@@ -197,7 +266,7 @@ The following cannot be established on an already-provisioned single host:
 - Actual offline first import on a clean host with its internet disconnected.
 
 The workflow-dispatch `run_wslc_acceptance` option runs media/lifecycle tests on
-a managed runner labelled `self-hosted, Windows, X64, wslc`. No such runner is
+a disposable runner labelled `self-hosted, Windows, X64, wslc, disposable`. No such runner is
 registered or changed by this code. These checks do not require Docker or an
 Ubuntu distribution on that Windows host.
 

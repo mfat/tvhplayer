@@ -137,7 +137,7 @@ def test_report_checks_wsl_version_without_starting_vm_when_virtualization_is_of
     assert calls == ['version']
     report = {row['key']: row['status'] for row in runtime.setup_checks}
     assert report == {'wsl': 'passed', 'version': 'passed', 'virtualization': 'failed',
-                      'platform': 'passed', 'server': 'pending'}
+                      'platform': 'passed', 'image': 'pending', 'server': 'pending'}
 
 
 def test_unknown_probe_never_reports_virtualization_or_windows_support_passed():

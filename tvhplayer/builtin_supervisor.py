@@ -15,6 +15,8 @@ try:
         STARTUP_TIMEOUT_SECONDS,
         LineBuffer,
         apply_builtin_defaults,
+        defaults_verdict,
+        htsp_ready,
         command_args,
         ensure_superuser,
         initial_ports,
@@ -36,6 +38,8 @@ except ImportError:
         STARTUP_TIMEOUT_SECONDS,
         LineBuffer,
         apply_builtin_defaults,
+        defaults_verdict,
+        htsp_ready,
         command_args,
         ensure_superuser,
         initial_ports,
@@ -102,6 +106,7 @@ class BuiltinSupervisor(QObject):
         self._poll.timeout.connect(self._poll_ready)
         self._check_attempt = 0
         self._checking = False
+        self.startup_warnings = []
         self._checked.connect(self._on_checked)
 
     @property
@@ -125,6 +130,7 @@ class BuiltinSupervisor(QObject):
     def start(self) -> None:
         if self._shut_down or self._status in ('starting', 'running'):
             return
+        self.startup_warnings = []
         if self.binary is None:
             self._set_status('failed')
             self.failed.emit('Built-in Tvheadend is not packaged in this build.')
@@ -223,14 +229,15 @@ class BuiltinSupervisor(QObject):
         threading.Thread(
             target=self._check_ready,
             args=(self._check_attempt, self.http_port, self.username, self.password,
-                  self.recordings_dir, self.padding),
+                  self.recordings_dir, self.padding, self.htsp_port),
             name='builtin-ready',
             daemon=True,
         ).start()
 
-    def _check_ready(self, attempt, http_port, username, password, recordings_dir, padding) -> None:
+    def _check_ready(self, attempt, http_port, username, password, recordings_dir, padding, htsp_port=None) -> None:
         failed = []
         answered = serverinfo_ok(http_port, username=username, password=password)
+        answered = answered and htsp_ready(self.htsp_port if htsp_port is None else htsp_port)
         if answered:
             failed = apply_builtin_defaults(http_port, username, password, recordings_dir, padding)
         try:
@@ -238,7 +245,7 @@ class BuiltinSupervisor(QObject):
         except RuntimeError:
             # The app closed while the server was being asked.
             return
-        if answered and not self._stop_requested:
+        if answered and not self._stop_requested and not defaults_verdict(failed)[0]:
             # After the window has the server: a big playlist takes a while.
             changed = use_ffmpeg_starter(http_port, username, password)
             # A server stopped meanwhile, as when the app quits right after
@@ -253,6 +260,10 @@ class BuiltinSupervisor(QObject):
             return
         self._checking = False
         if self._status != 'starting' or not answered:
+            return
+        fatal, self.startup_warnings = defaults_verdict(failed)
+        if fatal:
+            self._retry_or_fail('Could not configure the server: ' + ', '.join(fatal))
             return
         result = startup_result(self._child_alive(), self._lines.watch, True)
         if result == 'ready':

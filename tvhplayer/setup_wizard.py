@@ -354,6 +354,8 @@ class SetupWizard(QWizard):
         self.source_page = SourcePage(self)
         self.tuner_page = TunerPage(self)
         self.scan_page = ScanPage(self)
+        self.dismiss_automatic = QCheckBox('Don’t open setup automatically')
+        self.source_page.layout().addWidget(self.dismiss_automatic)
         self.addPage(self.source_page)
         self.addPage(self.tuner_page)
         self.addPage(self.scan_page)

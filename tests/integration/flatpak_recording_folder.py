@@ -28,7 +28,7 @@ def main():
     assert in_flatpak(), 'This integration check requires a real Flatpak sandbox'
     assert Path(args.marker).name == args.marker
     store = ConfigStore()
-    store.data.update(check_for_updates=False, builtin_autostart=False, setup_offered=True)
+    store.data.update(check_for_updates=False, builtin_autostart=False, setup_dismissed=True)
     store.save()
     app = QApplication([])
     window = TVHeadendClient()

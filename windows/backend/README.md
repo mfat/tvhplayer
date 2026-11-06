@@ -188,12 +188,18 @@ recordings are outside that archive and are never removed. Existing playlist FFm
 wrappers are migrated idempotently to `/usr/bin/ffmpeg`.
 
 If prerequisites are missing, the nonmodal setup dialog explains installation,
-virtualization and restart requirements. Install/repair uses `wsl --install
---no-distribution`; update uses `wsl --update`. Only a user click invokes elevation.
-Setup progress is persisted in `wslc-setup.json`; after a reboot, selecting Built-in
-Server checks prerequisites and resumes provisioning. No reboot is forced. A
+virtualization and restart requirements. Install uses `wsl --install
+--no-distribution`; update uses `wsl --update`; feature repair enables
+VirtualMachinePlatform with DISM and `/norestart`. Only a user click invokes elevation.
+Setup progress is persisted in `wslc-setup.json`; after a reboot, reopening the app
+resumes unfinished setup unless the built-in server was disabled. No reboot is forced. A
 missing/corrupt image fails with a bundle diagnostic and leaves remote servers
 available. Closing setup before installation cancels backend work.
+
+Startup reports individual provisioning stages. Failures show a concise checklist
+with inline recovery actions and expandable, copyable technical details. See
+[the first-run contract](../../docs/builtin-first-run.md) for image verification
+states, onboarding completion, and the shared Linux/Windows readiness policy.
 
 ## Validation and release gate
 

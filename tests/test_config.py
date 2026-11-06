@@ -19,6 +19,17 @@ def test_config_roundtrip_normalizes_servers(tmp_path):
     assert loaded.data['window_geometry']['width'] == 1200
 
 
+def test_app_profile_override_isolates_app_data_without_changing_windows_profile(tmp_path, monkeypatch):
+    from tvhplayer.core.config import default_config_dir, default_cache_dir
+    from tvhplayer.core.logs import log_dir
+    monkeypatch.setenv('TVHPLAYER_PROFILE_DIR', str(tmp_path))
+    original = {key: os.environ.get(key) for key in ('APPDATA', 'LOCALAPPDATA', 'USERPROFILE')}
+    assert default_config_dir() == tmp_path / 'Roaming/TVHplayer'
+    assert default_cache_dir() == tmp_path / 'Local/TVHplayer/Cache'
+    assert log_dir() == tmp_path / 'Local/TVHplayer/Logs'
+    assert {key: os.environ.get(key) for key in original} == original
+
+
 def test_old_config_keeps_port_80_for_portless_http_once(tmp_path):
     path = tmp_path / 'tvhplayer.conf'
     path.write_text(json.dumps({'servers': [

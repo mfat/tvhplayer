@@ -17,6 +17,67 @@ def test_ui_module_parses():
     ast.parse(UI_PATH.read_text(encoding='utf-8'))
 
 
+@pytest.mark.parametrize('dismiss', [False, True])
+def test_onboarding_cancel_is_not_completion_and_explicit_dismissal_is_saved(monkeypatch, tmp_path, dismiss):
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    try:
+        server = {'name': 'Built-in Server', 'builtin': True, 'url': 'http://127.0.0.1:24111'}
+        window.servers = [server]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('Built-in Server')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+        monkeypatch.setattr(window, 'ensure_server_ready', lambda server, ready, failed: ready(server))
+        monkeypatch.setattr(ui.SetupWizard, 'call', lambda *args: None)
+        window.show_setup_wizard()
+        wizard = window._setup_wizard
+        assert window.config['setup_started']
+        assert not window.config['setup_completed']
+        wizard.dismiss_automatic.setChecked(dismiss)
+        wizard.reject()
+        app.processEvents()
+        saved = ui.ConfigStore().data
+        assert saved['setup_dismissed'] is dismiss
+        assert not saved['setup_completed']
+        assert window._setup_wizard is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def _onboarding_channels(ui, window, server, channels):
+    fetch = types.SimpleNamespace(server=server, key=ui.server_key(server), backend=None,
+                                  keep_place=False, _now_next=False, deleteLater=lambda: None)
+    window._channel_fetch = fetch
+    window._on_channels_loaded(fetch, {'channels': channels, 'tags': [], 'services': [], 'now_next': {}})
+
+
+def test_legacy_offered_flag_does_not_suppress_incomplete_onboarding(monkeypatch, tmp_path):
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    try:
+        server = {'name': 'Built-in Server', 'builtin': True, 'url': 'http://127.0.0.1:24111'}
+        window.servers = [server]
+        window.server_combo.addItem('Built-in Server')
+        window.config['setup_offered'] = True
+        offers = []
+        monkeypatch.setattr(window, 'show_setup_wizard', lambda: offers.append(True))
+        _onboarding_channels(ui, window, server, [])
+        app.processEvents()
+        assert offers == [True]
+        _onboarding_channels(ui, window, server, [])
+        app.processEvents()
+        assert offers == [True]  # Never repeatedly prompt within the same session.
+        window._setup_offer_this_session = False  # A new application session.
+        _onboarding_channels(ui, window, server, [])
+        app.processEvents()
+        assert offers == [True, True]
+        _onboarding_channels(ui, window, server, [ui.Channel(uuid='one', name='One', number=1)])
+        assert window.config['setup_completed']
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_ui_module_uses_pyqt6(monkeypatch):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     sys.modules.pop('tvhplayer.tvhplayer', None)

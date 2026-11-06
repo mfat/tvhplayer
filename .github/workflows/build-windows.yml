@@ -13,6 +13,7 @@ on:
       - 'tvhplayer/core/hdhomerun.py'
       - 'tvhplayer/core/backend_bundle.py'
       - 'tvhplayer/windows_backend_setup.py'
+      - 'tvhplayer/windows_setup_checks.py'
       - 'tvhplayer/wslc_builtin_supervisor.py'
       - 'tvhplayer/builtin_supervisor.py'
       - 'tvhplayer/tvhplayer.py'
@@ -25,6 +26,9 @@ on:
       - 'tests/test_backend_bundle.py'
       - 'tests/test_backend_fingerprint.py'
       - 'tests/test_wslc_lifecycle.py'
+      - 'tests/test_windows_backend_setup.py'
+      - 'tests/test_windows_setup_checks.py'
+      - 'tests/test_windows_prerequisites.py'
       - 'packaging/tvheadend/**'
       - 'packaging/render_icon.py'
       - '.github/workflows/build-windows.yml'
@@ -36,7 +40,7 @@ on:
         type: string
         default: ''
       run_wslc_acceptance:
-        description: Run real WSLc tests on a managed Windows host with the wslc runner label
+        description: Run packaged install/media tests on a disposable Windows WSLc runner
         type: boolean
         default: false
       force_backend_rebuild:
@@ -60,10 +64,9 @@ jobs:
       contents: write
 
   windows:
-    needs: [backend, acceptance]
-    if: >-
-      ${{ !cancelled() && needs.backend.result == 'success' &&
-          (!inputs.run_wslc_acceptance || needs.acceptance.result == 'success') }}
+    needs: backend
+    outputs:
+      label: ${{ steps.version.outputs.label }}
     runs-on: windows-2025
     timeout-minutes: 30
     permissions:
@@ -98,8 +101,8 @@ jobs:
 
       - name: Test WSLc contracts without virtualization
         run: |
-          python -m pip install pytest requests PyQt6 psutil
-          python -m pytest tests/test_windows_wslc.py tests/test_windows_backend_storage.py tests/test_hdhomerun.py tests/test_builtin_server.py tests/test_tuner_setup.py tests/test_backend_bundle.py tests/test_backend_fingerprint.py tests/test_wslc_lifecycle.py -q
+          python -m pip install pytest -r windows/requirements-build.txt
+          python -m pytest tests/test_windows_wslc.py tests/test_windows_backend_storage.py tests/test_hdhomerun.py tests/test_builtin_server.py tests/test_tuner_setup.py tests/test_backend_bundle.py tests/test_backend_fingerprint.py tests/test_wslc_lifecycle.py tests/test_windows_backend_setup.py tests/test_windows_setup_checks.py tests/test_windows_prerequisites.py tests/test_config.py tests/test_logs.py tests/test_pyqt6_ui.py::test_onboarding_cancel_is_not_completion_and_explicit_dismissal_is_saved tests/test_pyqt6_ui.py::test_legacy_offered_flag_does_not_suppress_incomplete_onboarding -q
 
       - name: Download the offline backend bundle
         uses: actions/download-artifact@v8
@@ -139,6 +142,25 @@ jobs:
           if (-not (Select-String -Path $log -Pattern 'Media player created successfully' -Quiet)) { throw 'mpv did not start' }
           if (Select-String -Path $log -Pattern 'Error starting application' -Quiet) { throw 'The app reported a startup error' }
 
+      - name: Test distributed ZIP and installer upgrade with isolated profiles
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $currentTag = '${{ steps.version.outputs.label }}'
+          $previous = gh release list --repo $env:GITHUB_REPOSITORY --limit 20 --json tagName,isPrerelease,isDraft | ConvertFrom-Json | Where-Object { -not $_.isPrerelease -and -not $_.isDraft -and $_.tagName -ne $currentTag } | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list previous releases for upgrade acceptance' }
+          $baseline = Join-Path $env:RUNNER_TEMP 'tvhplayer-upgrade-baseline'
+          New-Item -ItemType Directory -Path $baseline -Force | Out-Null
+          $testArgs = @('windows/test-packages.py', '--portable', (Get-ChildItem windows/dist/*-windows-x86_64.zip | Select-Object -First 1).FullName, '--installer', (Get-ChildItem windows/dist/*-setup.exe | Select-Object -First 1).FullName)
+          if ($previous) {
+            gh release download $previous.tagName --repo $env:GITHUB_REPOSITORY --pattern '*-setup.exe' --dir $baseline
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download the previous distributed installer' }
+            $testArgs += @('--previous-installer', (Get-ChildItem $baseline/*-setup.exe | Select-Object -First 1).FullName)
+          }
+          python @testArgs
+          if ($LASTEXITCODE -ne 0) { throw 'Distributed package acceptance failed' }
+
       - uses: actions/upload-artifact@v7
         with:
           name: windows-x86_64
@@ -146,18 +168,31 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload to release
-        if: github.ref_type == 'tag' || inputs.release_tag != ''
+  publish:
+    needs: [windows, acceptance]
+    if: >-
+      ${{ !cancelled() && needs.windows.result == 'success' &&
+          (!inputs.run_wslc_acceptance || needs.acceptance.result == 'success') &&
+          (github.ref_type == 'tag' || inputs.release_tag != '') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-x86_64
+          path: release-assets
+      - name: Upload qualified packages to release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.label }}
-          files: windows/dist/*
+          tag_name: ${{ needs.windows.outputs.label }}
+          files: release-assets/*
           fail_on_unmatched_files: true
 
   acceptance:
     if: github.event_name == 'workflow_dispatch' && inputs.run_wslc_acceptance
-    needs: backend
-    runs-on: [self-hosted, Windows, X64, wslc]
+    needs: [backend, windows]
+    runs-on: [self-hosted, Windows, X64, wslc, disposable]
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -184,3 +219,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Playback/recording acceptance failed' }
           python windows/backend/lifecycle-test.py
           if ($LASTEXITCODE -ne 0) { throw 'Lifecycle acceptance failed' }
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-x86_64
+          path: windows/dist
+      - name: Real distributed-package backend acceptance
+        shell: pwsh
+        run: |
+          $zip = (Get-ChildItem windows/dist/*-windows-x86_64.zip | Select-Object -First 1).FullName
+          $installer = (Get-ChildItem windows/dist/*-setup.exe | Select-Object -First 1).FullName
+          python windows/test-packages.py --portable $zip --installer $installer --exercise-backend
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged backend acceptance failed' }

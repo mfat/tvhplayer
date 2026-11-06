@@ -12,7 +12,7 @@ def test_failed_row_has_inline_help_and_other_rows_show_only_results(qapp):
     widget = WindowsSetupChecks()
     rows = failed_checks(setup_checks({'firmware': False, 'feature': 1}, True, (3, 0, 3)), 'bios')
     widget.set_checks(rows)
-    assert set(widget.labels) == {'wsl', 'version', 'virtualization', 'platform', 'server'}
+    assert set(widget.labels) == {'wsl', 'version', 'virtualization', 'platform', 'image', 'server'}
     assert 'Passed:' in widget.labels['wsl'].accessibleName()
     assert 'Pending:' in widget.labels['server'].accessibleName()
     assert set(widget.help_labels) == {'virtualization'}
@@ -59,3 +59,26 @@ def test_channel_checklist_is_hidden_during_normal_startup_and_remote_messages(q
     state.checklist.show()
     state.show_state('Connecting to the living room server', busy=True)
     assert state.checklist.isHidden()
+
+
+def test_diagnostics_are_collapsed_copyable_and_redacted(qapp):
+    from PyQt6.QtWidgets import QApplication
+    widget = WindowsSetupChecks()
+    widget.set_checks(failed_checks([], 'diagnose'))
+    widget.set_diagnostics('Cannot secure the backend: password=private-value token=private-token')
+    assert widget.details_text.isReadOnly()
+    assert widget.details_text.isHidden()
+    widget.details_toggle.click()
+    assert not widget.details_text.isHidden()
+    assert 'private-value' not in widget.details_text.toPlainText()
+    widget.copy_details.click()
+    assert QApplication.clipboard().text() == widget.details_text.toPlainText()
+    widget.set_checks(failed_checks([], 'image'))
+    qapp.processEvents()
+    widget.set_checks(failed_checks([], 'diagnose'))
+    assert 'Cannot secure the backend' in widget.details_text.toPlainText()
+
+
+def test_import_timeout_is_not_misclassified_as_port_conflict():
+    from tvhplayer.windows_setup_checks import problem_summary
+    assert 'too long' in problem_summary('Image import timed out')

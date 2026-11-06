@@ -55,6 +55,13 @@ class WslcRuntimeAdapter:
         self.config_storage = None
         self._prerequisite_state = {}
         self.setup_checks = []
+        self.progress = None
+        self.image_state = 'not_checked'
+        self.archive_verified = False
+
+    def _progress(self, message):
+        if self.progress:
+            self.progress(message)
 
     def command(self, *args, timeout=20, cancellable=True):
         if not self.executable:
@@ -145,28 +152,40 @@ class WslcRuntimeAdapter:
                 f'Diagnostic details:\n{exc}', 'diagnose') from exc
 
     def provision(self, directory):
+        self.image_state = 'not_checked'
+        self.archive_verified = False
+        self._progress('Checking the server image…')
         directory = Path(directory)
         started = time.monotonic()
         try:
             manifest = read_manifest(directory)
             image = manifest['image']
+            self.image_state = 'available'
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise WslcError(f'Install the matching offline backend bundle: {exc}') from exc
         # WSLc checks the immutable imported image identity and architecture.
         # The archive is only needed (and hashed) when that image is absent.
         if not self.has_image(image):
+            self._progress('Verifying the server files…')
             try:
                 verify_bundle(directory, cancel=self.cancel)
+                self.archive_verified = True
+                self.image_state = 'verified'
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 raise WslcError(f'Install the matching offline backend bundle: {exc}') from exc
             logging.getLogger(__name__).info('Offline backend archive verified in %.1fs', time.monotonic() - started)
             loading = time.monotonic()
+            self._progress('Importing the server image. This can take a few minutes…')
             self.command('load', '--input', directory / 'tvheadend.tar', timeout=300)
             logging.getLogger(__name__).info('Offline backend image imported in %.1fs', time.monotonic() - loading)
             if not self.has_image(image):
                 raise WslcError('The offline archive did not provide the required backend image.')
         else:
             logging.getLogger(__name__).info('Reused offline backend image in %.1fs', time.monotonic() - started)
+        self.image_state = 'installed'
+        for row in self.setup_checks:
+            if row['key'] == 'image':
+                row['status'] = 'passed'
         return image
 
     def has_image(self, image):

@@ -89,7 +89,7 @@ def setup_checks(state=None, installed=None, version=None):
     feature = state.get('feature')
     values = [('wsl', installed), ('version', version >= (2, 9, 3) if version else None),
               ('virtualization', virtualized),
-              ('platform', feature == 1 if feature in (1, 2, 3) else None), ('server', None)]
+              ('platform', feature == 1 if feature in (1, 2, 3) else None), ('image', None), ('server', None)]
     return [{'key': key, 'status': 'passed' if value is True else 'failed' if value is False else 'pending'}
             for key, value in values]
 
@@ -97,7 +97,7 @@ def setup_checks(state=None, installed=None, version=None):
 def failed_checks(checks, action):
     rows = [dict(row) for row in (checks or setup_checks())]
     key = {'install': 'wsl', 'update': 'version', 'bios': 'virtualization',
-           'repair': 'platform'}.get(action, 'server')
+           'repair': 'platform', 'image': 'image'}.get(action, 'server')
     for row in rows:
         if row['key'] == key:
             row['status'] = 'failed'

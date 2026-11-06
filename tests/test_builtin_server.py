@@ -576,6 +576,7 @@ def test_a_server_stopped_while_playlist_commands_update_gives_no_warning(qapp, 
 
     supervisor = BuiltinSupervisor(tmp_path / 'tvheadend', tmp_path / 'config', 24115, 24116)
     monkeypatch.setattr(builtin_supervisor, 'serverinfo_ok', lambda *a, **k: True)
+    monkeypatch.setattr(builtin_supervisor, 'htsp_ready', lambda *a, **k: True)
     monkeypatch.setattr(builtin_supervisor, 'apply_builtin_defaults', lambda *a, **k: [])
 
     def quit_meanwhile(*_args, **_kwargs):
@@ -626,3 +627,32 @@ def test_startup_tracks_the_folder_actually_checked(qapp, tmp_path, monkeypatch,
     assert supervisor.is_running()  # Playback remains available when storage fails.
     assert supervisor.applied_recordings_dir == (None if failed else '/startup-snapshot')
     assert supervisor.recordings_dir == '/new-request'
+
+
+@pytest.mark.parametrize('failures,fatal', [(['plain login'], True), (['unknown setting'], True),
+    (['recordings folder'], False), (['recording margins', 'setup wizard off'], False)])
+def test_linux_enforces_essential_defaults_and_exposes_degraded_preferences(qapp, tmp_path, monkeypatch, failures, fatal):
+    from tvhplayer import builtin_supervisor as module
+    supervisor = module.BuiltinSupervisor(tmp_path / 'tvheadend', tmp_path / 'config')
+    supervisor._status = 'starting'
+    monkeypatch.setattr(supervisor, '_child_alive', lambda: True)
+    monkeypatch.setattr(module, 'startup_result', lambda *_args: 'ready')
+    errors, ready = [], []
+    monkeypatch.setattr(supervisor, '_retry_or_fail', errors.append)
+    supervisor.ready.connect(lambda *_ports: ready.append(True))
+    supervisor._on_checked(supervisor._check_attempt, True, failures)
+    assert bool(errors) == fatal
+    assert bool(ready) != fatal
+    assert supervisor.startup_warnings == ([] if fatal else failures)
+
+
+def test_linux_http_alone_is_not_ready_when_htsp_is_unreachable(qapp, tmp_path, monkeypatch):
+    from tvhplayer import builtin_supervisor as module
+    supervisor = module.BuiltinSupervisor(tmp_path / 'tvheadend', tmp_path / 'config')
+    monkeypatch.setattr(module, 'serverinfo_ok', lambda *args, **kwargs: True)
+    monkeypatch.setattr(module, 'htsp_ready', lambda *args, **kwargs: False)
+    monkeypatch.setattr(module, 'apply_builtin_defaults', lambda *args, **kwargs: pytest.fail('Not ready yet'))
+    answers = []
+    supervisor._checked.connect(lambda *args: answers.append(args))
+    supervisor._check_ready(1, 1234, 'user', 'password', '', None)
+    assert answers[0][1] is False

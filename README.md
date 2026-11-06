@@ -17,9 +17,9 @@ TVHplayer is a cross-platform desktop app for watching and recording live TV usi
 
 
 ## Who is this for
-This is for people who already have a Tvheadend server.
+Use TVHplayer with an existing Tvheadend server, or with its optional built-in server on Linux and Windows.
 
-But if you use linux, you can use this as a normal TV and PVR app, using the built-in server. You just need an IPTV playlist, or a TV tuner. 
+The Linux built-in server supports IPTV playlists and supported TV tuners. Windows packages include a WSL Containers backend for IPTV and supported network tuners; hardware virtualization is required. macOS connects to an existing server.
 
 ## Features
 
@@ -28,8 +28,10 @@ But if you use linux, you can use this as a normal TV and PVR app, using the bui
 - Cast live channels to Chromecast and Cast-enabled televisions from the player bar
 - Timeshif
 
-**Built-in server (Linux only)**
-- Comes with its own optional Tvheadend out of the box (optional, you can use any server), no need to set up a server to watch IPTV or use a USB tuner
+**Built-in server (Linux and Windows)**
+- Optional bundled Tvheadend; existing remote servers remain available
+- Native Linux backend, or WSL Containers on Windows (no Docker or separate Ubuntu installation)
+- Windows does not provide USB tuner passthrough; use supported network tuners or a remote server
 
 **TV guide**
 - Browse EPG
@@ -49,7 +51,7 @@ But if you use linux, you can use this as a normal TV and PVR app, using the bui
 - **macOS:** [Apple silicon](https://mfat.github.io/tvhplayer/download.html?format=macos-arm64) · [Intel](https://mfat.github.io/tvhplayer/download.html?format=macos-x86_64)
 - **Windows:** [installer](https://mfat.github.io/tvhplayer/download.html?format=windows-setup) · [portable zip](https://mfat.github.io/tvhplayer/download.html?format=windows-zip)
 
-The download links automatically get the latest version. The Flatpak, AppImage, deb and rpm include the built-in server, mpv and ffmpeg, or pull them in as dependencies. The macOS and Windows builds connect to an existing Tvheadend server; the built-in server is a Linux-only feature.
+The download links automatically get the latest version. The Flatpak, AppImage, deb and rpm include the built-in server, mpv and ffmpeg, or pull them in as dependencies. Complete Windows installer and ZIP packages include the optional offline WSL Containers backend. macOS connects to an existing Tvheadend server.
 
 You can also [browse all releases](https://github.com/mfat/tvhplayer/releases).
 
@@ -101,3 +103,23 @@ If hardware virtualization is disabled or unavailable, TVHplayer disables the
 built-in server and its automatic setup checks, including after relaunch.
 Remote servers remain usable. After enabling virtualization in BIOS/UEFI, use
 the gear button, select Built-in Server, and choose **Enable and check…** to retry.
+
+The installer and ZIP use the same in-app setup. Extract the entire ZIP before
+opening TVHplayer. The app requests administrator permission only when you choose
+to install/update WSL or enable a required Windows feature. BIOS/UEFI virtualization
+must be enabled manually. Settings and restart progress are stored in AppData,
+including for the ZIP version. Installing ordinary WSL does not by itself confirm
+that WSL Containers can start on your Windows version.
+
+After the built-in server starts with no channels, Set Up Channels offers a tuner
+or an IPTV playlist. Closing it lets it appear again next launch; select
+**Don’t open setup automatically** to stop automatic offers. It remains available
+from File > Set Up Channels. Setup is complete when the server actually has channels.
+
+Startup shows separate stages for checking Windows support, verifying/importing
+the server image, preparing settings and storage, and testing the server connection.
+When startup fails, the checklist shows what needs attention. Expand **Technical
+details** or choose **Copy details** when reporting an unexpected error.
+
+See [first-run validation](windows/backend/VALIDATION.md) for automated checks and
+the fresh-Windows/UAC/reboot scenarios that still require an isolated test machine.

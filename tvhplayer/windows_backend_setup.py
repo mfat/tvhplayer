@@ -8,10 +8,10 @@ from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QPushButton, QPro
 
 try:
     from .core.windows_prerequisites import failed_checks, save_setup
-    from .windows_setup_checks import WindowsSetupChecks
+    from .windows_setup_checks import WindowsSetupChecks, problem_summary
 except ImportError:
     from core.windows_prerequisites import failed_checks, save_setup
-    from windows_setup_checks import WindowsSetupChecks
+    from windows_setup_checks import WindowsSetupChecks, problem_summary
 
 
 def setup_command(action):
@@ -73,8 +73,14 @@ class WindowsBackendSetup(QDialog):
         supervisor.status_changed.connect(self._status)
         supervisor.failed.connect(self._failed)
         supervisor.ready.connect(self._ready)
+        if hasattr(supervisor, 'setup_progress'):
+            supervisor.setup_progress.connect(self._progress_stage)
         self.finished.connect(self._detach)
         self._update_action()
+        diagnostic = getattr(supervisor, 'last_error', '') or (str(issue) if issue else '')
+        self.checklist.set_diagnostics(diagnostic)
+        if issue is None and diagnostic:
+            self.message.setText(problem_summary(diagnostic))
         if supervisor.status in ('starting', 'installing'):
             self._status(supervisor.status)
 
@@ -159,10 +165,17 @@ class WindowsBackendSetup(QDialog):
         elif status in ('failed', 'stopped'):
             self._busy(False)
 
+    def _progress_stage(self, message):
+        self._busy(True)
+        self.checklist.hide()
+        self.message.setText(message)
+
     def _failed(self, message):
         self._update_action()
         self._busy(False)
-        self.message.setText('Fix the items below, then try again.')
+        self.checklist.set_diagnostics(message)
+        self.message.setText('Fix the items below, then try again.' if self.supervisor.setup_issue and self.action in
+                             ('bios', 'repair', 'install', 'update', 'reboot') else problem_summary(message))
 
     def _ready(self, *_ports):
         self.accept()
@@ -176,6 +189,8 @@ class WindowsBackendSetup(QDialog):
         super().reject()
 
     def _detach(self, _result):
+        if hasattr(self.supervisor, 'setup_progress'):
+            self.supervisor.setup_progress.disconnect(self._progress_stage)
         for signal, slot in ((self.supervisor.status_changed, self._status),
                              (self.supervisor.failed, self._failed), (self.supervisor.ready, self._ready)):
             try:

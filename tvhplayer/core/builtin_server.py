@@ -17,6 +17,7 @@ import re
 import secrets
 import shutil
 import signal
+import socket
 import sys
 import time
 import urllib.error
@@ -40,6 +41,22 @@ STARTUP_TIMEOUT_SECONDS = 60
 SUPERUSER_NAME = 'tvhplayer'
 # Tvheadend exits with 78 when another process holds its config lock.
 CONFIG_LOCKED_EXIT = 78
+
+
+def htsp_ready(port, connect=None):
+    """Both backends require a listening HTSP socket, not just a startup log line."""
+    try:
+        with (connect or socket.create_connection)(('127.0.0.1', port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def defaults_verdict(failures):
+    """Playback/authentication and tuner routing are essential; preferences can degrade."""
+    optional = {'setup wizard off', 'recording margins', 'recordings folder'}
+    return ([item for item in failures if item not in optional],
+            [item for item in failures if item in optional])
 
 _BIND_FAILURE = re.compile(r'bind:\s+\S+:\d+:')
 _HTTP_STARTED = 'Starting HTTP server'

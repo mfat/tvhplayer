@@ -118,7 +118,41 @@ def test_cached_image_does_not_read_unused_archive(tmp_path, monkeypatch):
     monkeypatch.setattr('tvhplayer.core.backend_bundle.file_digest', forbidden)
     (tmp_path / 'tvheadend.tar').unlink()
     cli = Cli(json.dumps([{'Id': IMAGE, 'Architecture': 'amd64'}]))
-    assert WslcRuntimeAdapter('wslc.exe', cli).provision(tmp_path) == IMAGE
+    runtime = WslcRuntimeAdapter('wslc.exe', cli)
+    assert runtime.provision(tmp_path) == IMAGE
+    assert runtime.image_state == 'installed'
+    assert not runtime.archive_verified  # A reused image is not a freshly hashed archive.
+
+
+def test_first_import_reports_verification_and_import_as_distinct_stages(tmp_path, monkeypatch):
+    from tvhplayer.core.windows_prerequisites import setup_checks
+    bundle(tmp_path)
+    runtime = WslcRuntimeAdapter('wslc.exe', Cli())
+    images = iter([False, True])
+    monkeypatch.setattr(runtime, 'has_image', lambda image: next(images))
+    states = []
+    monkeypatch.setattr('tvhplayer.core.windows_wslc.verify_bundle',
+                        lambda *args, **kwargs: states.append(runtime.image_state))
+    stages = []
+    runtime.progress = stages.append
+    runtime.setup_checks = setup_checks()
+    assert runtime.provision(tmp_path) == IMAGE
+    assert states == ['available']
+    assert stages == ['Checking the server image…', 'Verifying the server files…',
+                      'Importing the server image. This can take a few minutes…']
+    assert runtime.archive_verified and runtime.image_state == 'installed'
+    assert next(row for row in runtime.setup_checks if row['key'] == 'image')['status'] == 'passed'
+
+
+def test_old_wsl_version_offers_update_without_starting_server():
+    from tvhplayer.core.windows_wslc import WslcPrerequisiteError
+    cli = Cli('WSLc version 2.9.2')
+    runtime = WslcRuntimeAdapter('wslc.exe', cli)
+    with pytest.raises(WslcPrerequisiteError) as error:
+        runtime.check()
+    assert error.value.action == 'update'
+    assert cli.calls == [['wslc.exe', 'version']]
+    assert next(row for row in runtime.setup_checks if row['key'] == 'version')['status'] == 'failed'
     assert len(cli.calls) == 1
 
 
