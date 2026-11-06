@@ -34,6 +34,16 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.6.3" date="2026-11-06">
+      <description>
+        <ul>
+          <li>Improve Windows built-in server setup with clear prerequisite checklists and actions under failed checks.</li>
+          <li>Detect unavailable hardware virtualization and keep the built-in server disabled until the user explicitly retries.</li>
+          <li>Resume WSL setup after restarting Windows and keep playlist imports to remote servers available during local setup.</li>
+          <li>Fix verification of Windows backend settings-folder permissions for canonical account identities.</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.6.2" date="2026-11-06">
       <description>
         <ul>
