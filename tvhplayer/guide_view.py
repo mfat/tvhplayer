@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QProgressBar,
     QPushButton,
-    QScrollArea,
+    QPlainTextEdit,
     QSizePolicy,
     QToolTip,
     QVBoxLayout,
@@ -887,27 +887,27 @@ class GuideWindow(QDialog):
         self.title_label.setFont(title_font)
         self.title_label.setWordWrap(True)
         self.timing_label = QLabel()
-        self.description_label = QLabel()
-        self.description_label.setWordWrap(True)
-        self.description_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        description_scroll = QScrollArea()
-        description_scroll.setWidget(self.description_label)
-        description_scroll.setWidgetResizable(True)
-        description_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        description_scroll.setFixedHeight(QFontMetrics(self.font()).lineSpacing() * 4 + 6)
-        description_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Give long EPG descriptions their own scrollable, selectable view.
+        # Unlike a QLabel nested in a fixed-height scroll area, QPlainTextEdit
+        # supports wheel and keyboard scrolling of long wrapped descriptions.
+        self.description_text = QPlainTextEdit()
+        self.description_text.setReadOnly(True)
+        self.description_text.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.description_text.setTabChangesFocus(True)
+        self.description_text.setFrameShape(QFrame.Shape.NoFrame)
+        self.description_text.setFixedHeight(QFontMetrics(self.font()).lineSpacing() * 6 + 12)
+        self.description_text.setAccessibleName("Programme description")
+        self.description_text.setAccessibleDescription("Full programme description; scroll for additional text.")
         for label, name in (
             (self.channel_label, "Channel"),
             (self.title_label, "Programme"),
             (self.timing_label, "Time"),
-            (self.description_label, "Description"),
         ):
             label.setAccessibleDescription(name)
         text_column.addWidget(self.channel_label)
         text_column.addWidget(self.title_label)
         text_column.addWidget(self.timing_label)
-        text_column.addWidget(description_scroll)
+        text_column.addWidget(self.description_text)
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
         text_column.addWidget(self.status_label)
@@ -1179,6 +1179,13 @@ class GuideWindow(QDialog):
             return self._overrides[event.event_id]
         return self.grid.state_of(event)
 
+    def _set_description(self, text):
+        # The guide refreshes details periodically. Keep the user's scroll
+        # position while the selected description has not changed.
+        if self.description_text.toPlainText() != text:
+            self.description_text.setPlainText(text)
+            self.description_text.verticalScrollBar().setValue(0)
+
     def _show_details(self):
         channel = self.grid.current_channel()
         event = self.grid.current_event()
@@ -1187,7 +1194,7 @@ class GuideWindow(QDialog):
             self.channel_label.setText("")
             self.title_label.setText("")
             self.timing_label.setText(self._error and f"Could not load the guide: {self._error}" or "")
-            self.description_label.setText("")
+            self._set_description("")
             for button in (self.watch_btn, self.record_btn, self.series_btn):
                 button.setEnabled(False)
             return
@@ -1198,7 +1205,7 @@ class GuideWindow(QDialog):
         if event is None:
             self.title_label.setText("No programme information")
             self.timing_label.setText(self._error and f"Could not load the guide: {self._error}" or "")
-            self.description_label.setText("")
+            self._set_description("")
             self.record_btn.setText("Re&cord")
             self.record_btn.setEnabled(False)
             self.series_btn.setEnabled(False)
@@ -1212,7 +1219,7 @@ class GuideWindow(QDialog):
         self.title_label.setText(event.title or "No title")
         self.timing_label.setText(timing)
         text = "\n\n".join(part for part in (event.subtitle, event.description) if part)
-        self.description_label.setText(text or "No description.")
+        self._set_description(text or "No description.")
         ended = event.stop <= now
         if state == RECORDING:
             self.record_btn.setText("Stop Re&cording")
