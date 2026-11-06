@@ -78,10 +78,10 @@ def test_complete_windows_package_is_available_before_wsl_setup(monkeypatch, tmp
 def test_corrupt_archive_never_reaches_runtime(tmp_path):
     bundle(tmp_path)
     (tmp_path / 'tvheadend.tar').write_bytes(b'tampered')
-    cli = Cli()
+    cli = Cli('Object not found: ' + IMAGE)
     with pytest.raises(WslcError, match='checksum'):
         WslcRuntimeAdapter('wslc.exe', cli).provision(tmp_path)
-    assert not cli.calls
+    assert cli.calls == [['wslc.exe', 'inspect', '--type', 'image', IMAGE]]
 
 
 def test_offline_provision_uses_immutable_image(tmp_path):
@@ -89,6 +89,30 @@ def test_offline_provision_uses_immutable_image(tmp_path):
     cli = Cli(json.dumps([{'Id': IMAGE, 'Architecture': 'amd64'}]))
     assert WslcRuntimeAdapter('wslc.exe', cli).provision(tmp_path) == IMAGE
     assert cli.calls == [['wslc.exe', 'inspect', '--type', 'image', IMAGE]]
+
+
+def test_cached_image_does_not_read_unused_archive(tmp_path, monkeypatch):
+    bundle(tmp_path)
+    def forbidden(*args, **kwargs):
+        pytest.fail('Cached image startup must not hash the offline archive')
+    monkeypatch.setattr('tvhplayer.core.backend_bundle.file_digest', forbidden)
+    (tmp_path / 'tvheadend.tar').unlink()
+    cli = Cli(json.dumps([{'Id': IMAGE, 'Architecture': 'amd64'}]))
+    assert WslcRuntimeAdapter('wslc.exe', cli).provision(tmp_path) == IMAGE
+    assert len(cli.calls) == 1
+
+
+@pytest.mark.parametrize('field,value', [('image', 'latest'), ('tvheadend_commit', 'wrong'), ('schema', 99)])
+def test_invalid_manifest_rejected_before_cached_image_lookup(tmp_path, field, value):
+    bundle(tmp_path)
+    path = tmp_path / 'manifest.json'
+    manifest = json.loads(path.read_text())
+    manifest[field] = value
+    path.write_text(json.dumps(manifest))
+    cli = Cli(json.dumps([{'Id': IMAGE, 'Architecture': 'amd64'}]))
+    with pytest.raises(WslcError):
+        WslcRuntimeAdapter('wslc.exe', cli).provision(tmp_path)
+    assert not cli.calls
 
 
 def test_offline_load_on_cache_miss(tmp_path):

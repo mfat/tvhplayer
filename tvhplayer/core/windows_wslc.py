@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -10,7 +11,7 @@ import time
 from pathlib import Path
 
 from .windows_backend_paths import bind_mount
-from .backend_bundle import verify_bundle
+from .backend_bundle import read_manifest, verify_bundle
 
 
 class WslcError(RuntimeError):
@@ -98,16 +99,27 @@ class WslcRuntimeAdapter:
 
     def provision(self, directory):
         directory = Path(directory)
+        started = time.monotonic()
         try:
-            manifest = verify_bundle(directory, cancel=self.cancel)
+            manifest = read_manifest(directory)
             image = manifest['image']
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise WslcError(f'Install the matching offline backend bundle: {exc}') from exc
-        # Always verify the archive, even when this image was previously loaded.
+        # WSLc checks the immutable imported image identity and architecture.
+        # The archive is only needed (and hashed) when that image is absent.
         if not self.has_image(image):
+            try:
+                verify_bundle(directory, cancel=self.cancel)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise WslcError(f'Install the matching offline backend bundle: {exc}') from exc
+            logging.getLogger(__name__).info('Offline backend archive verified in %.1fs', time.monotonic() - started)
+            loading = time.monotonic()
             self.command('load', '--input', directory / 'tvheadend.tar', timeout=300)
+            logging.getLogger(__name__).info('Offline backend image imported in %.1fs', time.monotonic() - loading)
             if not self.has_image(image):
                 raise WslcError('The offline archive did not provide the required backend image.')
+        else:
+            logging.getLogger(__name__).info('Reused offline backend image in %.1fs', time.monotonic() - started)
         return image
 
     def has_image(self, image):

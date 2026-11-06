@@ -115,7 +115,7 @@ class WindowsBackendSetup(QDialog):
     def _status(self, status):
         if status in ('starting', 'installing'):
             self._busy(True)
-            self.message.setText('Loading the offline server image…' if status == 'installing' else 'Starting the built-in server…')
+            self.message.setText('Preparing the built-in server…' if status == 'installing' else 'Starting the built-in server…')
         elif status in ('failed', 'stopped'):
             self._busy(False)
 

@@ -18,7 +18,8 @@ def file_digest(path, cancel=None):
     return digest.hexdigest()
 
 
-def verify_bundle(directory, *, release=False, cancel=None):
+def read_manifest(directory):
+    """Validate bundle identity without reading the potentially large archive."""
     directory = Path(directory)
     manifest = json.loads((directory / 'manifest.json').read_text(encoding='utf-8-sig'))
     if not isinstance(manifest, dict):
@@ -29,6 +30,12 @@ def verify_bundle(directory, *, release=False, cancel=None):
         raise ValueError('Expected immutable backend image identity')
     if not re.fullmatch(r'[0-9a-f]{64}', manifest.get('sha256', '')):
         raise ValueError('Invalid backend archive SHA256')
+    return manifest
+
+
+def verify_bundle(directory, *, release=False, cancel=None):
+    directory = Path(directory)
+    manifest = read_manifest(directory)
     if (directory / 'tvheadend.tar').is_symlink() or file_digest(directory / 'tvheadend.tar', cancel) != manifest['sha256']:
         raise ValueError('Backend image checksum mismatch')
     if release:
