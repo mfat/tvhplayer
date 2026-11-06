@@ -28,14 +28,18 @@ class Runtime:
         return IMAGE
     def prepare_config(self, image, config):
         pass
+    def hdhomerun_device(self):
+        return ''
+    def configure_hdhomerun(self, transport):
+        pass
     def backup_config(self, *, upgrade=False):
         self.backups.append(upgrade)
         return Path('native-backup.tar.gz')
-    def launch(self, image, name, owner, config, recordings, ports):
-        self.starts.append((name, owner, ports))
+    def launch(self, image, name, owner, config, recordings, ports, udp_ports=()):
+        self.starts.append((name, owner, ports, udp_ports))
         if len(self.starts) <= self.collisions:
             raise WslcError('bind: Address already in use')
-    def verify_running(self, name, owner, ports):
+    def verify_running(self, name, owner, ports, udp_ports=()):
         pass
     def logs_owned(self, name, owner):
         return ''
@@ -48,6 +52,9 @@ def supervisor(tmp_path, monkeypatch, runtime):
     monkeypatch.setattr(module, 'protect_config', lambda path: path.mkdir(parents=True, exist_ok=True))
     monkeypatch.setattr(module, 'serverinfo_ok', lambda *args, **kwargs: True)
     monkeypatch.setattr(module, 'apply_builtin_defaults', lambda *args, **kwargs: [])
+    monkeypatch.setattr(module, 'probe_host_device', lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, 'plan_transport', lambda devices, **kwargs: None)
+    monkeypatch.setattr(module, 'apply_hdhomerun_transport', lambda *args, **kwargs: True)
     monkeypatch.setattr(module, 'use_guest_ffmpeg', lambda *args: 0)
     monkeypatch.setattr(module.socket, 'create_connection', lambda *args, **kwargs: contextlib.nullcontext())
     s = module.WslcBuiltinSupervisor(tmp_path / 'config', tmp_path, 24111, 24112, runtime=runtime)
@@ -66,6 +73,62 @@ def test_port_collision_recreates_only_owned_container(tmp_path, monkeypatch):
     assert runtime.stops == [start[:2] for start in runtime.starts]
     assert not (s.config_dir / 'wslc-owner.json').exists()
     assert s.status == 'stopped'
+
+
+def test_hdhomerun_udp_range_is_published_and_configured(tmp_path, monkeypatch):
+    from tvhplayer.core.hdhomerun import HdHomeRunTransport
+    runtime = Runtime()
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    transport = HdHomeRunTransport('192.168.8.211', 30000, 2, device_ip='192.168.8.148')
+    monkeypatch.setattr(module, 'plan_transport', lambda devices, **kwargs: transport)
+    applied = []
+    monkeypatch.setattr(module, 'apply_hdhomerun_transport',
+                        lambda *args, **kwargs: applied.append(args) or True)
+    s._run()
+    expected = (('192.168.8.211', 30000), ('192.168.8.211', 30001))
+    assert runtime.starts[0][3] == expected
+    assert applied and applied[0][1:3] == ('192.168.8.211', 30000)
+    assert 'udp://192.168.8.211:30000-30001' in s.log_text()
+
+
+def test_transport_planning_uses_configured_device_without_broadcast(tmp_path, monkeypatch):
+    from tvhplayer.core.hdhomerun import HostTuner, HdHomeRunTransport
+    runtime = Runtime()
+    runtime.hdhomerun_device = lambda: '192.168.1.9'
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    device = HostTuner('192.168.1.9', '192.168.1.5', 4)
+    def probe(address, **kwargs):
+        assert address == '192.168.1.9'
+        return device
+    def plan(devices, **kwargs):
+        assert devices == [device] and kwargs['device_ip'] == device.ip
+        return HdHomeRunTransport(device.local_ip, 30000, device.tuner_count, device.ip)
+    monkeypatch.setattr(module, 'probe_host_device', probe)
+    monkeypatch.setattr(module, 'plan_transport', plan)
+    assert s._plan_hdhomerun_transport().device_ip == device.ip
+
+
+def test_unreadable_live_config_does_not_launch_or_overwrite_it(tmp_path, monkeypatch):
+    runtime = Runtime()
+    def fail():
+        raise WslcError('Cannot read live settings')
+    runtime.hdhomerun_device = fail
+    runtime.configure_hdhomerun = lambda *a: pytest.fail('Must not overwrite unreadable settings')
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    s._run()
+    assert not runtime.starts and s.status == 'failed'
+
+
+def test_hdhomerun_udp_ports_move_when_a_publish_conflicts(tmp_path, monkeypatch):
+    from tvhplayer.core.hdhomerun import HdHomeRunTransport
+    runtime = Runtime(collisions=1)
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    transport = HdHomeRunTransport('192.168.8.211', 30000, 2)
+    monkeypatch.setattr(module, 'plan_transport', lambda devices, **kwargs: transport)
+    monkeypatch.setattr(module, 'pick_udp_base', lambda *args, **kwargs: 31000)
+    s._run()
+    assert runtime.starts[0][3] == (('192.168.8.211', 30000), ('192.168.8.211', 30001))
+    assert runtime.starts[1][3] == (('192.168.8.211', 31000), ('192.168.8.211', 31001))
 
 
 def test_image_upgrade_backs_up_config_without_recordings(tmp_path, monkeypatch):

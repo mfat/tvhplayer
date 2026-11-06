@@ -391,6 +391,45 @@ def _post_json(http_port: int, path: str, form: dict, username='', password='', 
         return None
 
 
+def _get_json(http_port: int, path: str, username='', password='', timeout: float = 2.0):
+    url = f'http://127.0.0.1:{int(http_port)}/{path}'
+    try:
+        with _direct_opener(url, username, password).open(url, timeout=timeout) as response:
+            return json.loads(response.read().decode('utf-8'))
+    except (OSError, urllib.error.URLError, ValueError):
+        return None
+
+
+def read_hdhomerun_transport(http_port: int, username='', password='') -> tuple[str, int] | None:
+    """The server's ``(local_ip, local_port)`` HDHomeRun stream settings, or None."""
+    data = _get_json(http_port, 'api/config/load', username, password)
+    entries = data.get('entries') if isinstance(data, dict) else None
+    params = {param.get('id'): param.get('value')
+              for param in (entries[0].get('params') or [])} if entries else {}
+    local_ip, local_port = params.get('local_ip'), params.get('local_port')
+    if not isinstance(local_ip, str):
+        return None
+    try:
+        return local_ip, int(local_port)
+    except (TypeError, ValueError):
+        return None
+
+
+def apply_hdhomerun_transport(http_port: int, local_ip: str, local_port: int,
+                              username='', password='') -> bool:
+    """Advertise a LAN-reachable address and per-tuner UDP range to HDHomeRun.
+
+    Tvheadend binds ``local_port + tuner_number``. The Windows backend publishes
+    the same range into the WSLc container, so the HDHomeRun never has to reach
+    a private container address. Read the settings back rather than trusting a
+    successful POST.
+    """
+    node = json.dumps({'local_ip': str(local_ip), 'local_port': int(local_port)})
+    if not _post(http_port, 'api/config/save', {'node': node}, username, password):
+        return False
+    return read_hdhomerun_transport(http_port, username, password) == (str(local_ip), int(local_port))
+
+
 def set_recording_profile(http_port: int, changes: dict, username='', password='') -> bool:
     """Change fields of the default recording profile. Other profiles keep their own."""
     grid = _post_json(http_port, 'api/dvr/config/grid', {'limit': '100'}, username, password)

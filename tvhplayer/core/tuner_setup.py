@@ -17,10 +17,12 @@ Tvheadend grabs the over-the-air guide on its own once channels exist.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Iterable, List, Tuple
 
 from .tuners import Tuner
+from .errors import TvhError
 
 # Tuner type -> (network class, scan table type).
 NETWORKS = {
@@ -51,10 +53,22 @@ def supported(kind: str) -> bool:
     return kind in NETWORKS
 
 
-def scan_regions(admin, kind: str) -> List[Tuple[str, str]]:
+def scan_regions(admin, kind: str, *, canonical=False) -> List[Tuple[str, str]]:
     """``(key, label)`` of every scan table for this tuner type, sorted by label."""
     _class, table = NETWORKS[kind]
-    data = admin.request('api/dvb/scanfile/list', params={'type': table})
+    if canonical:
+        table = {'dvbt': 'dvb-t', 'dvbc': 'dvb-c', 'dvbs': 'dvb-s', 'isdb-t': 'isdb-t'}.get(table, table)
+    # The bundled server loads its tables asynchronously after HTTP is ready.
+    # Retry that specific transient 400 only for the Windows built-in path.
+    deadline = time.monotonic() + 2
+    while True:
+        try:
+            data = admin.request('api/dvb/scanfile/list', params={'type': table})
+            break
+        except TvhError as exc:
+            if not canonical or not str(exc).startswith('HTTP 400 for api/dvb/scanfile/list:') or time.monotonic() >= deadline:
+                raise
+            time.sleep(.1)
     rows = data.get('entries') if isinstance(data, dict) else None
     regions = [(row['key'], row.get('val') or row['key']) for row in rows or [] if row.get('key')]
     return sorted(regions, key=lambda item: item[1].lower())

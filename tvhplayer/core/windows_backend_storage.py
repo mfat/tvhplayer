@@ -74,7 +74,7 @@ class NativeConfigStorage:
         name = 'tvhplayer-' + owner
         _write_json(self.helper_path, {'name': name, 'owner': owner})
         try:
-            self.runtime.command(
+            return self.runtime.command(
                 'run', '--rm', '--pull', 'never', '--no-healthcheck', '--name', name,
                 '--label', f'tvhplayer.owner={owner}', '--network', 'none',
                 '--mount', f'type=volume,source={self.volume},target=/native',
@@ -85,6 +85,26 @@ class NativeConfigStorage:
         finally:
             self.runtime.stop_owned(name, owner)
             self.helper_path.unlink(missing_ok=True)
+
+    def server_settings(self):
+        """Read the live volume, never the preserved Windows migration tree."""
+        output = self._helper(
+            'if [ -f /native/data/config ]; then cat /native/data/config; else printf "{}"; fi')
+        settings = json.loads(output)
+        if not isinstance(settings, dict):
+            raise WslcError('Invalid built-in server settings.')
+        return settings
+
+    def update_server_settings(self, settings):
+        """Update only while the owned server is stopped, before it loads muxes."""
+        transfer = self.folder / 'server-settings.json'
+        _write_json(transfer, settings)
+        try:
+            self._helper('set -eu; umask 077; test -f /native/data/.tvhplayer-native-ready; '
+                         'cp /config/.tvhplayer-storage/server-settings.json /native/data/config.tmp; '
+                         'chmod 600 /native/data/config.tmp; mv /native/data/config.tmp /native/data/config')
+        finally:
+            transfer.unlink(missing_ok=True)
 
     def _make_seed(self):
         seed = self.folder / 'seed.tar'

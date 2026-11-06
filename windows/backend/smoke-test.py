@@ -16,10 +16,10 @@ def main():
     folder = root / 'windows' / 'build' / ('wslc-smoke-' + uuid.uuid4().hex)
     app = QCoreApplication([])
     class DiagnosticRuntime(WslcRuntimeAdapter):
-        def verify_running(self, name, owner, ports):
+        def verify_running(self, name, owner, ports, udp_ports=()):
             data = self.inspect_owned(name, owner)
             (folder / 'inspect.json').write_text(json.dumps(data, indent=2), encoding='utf-8')
-            return super().verify_running(name, owner, ports)
+            return super().verify_running(name, owner, ports, udp_ports)
     supervisor = WslcBuiltinSupervisor(folder / 'config', root / 'windows/backend/dist',
                                       runtime=DiagnosticRuntime())
     supervisor.recordings_dir = str(folder / 'recordings')

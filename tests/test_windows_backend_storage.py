@@ -54,6 +54,11 @@ class Runtime:
                     raise WslcError('Interrupted backup')
                 with tarfile.open(self.config / '.tvhplayer-storage/backup.tmp', 'w:gz') as archive:
                     archive.add(self.native, arcname='.')
+            elif 'cat /native/data/config' in script:
+                path = self.native / 'config'
+                return path.read_text() if path.exists() else '{}'
+            elif 'server-settings.json' in script:
+                (self.native / 'config').write_text((self.config / '.tvhplayer-storage/server-settings.json').read_text())
             else:
                 raise AssertionError(script)
             return ''
@@ -87,6 +92,18 @@ def test_migration_keeps_original_and_restart_uses_native_settings(tmp_path, mon
     assert s.generation == generation
     assert runtime.calls == [('volume', 'inspect', volume)]
     assert (runtime.native / 'channels/one').read_text() == 'edited in Linux'
+
+
+def test_server_settings_read_live_volume_and_preserve_original_tree(tmp_path):
+    s, runtime = storage(tmp_path)
+    (s.config / 'config').write_text(json.dumps({'hdhomerun_ip': '192.168.1.2'}))
+    s.prepare()
+    (runtime.native / 'config').write_text(json.dumps({'hdhomerun_ip': '192.168.1.3', 'other': 123}))
+    settings = s.server_settings()
+    assert settings['hdhomerun_ip'] == '192.168.1.3'
+    s.update_server_settings(dict(settings, local_ip='192.168.1.5', local_port=30000))
+    assert s.server_settings()['other'] == 123
+    assert json.loads((s.config / 'config').read_text()) == {'hdhomerun_ip': '192.168.1.2'}
 
 
 def test_interrupted_migration_is_resumable(tmp_path):

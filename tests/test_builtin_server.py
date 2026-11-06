@@ -427,6 +427,75 @@ def test_builtin_server_gets_its_ready_to_use_defaults():
     assert apply_builtin_defaults(_free_port_for_test()) == ['plain login', 'setup wizard off']
 
 
+def test_hdhomerun_transport_is_saved_and_read_back():
+    from urllib.parse import parse_qs
+
+    from tvhplayer.core.builtin_server import apply_hdhomerun_transport, read_hdhomerun_transport
+
+    state = {'local_ip': '', 'local_port': 0}
+
+    class Api(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers['Content-Length'])
+            form = parse_qs(self.rfile.read(length).decode())
+            state.update(json.loads(form['node'][0]))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{}')
+
+        def do_GET(self):
+            body = json.dumps({'entries': [{'params': [
+                {'id': 'local_ip', 'value': state['local_ip']},
+                {'id': 'local_port', 'value': state['local_port']},
+            ]}]}).encode()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.HTTPServer(('127.0.0.1', 0), Api)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert apply_hdhomerun_transport(server.server_address[1], '192.168.8.211', 30000) is True
+        assert read_hdhomerun_transport(server.server_address[1]) == ('192.168.8.211', 30000)
+    finally:
+        server.shutdown()
+    assert state == {'local_ip': '192.168.8.211', 'local_port': 30000}
+
+
+def test_hdhomerun_transport_fails_when_the_server_drops_the_setting():
+    from tvhplayer.core.builtin_server import apply_hdhomerun_transport
+
+    class Api(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers['Content-Length'])
+            self.rfile.read(length)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{}')
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({'entries': [{'params': [
+                {'id': 'local_ip', 'value': ''}, {'id': 'local_port', 'value': 0},
+            ]}]}).encode())
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.HTTPServer(('127.0.0.1', 0), Api)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        assert apply_hdhomerun_transport(server.server_address[1], '192.168.8.211', 30000) is False
+    finally:
+        server.shutdown()
+
+
 def test_builtin_server_records_into_the_app_folder():
     from urllib.parse import parse_qs
 

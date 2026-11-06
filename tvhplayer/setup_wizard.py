@@ -700,7 +700,8 @@ class TunerPage(QWizardPage):
             return
         announce_label(self.region_status, 'Reading the list of regions…')
         self.region_status.show()
-        self._wizard.call(lambda admin: scan_regions(admin, kind), lambda regions, error: self._regions_read(kind, regions, error))
+        canonical = sys.platform == 'win32' and self._wizard.server.get('builtin')
+        self._wizard.call(lambda admin: scan_regions(admin, kind, canonical=canonical), lambda regions, error: self._regions_read(kind, regions, error))
 
     def _regions_read(self, kind, regions, error):
         if kind != self.kind():

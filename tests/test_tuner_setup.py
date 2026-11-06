@@ -50,6 +50,34 @@ class Admin:
         return self.services
 
 
+def test_windows_pinned_scan_table_names_and_returned_keys_are_preserved():
+    class PinnedAdmin:
+        def request(self, path, params):
+            assert path == 'api/dvb/scanfile/list'
+            assert params == {'type': 'dvb-t'}
+            return {'entries': [{'key': 'dvb-t/auto/dvb-t_auto-Defaul', 'val': '--Generic--: auto-Default'}]}
+    assert scan_regions(PinnedAdmin(), 'DVB-T', canonical=True) == [
+        ('dvb-t/auto/dvb-t_auto-Defaul', '--Generic--: auto-Default')]
+
+
+def test_windows_scan_table_loading_is_retried_without_changing_other_servers(monkeypatch):
+    import pytest
+    from tvhplayer.core.errors import TvhError
+    monkeypatch.setattr('tvhplayer.core.tuner_setup.time.sleep', lambda delay: None)
+    class LoadingAdmin:
+        calls = 0
+        def request(self, path, params):
+            self.calls += 1
+            if self.calls == 1:
+                raise TvhError('HTTP 400 for api/dvb/scanfile/list: loading')
+            return {'entries': []}
+    admin = LoadingAdmin()
+    assert scan_regions(admin, 'DVB-T', canonical=True) == []
+    assert admin.calls == 2
+    with pytest.raises(TvhError):
+        scan_regions(LoadingAdmin(), 'DVB-T')
+
+
 def test_regions_are_sorted_and_named():
     admin = Admin()
     regions = scan_regions(admin, 'DVB-T')

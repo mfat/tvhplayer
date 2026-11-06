@@ -125,9 +125,54 @@ folders without commas are supported. Stop the backend before changing recording
 folders. IPTV playlists use `/usr/bin/ffmpeg`. Tuner setup reads the backend's
 hardware tree. If container broadcasts find no tuners, Windows performs a local
 HDHomeRun discovery and configures directed discovery when exactly one device
-responds. This can take about 20 seconds. Detecting both DVB-T frontends of the
-development network's HDHomeRun has been verified; scanning and streaming through
-the container still require hardware testing. USB passthrough is not configured.
+responds. This can take about 20 seconds.
+
+### HDHomeRun MPEG-TS return path
+
+Tvheadend inside WSLc sits on a private container address. An HDHomeRun on the
+LAN cannot send MPEG-TS UDP there, so a scan that only locks RF reports
+`scan no data`. On startup the built-in server:
+
+1. Reads the selected HDHomeRun from the live Linux settings, determines the
+   Windows route to that device, and probes it with unicast discovery (at most
+   250 ms if offline). There is no unconditional two-second broadcast wait.
+2. Chooses a free consecutive UDP port range (`local_port` … `local_port + tuners - 1`).
+3. Publishes each port with WSLc as `LAN_IP:port:port/udp` (not `0.0.0.0`, not loopback).
+4. Updates Tvheadend's settings before launch so an existing initial scan cannot
+   advertise stale ports; reads the settings back through the API before ready.
+   `local_ip` / `local_port` make tuner *n* advertise
+   `udp://LAN_IP:(local_port + n)` while listening on that guest UDP port.
+
+These are configuration/API properties in the pinned Tvheadend, not command-line
+flags. The preserved Windows migration tree is never used as the live settings
+source. Unknown configuration fields are retained when preparing the new route.
+Only the configured device is selected; multiple discovered devices are never
+resolved by choosing the first reply. With no selected device, up to eight UDP
+ports on the default LAN interface are reserved for later setup. Setup checks
+the route even when the server already lists a tuner. If the device is on another
+interface, its address is saved and setup requests a server restart so the next
+launch can publish on that interface. Reconnect/restart after DHCP or route changes.
+
+HTTP and HTSP stay on `127.0.0.1` only. No host-network mode, Docker, or Windows
+UDP relay is used. WSLc 3.0.3 accepts the host-IP UDP publish form; host networking
+is not relied on. USB passthrough is not configured.
+
+`python windows/backend/hdhomerun-test.py` runs an isolated server and scans with
+Tvheadend's generic `--Generic--: auto-Default` table by default.
+Windows built-in setup uses canonical scan-table names such as `dvb-t` and the
+exact keys returned by the server. It retries the short asynchronous table-loading
+window instead of treating its HTTP 400 as a permanent backend failure.
+For a bounded dual-tuner test with known local frequencies, use:
+
+```powershell
+python windows/backend/hdhomerun-test.py --bundle 'C:\Program Files\TVHplayer\backend' --device DEVICE_IP --frequency 602000000 --frequency 674000000 --timeout 90
+```
+
+Replace the address and frequencies with those for the installation. The test
+keeps two streams from different RF muxes open together and checks MPEG-TS data,
+simultaneous RF locks, and the advertised targets. Run it only while the tuner
+is free, and run real WSLc acceptance scripts sequentially. Do not run a second
+scanner against the same physical frontends.
 
 Runtime operations run in a background thread. A per-config QLockFile rejects
 duplicate windows. A persisted random name and owner label identify an orphan

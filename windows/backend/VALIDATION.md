@@ -26,8 +26,113 @@ deliberately terminating a private test UI. Tests preserve unrelated WSL workloa
 `python windows/backend/smoke-test.py` checks basic startup and shutdown. An
 offscreen full-app launch reached successful mpv initialization and channel fetch.
 Windows-side HDHomeRun discovery found the local device and the container's
-directed discovery found both DVB-T frontends. RF scanning/tuning was not performed
-because that device was already used by the user's remote server.
+directed discovery found both DVB-T frontends.
+
+## HDHomeRun MPEG-TS transport
+
+Root cause: Tvheadend's HDHomeRun input thread
+(`tvhdhomerun_frontend_input_thread`, lines 86–150 of
+`src/input/mpegts/tvhdhomerun/tvhdhomerun_frontend.c` at commit
+`40e88d4cef2c81e44474e75fd2f1edb232575ceb`) binds UDP on `INADDR_ANY` and tells
+the device `udp://<local_ip>:<port>`. With an empty `local_ip` it uses the
+container address (for example `172.17.0.3`), which the LAN tuner cannot reach.
+Control-plane discovery on UDP 65001 still worked; the media plane did not.
+
+Fix chosen (Option B — explicit UDP publish): advertise a Windows LAN address and
+deterministic per-tuner ports via Tvheadend `local_ip`/`local_port`, and publish
+the same UDP range with WSLc `--publish LAN:port:port/udp`. Option A (host /
+direct networking) was rejected because WSLc 3.0.3 does not provide a supported
+host-network mode for this app model. Option C (Windows UDP relay) was rejected
+as unnecessary once publish+`local_ip` was verified.
+
+Contract coverage: `tests/test_hdhomerun.py`, `tests/test_windows_wslc.py`,
+`tests/test_wslc_lifecycle.py`, and `tests/test_builtin_server.py` cover discovery
+metadata, port planning, LAN-only UDP publication, readiness checks, supervisor
+lifecycle, and config save/read-back.
+
+Hardware acceptance on this development host (WSLc 3.0.3, HDHomeRun
+`192.168.8.148` via `192.168.8.211`):
+
+- Built-in server published MPEG-TS UDP on the LAN address and configured
+  Tvheadend `local_ip`/`local_port`.
+- HDHomeRun `/tuner0/target` became `udp://192.168.8.211:<published-port>`
+  (not a container `172.17.x.x` address).
+- RF lock on DVB-T2 at 674 MHz; scan discovered service(s) and mapped channel
+  `IRIB UHD HDR`; authenticated HTTP MPEG-TS play returned sync-byte `0x47`
+  packets.
+- The scan-table 400 was a client naming issue, plus asynchronous table loading:
+  the pinned server expects `type=dvb-t`, not `dvbt`. Windows built-in setup now
+  uses that canonical type, retries that specific startup-loading error for at
+  most two seconds, and preserves the returned scanfile keys exactly. A live
+  check returned 1,171 DVB-T tables; `dvb-t/auto/dvb-t_auto-Defaul` created 57 muxes.
+  The normal setup UI no longer needs a synthetic table or a backend patch.
+  Native Linux, macOS and remote-server requests retain their existing path.
+- After stopping competing acceptance-test processes, an isolated selected-device
+  run scanned 602 MHz and 674 MHz, found 12 services, mapped 12 channels and
+  played IRIB TV1. It then held both frequencies locked and read 1,372,400 bytes
+  of valid MPEG-TS from **each** channel simultaneously over six seconds.
+  The owned container was removed and both Windows UDP publications were released.
+
+### Review follow-up and reproduction (2026-11-06)
+
+The combined automated suite passed **168 tests, 4 skipped**. It includes startup
+selection, existing-tuner route checks, multi-device selection, live-volume
+settings preservation, canonical scan-table requests, UDP bindings, authentication,
+bundle integrity, and lifecycle contracts. Hardware evidence is separate below.
+
+Startup no longer performs unconditional two-second broadcast discovery. It
+reads the selected device from the live owned Linux volume, determines the
+Windows route to that specific IP and makes a short unicast probe. It never
+chooses the first of several devices. With no selection it reserves up to eight
+UDP ports on the default LAN interface for later setup. Missing/offline devices
+do not prevent IPTV startup.
+
+The new address/port settings are written atomically before TVHeadend starts,
+preserving unrelated settings, so persisted initial scans do not advertise old
+UDP ports. API read-back and strict publication checks gate readiness. Existing
+HDHomeRun frontend entries get the same route validation as new discoveries;
+NIC/DHCP changes produce a restart diagnostic rather than silent zero-service scans.
+
+The IPTV integration test passed authenticated HTTP MPEG-TS, HTSP media,
+Windows-folder recording/FFprobe, and preservation of credentials, channels and
+recordings across restart. Socket-table checks confirmed loopback-only HTTP/HTSP
+and rejection of unauthenticated/wrong credentials. The lifecycle test passed
+real port-collision retry, duplicate-window rejection and killed-UI orphan recovery
+with UDP publication enabled.
+
+Reproduce a focused RF test, using a free tuner and locally valid frequencies:
+
+```powershell
+python windows/backend/hdhomerun-test.py --bundle 'C:\Program Files\TVHplayer\backend' --device 192.168.8.148 --frequency 602000000 --frequency 674000000 --timeout 90
+```
+
+The script refuses to take a tuner already locked by another recorder/test. It
+holds channels from different RF muxes open together, reads both streams for six
+seconds, checks simultaneous RF locks/targets, then verifies container removal
+and that the UDP range can be rebound. The default full-band test looks up the
+generic table's exact key from the server.
+
+Run real WSLc acceptance scripts sequentially: parallel container creation during
+validation produced transient `E_UNEXPECTED` errors on this runtime, while the
+same tests passed sequentially. Concurrent media **within one server** passed.
+These short tests do not qualify sustained recording load or every WSLc version.
+
+Source references, verified against the pinned commit:
+
+- [HDHomeRun receiver, target address/port, tuning and lock handling](https://github.com/mfat/tvheadend/blob/40e88d4cef2c81e44474e75fd2f1edb232575ceb/src/input/mpegts/tvhdhomerun/tvhdhomerun_frontend.c)
+- [Configuration properties `hdhomerun_ip`, `local_ip`, `local_port`](https://github.com/mfat/tvheadend/blob/40e88d4cef2c81e44474e75fd2f1edb232575ceb/src/config.c)
+- [Scan-table API and server-provided keys](https://github.com/mfat/tvheadend/blob/40e88d4cef2c81e44474e75fd2f1edb232575ceb/src/api/api_mpegts.c)
+- [Microsoft WSL container documentation](https://learn.microsoft.com/en-us/windows/wsl/wsl-container)
+- [SiliconDust UDP target/control interface](https://info.hdhomerun.com/info/hdhomerun_config)
+
+`local_ip` and `local_port` are JSON configuration/API properties in this pin,
+not supported command-line flags. No upstream TVHeadend modification, global WSL
+setting, firewall change, host-network mode, third-party relay or fixed container
+address was needed. The Microsoft overview alone does not prove UDP semantics:
+the actual published ports, tuner targets, services and received MPEG-TS provide
+end-to-end evidence on WSLc 3.0.3.0. Older supported runtimes and multi-device
+installations need separate hardware qualification; the directed backend selects
+one device with multiple concurrent tuners.
 
 The final pinned image also passed the media and lifecycle tests:
 `sha256:fda0e3415254a8ecabc539042e33d87c438ad3ba48a48836df4a17deaa53bf81`.
@@ -88,7 +193,7 @@ The following cannot be established on an already-provisioned single host:
 - Reachability testing from a second physical LAN machine; host binding checks
   above passed but are not a substitute for a second-host test.
 - Sleep/resume, drive removal, disk-full behavior, multiple Windows accounts,
-  long sustained recordings, and RF tuner streaming under load.
+  and long sustained recordings under load.
 - Actual offline first import on a clean host with its internet disconnected.
 
 The workflow-dispatch `run_wslc_acceptance` option runs media/lifecycle tests on

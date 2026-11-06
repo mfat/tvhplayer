@@ -159,13 +159,27 @@ class WslcRuntimeAdapter:
     def config_generation(self):
         return self.config_storage.generation
 
-    def launch(self, image, name, owner, config, recordings, ports):
+    def hdhomerun_device(self):
+        self._server_settings = self.config_storage.server_settings()
+        return self._server_settings.get('hdhomerun_ip') or ''
+
+    def configure_hdhomerun(self, transport):
+        changes = transport.config() if transport else {'local_ip': '', 'local_port': 0}
+        if any(self._server_settings.get(key) != value for key, value in changes.items()):
+            self.config_storage.update_server_settings(dict(self._server_settings, **changes))
+
+    def launch(self, image, name, owner, config, recordings, ports, udp_ports=()):
         if self.config_storage is None or not self.config_storage.volume:
             raise WslcError('Linux server settings have not been prepared.')
         args = ['run', '--detach', '--pull', 'never', '--name', name,
                 '--label', f'tvhplayer.owner={owner}', '--stop-timeout', '5']
         for host, guest in zip(ports, (9981, 9982)):
             args += ['--publish', f'127.0.0.1:{int(host)}:{guest}/tcp']
+        # HDHomeRun MPEG-TS return path: tuner n sends to local_port+n on the
+        # Windows LAN address, and WSLc forwards the same guest UDP port.
+        for host_ip, port in udp_ports:
+            port = int(port)
+            args += ['--publish', f'{host_ip}:{port}:{port}/udp']
         args += ['--mount', f'type=volume,source={self.config_storage.volume},target=/config',
                  '--mount', bind_mount(str(recordings), '/recordings'), '--entrypoint', '/bin/sh']
         self.command(*args, image, '-c',
@@ -194,17 +208,27 @@ class WslcRuntimeAdapter:
         except (ValueError, KeyError, TypeError, IndexError) as exc:
             raise WslcError('Cannot verify TVHplayer container ownership.') from exc
 
-    def verify_running(self, name, owner, ports):
+    def verify_running(self, name, owner, ports, udp_ports=()):
         data = self.inspect_owned(name, owner)
         if not data['State']['Running']:
             raise WslcError('The built-in container stopped before it was ready.')
         # WSLc 3.x uses top-level Ports; Docker-compatible versions may nest it.
         mappings = data.get('Ports', data.get('NetworkSettings', {}).get('Ports', {}))
-        if set(mappings) != {'9981/tcp', '9982/tcp'}:
+        expected = {'9981/tcp', '9982/tcp'}
+        for host_ip, port in udp_ports:
+            expected.add(f'{int(port)}/udp')
+        if set(mappings) != expected:
             raise WslcError('Unexpected backend port publication.')
         for host, guest in zip(ports, (9981, 9982)):
             if mappings.get(f'{guest}/tcp') != [{'HostIp': '127.0.0.1', 'HostPort': str(host)}]:
                 raise WslcError('Cannot verify loopback-only publication of both server ports.')
+        for host_ip, port in udp_ports:
+            port = int(port)
+            published = mappings.get(f'{port}/udp')
+            if published != [{'HostIp': str(host_ip), 'HostPort': str(port)}]:
+                raise WslcError('Cannot verify the HDHomeRun stream port publication.')
+            if host_ip in ('0.0.0.0', '::') or host_ip.startswith('127.'):
+                raise WslcError('HDHomeRun stream ports must be published on one LAN address.')
 
     def stop_owned(self, name, owner):
         data = self.inspect_owned(name, owner, cancellable=False, missing_ok=True)
