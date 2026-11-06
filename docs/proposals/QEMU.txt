@@ -1,0 +1,123 @@
+QEMU is a serious alternative for TVHplayer, and potentially a better solution than building a Windows BDA-to-SAT>IP bridge. It gives TVHeadend a dedicated Linux environment with its own kernel and USB tuner drivers, without modifying WSL or interfering with other applications.
+
+However, USB passthrough on Windows is the critical issue to validate.
+
+## 1. Proposed architecture
+
+TVHplayer — Windows
+
+PyQt6 GUI and VM lifecycle manager
+
+QEMU + WHPX acceleration
+
+Lightweight, headless Linux virtual machine
+
+Dedicated Linux kernel
+
+DVB drivers, USB subsystem, tuner firmware
+
+TVHeadend
+
+Native DVB tuner detection, scanning and recording
+
+Unlike WSL2, the VM's kernel belongs exclusively to TVHplayer. You can compile in a broad set of Linux DVB drivers without affecting other WSL distributions.
+
+QEMU officially supports Windows Hypervisor Platform (WHPX) acceleration, including on supported Windows 10 and 11 systems.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.qemu.org\&sz=32)
+
+QEMU documentation
+
+
+
+## 2. USB passthrough: the important complication
+
+QEMU supports USB host devices through `usb-host` and USB redirection through `usb-redir`.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.qemu.org\&sz=32)
+
+QEMU documentation
+
+
+
+But on Windows, taking control of a USB tuner is more complicated than on Linux.
+
+There are two approaches worth evaluating.
+
+Option A: Direct USB host passthrough
+
+QEMU can expose a selected physical USB device to a guest using its USB host-device mechanism. However, Windows host compatibility depends on the QEMU build and USB access backend. You cannot assume an existing BDA driver will allow QEMU to claim the device.
+
+Option B: SPICE USB redirection
+
+This is especially interesting because the SPICE ecosystem already provides Windows USB redirection through UsbDk.
+
+The official documentation confirms that Windows clients can redirect USB devices to QEMU guests using UsbDk and the `usbredir` protocol.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.spice-space.org\&sz=32)
+
+spice-space.org+1
+
+
+
+For TVHplayer, I would test SPICE/UsbDk first rather than require users to replace their tuner drivers with WinUSB.
+
+## 3. Comparing QEMU with the SAT>IP proposal
+
+| Feature                                 | QEMU VM                | Windows BDA → SAT>IP         |
+| --------------------------------------- | ---------------------- | ---------------------------- |
+| Dedicated kernel                        | Yes                    | Not needed                   |
+| Linux DVB drivers                       | Native                 | Not used                     |
+| Windows BDA drivers                     | Not required inside VM | Required                     |
+| Requires USB passthrough                | Yes                    | No                           |
+| Requires custom protocol implementation | No                     | Potentially                  |
+| Existing TVHeadend code                 | Reused unchanged       | Reused unchanged             |
+| Advanced DVB-S/S2 controls              | Via Linux driver       | BDA-dependent                |
+| Memory overhead                         | Higher                 | Lower                        |
+| Installation complexity                 | Moderate to high       | Potentially lower            |
+| Hardware compatibility                  | Linux driver dependent | Windows BDA driver dependent |
+| Sharing resources with WSL              | No shared kernel       | Uses existing WSLc backend   |
+
+The greatest advantage of QEMU is that you avoid developing a hardware abstraction and SAT>IP translation layer. TVHeadend talks directly to Linux DVB devices, using the code it already has.
+
+The major disadvantage is that you must ship and manage a VM, including USB forwarding, kernel/firmware updates, networking and storage.
+
+## 4. How I would implement it
+
+I would not install a complete desktop Linux distribution.
+
+Instead, create a minimal, headless Linux appliance containing a dedicated kernel, a small userspace, TVHeadend, required firmware and a startup service.
+
+TVHplayer would manage that appliance automatically, expose TVHeadend on localhost and preserve settings and recordings on persistent storage.
+
+For USB devices, the initial proof of concept should verify that a specific tuner can be redirected into the guest, creates `/dev/dvb/adapter0`, scans channels and sustains recording. A basic device-enumeration test would not be sufficient.
+
+## 5. Recommendation
+
+QEMU should be added as a serious third proposal in your architecture evaluation.
+
+QEMU appliance — strongest for Linux-supported tuners
+
+Reuses TVHeadend's native DVB stack and provides a dedicated kernel. Best if reliable Windows USB passthrough can be demonstrated.
+
+Windows BDA-to-SAT>IP — strongest for Windows-supported tuners
+
+Avoids virtualization overhead and uses manufacturer-provided Windows drivers, but demands much more integration work.
+
+Existing WSLc — retain for network tuners
+
+Continue supporting IPTV, HDHomeRun and other network sources using your existing implementation.
+
+My revised recommendation is to prototype QEMU before developing a custom SAT>IP bridge.
+
+Test one real USB tuner on Windows using QEMU, WHPX and UsbDk-based redirection. If it works reliably during tuning, scanning, prolonged recording and unplug/reconnect cycles, QEMU may eliminate an entire new protocol-development project.
+
+The deciding factor is not VM performance but the reliability of real-time USB transport-stream capture through Windows USB redirection. QEMU's own documentation cautions that some real-time USB devices can be problematic.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://qemu-project.gitlab.io\&sz=32)
+
+QEMU documentation
+
+
+
+This deserves a hardware proof of concept before choosing QEMU as TVHplayer's production backend.
