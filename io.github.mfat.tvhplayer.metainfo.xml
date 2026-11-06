@@ -34,6 +34,17 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.6.2" date="2026-11-06">
+      <description>
+        <ul>
+          <li>Fix HDHomeRun channel scans returning no services in the Windows built-in server.</li>
+          <li>Support simultaneous HDHomeRun tuner streams through explicit Windows UDP forwarding while keeping HTTP and HTSP on loopback.</li>
+          <li>Use the configured tuner and validate its network route, including already discovered frontends.</li>
+          <li>Remove the unconditional startup broadcast wait and fix Windows built-in scan-table loading.</li>
+          <li>Improve backend health checks and settings-folder permissions.</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.6.1" date="2026-11-06">
       <description>
         <ul>

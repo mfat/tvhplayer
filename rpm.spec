@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.6.1
+Version:        4.6.2
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Fri Nov 06 2026 mFat <newmfat@gmail.com> - 4.6.2-1
+- Fix HDHomeRun channel scans returning no services in the Windows built-in server.
+- Support simultaneous HDHomeRun tuner streams through explicit Windows UDP forwarding while keeping HTTP and HTSP on loopback.
+- Use the configured tuner and validate its network route, including already discovered frontends.
+- Remove the unconditional startup broadcast wait and fix Windows built-in scan-table loading.
+- Improve backend health checks and settings-folder permissions.
+
 * Fri Nov 06 2026 mFat <newmfat@gmail.com> - 4.6.1-1
 - Speed up repeat startup of the built-in server on Windows.
 - Migrate Windows server settings safely to persistent Linux storage and keep automatic backups.
