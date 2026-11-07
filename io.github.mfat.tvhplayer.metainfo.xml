@@ -43,6 +43,17 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.6.5" date="2026-11-07">
+      <description>
+        <ul>
+          <li>Make the Organic theme the default for new installs.</li>
+          <li>Fix gaps at the rounded corners of menus and other popups in the Organic theme.</li>
+          <li>Keep the window title readable when switching between light and dark while the app is open.</li>
+          <li>Show pressed, switched-on, disabled and focused controls more clearly in the Organic theme.</li>
+          <li>Show the Flatpak recordings folder by its real location, with clearer guidance when it is unavailable.</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.6.4" date="2026-11-07">
       <description>
         <ul>
