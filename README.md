@@ -19,8 +19,6 @@ TVHplayer is a cross-platform desktop app for watching and recording live TV usi
 ## Who is this for
 Use TVHplayer with an existing Tvheadend server, or with its optional built-in server on Linux and Windows.
 
-The Linux built-in server supports IPTV playlists and supported TV tuners. Windows packages include a WSL Containers backend for IPTV and supported network tuners; hardware virtualization is required. macOS connects to an existing server.
-
 ## Features
 
 **Watch**
