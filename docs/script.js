@@ -5,6 +5,23 @@ const updateHeader = () => header.classList.toggle('scrolled', window.scrollY > 
 updateHeader();
 window.addEventListener('scroll', updateHeader, { passive: true });
 
+// The intro video plays muted on a loop, unless the visitor asked for less motion.
+const video = document.querySelector('[data-intro-video]');
+const toggle = document.querySelector('[data-video-toggle]');
+if (video && toggle) {
+  const sync = () => {
+    const playing = !video.paused;
+    toggle.classList.toggle('playing', playing);
+    toggle.setAttribute('aria-label', playing ? 'Pause video' : 'Play video');
+  };
+  video.addEventListener('play', sync);
+  video.addEventListener('pause', sync);
+  toggle.addEventListener('click', () => (video.paused ? video.play() : video.pause()));
+  toggle.hidden = false;
+  sync();
+  if (!reducedMotion) video.play().catch(sync);
+}
+
 if (reducedMotion) {
   document.querySelectorAll('.reveal').forEach((element) => element.classList.add('visible'));
 } else {
