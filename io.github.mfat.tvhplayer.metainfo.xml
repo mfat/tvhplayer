@@ -23,8 +23,20 @@
   <launchable type="desktop-id">io.github.mfat.tvhplayer.desktop</launchable>
   <screenshots>
     <screenshot type="default">
-      <caption>Channel list and player with the built-in server</caption>
-      <image>https://raw.githubusercontent.com/mfat/tvhplayer/f4f04fa1d39b3f92493d779bfe15f2cc2f4d5087/Screenshots/main.png</image>
+      <caption>Watch live TV with what’s on now beside every channel</caption>
+      <image type="source" width="1379" height="660">https://raw.githubusercontent.com/mfat/tvhplayer/a8208a67c1cd43d15b3ee6ab50b690ede5b96cef/Screenshots/main-window.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>See what’s on every channel in the TV guide</caption>
+      <image type="source" width="1379" height="660">https://raw.githubusercontent.com/mfat/tvhplayer/a8208a67c1cd43d15b3ee6ab50b690ede5b96cef/Screenshots/tv-guide.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Record several channels at once to your computer</caption>
+      <image type="source" width="1379" height="660">https://raw.githubusercontent.com/mfat/tvhplayer/a8208a67c1cd43d15b3ee6ab50b690ede5b96cef/Screenshots/recordings.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Light and dark styles follow your desktop</caption>
+      <image type="source" width="1379" height="660">https://raw.githubusercontent.com/mfat/tvhplayer/a8208a67c1cd43d15b3ee6ab50b690ede5b96cef/Screenshots/dark-style.png</image>
     </screenshot>
   </screenshots>
   <url type="homepage">https://github.com/mfat/tvhplayer</url>
