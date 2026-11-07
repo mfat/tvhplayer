@@ -5,7 +5,7 @@
 
 
 # TVHplayer
-Watch and record your favorite shows right on your PC or laptop. Supports IPTV, HDHomerun, USB TV tuners and more. 
+Watch and record your favorite shows right on your PC or laptop. Supports IPTV, HDHomerun and more. 
 
 <img width="1418" height="894" alt="main" src="https://github.com/user-attachments/assets/95471032-de4f-4778-a984-722bd2d10dbf" />
 
@@ -17,7 +17,7 @@ TVHplayer is a cross-platform desktop app for watching and recording live TV usi
 
 
 ## Who is this for
-Use TVHplayer with an existing Tvheadend server, or with its optional built-in server on Linux and Windows.
+Use TVHplayer to connect to an existing Tvheadend server, or with its built-in server. You don't need your own server to use the app. 
 
 ## Features
 
