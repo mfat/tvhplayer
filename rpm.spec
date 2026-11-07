@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.6.3
+Version:        4.6.4
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -117,6 +117,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Sat Nov 07 2026 mFat <newmfat@gmail.com> - 4.6.4-1
+- Improve built-in server first-run setup and channel onboarding, including retry and dismissal behavior.
+- Show clearer Windows setup diagnostics, prerequisite actions, and credential-safe error details.
+- Strengthen built-in server startup readiness checks and Windows package validation.
+- Enlarge the Windows app icon and refine Linux and macOS icon sizing.
+- Restore macOS Apple Silicon builds on supported runners.
+
 * Fri Nov 06 2026 mFat <newmfat@gmail.com> - 4.6.3-1
 - Improve Windows built-in server setup with clear prerequisite checklists and actions under failed checks.
 - Detect unavailable hardware virtualization and keep the built-in server disabled until the user explicitly retries.
