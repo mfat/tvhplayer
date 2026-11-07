@@ -369,3 +369,86 @@ def test_tooltips_take_the_app_palette_after_qt_gives_them_the_desktops(qapp):
     finally:
         qapp.setPalette(app_palette)
         QToolTip.setPalette(tip_palette)
+
+
+def test_organic_buttons_distinguish_checked_pressed_and_disabled(qapp, monkeypatch):
+    from PyQt6.QtGui import QImage, QPainter
+    from PyQt6.QtWidgets import QPushButton, QStyleOptionButton
+    from tvhplayer import ui_theme as theme
+
+    monkeypatch.setattr(theme, '_organic', True)
+    button = QPushButton('Play')
+
+    def render(state):
+        option = QStyleOptionButton()
+        option.rect = QRect(0, 0, 120, 36)
+        option.state = state
+        image = QImage(120, 36, QImage.Format.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        theme.ThemeStyle._button(option, painter, button)
+        painter.end()
+        return image
+
+    enabled = theme.State.State_Enabled
+    for dark in (False, True):
+        monkeypatch.setattr(theme, 'colors', theme.compose(dark, organic=True))
+        normal = render(enabled)
+        checked = render(enabled | theme.State.State_On)
+        assert checked != normal
+        # Disabled controls must ignore stale interaction flags.
+        assert render(theme.State.State_None) == render(theme.State.State_Sunken | theme.State.State_MouseOver)
+        button.setProperty('primary', True)
+        assert render(enabled) != render(enabled | theme.State.State_Sunken)
+        assert render(enabled) != render(enabled | theme.State.State_HasFocus)
+        button.setProperty('primary', False)
+
+
+def test_organic_status_strip_leaves_card_corners_clear(qapp, monkeypatch):
+    from PyQt6.QtGui import QImage, QPainter
+    from tvhplayer import ui_theme
+
+    monkeypatch.setattr(ui_theme, '_organic', True)
+    for dark in (False, True):
+        monkeypatch.setattr(ui_theme, 'colors', ui_theme.compose(dark, organic=True))
+        for scale in (1, 1.5, 2):
+            image = QImage(round(120 * scale), round(40 * scale), QImage.Format.Format_ARGB32)
+            image.setDevicePixelRatio(scale)
+            image.fill(0)
+            painter = QPainter(image)
+            ui_theme._draw_frame('statusStrip', painter, QRect(0, 0, 120, 40))
+            painter.end()
+            # These pixels are outside the card's inner 13px corner, but
+            # the old 7px footer painted them and interrupted the outline.
+            for x in (3, 116):
+                assert image.pixelColor(round(x * scale), round(37 * scale)).alpha() == 0
+            assert image.pixelColor(round(60 * scale), round(37 * scale)).alpha() == 255
+
+
+def test_menu_outline_follows_its_rounded_corners(qapp, monkeypatch):
+    from PyQt6.QtGui import QColor, QImage
+    from PyQt6.QtWidgets import QMenu, QProxyStyle
+    from tvhplayer import ui_theme
+
+    # QMenu clips its frame to a one pixel band along its square edge; a
+    # rounded outline curves out of that band and vanished at the corners.
+    style = ui_theme.ThemeStyle('Fusion')
+    for organic in (False, True):
+        monkeypatch.setattr(ui_theme, '_active', True)
+        monkeypatch.setattr(ui_theme, '_organic', organic)
+        monkeypatch.setattr(ui_theme, 'colors', ui_theme.compose(True, organic=organic))
+        menu = QMenu()
+        menu.setStyle(style)
+        menu.addAction('Open')
+        menu.addAction('Quit')
+        menu.adjustSize()
+        image = QImage(menu.size(), QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(QColor(0, 255, 0))
+        menu.render(image)
+        fill = ui_theme.color('popover')
+        w, h = image.width(), image.height()
+        for x, y, dx, dy in ((0, 0, 1, 1), (w - 1, h - 1, -1, -1)):
+            diagonal = [image.pixelColor(x + dx * i, y + dy * i) for i in range(1, 8)]
+            # Some pixel where the curve crosses the diagonal shows the
+            # lighter outline, not just the fill blended into what is behind.
+            assert any(c.green() < 200 and c.lightness() > fill.lightness() + 12 for c in diagonal)

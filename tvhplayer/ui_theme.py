@@ -342,7 +342,10 @@ def compose(dark, accent=ACCENT_DEFAULT, window=WINDOW_DEFAULT, organic=False):
         tint = _rgba(c['ink'], 20 if dark else 18)
         c.update({
             'popover': popover, 'tooltip': popover, 'tooltip_ink': c['ink'],
-            'edge': line, 'edge_soft': line, 'menu_edge': line,
+            'edge': line, 'edge_soft': _rgba(c['ink'], 23 if dark else 25), 'menu_edge': line,
+            'rule': _rgba(c['ink'], 26 if dark else 24),
+            'hairline': _rgba(c['ink'], 18 if dark else 16),
+            'list_edge': _blend(c['ink'], c['base'], 0.16 if dark else 0.14),
             'hover': tint, 'tint': tint,
             'scroll': _rgba(c['ink'], 77), 'scroll_hover': _rgba(c['ink'], 128),
         })
@@ -453,10 +456,21 @@ def _radius(rect, classic, cap):
     return min(QRectF(rect).height() / 2, cap) if _organic else classic
 
 
+def _focus_ring(painter, rect, radius):
+    """An inset halo leaves room for keyboard focus without changing layout."""
+    halo = color('accent')
+    halo.setAlpha(65)
+    _box(painter, rect, radius, None, halo, 3)
+
+
 def _field(painter, rect, fill, focused):
     """Text fields, dropdowns and number boxes: a thin edge, a thicker accent one with focus."""
     radius = _radius(rect, 4, 14)
-    if focused:
+    if focused and _organic:
+        _box(painter, rect, radius, fill)
+        _focus_ring(painter, rect, radius)
+        _box(painter, QRectF(rect).adjusted(2, 2, -2, -2), max(0, radius - 2), None, color('accent'))
+    elif focused:
         _box(painter, rect, radius, fill, color('accent'), 2)
     else:
         _box(painter, rect, radius, fill, color('edge'))
@@ -509,7 +523,7 @@ def _indicator(option, painter, radio):
     side = min(option.rect.width(), option.rect.height())
     box = QRectF(0, 0, side, side)
     box.moveCenter(QRectF(option.rect).center())
-    radius = side / 2 if radio else side / 3
+    radius = side / 2 if radio else side / 3.6
     if on:
         fill = color('primary_off' if not enabled else
                      'primary_hover' if state & State.State_MouseOver else 'accent')
@@ -517,7 +531,7 @@ def _indicator(option, painter, radio):
     else:
         amount = 0.2 if not enabled else 0.7 if state & State.State_MouseOver else 0.45
         edge = QColor(_blend(color('ink').name(), color('base').name(), amount))
-        _box(painter, box, radius, color('base'), edge, 2)
+        _box(painter, box, radius, color('base'), edge, 1.25)
     if not on:
         return
     ink = color('on_accent' if enabled else 'muted')
@@ -625,7 +639,10 @@ def _draw_frame(kind, painter, rect):
     elif kind == 'statusStrip':
         r = QRectF(rect.adjusted(0, 1, 0, 0))
         path = QPainterPath()
-        path.addRoundedRect(r, 7, 7)
+        # The strip sits one pixel inside its card: match the inner curve
+        # so its opaque fill cannot paint over the card's rounded border.
+        radius = 13 if _organic else 7
+        path.addRoundedRect(r, radius, radius)
         top = QPainterPath()
         top.addRect(QRectF(r.x(), r.y(), r.width(), r.height() / 2))
         painter.save()
@@ -830,6 +847,12 @@ class ThemeStyle(QProxyStyle):
 
     def pixelMetric(self, metric, option=None, widget=None):
         if _active:
+            if _organic:
+                if metric in (PM.PM_IndicatorWidth, PM.PM_IndicatorHeight,
+                              PM.PM_ExclusiveIndicatorWidth, PM.PM_ExclusiveIndicatorHeight):
+                    return 18
+                if metric in (PM.PM_CheckBoxLabelSpacing, PM.PM_RadioButtonLabelSpacing):
+                    return 8
             if metric == PM.PM_ScrollBarExtent:
                 return 12 if _organic else 10
             if metric == PM.PM_ScrollBarSliderMin:
@@ -857,16 +880,16 @@ class ThemeStyle(QProxyStyle):
         # Each adds the theme's padding and edge to what the widget needs for its text.
         if kind == CT.CT_PushButton:
             if _organic:
-                return QSize(size.width() + 40, size.height() + 14)
+                return QSize(size.width() + 36, max(34, size.height() + 14))
             return QSize(size.width() + 30, size.height() + 10)
         if kind == CT.CT_ToolButton:
-            return QSize(size.width() + 21, size.height() + 13)
+            return QSize(size.width() + 21, max(34, size.height() + 14)) if _organic else QSize(size.width() + 21, size.height() + 13)
         if kind == CT.CT_LineEdit and isinstance(option, QStyleOptionFrame) and option.lineWidth > 0:
-            return QSize(size.width() + 18, size.height() + 10)
+            return QSize(size.width() + 24, max(34, size.height() + 14)) if _organic else QSize(size.width() + 18, size.height() + 10)
         if kind == CT.CT_ComboBox and isinstance(option, QStyleOptionComboBox) and option.frame:
-            return QSize(size.width() + 44, size.height() + 10)
+            return QSize(size.width() + 44, max(34, size.height() + 14) if _organic else size.height() + 10)
         if kind == CT.CT_SpinBox and isinstance(widget, QSpinBox):
-            return QSize(size.width() + 76, size.height() + 9)
+            return QSize(size.width() + 76, max(34, size.height() + 14) if _organic else size.height() + 9)
         if kind == CT.CT_ProgressBar and isinstance(option, QStyleOptionProgressBar) and not option.textVisible:
             return QSize(size.width(), 4)
         if kind == CT.CT_HeaderSection and isinstance(option, QStyleOptionHeader):
@@ -1006,11 +1029,15 @@ class ThemeStyle(QProxyStyle):
         elif element == PE.PE_PanelMenu:
             if not isinstance(widget, QMenu):
                 return False
-            _box(painter, option.rect, 14 if _organic else 6, color('popover'))
+            radius = 14 if _organic else 6
+            _box(painter, option.rect, radius, color('popover'))
+            # The outline is drawn here: QMenu clips PE_FrameMenu to a band
+            # PM_MenuPanelWidth wide along its square edge, which cuts off
+            # a rounded outline where it curves in at the corners.
+            _box(painter, option.rect, radius, None, color('menu_edge'))
         elif element == PE.PE_FrameMenu:
             if not isinstance(widget, QMenu):
                 return False
-            _box(painter, option.rect, 14 if _organic else 6, None, color('menu_edge'))
         elif element == PE.PE_PanelMenuBar:
             pass
         elif element == PE.PE_PanelStatusBar:
@@ -1041,18 +1068,26 @@ class ThemeStyle(QProxyStyle):
         if _primary(widget):
             fill = color('primary_off' if not enabled else
                          'primary_hover' if state & State.State_MouseOver else 'primary')
+            if _organic and enabled and state & State.State_Sunken:
+                fill = QColor(_blend(colors['primary'], colors['on_accent'], 0.80))
             edge = color('primary_off' if not enabled else 'primary_edge')
         elif _organic:
-            # Clear on the window, as in Jottr; only focus colors the edge.
-            fill = (color('pressed') if state & State.State_Sunken else
+            checked = enabled and bool(state & State.State_On)
+            fill = (color('pressed') if enabled and state & (State.State_Sunken | State.State_On) else
                     color('hover') if enabled and state & State.State_MouseOver else None)
-            edge = color('accent' if focused else 'edge')
+            edge = color('accent' if focused or checked else 'edge' if enabled else 'edge_soft')
         else:
             fill = color('pressed' if state & State.State_Sunken else
                          'hover' if enabled and state & State.State_MouseOver else 'base')
             edge = color('accent' if focused or (enabled and state & State.State_MouseOver) else
                          'edge' if enabled else 'edge_soft')
-        _box(painter, option.rect, _radius(option.rect, 4, 22), fill, edge, 2 if focused else 1)
+        radius = _radius(option.rect, 4, 22)
+        if _organic and focused:
+            _box(painter, option.rect, radius, fill)
+            _focus_ring(painter, option.rect, radius)
+            _box(painter, QRectF(option.rect).adjusted(2, 2, -2, -2), radius - 2, None, edge)
+        else:
+            _box(painter, option.rect, radius, fill, edge, 2 if focused else 1)
 
     @staticmethod
     def _selected_row(option, painter, widget):
