@@ -7,6 +7,8 @@ the widget attribute names are unchanged from the tabbed version.
 
 from __future__ import annotations
 
+import os
+
 
 from PyQt6.QtCore import QEvent, QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
@@ -300,7 +302,7 @@ class SettingsDialog(QDialog):
         folder_row = QHBoxLayout(folder)
         folder_row.setContentsMargins(0, 0, 0, 0)
         folder_row.setSpacing(8)
-        self.folder_edit = QLineEdit(host.local_recording_dir())
+        self.folder_edit = QLineEdit(getattr(host, 'local_recording_display', host.local_recording_dir)())
         self.folder_edit.setReadOnly(True)
         self.folder_edit.setPlaceholderText('Chosen the first time you record')
         folder_text = FOLDER_HELP + (BUILTIN_FOLDER_HELP if has_builtin else '')
@@ -588,12 +590,16 @@ class SettingsDialog(QDialog):
             self._host.set_low_space_gb(self.space_spin.value())
 
     def _choose_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, 'Recordings Folder', self.folder_edit.text())
+        current = self._host.local_recording_dir()
+        start = current if os.path.isdir(current) else os.path.expanduser('~')
+        folder = QFileDialog.getExistingDirectory(self, 'Recordings Folder', start)
         if folder and self._host.set_local_recording_dir(folder):
-            self.folder_edit.setText(folder)
+            self.folder_edit.setText(getattr(self._host, 'local_recording_display', self._host.local_recording_dir)())
             self._refresh_folder_status()
 
     def _refresh_folder_status(self, *_args):
+        self.folder_edit.setText(getattr(self._host, 'local_recording_display', self._host.local_recording_dir)())
+        self.folder_edit.setToolTip(self._host.local_recording_dir())
         supervisor = getattr(self._host, 'builtin', None)
         problem = getattr(self._host, 'recording_folder_problem', lambda: '')()
         text = f'Cannot save recordings here: {problem}' if problem else ''

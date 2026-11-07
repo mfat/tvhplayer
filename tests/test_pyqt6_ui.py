@@ -4117,3 +4117,35 @@ def test_cancelling_backend_start_disconnects_queued_actions(monkeypatch, tmp_pa
     finally:
         window.close()
         app.processEvents()
+
+
+def test_recording_folder_display_never_becomes_picker_or_writer_path(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    folder = tmp_path / 'recordings'
+    folder.mkdir()
+    friendly = '/media/Storage/Recordings'
+    try:
+        monkeypatch.setattr(ui, 'in_flatpak', lambda: True)
+        monkeypatch.setattr(ui, 'recording_folder_display', lambda *_: friendly)
+        assert window.set_local_recording_dir(str(folder))
+        dialog = window.show_settings()
+        assert dialog.folder_edit.text() == friendly
+        assert dialog.folder_edit.toolTip() == str(folder)
+        assert window.config_store.load()['local_recording_display'] == friendly
+        calls = []
+        monkeypatch.setattr(ui.QFileDialog, 'getExistingDirectory', lambda *args: calls.append(args[2]) or '')
+        dialog._choose_folder()
+        assert calls == [str(folder)]
+        folder.rmdir()
+        dialog._refresh_folder_status()
+        dialog._choose_folder()
+        assert calls[-1] == os.path.expanduser('~')
+        assert window.local_recording_dir() == str(folder)
+        folder.mkdir()
+        dialog._refresh_folder_status()
+        assert window.recording_folder_problem() == ''
+        assert 'Cannot save recordings here:' not in dialog.folder_status.text()
+        assert window.local_recording_dir() == str(folder)
+    finally:
+        window.close()
+        app.processEvents()

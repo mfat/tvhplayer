@@ -61,3 +61,58 @@ def test_real_read_only_directory(tmp_path):
             recording_folder.validate_recording_folder(str(folder))
     finally:
         folder.chmod(0o755)
+
+
+def test_portal_display_uses_host_path_only_for_presentation(monkeypatch):
+    folder = '/run/user/1000/doc/abc/RECORDINGS'
+    monkeypatch.setattr(os, 'getxattr', lambda *_: b'/media/Storage/RECORDINGS\0')
+    assert recording_folder.recording_folder_display(folder) == '/media/Storage/RECORDINGS'
+
+
+def test_disconnected_drive_keeps_saved_display(monkeypatch):
+    def missing(*_):
+        raise FileNotFoundError()
+    monkeypatch.setattr(os, 'getxattr', missing)
+    folder = '/run/user/1000/doc/abc/RECORDINGS'
+    assert recording_folder.recording_folder_display(folder, '/media/Storage/RECORDINGS') == '/media/Storage/RECORDINGS'
+    assert recording_folder.recording_folder_display(folder) == 'RECORDINGS'
+    assert recording_folder.recording_folder_display('/home/user/Videos', 'old') == '/home/user/Videos'
+
+
+@pytest.mark.parametrize('code', [errno.ENOENT, errno.ENOTCONN, errno.ENODEV, errno.ESTALE])
+def test_unavailable_portal_folder_explains_drive_recovery(code):
+    message = recording_folder.recording_folder_error('/run/user/1000/doc/abc/RECORDINGS', OSError(code, 'failure'))
+    assert 'mount the drive' in message
+    assert 'Browse' in message
+    assert 'kept' in message
+
+
+def test_disk_full_is_not_reported_as_lost_access():
+    error = OSError(errno.ENOSPC, 'No space left on device')
+    assert recording_folder.recording_folder_error('/run/user/1000/doc/abc/RECORDINGS', error) == str(error)
+
+
+@pytest.mark.parametrize('suffix,expected', [
+    ('/RECORDINGS', '/media/Storage/RECORDINGS'),
+    ('/RECORDINGS/TV', '/media/Storage/RECORDINGS/TV'),
+    ('', '/media/Storage/RECORDINGS'),
+])
+def test_gethostpaths_recovers_display_when_drive_is_missing(monkeypatch, suffix, expected):
+    def missing(*_):
+        raise FileNotFoundError()
+    monkeypatch.setattr(os, 'getxattr', missing)
+    requested = []
+    def lookup(doc_id):
+        requested.append(doc_id)
+        return '/media/Storage/RECORDINGS'
+    folder = '/run/user/1000/doc/abc' + suffix
+    assert recording_folder.recording_folder_display(folder, '', lookup) == expected
+    assert requested == ['abc']
+
+
+def test_older_portal_keeps_saved_display(monkeypatch):
+    def missing(*_):
+        raise FileNotFoundError()
+    monkeypatch.setattr(os, 'getxattr', missing)
+    assert recording_folder.recording_folder_display(
+        '/run/user/1000/doc/abc/Recordings', '/media/Recordings', lambda _: '') == '/media/Recordings'

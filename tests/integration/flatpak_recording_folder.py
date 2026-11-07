@@ -52,7 +52,7 @@ def main():
                 dialog = window.show_settings()
                 dialog.nav.setCurrentRow(3)
                 dialog.folder_btn.click()
-                assert dialog.folder_edit.text() == window.local_recording_dir()
+                assert dialog.folder_edit.text() == window.local_recording_display()
                 assert args.allow_same_folder or window.local_recording_dir() != previous, 'Choose a different folder'
             folder = window.local_recording_dir()
             error = recording_dir_error(folder)
@@ -61,7 +61,7 @@ def main():
                 assert error, 'Expected the saved path to have become inaccessible'
                 dialog = window.show_settings()
                 assert 'Cannot save recordings here:' in dialog.folder_status.text()
-                assert folder in dialog.folder_status.text(), 'Settings must identify the stale path'
+                assert dialog.folder_edit.toolTip() == folder, 'Settings must retain the selected path'
             else:
                 assert not error, error
                 assert ConfigStore().data['local_recording_dir'] == folder

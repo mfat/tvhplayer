@@ -21,9 +21,11 @@ import html
 import json
 import re
 try:
-    from .core.recording_folder import validate_recording_folder
+    from .portal_paths import document_host_path
+    from .core.recording_folder import validate_recording_folder, recording_folder_display, recording_folder_error
 except ImportError:
-    from core.recording_folder import validate_recording_folder
+    from portal_paths import document_host_path
+    from core.recording_folder import validate_recording_folder, recording_folder_display, recording_folder_error
 # Replace this line:
 #from . import resources_rc
 
@@ -1750,7 +1752,7 @@ def recording_dir_error(folder):
     try:
         validate_recording_folder(folder, create_missing=not in_flatpak())
     except OSError as exc:
-        return str(exc)
+        return recording_folder_error(folder, exc)
     return ''
 
 
@@ -8079,6 +8081,10 @@ class TVHeadendClient(QMainWindow):
     def local_recording_dir(self):
         return self.config.get('local_recording_dir') or default_recording_dir()
 
+    def local_recording_display(self):
+        return recording_folder_display(
+            self.local_recording_dir(), self.config.get('local_recording_display', ''), document_host_path)
+
     def recording_folder_problem(self):
         folder = self.local_recording_dir()
         return recording_dir_error(folder) if folder else ''
@@ -8089,9 +8095,10 @@ class TVHeadendClient(QMainWindow):
             QMessageBox.warning(self, "Recordings Folder", f"TVHplayer cannot save recordings in {folder}.\n\n{error}")
             return False
         self.config['local_recording_dir'] = folder
+        self.config['local_recording_display'] = recording_folder_display(folder, '', document_host_path)
         self.save_config()
         if self._settings_dialog is not None:
-            self._settings_dialog.folder_edit.setText(folder)
+            self._settings_dialog.folder_edit.setText(self.local_recording_display())
         if self.builtin is not None and not self.builtin.set_recordings_dir(folder):
             self.statusbar.showMessage("The built-in server keeps its old recordings folder until it starts again.")
         if self._settings_dialog is not None:

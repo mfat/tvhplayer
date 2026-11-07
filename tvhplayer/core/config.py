@@ -86,6 +86,7 @@ def default_config():
         'hide_dead_channels': True,
         # Empty until chosen: the Videos folder, or asked the first time where that cannot be written.
         'local_recording_dir': '',
+        'local_recording_display': '',
         'local_recording_format': DEFAULT_FORMAT,
         'local_recording_ffmpeg_options': '',
         'convert_after_recording': False,
@@ -188,7 +189,7 @@ def _normalize(data):
     cfg.pop('resize_on_release', None)
     choice = cfg.get('live_resize', None)
     cfg['live_resize'] = None if choice is None else bool(choice)
-    for key in ('local_recording_dir', 'local_recording_ffmpeg_options', 'convert_options', 'skipped_update_version'):
+    for key in ('local_recording_dir', 'local_recording_display', 'local_recording_ffmpeg_options', 'convert_options', 'skipped_update_version'):
         if not isinstance(cfg.get(key), str):
             cfg[key] = ''
     if cfg.get('deinterlace') not in DEINTERLACE_MODES:
