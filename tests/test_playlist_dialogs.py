@@ -642,7 +642,8 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
             self.hide = on
 
         def local_recording_dir(self):
-            return '/videos'
+            # The dialog shows what the host saved, not the path it was given.
+            return getattr(self, 'folder', '/videos')
 
         def set_local_recording_dir(self, folder):
             self.folder = folder

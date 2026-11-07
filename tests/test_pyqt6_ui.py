@@ -1903,7 +1903,9 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.action_btn.text() == 'Cancel'
         panel.run_action()
         assert backend.cancelled == ['soon']
-        assert window.is_recording is True
+        # The refresh after cancelling finds nothing recording, so the
+        # indicator follows the real count and turns off (#52).
+        assert window.is_recording is False
         assert any('Old' in text for text in _task_texts(panel))
         assert panel.task_table.isVisible()
         _select_task(panel, 'Old')
