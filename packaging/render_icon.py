@@ -1,4 +1,4 @@
-"""Render icons/tvhplayer.svg into the icon file a build needs.
+"""Render the platform app artwork into the icon file a build needs.
 
     render_icon.py OUTPUT
 
@@ -16,16 +16,16 @@ SVG = ROOT / 'icons' / 'tvhplayer.svg'
 ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
 
 
-def render(size):
+def render(size, svg=SVG):
     from PyQt6.QtCore import Qt
     from PyQt6.QtGui import QGuiApplication, QImage, QPainter
     from PyQt6.QtSvg import QSvgRenderer
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     app = QGuiApplication.instance() or QGuiApplication([])
-    renderer = QSvgRenderer(str(SVG))
+    renderer = QSvgRenderer(str(svg))
     if not renderer.isValid():
-        raise SystemExit(f'Cannot read {SVG}')
+        raise SystemExit(f'Cannot read {svg}')
     image = QImage(size, size, QImage.Format.Format_ARGB32)
     image.fill(Qt.GlobalColor.transparent)
     painter = QPainter(image)
@@ -38,14 +38,15 @@ def render(size):
 
 def main(output):
     output = Path(output)
+    svg = ROOT / 'icons' / 'tvhplayer-windows.svg' if output.suffix == '.ico' else SVG
     if output.suffix == '.png':
-        if not render(1024).save(str(output)):
+        if not render(1024, svg).save(str(output)):
             raise SystemExit(f'Cannot write {output}')
     elif output.suffix == '.ico':
         from PIL import Image
 
         png = output.with_suffix('.png')
-        render(256).save(str(png))
+        render(256, svg).save(str(png))
         Image.open(png).save(output, sizes=ICO_SIZES)
         png.unlink()
     else:

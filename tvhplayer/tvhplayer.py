@@ -3642,7 +3642,8 @@ class TVHeadendClient(QMainWindow):
         self.setup_paths()
         # Windows and macOS take the title bar, taskbar and Dock icon from the window;
         # Linux desktops take it from the desktop file, an AppImage without one from here.
-        app_icon = QIcon(str(self.icons_dir / 'tvhplayer.svg'))
+        icon_name = 'tvhplayer-windows.svg' if sys.platform == 'win32' else 'tvhplayer.svg'
+        app_icon = QIcon(str(self.icons_dir / icon_name))
         if not app_icon.isNull():
             QApplication.instance().setWindowIcon(app_icon)
             self.setWindowIcon(app_icon)
