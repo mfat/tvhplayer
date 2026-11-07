@@ -359,6 +359,13 @@ class TitleBar(QMenuBar):
         super().resizeEvent(event)
         self._place_title()
 
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        # The window hears of a new palette before this bar has it, so the
+        # title it colored then kept the old ink: color it again from ours.
+        if event.type() == QEvent.Type.PaletteChange:
+            self._place_title()
+
     def _start_move(self):
         handle = self._window.windowHandle()
         if handle is not None:

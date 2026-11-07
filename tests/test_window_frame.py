@@ -127,3 +127,38 @@ def test_styles_that_ask_for_the_menu_bar_keep_the_title_bar(qapp):
     finally:
         window.deleteLater()
         qapp.processEvents()
+
+
+def test_title_follows_a_palette_change_while_the_window_is_open(qapp):
+    # Switching light to dark while the app runs left the title in the old,
+    # dark ink on the new dark title bar.
+    from PyQt6.QtGui import QColor, QPalette
+
+    def palette(window, ink):
+        p = QPalette(qapp.palette())
+        for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+            p.setColor(group, QPalette.ColorRole.Window, QColor(window))
+            p.setColor(group, QPalette.ColorRole.WindowText, QColor(ink))
+        return p
+
+    saved = qapp.palette()
+    qapp.setPalette(palette('#f6f5f4', '#1d1d20'))
+    window = QMainWindow()
+    window.setWindowTitle('TVHplayer')
+    window.setCentralWidget(QWidget())
+    menubar = QMenuBar(window)
+    menubar.addMenu('&File')
+    frame = WindowFrame(window, menubar, button_layout='icon:minimize,maximize,close')
+    try:
+        window.resize(800, 600)
+        window.show()
+        qapp.processEvents()
+        qapp.setPalette(palette('#1d1d20', '#f6f5f4'))
+        qapp.processEvents()
+        title = frame.title_bar.title
+        ink = title.palette().color(QPalette.ColorRole.WindowText)
+        assert ink.red() > 200, title.styleSheet()
+    finally:
+        qapp.setPalette(saved)
+        window.deleteLater()
+        qapp.processEvents()
