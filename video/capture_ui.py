@@ -30,53 +30,6 @@ PLAYING = 'Nature HD'
 RECORDINGS = [('Nature HD', 'ts'), ('Sports Live', 'mp4'), ('Cinema One', 'mkv')]
 
 
-class FakePlayer:
-    """Just enough of the mpv player for the window to draw."""
-
-    def __init__(self):
-        self._playing = False
-        self.on_playing = None
-        self.state = None
-
-    def set_handlers(self, on_playing=None, *_args, **_kwargs):
-        self.on_playing = on_playing
-
-    def play(self, url):
-        self._playing = True
-        if self.on_playing:
-            self.on_playing()
-
-    def stop(self):
-        self._playing = False
-
-    def is_playing(self):
-        return self._playing
-
-    def is_muted(self):
-        return False
-
-    def audio_tracks(self):
-        return []
-
-    def subtitle_tracks(self):
-        return []
-
-    def audio_track(self):
-        return -1
-
-    def subtitle_track(self):
-        return -1
-
-    def deinterlace(self):
-        return 'auto'
-
-    def timeshift(self):
-        return self.state
-
-    def __getattr__(self, name):
-        return lambda *a, **k: None
-
-
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     home = Path(tempfile.mkdtemp(prefix='tvhplayer-video-'))
@@ -99,7 +52,7 @@ def main():
     ui.ConfigStore = lambda *a, **k: store
     ui.windows_backend_enabled = lambda: False
     ui.default_picon_dir = lambda: home / 'picons'
-    ui.TVHeadendClient._new_player = lambda self: FakePlayer()
+    ui.TVHeadendClient._new_player = lambda self: demo.FakePlayer()
     ui.TVHeadendClient.fetch_channels = lambda self, keep_place=False: None
     window_frame.wants_own_title_bar = lambda *a, **k: True
     guide_view.create_backend = lambda server: Backend()

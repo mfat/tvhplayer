@@ -32,22 +32,7 @@ sys.path.insert(0, str(ROOT / 'video'))
 WINDOW = [1340, 660]
 PLAYING = 'Science Now'
 RECORDINGS = [('Sports Live', 'mp4'), ('Cinema One', 'mkv'), ('News 24', 'ts')]
-NASA_CLIP = ROOT / 'video' / 'build' / 'footage' / 'nasa-earth-in-4k.mp4'
-NASA_SOURCE = ('https://images-assets.nasa.gov/video/jsc2023m000111_Earth_in_4K_Space_Station_Expedition_67_68_Edition/'
-               'jsc2023m000111_Earth_in_4K_Space_Station_Expedition_67_68_Edition~large.mp4')
 SERVER = {'name': 'Living Room', 'url': 'http://192.0.2.1:9981', 'protocol': 'http'}
-
-
-def nasa_clip():
-    """30 seconds of Earth with the station's solar arrays, cut from NASA's video without downloading all 2 GB."""
-    import subprocess
-
-    if not NASA_CLIP.is_file():
-        NASA_CLIP.parent.mkdir(parents=True, exist_ok=True)
-        print('Fetching 30 seconds of NASA footage…')
-        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-ss', '1640', '-i', NASA_SOURCE, '-t', '30', '-an',
-                        '-c:v', 'copy', str(NASA_CLIP)], check=True)
-    return NASA_CLIP
 
 
 def main():
@@ -57,11 +42,12 @@ def main():
     parser.add_argument('--theme')
     parser.add_argument('--scheme', choices=('light', 'dark'))
     args = parser.parse_args()
-    clip = (args.clip or nasa_clip()).resolve()
+    import demo_data as demo
+
+    clip = (args.clip or demo.nasa_clip()).resolve()
     if not clip.is_file():
         parser.error(f'{clip} is not a file')
 
-    import demo_data as demo
     import tvhplayer.guide_view as guide_view
     import tvhplayer.tvhplayer as ui
     from tvhplayer.core.config import ConfigStore

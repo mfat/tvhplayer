@@ -84,6 +84,23 @@ LOGOS = {
         <g fill="#fff"><circle cx="62" cy="45" r="8"/><circle cx="87.5" cy="45" r="8"/><circle cx="113" cy="45" r="8"/></g>''',
 }
 
+NASA_CLIP = Path(__file__).resolve().parent / 'build' / 'footage' / 'nasa-earth-in-4k.mp4'
+NASA_SOURCE = ('https://images-assets.nasa.gov/video/jsc2023m000111_Earth_in_4K_Space_Station_Expedition_67_68_Edition/'
+               'jsc2023m000111_Earth_in_4K_Space_Station_Expedition_67_68_Edition~large.mp4')
+
+def nasa_clip():
+    """The path of 30 seconds of Earth with the station's solar arrays, cut from NASA's video without downloading all 2 GB."""
+    import subprocess
+
+    if not NASA_CLIP.is_file():
+        NASA_CLIP.parent.mkdir(parents=True, exist_ok=True)
+        print('Fetching 30 seconds of NASA footage…')
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-ss', '1640', '-i', NASA_SOURCE, '-t', '30', '-an',
+                        '-c:v', 'copy', str(NASA_CLIP)], check=True)
+    return NASA_CLIP
+
+
+
 # Local recordings shown in Tasks: a made-up folder, sizes given here.
 FOLDER = '/home/you/Videos'
 SIZES = {}
@@ -119,6 +136,53 @@ def schedule(now):
             event_id += 1
             start, step = stop, step + 1
     return events
+
+
+class FakePlayer:
+    """Just enough of the mpv player for the window to draw."""
+
+    def __init__(self):
+        self._playing = False
+        self.on_playing = None
+        self.state = None
+
+    def set_handlers(self, on_playing=None, *_args, **_kwargs):
+        self.on_playing = on_playing
+
+    def play(self, url):
+        self._playing = True
+        if self.on_playing:
+            self.on_playing()
+
+    def stop(self):
+        self._playing = False
+
+    def is_playing(self):
+        return self._playing
+
+    def is_muted(self):
+        return False
+
+    def audio_tracks(self):
+        return []
+
+    def subtitle_tracks(self):
+        return []
+
+    def audio_track(self):
+        return -1
+
+    def subtitle_track(self):
+        return -1
+
+    def deinterlace(self):
+        return 'auto'
+
+    def timeshift(self):
+        return self.state
+
+    def __getattr__(self, name):
+        return lambda *a, **k: None
 
 
 def make_logos(folder):
