@@ -144,9 +144,11 @@ def test_cast_automatic_and_manual_choices_roundtrip_separately(tmp_path):
     assert loaded.data['cast_auto_profiles'] == {'receiver|local': 'webm-profile'}
 
 
-def test_theme_defaults_to_tvhplayer_and_keeps_a_qt_style_name(tmp_path):
+def test_theme_defaults_to_organic_and_keeps_a_chosen_one(tmp_path):
     path = tmp_path / 'tvhplayer.conf'
-    for saved, loaded in ((None, 'TVHplayer'), ('', 'TVHplayer'), (3, 'TVHplayer'), ('Breeze', 'Breeze')):
+    assert ConfigStore(tmp_path / 'new.conf').data['ui_theme'] == 'Organic'
+    for saved, loaded in ((None, 'Organic'), ('', 'Organic'), (3, 'Organic'), ('Breeze', 'Breeze'),
+                          ('TVHplayer', 'TVHplayer')):
         path.write_text(json.dumps({'ui_theme': saved}), encoding='utf-8')
         assert ConfigStore(path).data['ui_theme'] == loaded
 

@@ -24,6 +24,8 @@ from .urls import pin_http_port
 THEME_TVHPLAYER = 'TVHplayer'
 # The same, drawn in Jottr's Organic look.
 THEME_ORGANIC = 'Organic'
+# What a new install starts with.
+DEFAULT_THEME = THEME_ORGANIC
 # Light or dark: as the desktop is, or always one of them.
 SCHEME_SYSTEM = 'system'
 SCHEME_LIGHT = 'light'
@@ -102,7 +104,7 @@ def default_config():
         'timeshift_on_disk': False,
         'timeshift_gb': 4,
         # TVHplayer's own look, or the name of a Qt style. Read before the window is built.
-        'ui_theme': THEME_TVHPLAYER,
+        'ui_theme': DEFAULT_THEME,
         'color_scheme': SCHEME_SYSTEM,
         # Keys of ui_theme.ACCENTS and ui_theme.WINDOW_COLORS, or 'default'.
         'accent_color': 'default',
@@ -197,7 +199,7 @@ def _normalize(data):
     # Legacy Settings choice (auto/mpv/vlc); playback is always libmpv now.
     cfg.pop('player_engine', None)
     if not isinstance(cfg.get('ui_theme'), str) or not cfg['ui_theme'].strip():
-        cfg['ui_theme'] = THEME_TVHPLAYER
+        cfg['ui_theme'] = DEFAULT_THEME
     if cfg.get('color_scheme') not in SCHEME_CHOICES:
         cfg['color_scheme'] = SCHEME_SYSTEM
     for key in ('accent_color', 'window_color'):

@@ -49,7 +49,7 @@ try:
         recording_titles,
         upcoming_recordings,
     )
-    from .core.config import ConfigStore, default_cache_dir
+    from .core.config import DEFAULT_THEME, ConfigStore, default_cache_dir
     from .core.chromecast import CastManager
     from .core.cast_profiles import AUTO_PROFILE
     from .core.guide_feeds import GuideCache, GuideSource
@@ -149,7 +149,7 @@ except ImportError:
         recording_titles,
         upcoming_recordings,
     )
-    from core.config import ConfigStore, default_cache_dir
+    from core.config import DEFAULT_THEME, ConfigStore, default_cache_dir
     from core.chromecast import CastManager
     from core.cast_profiles import AUTO_PROFILE
     from core.guide_feeds import GuideCache, GuideSource
@@ -8815,7 +8815,7 @@ def main():
             window_color = settings['window_color']
         except Exception as e:
             print(f"Debug: Could not read the theme settings: {e}")
-            theme = THEME_TVHPLAYER
+            theme = DEFAULT_THEME
             scheme = accent = window_color = None
         LAUNCH_ENVIRON.update(os.environ)
         cursor_debug.prepare()
@@ -8832,8 +8832,8 @@ def main():
         if prefers_high_contrast():
             theme = None
         elif style_key(theme) is None:
-            print(f"Debug: Theme {theme!r} is not available here; using {THEME_TVHPLAYER}")
-            theme = THEME_TVHPLAYER
+            print(f"Debug: Theme {theme!r} is not available here; using {DEFAULT_THEME}")
+            theme = DEFAULT_THEME
         if theme is not None:
             set_color_scheme(app, scheme)
             set_accent(app, accent)

@@ -12,7 +12,7 @@ desktop's own window screenshot (Alt+Print Screen on GNOME), so each one
 has the real title bar and shadow.
 
 --recordings  adds three recordings to this computer, which open Tasks.
---theme       Organic, TVHplayer (the default) or a Qt style.
+--theme       Organic (the default), TVHplayer or a Qt style.
 --scheme      light or dark instead of following the desktop.
 """
 
