@@ -4,7 +4,8 @@ Run by scripts/render-intro-video.ts as ``capture_ui.py OUT_DIR SCALE``. It
 builds the main window, the TV guide and the Tasks list from the app's own
 code with made-up channels, saves PNGs to OUT_DIR and prints a JSON manifest:
 the files and, in window pixels, where the controls the video animates over
-are. No server, network or video is used; the picture area stays black and
+are. The channels, programmes and logos come from demo_data.py. No server,
+network or video is used; the picture area stays black and
 the video draws its own picture there.
 """
 
@@ -13,13 +14,12 @@ import os
 import sys
 import tempfile
 import time
-import types
-from datetime import datetime
 from pathlib import Path
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'video'))
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / 'video' / 'build')
 SCALE = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0
 os.environ['QT_SCALE_FACTOR'] = str(SCALE)
@@ -27,46 +27,7 @@ os.environ['QT_SCALE_FACTOR'] = str(SCALE)
 WINDOW = (1440, 900)
 TASKS_WINDOW = (2240, 900)
 PLAYING = 'Nature HD'
-# Made-up channels and programmes, as on the website: never real broadcasters.
-CHANNELS = [
-    ('News 24', ['Evening Headlines', 'Business Hour', 'World Tonight', 'Late Edition']),
-    ('Capital TV', ['City Life', 'The Late Show', 'Night Desk', 'Replay']),
-    ('Cinema One', ['The Long Voyage', 'Midnight Movie', 'Film Club']),
-    ('World News', ['Global Report', 'Weather', 'Global Report', 'Markets']),
-    ('Sports Live', ['Match of the Week', 'Highlights', 'Extra Time']),
-    ('Nature HD', ['Wild Coasts', 'Ocean Giants', 'Night Forest', 'Rivers']),
-    ('Kids Club', ['Cartoon Hour', 'Story Time', 'Puzzle Quest', 'Goodnight']),
-    ('Music Hits', ['Top 40 Countdown', 'Live Sessions', 'Throwback']),
-    ('Comedy Plus', ['Stand-up Night', 'Sketch Show', 'Sitcom Classics']),
-    ('Science Now', ['Space Frontiers', 'How It Works', 'Big Ideas']),
-    ('Travel & Taste', ['Street Food Tour', 'Island Hopping', 'Slow Trains']),
-    ('Classic Films', ['Silver Screen', 'Double Feature']),
-    ('Weather Today', ['Forecast', 'Climate Watch', 'Forecast', 'Outlook']),
-    ('Radio Lounge', ['Chill Mix', 'Night Grooves', 'Deep Cuts']),
-    ('Jazz FM', ['Late Jazz', 'Blue Notes', 'Standards']),
-    ('Talk Radio', ['Phone-in', 'Night Talk', 'Morning Early']),
-]
-
-
-DESCRIPTIONS = {'Wild Coasts': 'Seals, puffins and winter storms along a rugged shore.'}
-
-# Local recordings shown in Tasks: a made-up folder, sizes given here.
-FOLDER = '/home/you/Videos'
 RECORDINGS = [('Nature HD', 'ts'), ('Sports Live', 'mp4'), ('Cinema One', 'mkv')]
-SIZES = {}
-
-
-def fake_files():
-    """Make the recordings' paths exist with their sizes, for the Tasks list only."""
-    exists, getsize = os.path.exists, os.path.getsize
-    os.path.exists = lambda path: path in SIZES or exists(path)
-    os.path.getsize = lambda path: SIZES[path] if path in SIZES else getsize(path)
-
-
-def settle(app, rounds=8):
-    for _ in range(rounds):
-        app.processEvents()
-        time.sleep(0.02)
 
 
 class FakePlayer:
@@ -116,52 +77,22 @@ class FakePlayer:
         return lambda *a, **k: None
 
 
-def schedule(now):
-    """Each channel's programmes from an hour ago on, of varied lengths."""
-    from tvhplayer.core.models import EpgEvent
-
-    events, event_id = [], 1
-    for index, (_name, titles) in enumerate(CHANNELS):
-        start = now - 1800 - 600 * ((index * 5) % 4)
-        lengths = [3600, 1800, 5400, 2700, 3600]
-        step = 0
-        while start < now + 6 * 3600:
-            stop = start + lengths[(index + step) % len(lengths)]
-            title = titles[step % len(titles)]
-            events.append(EpgEvent(start=start, stop=stop, title=title, channel_uuid=f'c{index}',
-                                   event_id=event_id, description=DESCRIPTIONS.get(title, '')))
-            event_id += 1
-            start, step = stop, step + 1
-    return events
-
-
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     home = Path(tempfile.mkdtemp(prefix='tvhplayer-video-'))
     import tvhplayer.tvhplayer as ui
     import tvhplayer.guide_view as guide_view
     from tvhplayer import ui_theme, window_frame
-    from tvhplayer.core.channel_info import NowNext
     from tvhplayer.core.config import ConfigStore
-    from tvhplayer.core.models import Channel
     from tvhplayer.core.player import Timeshift
+    import demo_data as demo
+    from demo_data import settle
     from PyQt6.QtWidgets import QApplication
 
     now = int(time.time()) // 1800 * 1800 + 1200
-    events = schedule(now)
+    events = demo.schedule(now)
 
-    class Backend:
-        def stream_url(self, channel, profile=None):
-            return f'http://192.0.2.1:9981/stream/channel/{channel.uuid}'
-
-        def query_epg(self, query):
-            return [e for e in events if e.stop > query.ends_after and e.start < query.starts_before]
-
-        def close(self):
-            pass
-
-        def __getattr__(self, name):
-            return lambda *a, **k: []
+    Backend = lambda: demo.Backend(events)  # noqa: E731
 
     store = ConfigStore(home / 'tvhplayer.conf')
     store.data['own_title_bar'] = True
@@ -173,10 +104,11 @@ def main():
     window_frame.wants_own_title_bar = lambda *a, **k: True
     guide_view.create_backend = lambda server: Backend()
 
-    fake_files()
+    demo.fake_files()
     app = QApplication.instance() or QApplication([])
+    demo.make_logos(home / 'picons')
     ui_theme.apply(app, ui_theme.THEME_ORGANIC)
-    channels = [Channel(uuid=f'c{i}', name=name, number=i + 1) for i, (name, _t) in enumerate(CHANNELS)]
+    channels = demo.channels()
     from tvhplayer.core.recorder import RECORDING_FORMATS
     manifest = {'formats': [label for label, *_rest in RECORDING_FORMATS.values()], 'scale': SCALE, 'window': list(WINDOW), 'channels': [c.name for c in channels], 'files': []}
 
@@ -191,26 +123,10 @@ def main():
         window.get_backend = lambda: Backend()
         window._server_requests_ready = lambda: True
         window.resize(*WINDOW)
-        server = {'name': 'Living Room', 'url': 'http://192.0.2.1:9981'}
-        window.servers = [server]
-        window.current_server = lambda: server
-        window.server_combo.blockSignals(True)
-        window.server_combo.clear()
-        window.server_combo.addItem(server['name'])
-        window.server_combo.blockSignals(False)
-        now_next = {}
-        for channel in channels:
-            mine = [e for e in events if e.channel_uuid == channel.uuid]
-            current = next(e for e in mine if e.start <= now < e.stop)
-            following = mine[mine.index(current) + 1]
-            now_next[channel.uuid] = NowNext(current, following)
-        fetch = types.SimpleNamespace(server=server, key=ui.server_key(server), backend=None,
-                                      keep_place=False, _now_next=True, deleteLater=lambda: None)
-        window._channel_fetch = fetch
-        window._on_channels_loaded(fetch, {'channels': channels, 'tags': [], 'services': [], 'now_next': now_next})
+        demo.load(window, ui, channels, events, now, {'name': 'Living Room', 'url': 'http://192.0.2.1:9981'})
         window.show()
         settle(app)
-        window.play_channel_by_data(channels[[c.name for c in channels].index(PLAYING)])
+        window.play_channel_by_data(demo.find(channels, PLAYING))
         window.channel_list.setFocus()
         window.activateWindow()
         settle(app)
@@ -243,13 +159,7 @@ def main():
         manifest[f'base_{mode}'] = ui_theme.color('base').name()
 
         # Several channels recording to this computer at once, one per format.
-        jobs = []
-        for index, (name, fmt) in enumerate(RECORDINGS):
-            path = f'{FOLDER}/' + ui.local_recording_name(name, datetime.fromtimestamp(now - 600), fmt)
-            recorder = types.SimpleNamespace(is_running=True, file_path=path, started_at=time.time() - 300 - 170 * index,
-                                             stall_count=0)
-            jobs.append(ui.LocalJob(recorder, channels[[c.name for c in channels].index(name)]))
-            SIZES[path] = (380 - 90 * index) * 1024 * 1024
+        jobs = demo.recordings(ui, channels, now, RECORDINGS)
         window.local_jobs = jobs
         bar.set_recording(False, True, PLAYING)
         window._open_tasks_pane()
@@ -275,7 +185,7 @@ def main():
         save(window, f'tasks-{mode}.png')
         window.local_jobs = []
 
-        window.show_guide(channels[[c.name for c in channels].index(PLAYING)])
+        window.show_guide(demo.find(channels, PLAYING))
         guide = window._guide
         guide.resize(1200, 720)
         deadline = time.monotonic() + 5
