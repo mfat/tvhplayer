@@ -39,3 +39,8 @@ __pycache__/
 # Locally built offline WSLc image archives
 windows/backend/dist/
 windows/backend/release-bundle/
+
+# Intro video: renders, captured UI and its Node tools
+/video/out/
+/video/build/
+/video/node_modules/

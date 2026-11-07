@@ -1,0 +1,563 @@
+<!doctype html>
+<!--
+  TVHplayer intro video. Every frame is a pure function of time: render(t)
+  sets all styles from t (seconds), with no CSS transitions or timers, so the
+  render script can seek frame by frame and pipe screenshots into ffmpeg.
+  The app's windows, the positions of their controls and the recording
+  formats arrive as window.INTRO_DATA from render-intro-video.ts.
+
+  Wording: CAPTIONS. Timing: the T constants; every scene and caption
+  derives from them.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TVHplayer Intro</title>
+<style>
+  /* The app's own font. Static Noto Sans ships Regular and Bold. */
+  @font-face { font-family: Brand; font-weight: 400; font-display: block; src: local("Noto Sans"), local("NotoSans-Regular"); }
+  @font-face { font-family: Brand; font-weight: 700; font-display: block; src: local("Noto Sans Bold"), local("NotoSans-Bold"); }
+
+  /* The website's colours (docs/styles.css). */
+  :root {
+    --ink: #0b1424;
+    --muted: #5d687a;
+    --paper: #f6f3ed;
+    --paper-deep: #ebe7df;
+    --orange: #ff8a3d;
+    --cyan: #62a9f5;
+    --blue: #2f80ed;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #05080e; }
+  #stage {
+    position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; overflow: hidden;
+    transform-origin: 0 0; font-family: Brand, sans-serif; color: var(--ink);
+    background: var(--paper);
+    -webkit-font-smoothing: antialiased;
+  }
+  .layer { position: absolute; inset: 0; }
+  .blob { position: absolute; left: 0; top: 0; border-radius: 50%; filter: blur(110px); }
+  b { font-weight: inherit; color: var(--blue); }
+
+  #night { background: radial-gradient(900px 600px at 50% 45%, #14233d 0%, #070b12 70%); }
+
+  #captions { position: absolute; left: 0; right: 0; top: 62px; height: 90px; z-index: 50; }
+  .cap { position: absolute; left: 0; right: 0; text-align: center; white-space: nowrap; font-size: 64px; line-height: 1.15; font-weight: 700; letter-spacing: -0.03em; }
+  .cap.light { color: #fff; }
+  .cap.light b { color: var(--cyan); }
+
+  #heroIcon { position: absolute; left: 50%; top: 50%; width: 300px; height: 300px; margin: -150px 0 0 -150px; }
+
+  /* A window: an app capture at its own size, placed with one transform. */
+  .win { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .win > img.shot { position: absolute; left: 0; top: 0; }
+  .picture { position: absolute; overflow: hidden; background: #000; }
+  .picture svg { position: absolute; left: 0; width: 100%; }
+  .cover { position: absolute; }
+
+  #cursor { position: absolute; left: 0; top: 0; width: 34px; height: 34px; z-index: 5; transform-origin: 0 0; }
+  .ripple { position: absolute; width: 60px; height: 60px; margin: -30px 0 0 -30px; border-radius: 50%; border: 4px solid var(--orange); z-index: 4; }
+
+  .tile {
+    position: absolute; left: 150px; width: 540px; height: 132px; padding: 24px 28px; border-radius: 26px;
+    background: #fff; box-shadow: 0 18px 50px rgba(11,20,36,.12), 0 0 0 1px rgba(11,20,36,.06);
+    display: flex; align-items: center; gap: 24px;
+  }
+  .tile .ic { width: 84px; height: 84px; border-radius: 22px; flex: none; display: grid; place-items: center; }
+  .tile .ic svg { width: 48px; height: 48px; }
+  .tile h3 { margin: 0; font-size: 36px; letter-spacing: -0.02em; }
+  .tile p { margin: 4px 0 0; font-size: 24px; color: var(--muted); }
+  .dot { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; }
+
+  .guideFrame { position: absolute; left: 0; top: 0; transform-origin: 0 0; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 40px 90px rgba(11,20,36,.30), 0 0 0 1px rgba(11,20,36,.12); }
+  .guideFrame img { display: block; }
+
+  .fmt { position: absolute; height: 44px; padding: 0 18px; border-radius: 22px; font-size: 24px; font-weight: 700; color: #fff;
+    display: flex; align-items: center; letter-spacing: .02em; transform-origin: 0 50%; white-space: nowrap; }
+
+
+  #end { text-align: center; }
+  #endIcon { position: absolute; left: 50%; top: 250px; width: 220px; height: 220px; margin-left: -110px; }
+  #endWord { position: absolute; left: 0; right: 0; top: 500px; font-size: 128px; font-weight: 700; letter-spacing: -0.045em; }
+  #endWord span { font-weight: 400; color: var(--blue); }
+  #endTag { position: absolute; left: 0; right: 0; top: 670px; font-size: 44px; font-weight: 700; letter-spacing: -0.02em; }
+  #endFree { position: absolute; left: 0; right: 0; top: 740px; font-size: 32px; color: var(--muted); }
+  #endUrl { position: absolute; left: 50%; top: 830px; transform: translateX(-50%); padding: 18px 40px; border-radius: 40px;
+    background: var(--ink); color: #fff; font-size: 34px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
+
+  #controls {
+    position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 12px; align-items: center; padding: 10px 16px;
+    background: rgba(13,12,11,.85); color: #eee; font: 13px/1 ui-monospace, monospace;
+  }
+  #controls input { flex: 1; }
+  .render #controls { display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="blob" id="blobA" style="width:900px;height:900px;background:#cfe3fb;opacity:.7"></div>
+  <div class="blob" id="blobB" style="width:760px;height:760px;background:#ffd9bd;opacity:.6"></div>
+
+  <div class="layer" id="scenes"></div>
+  <div class="layer" id="night"><img id="heroIcon" src="../icons/tvhplayer.svg" alt=""></div>
+
+  <div class="layer" id="end">
+    <img id="endIcon" src="../icons/tvhplayer.svg" alt="">
+    <div id="endWord">TVH<span>player</span></div>
+    <div id="endTag">Live TV. Right on your computer.</div>
+    <div id="endFree"></div>
+    <div id="endUrl">mfat.github.io/tvhplayer</div>
+  </div>
+
+  <div id="captions"></div>
+</div>
+
+<div id="controls">
+  <button id="play">Pause</button>
+  <input id="scrub" type="range" min="0" step="0.001">
+  <span id="clock">0.00s</span>
+</div>
+
+<script>
+(() => {
+  const DATA = window.INTRO_DATA;
+  if (!DATA) {
+    document.body.innerHTML = '<p style="color:#eee;font:16px sans-serif;padding:24px">Open this through the render script with <code>--preview</code> so the product data is injected.</p>';
+    return;
+  }
+
+  // ---------- timing: every scene and caption hangs off these ----------
+  const T = {
+    title: 0.3,      // "Live TV." over the icon
+    window: 2.5,     // the main window rises
+    signal: 6.6,     // sources flow into the channel list
+    guide: 12.4,     // the TV guide
+    controls: 18.4,  // pause, rewind, record
+    tasks: 25.6,     // several recordings, three formats
+    formats: 28.6,
+    theme: 31.8,     // light to dark
+    end: 36.0,       // logo and address
+  };
+  const DURATION = 42;
+  // Inside the controls scene: when the pointer clicks each button.
+  const CLICK = { pause: T.controls + 1.7, back: T.controls + 3.2, record: T.controls + 4.7 };
+
+  // ---------- helpers ----------
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const prog = (t, a, b) => clamp((t - a) / (b - a));
+  const lerp = (a, b, x) => a + (b - a) * x;
+  const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+  const easeInOut = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  const back = (x) => { const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+  /** 0→1 while entering over [a,b], 1→0 while leaving over [c,d]. */
+  const life = (t, a, b, c, d) => Math.min(easeOut(prog(t, a, b)), 1 - easeInOut(prog(t, c, d)));
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, className, html = "") => { const e = document.createElement(tag); e.className = className; e.innerHTML = html; return e; };
+  const show = (node, opacity, transform = "") => {
+    node.style.opacity = opacity;
+    node.style.visibility = opacity <= 0.001 ? "hidden" : "visible";
+    node.style.transform = transform;
+  };
+  const img = (name, w, h) => {
+    const i = el("img", "shot"); i.src = `${DATA.folder}/${name}`; i.style.width = `${w}px`; i.style.height = `${h}px`; return i;
+  };
+  const [WW, WH] = DATA.window;
+  const [TW, TH] = DATA.tasks_window;
+  /** Place a window of size w×h so its centre is at (cx, cy) at scale s. */
+  const place = (node, w, h, cx, cy, s) => `translate(${cx - w * s / 2}px, ${cy - h * s / 2}px) scale(${s})`;
+  /** Where window point (x, y) lands on the stage. */
+  const onStage = (w, h, cx, cy, s, x, y) => [cx - w * s / 2 + x * s, cy - h * s / 2 + y * s];
+
+  const formats = DATA.formats.map((label) => label.replace(/\s*\(.*\)$/, ""));
+  const formatList = `${formats.slice(0, -1).join(", ")} or ${formats.at(-1)}`;
+
+  // ---------- captions ----------
+  const CAPTIONS = [
+    { html: "Live <b>TV.</b>", in: T.title, out: T.window - .1, type: true, light: true },
+    { html: "Right on your <b>computer.</b>", in: T.window + .2, out: T.signal - .1 },
+    { html: "Bring your own <b>signal.</b>", in: T.signal + .2, out: T.guide - .1 },
+    { html: "See what’s on, and what’s <b>next.</b>", in: T.guide + .2, out: T.controls - .1 },
+    { html: "Pause, rewind, <b>record.</b>", in: T.controls + .2, out: T.tasks - .1 },
+    { html: "Record several channels at <b>once.</b>", in: T.tasks + .2, out: T.formats - .05 },
+    { html: `As <b>${formatList}.</b>`, in: T.formats + .1, out: T.theme - .1 },
+    { html: "Light or <b>dark</b>, it feels at home.", in: T.theme + .2, out: T.end - .1 },
+  ];
+  const captions = CAPTIONS.map((c) => {
+    const node = el("div", c.light ? "cap light" : "cap");
+    if (c.type) {
+      // Typed captions reveal one character at a time without reflowing.
+      const holder = document.createElement("div"); holder.innerHTML = c.html;
+      c.chars = [];
+      const walk = (src, dst) => src.childNodes.forEach((n) => {
+        if (n.nodeType === 3) {
+          [...n.textContent].forEach((ch) => { const s = el("span", "", ch === " " ? "&nbsp;" : ch); dst.appendChild(s); c.chars.push(s); });
+        } else { const copy = document.createElement(n.tagName); dst.appendChild(copy); walk(n, copy); }
+      });
+      walk(holder, node);
+    } else {
+      node.innerHTML = c.html;
+    }
+    $("captions").appendChild(node);
+    return { ...c, node };
+  });
+
+  function renderCaptions(t) {
+    for (const c of captions) {
+      const v = life(t, c.in, c.in + .35, c.out - .3, c.out);
+      show(c.node, v, c.type ? "" : `translateY(${lerp(22, 0, easeOut(prog(t, c.in, c.in + .45)))}px)`);
+      if (c.type && v > 0) {
+        const shown = Math.floor((t - c.in) / .06);
+        c.chars.forEach((ch, i) => { ch.style.opacity = i < shown ? 1 : 0; });
+      }
+    }
+  }
+
+  // ---------- the picture: an illustrated seascape for "Wild Coasts" ----------
+  // Not a broadcast: a drawing, letterboxed 16:9 the way mpv shows a picture.
+  function seascape() {
+    const wrap = el("div", "picture");
+    wrap.innerHTML = `
+      <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#2c4f86"/><stop offset=".55" stop-color="#f29a63"/><stop offset="1" stop-color="#ffd59a"/>
+          </linearGradient>
+          <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#3a6b8f"/><stop offset="1" stop-color="#0d2238"/>
+          </linearGradient>
+          <radialGradient id="sun" cx=".5" cy=".5" r=".5">
+            <stop offset="0" stop-color="#fff6d8"/><stop offset=".4" stop-color="#ffd27a"/><stop offset="1" stop-color="#ffd27a" stop-opacity="0"/>
+          </radialGradient>
+        </defs>
+        <rect width="1600" height="560" fill="url(#sky)"/>
+        <circle data-sun cx="1060" cy="470" r="200" fill="url(#sun)"/>
+        <g data-clouds fill="#fff" opacity=".35">
+          <ellipse cx="300" cy="180" rx="220" ry="26"/><ellipse cx="420" cy="150" rx="140" ry="20"/>
+          <ellipse cx="1250" cy="230" rx="260" ry="22"/><ellipse cx="900" cy="120" rx="180" ry="16"/>
+        </g>
+        <path d="M0 560 L0 380 L120 340 L210 360 L300 300 L380 330 L470 410 L560 470 L620 560 Z" fill="#3b2f3f"/>
+        <path d="M0 560 L0 450 L90 430 L170 470 L260 455 L340 500 L420 560 Z" fill="#2a2231"/>
+        <path d="M1600 560 L1600 400 L1500 380 L1410 430 L1330 470 L1260 560 Z" fill="#43354a"/>
+        <rect y="560" width="1600" height="340" fill="url(#sea)"/>
+        <rect data-glint x="980" y="560" width="160" height="340" fill="#ffd9a0" opacity=".25"/>
+        <g data-waves stroke="#bfe0f5" stroke-width="5" stroke-linecap="round" fill="none" opacity=".55"></g>
+        <g data-birds stroke="#2a2231" stroke-width="5" stroke-linecap="round" fill="none"></g>
+      </svg>`;
+    const svg = wrap.querySelector("svg");
+    const waves = svg.querySelector("[data-waves]"), birds = svg.querySelector("[data-birds]");
+    const waveLines = Array.from({ length: 12 }, (_, i) => {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); waves.appendChild(p);
+      return { p, y: 590 + i * 26, phase: i * 1.7, len: 120 + (i % 4) * 60 };
+    });
+    const birdLines = Array.from({ length: 4 }, (_, i) => {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path"); birds.appendChild(p);
+      return { p, x: 260 + i * 150, y: 230 + (i % 2) * 60, s: 1 - i * .12 };
+    });
+    return {
+      node: wrap,
+      /** Draw the picture at picture time tau; time stops while paused. */
+      draw(tau, w, h) {
+        // Letterboxed: the picture keeps 16:9 inside the frame.
+        const ph = w * 9 / 16;
+        svg.style.top = `${(h - ph) / 2}px`; svg.style.height = `${ph}px`;
+        for (const l of waveLines) {
+          const x = ((l.phase * 230 + tau * (40 + l.y / 20)) % 1900) - 150;
+          const dy = Math.sin(tau * 1.3 + l.phase) * 4;
+          l.p.setAttribute("d", `M${x} ${l.y + dy} q${l.len / 2} -10 ${l.len} 0`);
+        }
+        for (const b of birdLines) {
+          const x = b.x + tau * 26, y = b.y + Math.sin(tau * 1.1 + b.x) * 10, flap = Math.sin(tau * 7 + b.x) * 10 * b.s;
+          b.p.setAttribute("d", `M${x - 24 * b.s} ${y - flap} q${12 * b.s} ${-8 * b.s} ${24 * b.s} ${flap} q${12 * b.s} ${-8 * b.s - flap} ${24 * b.s} ${-flap}`);
+        }
+        svg.querySelector("[data-clouds]").setAttribute("transform", `translate(${tau * 8} 0)`);
+        svg.querySelector("[data-glint]").setAttribute("opacity", (.22 + Math.sin(tau * 2.1) * .06).toFixed(3));
+      },
+    };
+  }
+
+  /** The main window: one capture per state, the picture laid over the black video area. */
+  function mainWindow(mode, states) {
+    const node = el("div", "win");
+    node.style.width = `${WW}px`; node.style.height = `${WH}px`;
+    const shots = {};
+    for (const s of states) { shots[s] = img(`main-${mode}-${s}.png`, WW, WH); node.appendChild(shots[s]); }
+    const pic = seascape();
+    const [vx, vy, vw, vh] = DATA.video;
+    Object.assign(pic.node.style, { left: `${vx}px`, top: `${vy}px`, width: `${vw}px`, height: `${vh}px` });
+    node.appendChild(pic.node);
+    $("scenes").appendChild(node);
+    return {
+      node, shots,
+      state(name) { for (const s of states) shots[s].style.opacity = s === name ? 1 : 0; },
+      picture: (tau) => pic.draw(tau, vw, vh),
+    };
+  }
+
+  // ---------- build ----------
+  const tiles = [
+    { title: "TV tuner", sub: "USB and PCIe", color: "#2f80ed",
+      icon: '<rect x="3" y="7" width="18" height="12" rx="2"/><path d="M8 3l4 4 4-4"/>' },
+    { title: "SAT>IP", sub: "Satellite receivers", color: "#ff8a3d",
+      icon: '<path d="M5 19a9 9 0 0 1 0-14l14 14a9 9 0 0 1-14 0z"/><path d="M14 10l5-5"/><circle cx="20" cy="4" r="1.5"/>' },
+    { title: "HDHomeRun", sub: "Network tuners", color: "#1f9d74",
+      icon: '<rect x="3" y="14" width="18" height="6" rx="2"/><path d="M8 10a6 6 0 0 1 8 0M5.5 7.5a10 10 0 0 1 13 0"/>' },
+    { title: "IPTV", sub: "M3U playlists", color: "#8b5cf6",
+      icon: '<path d="M4 6h11M4 12h11M4 18h7"/><path d="M16 15l5 3-5 3z"/>' },
+  ];
+  const tileNodes = tiles.map((tile, i) => {
+    const node = el("div", "tile", `
+      <div class="ic" style="background:${tile.color}1f"><svg viewBox="0 0 24 24" fill="none" stroke="${tile.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${tile.icon}</svg></div>
+      <div><h3>${tile.title.replace(">", "&gt;")}</h3><p>${tile.sub}</p></div>`);
+    node.style.top = `${232 + i * 162}px`;
+    $("scenes").appendChild(node);
+    return node;
+  });
+  const dots = tiles.flatMap((tile, i) => [0, 1, 2].map((k) => {
+    const d = el("div", "dot"); d.style.background = tile.color; $("scenes").appendChild(d);
+    return { d, i, k };
+  }));
+
+  const light = mainWindow("light", ["live", "paused", "rewound", "recording"]);
+  // The list fills as the sources arrive: a cover in the list's own colour.
+  const listCover = el("div", "cover");
+  const [lx, ly, lw, lh] = DATA.list;
+  Object.assign(listCover.style, { left: `${lx}px`, width: `${lw}px`, background: DATA.base_light });
+  light.node.appendChild(listCover);
+  const cursor = el("div", "", `<svg id="cursorSvg" viewBox="0 0 24 24" width="34" height="34"><path d="M4 2l15 11-7 1 4 8-3 1.5-4-8-5 5z" fill="#0b1424" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>`);
+  cursor.id = "cursor"; light.node.appendChild(cursor);
+  const ripple = el("div", "ripple"); light.node.appendChild(ripple);
+
+  const dark = mainWindow("dark", ["live"]);
+
+  const guide = el("div", "guideFrame");
+  const guideImg = el("img", ""); guideImg.src = `${DATA.folder}/guide-light.png`;
+  guideImg.style.width = "1200px"; guideImg.style.height = "720px";
+  guide.appendChild(guideImg); $("scenes").appendChild(guide);
+
+  const tasks = el("div", "win");
+  tasks.style.width = `${TW}px`; tasks.style.height = `${TH}px`;
+  tasks.appendChild(img("tasks-light.png", TW, TH));
+  // The picture plays on beside the recordings.
+  const tasksPic = seascape();
+  const [tvx, tvy, tvw, tvh] = DATA.tasks_video;
+  Object.assign(tasksPic.node.style, { left: `${tvx}px`, top: `${tvy}px`, width: `${tvw}px`, height: `${tvh}px` });
+  tasks.appendChild(tasksPic.node);
+  $("scenes").appendChild(tasks);
+  const FORMAT_COLOURS = { ts: "#2f80ed", mp4: "#ff8a3d", mkv: "#1f9d74" };
+  const pills = DATA.task_rows.map((row) => {
+    const p = el("div", "fmt", `.${row.format}`);
+    p.style.background = FORMAT_COLOURS[row.format] ?? "#0b1424";
+    $("scenes").appendChild(p);
+    return { p, row };
+  });
+
+  $("endFree").textContent = "Free and open source for Linux, Windows and macOS";
+
+  // ---------- scenes ----------
+  const HOME = { cx: 960, cy: 618, s: .95 };
+
+  function renderOpening(t) {
+    const v = 1 - easeInOut(prog(t, T.window - .2, T.window + .5));
+    show($("night"), v);
+    const s = prog(t, 0, 1.1);
+    show($("heroIcon"), easeOut(s), `translateY(${lerp(0, -40, easeOut(s))}px) scale(${lerp(.5, 1, back(s)) * lerp(1, .6, easeInOut(prog(t, T.window - .3, T.window + .4)))})`);
+  }
+
+  /** Where the light main window is, and how big, at time t. */
+  function lightPlacement(t) {
+    let { cx, cy, s } = HOME;
+    // Rise in.
+    const rise = easeOut(prog(t, T.window, T.window + 1.1));
+    cy = lerp(1500, cy, rise); s = lerp(.8, s, rise);
+    // Aside for the sources.
+    const aside = easeInOut(prog(t, T.signal, T.signal + .9)) * (1 - easeInOut(prog(t, T.guide - .6, T.guide + .2)));
+    cx = lerp(cx, 1330, aside); cy = lerp(cy, 640, aside); s = lerp(s, .64, aside);
+    // In close on the player bar: the bar sits low, the picture under the caption.
+    const close = easeInOut(prog(t, T.controls, T.controls + 1.0)) * (1 - easeInOut(prog(t, T.tasks - .6, T.tasks + .1)));
+    const [bx, by, bw, bh] = DATA.bar;
+    // Close enough to read the bar, low enough that the title bar clears the caption.
+    const zs = 1.06, zx = 960 - (bx + bw / 2 - WW / 2) * zs, zy = 1012 - (by + bh / 2 - WH / 2) * zs;
+    cx = lerp(cx, zx, close); cy = lerp(cy, zy, close); s = lerp(s, zs, close);
+    return { cx, cy, s };
+  }
+
+  function renderLight(t) {
+    const v = Math.min(prog(t, T.window, T.window + .3), 1 - prog(t, T.tasks - .2, T.tasks + .2)) +
+      (t >= T.theme - .4 ? prog(t, T.theme - .4, T.theme) : 0);
+    const out = 1 - prog(t, T.end - .3, T.end + .3);
+    // Out of the way while the guide is open.
+    const guideUp = life(t, T.guide, T.guide + .6, T.controls - .5, T.controls);
+    const opacity = clamp(v) * (t >= T.end - .3 ? out : 1) * (1 - guideUp);
+    const p = t >= T.theme - .4 ? { ...HOME } : lightPlacement(t);
+    show(light.node, opacity, place(light.node, WW, WH, p.cx, p.cy, p.s));
+    if (opacity <= 0) return;
+
+    // Playback state, from the clicks.
+    const state = t < CLICK.pause || t >= T.tasks ? "live" : t < CLICK.back ? "paused" : t < CLICK.record ? "rewound" : "recording";
+    light.state(state);
+    // Picture time stops while paused and jumps back ten seconds on rewind.
+    let tau = t;
+    if (t >= CLICK.pause && t < T.tasks) tau = t < CLICK.back ? CLICK.pause : t - (CLICK.back - CLICK.pause) - 10;
+    light.picture(tau);
+
+    // The list fills from top to bottom as the sources arrive.
+    const fill = t < T.signal ? 1 : easeInOut(prog(t, T.signal + 1.6, T.signal + 4.2));
+    listCover.style.top = `${ly + lh * fill}px`;
+    listCover.style.height = `${lh * (1 - fill)}px`;
+
+    // The pointer visits pause, ten seconds back, then Record.
+    const target = (r) => [r[0] + r[2] / 2 + 6, r[1] + r[3] / 2 + 8];
+    const P = { start: [1180, 520], pause: target(DATA.pause), back: target(DATA.back), record: target(DATA.record) };
+    const path = [
+      [T.controls + .9, CLICK.pause - .1, P.start, P.pause],
+      [CLICK.pause + .3, CLICK.back - .1, P.pause, P.back],
+      [CLICK.back + .3, CLICK.record - .1, P.back, P.record],
+    ];
+    let pos = P.start;
+    for (const [a, b, from, to] of path) {
+      if (t >= a) { const k = easeInOut(prog(t, a, b)); pos = [lerp(from[0], to[0], k), lerp(from[1], to[1], k)]; }
+    }
+    const cv = life(t, T.controls + .7, T.controls + 1.0, T.tasks - .9, T.tasks - .5);
+    const press = Object.values(CLICK).some((c) => t >= c - .08 && t < c + .1) ? .86 : 1;
+    show(cursor, cv, `translate(${pos[0] - 6}px, ${pos[1] - 4}px) scale(${press})`);
+    const recent = Object.values(CLICK).filter((c) => t >= c && t < c + .5).at(-1);
+    if (recent !== undefined && cv > 0) {
+      const k = prog(t, recent, recent + .5);
+      ripple.style.left = `${pos[0] - 6}px`; ripple.style.top = `${pos[1] - 6}px`;
+      show(ripple, 1 - k, `scale(${lerp(.4, 1.4, easeOut(k))})`);
+    } else show(ripple, 0);
+  }
+
+  function renderSignal(t) {
+    tileNodes.forEach((node, i) => {
+      const a = T.signal + .5 + i * .18;
+      const v = life(t, a, a + .5, T.guide - .7, T.guide - .3);
+      show(node, v, `translateX(${lerp(-80, 0, easeOut(prog(t, a, a + .6)))}px)`);
+    });
+    // Dots travel from each source to the channel list.
+    const p = lightPlacement(t);
+    const [tx, ty] = onStage(WW, WH, p.cx, p.cy, p.s, lx + 20, ly + lh * .35);
+    for (const { d, i, k } of dots) {
+      const start = T.signal + 1.3 + i * .22 + k * .55;
+      const x = prog(t, start, start + 1.1);
+      const v = x > 0 && x < 1 && t < T.guide - .6 ? Math.sin(Math.PI * x) : 0;
+      const sx = 690, sy = 232 + i * 162 + 66;
+      const e = easeInOut(x);
+      const px = lerp(sx, tx, e), py = lerp(sy, ty + (i - 1.5) * 40 * (1 - e), e) - Math.sin(Math.PI * e) * 60;
+      show(d, v, ""); d.style.left = `${px}px`; d.style.top = `${py}px`;
+    }
+  }
+
+  function renderGuide(t) {
+    const v = life(t, T.guide, T.guide + .7, T.controls - .5, T.controls);
+
+    const k = easeOut(prog(t, T.guide, T.guide + .9));
+    const s = lerp(1.08, 1.14, prog(t, T.guide, T.controls));
+    const cy = lerp(1300, 640, k);
+    show(guide, v, place(guide, 1200, 720, 960, cy, s));
+  }
+
+  function renderTasks(t) {
+    const v = life(t, T.tasks - .2, T.tasks + .4, T.theme - .5, T.theme - .1);
+    const [px, py, pw, ph] = DATA.tasks;
+    // Start on the whole window, then move in on the Tasks list.
+    const whole = { cx: 960, cy: 640, s: 1700 / TW };
+    // Close: the list's right edge (and the labels beside it) inside the frame, its top under the caption.
+    const zs = 1.5, close = easeInOut(prog(t, T.tasks + 1.2, T.tasks + 2.6));
+    const zoom = { cx: 1700 - (px + pw - TW / 2) * zs, cy: 240 - (py - TH / 2) * zs, s: zs };
+    const p = { cx: lerp(whole.cx, zoom.cx, close), cy: lerp(whole.cy, zoom.cy, close), s: lerp(whole.s, zoom.s, close) };
+    const rise = easeOut(prog(t, T.tasks - .2, T.tasks + .6));
+    show(tasks, v, place(tasks, TW, TH, p.cx, p.cy + lerp(120, 0, rise), p.s));
+    if (v > 0) tasksPic.draw(t, tvw, tvh);
+    // A label with each recording's format, beside its row.
+    pills.forEach(({ p: pill, row }, i) => {
+      const a = T.formats + .2 + i * .25;
+      const pv = Math.min(v, easeOut(prog(t, a, a + .4)));
+      const [sx, sy] = onStage(TW, TH, p.cx, p.cy, p.s, px + pw - 12, row.y + row.height / 2);
+      pill.style.left = `${sx + 16}px`; pill.style.top = `${sy - 22}px`;
+      show(pill, pv, `scale(${lerp(.6, 1, back(prog(t, a, a + .45)))})`);
+    });
+  }
+
+  function renderTheme(t) {
+    // Dark sweeps over light from the right, the picture playing on.
+    const v = life(t, T.theme + .8, T.theme + .81, T.end - .3, T.end + .3);
+    const sweep = easeInOut(prog(t, T.theme + .8, T.theme + 2.2));
+    show(dark.node, v, place(dark.node, WW, WH, HOME.cx, HOME.cy, HOME.s));
+    dark.node.style.clipPath = `inset(0 0 0 ${(1 - sweep) * 100}%)`;
+    dark.state("live");
+    dark.picture(t);
+  }
+
+  function renderEnd(t) {
+    const v = prog(t, T.end - .1, T.end + .5);
+    show($("end"), v);
+    if (v <= 0) return;
+    const step = (a, node, dy = 30) => { const k = prog(t, T.end + a, T.end + a + .7); show(node, easeOut(k), `translateY(${lerp(dy, 0, easeOut(k))}px)`); };
+    const k = prog(t, T.end + .1, T.end + 1);
+    show($("endIcon"), easeOut(k), `scale(${lerp(.5, 1, back(k))})`);
+    step(.5, $("endWord"));
+    step(1.1, $("endTag"));
+    step(1.6, $("endFree"));
+    const u = prog(t, T.end + 2.2, T.end + 2.9);
+    show($("endUrl"), easeOut(u), `translateX(-50%) translateY(${lerp(30, 0, easeOut(u))}px)`);
+  }
+
+  function render(t) {
+    $("blobA").style.transform = `translate(${-250 + Math.sin(t * .31) * 180}px, ${-300 + Math.cos(t * .23) * 110}px)`;
+    $("blobB").style.transform = `translate(${1300 + Math.cos(t * .27) * 160}px, ${520 + Math.sin(t * .19) * 120}px)`;
+    renderCaptions(t);
+    renderLight(t);
+    renderSignal(t);
+    renderGuide(t);
+    renderTasks(t);
+    renderTheme(t);
+    renderEnd(t);
+    renderOpening(t);
+  }
+
+  // ---------- render / preview API ----------
+  window.INTRO = {
+    duration: DURATION,
+    seek: (t) => render(t),
+    ready: () => Promise.all([
+      document.fonts.ready,
+      ...Array.from(document.images).map((i) => i.decode().catch(() => {})),
+    ]),
+  };
+
+  const params = new URLSearchParams(location.search);
+  if (params.has("render")) {
+    document.documentElement.classList.add("render");
+    render(0);
+    return;
+  }
+
+  // Preview: fit the stage to the window and loop with a scrubber.
+  const stage = $("stage"), scrub = $("scrub"), playBtn = $("play"), clock = $("clock");
+  scrub.max = String(DURATION);
+  const fit = () => {
+    const s = Math.min(innerWidth / 1920, (innerHeight - 44) / 1080);
+    stage.style.transform = `translate(${(innerWidth - 1920 * s) / 2}px, ${(innerHeight - 44 - 1080 * s) / 2}px) scale(${s})`;
+  };
+  addEventListener("resize", fit); fit();
+  let playing = true, t = Number(params.get("t") ?? 0), last = performance.now();
+  const frame = (now) => {
+    if (playing) t = (t + (now - last) / 1000) % DURATION;
+    last = now;
+    render(t);
+    scrub.value = String(t);
+    clock.textContent = `${t.toFixed(2)}s`;
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+  playBtn.onclick = () => { playing = !playing; playBtn.textContent = playing ? "Pause" : "Play"; };
+  scrub.oninput = () => { t = Number(scrub.value); };
+  addEventListener("keydown", (e) => { if (e.code === "Space") { e.preventDefault(); playBtn.click(); } });
+})();
+</script>
+</body>
+</html>

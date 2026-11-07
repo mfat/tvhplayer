@@ -1,0 +1,12 @@
+{
+  "name": "tvhplayer-intro-video",
+  "private": true,
+  "type": "module",
+  "description": "Renders the TVHplayer intro video from video/intro.html with the installed Chrome.",
+  "scripts": {
+    "video:intro": "node render-intro-video.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "25.16.0"
+  }
+}
