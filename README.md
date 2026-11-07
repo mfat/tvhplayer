@@ -7,7 +7,12 @@
 # TVHplayer
 Watch live TV and record your favorite shows right on your PC or laptop. Supports IPTV, HDHomerun and more. 
 
-<img width="1418" height="894" alt="main" src="https://github.com/user-attachments/assets/95471032-de4f-4778-a984-722bd2d10dbf" />
+
+
+
+https://github.com/user-attachments/assets/81b82de6-d414-4de1-824e-5ae826cfe540
+
+
 
 
 ## About
