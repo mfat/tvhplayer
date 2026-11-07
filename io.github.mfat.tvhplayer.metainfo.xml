@@ -2,25 +2,22 @@
 <component type="desktop-application">
   <id>io.github.mfat.tvhplayer</id>
   <name>TVHplayer</name>
-  <summary>A desktop client for Tvheadend for watching and recording live TV channels</summary>
+  <summary>Watch live TV and record your favorite shows</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0+</project_license>
   <description>
     <p>
-      TVHplayer is a desktop app for watching and recording live TV. It comes with its own built-in Tvheadend server, and also connects to any Tvheadend server you already run.
+      TVHplayer is a desktop app for watching and recording live TV powered by Tvheadend. It supports IPTV, HDHomerun, program guides and more.
     </p>
     <p>Features include:</p>
     <ul>
-      <li>Watch live TV and radio from an IPTV playlist, a tuner or HDHomerun</li>
-      <li>Built-in Tvheadend server that starts and stops with the app</li>
-      <li>Scan for channels with USB, PCIe, SAT&gt;IP and HDHomeRun tuners</li>
-      <li>Import IPTV channels from M3U playlists, with TV guide data from XMLTV</li>
-      <li>TV guide showing every channel on a timeline, with watch and record from the guide</li>
-      <li>Record on the server or on local computer, and convert recordings for video editing</li>
-      <li>Customizable channel list with logos, now and next, groups and favourites</li>
-      <li>Cast live channels to Chromecast and Cast-enabled televisions</li>
-      <li>Light and dark themes, keyboard shortcuts and screen reader support</li>
-      <li>Support for multiple Tvheadend servers over HTSP or HTTP</li>
+      <li>Watch live TV channels from an IPTV playlist, a tuner or HDHomerun</li>
+      <li>Record live TV while watching</li>
+      <li>Schedule recordings for your favorite shows</li>
+      <li>Cast live channels to your Chromecast-enabled TV from your computer</li>
+      <li>Browse program guides</li>
+      <li>Fetch missing guides from online sources</li>
+      <li>Rewind live TV during playback</li>
     </ul>
   </description>
   <launchable type="desktop-id">io.github.mfat.tvhplayer.desktop</launchable>
