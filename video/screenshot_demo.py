@@ -26,10 +26,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'video'))
 
-# Every window the same size, so the screenshots match: the main window
-# can be no narrower with Tasks open. (Flathub suggests 1000 by 700 at most.)
-WINDOW = (1340, 660)
-GUIDE = WINDOW
+# Every window the same size, so the screenshots match: as narrow as the
+# main window can be with Tasks open, which depends on the desktop's fonts,
+# so it is measured on screen. (Flathub suggests 1000 by 700 at most.)
+WINDOW = [1340, 660]
 PLAYING = 'Science Now'
 RECORDINGS = [('Sports Live', 'mp4'), ('Cinema One', 'mkv'), ('News 24', 'ts')]
 NASA_CLIP = ROOT / 'video' / 'build' / 'footage' / 'nasa-earth-in-4k.mp4'
@@ -66,6 +66,7 @@ def main():
     import tvhplayer.tvhplayer as ui
     from tvhplayer.core.config import ConfigStore
     from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QApplication
 
     home = Path(tempfile.mkdtemp(prefix='tvhplayer-demo-'))
     store = ConfigStore(home / 'tvhplayer.conf')
@@ -110,7 +111,14 @@ def main():
         demo.load(self, ui, channels, events, now // 1800 * 1800 + 1200, SERVER)
 
         def start():
+            # Measure with Tasks open, then use that width for every shot.
+            tasks_open = self.tasks_pane.isVisible()
+            self.tasks_pane.show()
+            QApplication.processEvents()
+            WINDOW[0] = max(WINDOW[0], self.minimumSizeHint().width(), self.minimumWidth())
+            self.tasks_pane.setVisible(tasks_open)
             self.resize(*WINDOW)
+            print(f'Window size for every screenshot: {WINDOW[0]} x {WINDOW[1]}')
             self.play_channel_by_data(demo.find(channels, PLAYING))
             if args.recordings:
                 self.local_jobs = demo.recordings(ui, channels, now, RECORDINGS)
@@ -126,7 +134,7 @@ def main():
 
     def guide_at_store_size(self, *a, **k):
         guide_init(self, *a, **k)
-        self.resize(*GUIDE)
+        self.resize(*WINDOW)
 
     guide_view.GuideWindow.__init__ = guide_at_store_size
     # The app reads the logo folder once its window is up; the logos are drawn
