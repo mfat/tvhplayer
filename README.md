@@ -16,8 +16,8 @@ TVHplayer is a cross-platform desktop app for watching and recording live TV usi
 <img width="1965" height="1055" alt="image" src="https://github.com/user-attachments/assets/fe5fae0a-90df-45f0-9bcd-a272cefd76ba" />
 
 
-## Who is this for
-Use TVHplayer to connect to an existing Tvheadend server, or with its built-in server. You don't need your own server to use the app. 
+## Do I need a Tvheadend server to use this?
+No, TVHplayer comes with its own built-in server and works out of the box. But it can also connect to your existing Tvheadend servers too. You can add as many servers as you want.
 
 ## Features
 
