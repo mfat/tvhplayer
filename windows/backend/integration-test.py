@@ -21,7 +21,6 @@ from tvhplayer.wslc_builtin_supervisor import WslcBuiltinSupervisor
 from tvhplayer.core.http_backend import HttpBackend
 from tvhplayer.core.htsp_backend import HtspBackend
 from tvhplayer.core.htsp_connection import HtspConnection
-from tvhplayer.core.errors import TvhAuthError
 from tvhplayer.core.models import ServerConfig
 from tvhplayer.core.playlist import parse_playlist, plan_channels
 from tvhplayer.core.playlist_sync import PlaylistSource, sync_playlist, wait_for_checks, NETWORK_CONF
@@ -48,23 +47,19 @@ def exercise(s, recordings):
     assert {row.laddr.port for row in listeners} == {s.http_port, s.htsp_port}
     assert all(row.laddr.ip == '127.0.0.1' for row in listeners)
     print('PASS: Windows socket table confirms IPv4 loopback-only listeners', flush=True)
+    # Access control is off (--noacl); the loopback-only check above is the boundary.
     with requests.Session() as session:
         session.trust_env = False
-        assert session.get(base + '/api/serverinfo', timeout=5).status_code == 401
-    print('PASS: unauthenticated administrative HTTP access denied', flush=True)
-    rejected = HtspConnection('127.0.0.1', s.htsp_port)
+        assert session.get(base + '/api/serverinfo', timeout=5).status_code == 200
+    print('PASS: HTTP works without a login (--noacl)', flush=True)
+    anonymous = HtspConnection('127.0.0.1', s.htsp_port)
     try:
-        rejected.connect()
-        rejected.hello()
-        try:
-            rejected.authenticate(s.username, 'wrong-password')
-        except TvhAuthError:
-            pass
-        else:
-            raise AssertionError('HTSP accepted an incorrect password')
+        anonymous.connect()
+        anonymous.hello()
+        anonymous.authenticate('', '')
     finally:
-        rejected.close()
-    print('PASS: incorrect HTSP credentials denied', flush=True)
+        anonymous.close()
+    print('PASS: HTSP works without a login (--noacl)', flush=True)
     command = ('pipe:///usr/bin/ffmpeg -nostdin -loglevel error -re -f lavfi '
                '-i testsrc2=size=320x180:rate=25 -f lavfi -i sine=frequency=1000 '
                '-c:v mpeg2video -c:a mp2 -mpegts_service_id 1 -f mpegts pipe:1')

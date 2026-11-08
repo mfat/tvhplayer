@@ -200,7 +200,8 @@ def test_launch_publishes_only_two_loopback_ports_without_credentials():
     assert '127.0.0.1:24111:9981/tcp' in args
     assert '127.0.0.1:24112:9982/tcp' in args
     assert args[args.index('--pull') + 1] == 'never'
-    assert not any('password' in arg or 'noacl' in arg for arg in args)
+    assert not any('password' in arg for arg in args)
+    assert '--noacl' in args[-1].split()
     assert r'C:\Config' not in str(args)
     assert 'type=volume,source=tvhplayer-config-' + OWNER + ',target=/config' in args
     assert '-c /config/data' in args[-1]

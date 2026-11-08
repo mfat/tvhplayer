@@ -245,11 +245,13 @@ class WslcRuntimeAdapter:
         for host_ip, port in udp_ports:
             port = int(port)
             args += ['--publish', f'{host_ip}:{port}:{port}/udp']
+        # No access control: the ports above are published on 127.0.0.1 only,
+        # as on Linux, and verify_running checks that before the app uses them.
         args += ['--mount', f'type=volume,source={self.config_storage.volume},target=/config',
                  '--mount', bind_mount(str(recordings), '/recordings'), '--entrypoint', '/bin/sh']
         self.command(*args, image, '-c',
                      'umask 077; exec /usr/libexec/tvhplayer/tvheadend -c /config/data -B '
-                     '--bindaddr 0.0.0.0 --http_port 9981 --htsp_port 9982', timeout=60)
+                     '--bindaddr 0.0.0.0 --noacl --http_port 9981 --htsp_port 9982', timeout=60)
 
     def inspect_owned(self, name, owner, cancellable=True, missing_ok=False):
         if not re.fullmatch(r'[0-9a-f]{32}', owner) or name != 'tvhplayer-' + owner:
