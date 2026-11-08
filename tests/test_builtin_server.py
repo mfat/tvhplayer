@@ -54,8 +54,8 @@ def test_command_stays_in_the_foreground_without_a_pid_file():
     assert '--firstrun' not in args
     assert '--logfile' not in args
     assert '--nostderr' not in args
-    assert '--noacl' not in args
-    assert '--bindaddr' in args
+    assert '--noacl' in args
+    assert args[args.index('--bindaddr') + 1] == '127.0.0.1'
     assert args[args.index('--http_port') + 1] == '24111'
     assert args[args.index('--htsp_port') + 1] == '24112'
 

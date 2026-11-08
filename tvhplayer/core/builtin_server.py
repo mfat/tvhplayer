@@ -3,9 +3,11 @@
 The child stays in the foreground. Tvheadend writes a pid file only when
 ``-f`` is passed, so this module does not use ``--pid``.
 
-Access control stays on. The app writes a Tvheadend ``superuser`` file with a
-generated password, so a web page or another local user cannot drive the
-built-in server through 127.0.0.1.
+Access control is off (``--noacl``): the server listens on 127.0.0.1 only and
+anything on this computer can use it without a login, including the web
+interface. The app still writes a ``superuser`` file with a generated password
+and sends that login; Tvheadend accepts it, and the Windows backend, which
+keeps access control on, needs it.
 """
 
 from __future__ import annotations
@@ -155,12 +157,16 @@ def ensure_superuser(config_dir) -> tuple[str, str]:
 
 
 def command_args(binary, config_dir, http_port: int, htsp_port: int) -> list[str]:
-    """Foreground command. No ``-f``, ``-C``, ``--pid``, ``--logfile``, ``--nostderr``, or ``--noacl``."""
+    """Foreground command. No ``-f``, ``-C``, ``--pid``, ``--logfile``, or ``--nostderr``.
+
+    ``--noacl`` goes only with ``--bindaddr 127.0.0.1``.
+    """
     return [
         str(binary),
         '-c', str(config_dir),
         '-B',
         '--bindaddr', '127.0.0.1',
+        '--noacl',
         '--http_port', str(int(http_port)),
         '--htsp_port', str(int(htsp_port)),
     ]
