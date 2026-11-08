@@ -44,7 +44,7 @@ CHECK_POLL_SECONDS = 2
 # less often: a second between polls for every thousand muxes.
 MUXES_PER_POLL_SECOND = 1000
 CHECK_MUX_FIELDS = ('scan_result', 'scan_state', 'name', 'iptv_sname')
-CHECK_SERVICE_FIELDS = ('enabled',)
+CHECK_SERVICE_FIELDS = ('enabled', 'channel')
 NOT_WORKING = 'It is not working right now.'
 NETWORK_GONE = 'The channels from this playlist are no longer on the server. Import it again.'
 _HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
@@ -202,6 +202,8 @@ class SyncResult:
     not_working: List[str] = field(default_factory=list)
     untested: int = 0
     check_stopped: bool = False
+    # Whether channels that failed were hidden, or only marked in the list.
+    hidden: bool = True
 
 
 def plan_group(plan: ChannelPlan) -> str:
@@ -325,6 +327,12 @@ def _channels(count: int) -> str:
     return '1 channel' if count == 1 else f'{count} channels'
 
 
+def _failed_fate(result: SyncResult, plural: bool) -> str:
+    if result.hidden:
+        return 'are hidden' if plural else 'is hidden'
+    return 'are marked in the channel list' if plural else 'is marked in the channel list'
+
+
 def result_message(name: str, result: SyncResult, first_import: bool) -> str:
     if result.cancelled:
         return f'Import stopped. {_channels(result.added)} from {name} were added.'
@@ -333,8 +341,8 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
         message = f'Added {_channels(result.added)} from {name}.'
         if failed:
             message += (
-                ' 1 is hidden because it is not working.' if failed == 1
-                else f' {failed} are hidden because they are not working.'
+                f' 1 {_failed_fate(result, False)} because it is not working.' if failed == 1
+                else f' {failed} {_failed_fate(result, True)} because they are not working.'
             )
     elif result.added or result.removed:
         parts = []
@@ -347,8 +355,8 @@ def result_message(name: str, result: SyncResult, first_import: bool) -> str:
         message = f'The channels from {name} are up to date.'
     if failed and not first_import:
         message += (
-            ' 1 channel is not working right now and is hidden.' if failed == 1
-            else f' {failed} channels are not working right now and are hidden.'
+            f' 1 channel is not working right now and {_failed_fate(result, False)}.' if failed == 1
+            else f' {failed} channels are not working right now and {_failed_fate(result, True)}.'
         )
     if result.check_stopped:
         message += ' Channels that were not checked yet stay in the list.'
@@ -377,8 +385,8 @@ def check_message(name: str, result: SyncResult) -> str:
         return f'Checked the channels from {name}: all {result.working} are working.'
     if failed:
         message += (
-            ' 1 is hidden because it is not working.' if failed == 1
-            else f' {failed} are hidden because they are not working.'
+            f' 1 {_failed_fate(result, False)} because it is not working.' if failed == 1
+            else f' {failed} {_failed_fate(result, True)} because they are not working.'
         )
     if untested:
         message += (
@@ -436,12 +444,15 @@ def sync_playlist(
     cancelled: Optional[Callable[[], bool]] = None,
     checkpoint: Optional[Callable[[], None]] = None,
     check: bool = True,
+    hide: bool = True,
 ) -> SyncResult:
     """Create, update, and remove muxes so the network matches ``plans``.
 
     With ``check`` a refresh tests the streams whose address changed and
-    hides channels known not to work; the others keep their last verdict
-    until the playlist is checked. Without it visibility is left alone.
+    reads the verdicts the server has; the others keep their last verdict
+    until the playlist is checked. With ``hide`` too, channels known not to
+    work are hidden, and without it every channel is shown. Without
+    ``check`` visibility is left alone.
     ``source`` is updated in place. ``checkpoint`` is called whenever its
     mux map changed, so a cancelled or failed import leaves the saved map
     matching the server.
@@ -554,7 +565,7 @@ def sync_playlist(
         admin.scan_muxes(retest)
     if check:
         # Hide channels already known not to work before the bouquet maps them.
-        apply_checks(admin, source)
+        apply_checks(admin, source, hide_failed=hide)
     if bouquets:
         admin.map_network_bouquet(source.network_uuid)
         if refresh:
@@ -640,7 +651,13 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
         row for row in admin.list_muxes(source.network_uuid, fields=CHECK_MUX_FIELDS)
         if row.get('uuid') in ours
     ]
-    _update_health(source, rows)
+    services = admin.list_services([row['uuid'] for row in rows], fields=CHECK_SERVICE_FIELDS)
+    channels = {}
+    for service in services:
+        channels.setdefault(service.get('multiplex_uuid'), []).extend(
+            str(uuid) for uuid in service.get('channel') or [] if uuid
+        )
+    _update_health(source, rows, channels)
     wanted = {}
     checked = 0
     untested = 0
@@ -657,7 +674,7 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
         elif result == SCAN_NONE:
             untested += 1
     changes = []
-    for service in admin.list_services(wanted, fields=CHECK_SERVICE_FIELDS):
+    for service in services:
         want = wanted.get(service.get('multiplex_uuid'))
         if want is not None and bool(service.get('enabled')) != want:
             changes.append({'uuid': service['uuid'], 'enabled': want})
@@ -679,7 +696,9 @@ def health_counts(source: PlaylistSource) -> Dict[str, int]:
     return counts
 
 
-def _update_health(source: PlaylistSource, rows) -> None:
+def _update_health(source: PlaylistSource, rows, channels=None) -> None:
+    """Save each entry's verdict; ``channels`` maps a mux to the channels it feeds."""
+    channels = channels or {}
     now = time.time()
     key_for_uuid = {uuid: key for key, uuid in source.muxes.items()}
     health = {}
@@ -688,16 +707,8 @@ def _update_health(source: PlaylistSource, rows) -> None:
         key = key_for_uuid.get(row.get('uuid'))
         if not key:
             continue
-        state = row.get('scan_state', SCAN_IDLE)
         result = row.get('scan_result', SCAN_NONE)
-        if state != SCAN_IDLE:
-            status = 'checking'
-        elif result in SCAN_PASSED:
-            status = 'working'
-        elif result == SCAN_NONE:
-            status = 'untested'
-        else:
-            status = 'failed'
+        status = _status_of(row)
         counts[status] += 1
         # Healthy rows are represented by the aggregate. This keeps the config
         # small even for providers with hundreds of thousands of channels.
@@ -708,6 +719,8 @@ def _update_health(source: PlaylistSource, rows) -> None:
                 'scan_result': result,
                 'checked': now,
             }
+            if status == 'failed' and channels.get(row.get('uuid')):
+                health[key]['channels'] = channels[row['uuid']]
     source.health = health
     source.health_totals = counts
     if rows and not counts['checking']:
@@ -737,19 +750,29 @@ def wait_for_checks(
     cancelled: Optional[Callable[[], bool]] = None,
     changed: Optional[Callable[[], None]] = None,
     sleep=time.sleep,
+    hide: Callable[[], bool] = lambda: True,
+    verdicts: Optional[Callable[[], None]] = None,
 ) -> None:
     """Apply scan verdicts as the server finishes them, until every mux is checked.
 
-    ``changed`` is called whenever channels were shown or hidden.
+    ``changed`` is called whenever channels were shown or hidden, and
+    ``verdicts`` whenever the server finished more of them. ``hide`` says,
+    each round, whether channels that fail are hidden or only marked.
     """
     progress = progress or (lambda _done, _total: None)
     cancelled = cancelled or (lambda: False)
     changed = changed or (lambda: None)
+    verdicts = verdicts or (lambda: None)
+    seen = -1
     while True:
-        checked, total, failed, shown_or_hidden, untested = apply_checks(admin, source)
+        hidden = bool(hide())
+        checked, total, failed, shown_or_hidden, untested = apply_checks(admin, source, hide_failed=hidden)
         if shown_or_hidden:
             _map_without_bouquet(admin, source)
             changed()
+        if checked != seen:
+            verdicts()
+        seen = checked
         progress(checked, total)
         if checked >= total or cancelled():
             break
@@ -758,10 +781,107 @@ def wait_for_checks(
             sleep(CHECK_POLL_SECONDS)
             waited += CHECK_POLL_SECONDS
     result.check_stopped = checked < total
+    result.hidden = hidden
     result.working = checked - len(failed) - untested
     result.not_working = failed
     result.untested = untested
     result.skipped.extend(SkippedEntry(name, NOT_WORKING) for name in failed)
+
+
+def _status_of(row) -> str:
+    state = row.get('scan_state', SCAN_IDLE)
+    result = row.get('scan_result', SCAN_NONE)
+    if state != SCAN_IDLE:
+        return 'checking'
+    if result in SCAN_PASSED:
+        return 'working'
+    return 'untested' if result == SCAN_NONE else 'failed'
+
+
+def failed_channels(playlists, server: str) -> Dict[str, tuple]:
+    """Channel uuid -> (playlist location, entry key) for every entry the server's test failed.
+
+    Reads the saved playlist dicts as they are, so it costs no more than
+    the failures it finds.
+    """
+    found = {}
+    for raw in playlists or []:
+        if not isinstance(raw, dict) or raw.get('server') != server:
+            continue
+        for key, item in (raw.get('health') or {}).items():
+            if isinstance(item, dict) and item.get('status') == 'failed':
+                for uuid in item.get('channels') or []:
+                    found[str(uuid)] = (raw.get('location') or '', str(key))
+    return found
+
+
+def retest_entry(
+    admin,
+    source: PlaylistSource,
+    key: str,
+    hide: bool = False,
+    channel: str = '',
+    cancelled: Optional[Callable[[], bool]] = None,
+    sleep=time.sleep,
+    timeout: float = 0,
+) -> str:
+    """Have the server test one entry's stream again and save the verdict.
+
+    Returns 'working', 'failed', 'untested', or 'checking' when it ran out of
+    time. ``channel`` is the channel the user picked, kept with a failure.
+    With ``hide`` a failure is hidden and a pass shown.
+    """
+    cancelled = cancelled or (lambda: False)
+    uuid = source.muxes.get(key)
+    if not uuid or not admin.network_exists(source.network_uuid):
+        raise PlaylistError(NETWORK_GONE)
+    # The server declines to scan the muxes of a switched-off network.
+    admin.update_network(source.network_uuid, {'enabled': True})
+    admin.scan_muxes([uuid])
+    timeout = timeout or NETWORK_CONF['max_timeout'] * 2 + 30
+    deadline = time.monotonic() + timeout
+    row = {}
+    while True:
+        sleep(1)
+        row = admin.mux_state(uuid)
+        if not row:
+            raise PlaylistError(NETWORK_GONE)
+        status = _status_of(row)
+        if status != 'checking' or cancelled() or time.monotonic() >= deadline:
+            break
+    if status == 'checking':
+        return status
+    previous = source.health.get(key) or {}
+    old = previous.get('status') or 'working'
+    if status in ('failed', 'untested'):
+        item = {
+            'name': row.get('name') or row.get('iptv_sname') or previous.get('name') or key,
+            'status': status,
+            'scan_result': row.get('scan_result', SCAN_NONE),
+            'checked': time.time(),
+        }
+        channels = list(previous.get('channels') or ([channel] if channel else []))
+        if status == 'failed' and channels:
+            item['channels'] = channels
+        source.health[key] = item
+    else:
+        source.health.pop(key, None)
+    if source.health_totals and old != status:
+        totals = dict(source.health_totals)
+        totals[old] = max(_count(totals.get(old)) - 1, 0)
+        totals[status] = _count(totals.get(status)) + 1
+        source.health_totals = totals
+    if hide:
+        want = status != 'failed'
+        changes = [
+            {'uuid': service['uuid'], 'enabled': want}
+            for service in admin.list_services([uuid], fields=('enabled',))
+            if bool(service.get('enabled')) != want
+        ]
+        if changes:
+            admin.save(changes)
+            _map_without_bouquet(admin, source)
+    return status
 
 
 def remove_playlist(admin, source: PlaylistSource) -> None:

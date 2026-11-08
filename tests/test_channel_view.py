@@ -209,6 +209,35 @@ def test_channel_model_marks_playing_and_recording_rows_once():
     view.close()
 
 
+def test_channels_that_failed_the_servers_test_are_marked():
+    from PyQt6.QtCore import Qt
+
+    from tvhplayer.channel_view import COL_NAME, COL_STATUS, FAILED_ROLE, NOT_WORKING, NOT_WORKING_TIP
+    from tvhplayer.core.models import Channel
+
+    news = Channel(uuid='news', name='News', number=1)
+    sport = Channel(uuid='sport', name='Sport', number=2)
+    app, model, view = _model([news, sport])
+    model.describe = lambda channel, playing, recording: channel.name
+    model.set_failed({'sport'})
+    assert model.index(1, COL_STATUS).data() == NOT_WORKING
+    assert model.index(0, COL_STATUS).data() == ''
+    assert model.index(1, COL_NAME).data(FAILED_ROLE) is True
+    assert model.index(0, COL_NAME).data(FAILED_ROLE) is False
+    assert model.index(1, COL_NAME).data(Qt.ItemDataRole.ToolTipRole) == NOT_WORKING_TIP
+    assert model.index(1, COL_NAME).data(Qt.ItemDataRole.AccessibleDescriptionRole) == f'Sport {NOT_WORKING_TIP}'
+    assert model.index(1, COL_STATUS).data(Qt.ItemDataRole.AccessibleDescriptionRole) == 'Sport: not working'
+    from tvhplayer.channel_view import ChannelDelegate
+    view.setItemDelegate(ChannelDelegate(view))
+    view.resize(400, 200)
+    view.grab()  # paints the faded row without errors
+    model.set_marks(sport, set())
+    assert model.index(1, COL_STATUS).data() == f'Playing, {NOT_WORKING}'
+    model.set_failed(set())
+    assert model.index(1, COL_STATUS).data() == 'Playing'
+    view.close()
+
+
 def test_channel_model_handles_a_very_large_list_quickly():
     from PyQt6.QtCore import Qt
 

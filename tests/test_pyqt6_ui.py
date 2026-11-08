@@ -4151,3 +4151,75 @@ def test_recording_folder_display_never_becomes_picker_or_writer_path(monkeypatc
     finally:
         window.close()
         app.processEvents()
+
+
+def test_channels_that_failed_the_stream_test_are_marked_later_and_can_be_retested(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QObject, QPoint, pyqtSignal
+
+    from tvhplayer.channel_view import COL_STATUS
+    from tvhplayer.core.models import Channel
+    from tvhplayer.core.playlist_sync import PlaylistSource
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        server = {'name': 'TV', 'url': 'http://tv:9981'}
+        monkeypatch.setattr(window, 'current_server', lambda: server)
+        monkeypatch.setattr(window, '_server_requests_ready', lambda: True)
+        monkeypatch.setattr(window, 'save_config', lambda: None)
+        source = PlaylistSource('List', 'http://x/list.m3u', 'http://tv:9981', network_uuid='net',
+                                muxes={'id:a': 'ma', 'id:b': 'mb'})
+        source.health = {'id:b': {'name': 'Sport', 'status': 'failed', 'channels': ['sport']}}
+        window.config['playlists'] = [source.to_dict()]
+        news, sport = Channel(uuid='news', name='News', number=1), Channel(uuid='sport', name='Sport', number=2)
+        window._channels = [news, sport]
+        window._fill_channel_rows()
+        # Nothing is worked out while the list is being shown.
+        assert window.channel_model.index(1, COL_STATUS).data() == ''
+        assert window._failed_marks_timer.isActive()
+        assert window._failed_marks_timer.interval() >= 1000
+        window._failed_marks_timer.stop()
+        window._mark_failed_channels()
+        assert window.channel_model.index(1, COL_STATUS).data() == 'Not working'
+        assert window.channel_model.index(0, COL_STATUS).data() == ''
+
+        started = []
+
+        class FakeRetest(QObject):
+            done = pyqtSignal(str, str, object)
+
+            def __init__(self, server, source, key, hide, channel_uuid, parent=None):
+                super().__init__(parent)
+                self.source = source
+                started.append((key, hide, channel_uuid, window.is_playlist_busy(source)))
+
+            def start(self):
+                self.source.health = {}
+                self.done.emit('working', '', self.source.to_dict())
+
+        monkeypatch.setattr(ui, 'RetestJob', FakeRetest)
+        menus = []
+
+        def open_menu(menu, *_args):
+            actions = {action.text().replace('&', ''): action for action in menu.actions()}
+            menus.append(sorted(actions))
+            retest = actions.get('Test Stream Again')
+            if retest is not None:
+                assert retest.isEnabled()
+                retest.trigger()
+
+        monkeypatch.setattr(ui.QMenu, 'exec', open_menu)
+        rect = window.channel_list.visualRect(window.channel_model.index(0, 1))
+        window.show_channel_context_menu(rect.center())
+        assert 'Test Stream Again' not in menus[-1]
+        rect = window.channel_list.visualRect(window.channel_model.index(1, 1))
+        window.show_channel_context_menu(QPoint(rect.center()))
+        assert 'Test Stream Again' in menus[-1]
+        app.processEvents()
+        # The playlist is claimed while the server tests it.
+        assert started == [('id:b', window.hides_dead_channels(), 'sport', True)]
+        assert window.channel_model.index(1, COL_STATUS).data() == ''
+        assert window.status_label.text() == 'Sport works now.'
+        assert not window.is_playlist_busy(source)
+    finally:
+        window.close()
+        app.processEvents()

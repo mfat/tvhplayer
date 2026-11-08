@@ -120,6 +120,10 @@ CHANNEL_KEY_ROLE = Qt.ItemDataRole.UserRole + 3
 PLAYING_ROLE = Qt.ItemDataRole.UserRole + 4
 # Title of the programme on now, for the second line under the name.
 SUBTITLE_ROLE = Qt.ItemDataRole.UserRole + 5
+# True on a channel whose stream failed the server's last test.
+FAILED_ROLE = Qt.ItemDataRole.UserRole + 6
+NOT_WORKING = 'Not working'
+NOT_WORKING_TIP = "This channel's stream failed the server's last test. Right-click it to test it again."
 
 DEFAULT_ICONS_DIR = Path(__file__).resolve().parent.parent / 'icons'
 
@@ -181,6 +185,8 @@ class ChannelTableModel(QAbstractTableModel):
         self._members = None
         self._playing = None
         self._recording = frozenset()
+        # Uuids of channels whose stream failed the server's last test.
+        self._failed = frozenset()
         self._now_next = {}
         self._epg_loaded = False
         self._show_progress = True
@@ -222,6 +228,8 @@ class ChannelTableModel(QAbstractTableModel):
             return self._extra(position, column, role)
         if role == PLAYING_ROLE:
             return self.is_playing(self._channels[position])
+        if role == FAILED_ROLE:
+            return self._is_failed(position)
         if role == SUBTITLE_ROLE and column == COL_NAME:
             event = self._programme(position, COL_NOW, int(time.time()))
             return event.title if event is not None else ''
@@ -280,6 +288,20 @@ class ChannelTableModel(QAbstractTableModel):
         self._playing = playing_id
         self._recording = recording
         self._changed(range(len(COLUMN_TITLES)))
+
+    def set_failed(self, uuids):
+        """Mark the channels with these uuids as not working."""
+        failed = frozenset(uuids)
+        if failed == self._failed:
+            return
+        self._failed = failed
+        self._changed(range(len(COLUMN_TITLES)))
+
+    def is_failed(self, channel):
+        return bool(self._failed) and channel is not None and str(channel.uuid or '') in self._failed
+
+    def _is_failed(self, position):
+        return bool(self._failed) and str(self._channels[position].uuid or '') in self._failed
 
     def set_programmes(self, now_next, show_progress, fetched=False):
         self._now_next = now_next
@@ -356,6 +378,8 @@ class ChannelTableModel(QAbstractTableModel):
             parts.append('Playing')
         if self._keys[position] in self._recording:
             parts.append('Recording')
+        if self._is_failed(position):
+            parts.append(NOT_WORKING)
         return ', '.join(parts)
 
     def _programmes(self, position, now):
@@ -422,17 +446,22 @@ class ChannelTableModel(QAbstractTableModel):
                 return f'Provider: {kind.provider}'
             return None
         if role == _TOOLTIP:
+            if column in (COL_NAME, COL_STATUS) and self._is_failed(position):
+                return NOT_WORKING_TIP
             return None
         if column == COL_NUMBER:
             return f'Channel {channel.number}' if role == _ACCESSIBLE_TEXT else 'Channel number'
         if column == COL_NAME:
             if role == _ACCESSIBLE_TEXT:
                 return channel.name
-            return self.describe(
+            description = self.describe(
                 channel,
                 self.is_playing(channel),
                 self._keys[position] in self._recording,
             )
+            if self._is_failed(position):
+                description = f"{description} {NOT_WORKING_TIP}".strip()
+            return description
         if column == COL_STATUS:
             status = self._status(position)
             if not status:
@@ -571,6 +600,16 @@ class ChannelTableView(QTableView):
             self.setCurrentIndex(model.index(row, column))
 
 
+def _fade_text(opt):
+    """Draw the cell's text fainter, for a channel that failed the server's test."""
+    palette = QPalette(opt.palette)
+    for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+        ink = QColor(palette.color(group, QPalette.ColorRole.Text))
+        ink.setAlphaF(ink.alphaF() * 0.55)
+        palette.setColor(group, QPalette.ColorRole.Text, ink)
+    opt.palette = palette
+
+
 class ChannelDelegate(QStyledItemDelegate):
     """Draws a channel row's cells with the extras chosen in View > Channel List.
 
@@ -616,6 +655,8 @@ class ChannelDelegate(QStyledItemDelegate):
             font.setWeight(QFont.Weight.DemiBold)
             opt.font = font
         selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        if not selected and index.data(FAILED_ROLE):
+            _fade_text(opt)
         if playing and _starts_row(widget, column):
             self._add_playing_mark(opt, selected)
         subtitle = index.data(SUBTITLE_ROLE) if self.two_line and column == COL_NAME else ''

@@ -139,6 +139,10 @@ class TvhAdmin:
         """Queue a scan of every mux in the network."""
         self._request('api/mpegts/network/scan', data={'uuid': network_uuid})
 
+    def mux_state(self, uuid: str) -> dict:
+        """One mux's settings and scan state, or {} when it is gone."""
+        return self._node(uuid)
+
     def scan_muxes(self, uuids: List[str]) -> None:
         """Queue a scan of these muxes only."""
         self.save([{'uuid': uuid, 'scan_state': SCAN_PENDING} for uuid in uuids])

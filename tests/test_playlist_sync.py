@@ -15,6 +15,8 @@ from tvhplayer.core.builtin_server import find_bundled_binary
 from tvhplayer.core.errors import PlaylistError, TvhAuthError, TvhConnectionError
 from tvhplayer.core.playlist import SkippedEntry, parse_playlist, plan_channels
 from tvhplayer.core.playlist_sync import (
+    failed_channels,
+    retest_entry,
     MAX_STREAMS,
     NETWORK_CONF,
     NOT_WORKING,
@@ -109,8 +111,11 @@ class FakeAdmin:
     def create_mux(self, network_uuid, conf):
         uuid = self._uuid()
         self.muxes[uuid] = dict(conf, network_uuid=network_uuid, name=conf['iptv_sname'], scan_state=1, scan_result=0)
-        self.services[f's{uuid}'] = {'multiplex_uuid': uuid, 'enabled': True}
+        self.services[f's{uuid}'] = {'multiplex_uuid': uuid, 'enabled': True, 'channel': [f'c{uuid}']}
         return uuid
+
+    def mux_state(self, uuid):
+        return dict(self.muxes.get(uuid) or {})
 
     def list_services(self, mux_uuids, fields=None):
         return [dict(row, uuid=uuid) for uuid, row in self.services.items() if row['multiplex_uuid'] in mux_uuids]
@@ -387,6 +392,56 @@ def test_stream_health_is_saved_per_channel():
     assert source.health['id:b']['status'] == 'failed'
     assert source.last_checked > 0
     assert PlaylistSource.from_dict(source.to_dict()).health == source.health
+
+
+def test_failures_keep_their_channels_for_the_list_to_mark():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST), hide=False)
+    wait_for_checks(admin, source, result, sleep=lambda _seconds: admin.finish_scans(), hide=lambda: False)
+    assert admin.visible() == ['A', 'B']
+    assert result.hidden is False
+    assert result_message('List', result, True).endswith('1 is marked in the channel list because it is not working.')
+    dead = 'c' + source.muxes['id:b']
+    assert source.health['id:b']['channels'] == [dead]
+    playlists = [source.to_dict(), dict(source.to_dict(), server='http://other')]
+    assert failed_channels(playlists, 'builtin') == {dead: ('http://x/list.m3u', 'id:b')}
+    assert failed_channels(playlists, 'http://nowhere') == {}
+
+
+def test_a_retest_saves_the_new_verdict():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST), hide=False)
+    wait_for_checks(admin, source, result, sleep=lambda _seconds: admin.finish_scans(), hide=lambda: False)
+    uuid = source.muxes['id:b']
+
+    assert retest_entry(admin, source, 'id:b', sleep=lambda _s: admin.finish_scans()) == 'failed'
+    assert admin.scanned[-1] == uuid
+    assert source.health['id:b']['channels'] == ['c' + uuid]
+    assert admin.visible() == ['A', 'B']
+
+    admin.dead = set()
+    assert retest_entry(admin, source, 'id:b', sleep=lambda _s: admin.finish_scans()) == 'working'
+    assert 'id:b' not in source.health
+    assert health_counts(source) == {'working': 2, 'failed': 0, 'untested': 0, 'checking': 0}
+    assert failed_channels([source.to_dict()], 'builtin') == {}
+
+
+def test_a_retest_hides_a_failure_when_asked():
+    admin = FakeAdmin(dead={'B'})
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST), hide=False)
+    wait_for_checks(admin, source, result, sleep=lambda _seconds: admin.finish_scans(), hide=lambda: False)
+    assert retest_entry(admin, source, 'id:b', hide=True, sleep=lambda _s: admin.finish_scans()) == 'failed'
+    assert admin.visible() == ['A']
+
+
+def test_a_retest_of_a_gone_playlist_says_so():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin', network_uuid='gone', muxes={'id:a': 'm'})
+    with pytest.raises(PlaylistError):
+        retest_entry(admin, source, 'id:a', sleep=lambda _s: None)
 
 
 def test_server_values_compare_equal_to_planned_values():

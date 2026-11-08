@@ -510,7 +510,7 @@ def test_closing_while_checking_hands_the_job_to_the_host(app, tmp_path, monkeyp
     while time.monotonic() < deadline and dialog.hint_label.isHidden():
         app.processEvents()
         time.sleep(0.02)
-    assert dialog.hint_label.text() == dialogs.CHECK_HINT
+    assert dialog.hint_label.text() == dialogs.check_hint(host.hides_dead_channels())
     assert dialog.close_btn.text() == 'Close'
 
     job = dialog._job
@@ -544,28 +544,60 @@ def _finish(app, job, timeout=10):
     return events
 
 
-def test_import_without_hiding_skips_the_check(app, tmp_path):
+class _OneDead(FakeAdmin):
+    """The second stream fails the server's test; each mux feeds one channel."""
+
+    hidden = []
+
+    def create_mux(self, network_uuid, conf):
+        uuid = super().create_mux(network_uuid, conf)
+        if uuid == 'm2':
+            self.muxes[uuid].update(scan_result=2)
+        return uuid
+
+    def list_services(self, mux_uuids, fields=None):
+        return [{'uuid': f's{uuid}', 'multiplex_uuid': uuid, 'enabled': True, 'channel': [f'c{uuid}']}
+                for uuid in self.muxes if uuid in set(mux_uuids)]
+
+    def save(self, nodes):
+        _OneDead.hidden.extend(node['uuid'] for node in nodes if node.get('enabled') is False)
+
+
+def test_import_without_hiding_still_tests_and_marks_failures(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(dialogs, 'TvhAdmin', _OneDead)
+    _OneDead.hidden = []
     host = FakeHost([BUILTIN], current=BUILTIN)
     host.hide_dead = False
     source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
     events = _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True))
-    assert events == ['Added 2 channels from news.']
+    assert events == ['checking', 'Added 2 channels from news. 1 is marked in the channel list because it is not working.']
+    assert _OneDead.hidden == []
+    health = PlaylistSource.from_dict(host.stored[-1]).health
+    assert [item['channels'] for item in health.values() if item['status'] == 'failed'] == [['cm2']]
 
 
-def test_an_import_stops_waiting_for_the_test_once_hiding_is_off(app, tmp_path, monkeypatch):
-    class SlowScan(FakeAdmin):
+def test_turning_hiding_off_during_the_test_marks_instead(app, tmp_path, monkeypatch):
+    class SlowScan(_OneDead):
         def create_mux(self, network_uuid, conf):
             uuid = super().create_mux(network_uuid, conf)
-            self.muxes[uuid].update(scan_state=1, scan_result=0)
+            self.muxes[uuid]['scan_state'] = 1
             return uuid
 
     monkeypatch.setattr(dialogs, 'TvhAdmin', SlowScan)
+    SlowScan.hidden = []
     host = FakeHost([BUILTIN], current=BUILTIN)
     source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
     job = dialogs.PlaylistJob(host, source, BUILTIN, first_import=True)
-    job.checking.connect(lambda: setattr(host, 'hide_dead', False))
+
+    def finish_scans():
+        host.hide_dead = False
+        for mux in FakeAdmin.servers[BUILTIN['url']]['muxes'].values():
+            mux['scan_state'] = 0
+
+    job.checking.connect(finish_scans)
     events = _finish(app, job)
-    assert events == ['checking', 'Added 2 channels from news. Channels that were not checked yet stay in the list.']
+    assert events == ['checking', 'Added 2 channels from news. 1 is marked in the channel list because it is not working.']
+    assert SlowScan.hidden == []
 
 
 def test_check_and_show_every_channel_of_an_imported_playlist(app, tmp_path):
@@ -1056,7 +1088,7 @@ def test_job_adds_only_the_chosen_channels(app, tmp_path):
         return True
 
     events = _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True, choose=keep_news))
-    assert events == ['Added 2 channels from news.']
+    assert events == ['checking', 'Added 2 channels from news.']
     stored = PlaylistSource.from_dict(host.stored[-1])
     assert stored.chosen_groups == ['News']
     assert sorted(stored.muxes) == ['name:A', 'name:B']
