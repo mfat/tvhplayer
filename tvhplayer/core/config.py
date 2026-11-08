@@ -86,6 +86,8 @@ def default_config():
         'cast_profiles': {},
         'cast_auto_profiles': {},
         'hide_dead_channels': False,
+        # Fade channels that failed the server's stream test and say Not working.
+        'mark_dead_channels': True,
         # Empty until chosen: the Videos folder, or asked the first time where that cannot be written.
         'local_recording_dir': '',
         'local_recording_display': '',
@@ -178,7 +180,7 @@ def _normalize(data):
     cfg['channel_list'] = channel_list_options(data.get('channel_list'))
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
     for key in (
-        'play_on_start', 'hide_dead_channels', 'convert_after_recording', 'delete_converted_original',
+        'play_on_start', 'hide_dead_channels', 'mark_dead_channels', 'convert_after_recording', 'delete_converted_original',
         'stay_awake_for_scheduled', 'setup_offered', 'own_title_bar', 'check_for_updates', 'fast_channel_start',
         'timeshift_on_disk', 'setup_started', 'setup_completed', 'setup_dismissed',
     ):

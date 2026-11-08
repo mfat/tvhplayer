@@ -673,6 +673,14 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_hides_dead_channels(self, on):
             self.hide = on
 
+        mark = True
+
+        def marks_dead_channels(self):
+            return self.mark
+
+        def set_marks_dead_channels(self, on):
+            self.mark = on
+
         def local_recording_dir(self):
             # The dialog shows what the host saved, not the path it was given.
             return getattr(self, 'folder', '/videos')
@@ -855,6 +863,12 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert host.theme == 'Fusion'
     assert not dialog.window_color_combo.isVisibleTo(dialog)
     assert dialog.hide_check.isChecked()
+    assert dialog.mark_check.isChecked()
+    dialog.mark_check.click()
+    assert host.mark is False
+    assert dialog.status_label.text() == 'Channels that do not work are no longer marked.'
+    dialog.mark_check.click()
+    assert host.mark is True
     assert not dialog.play_check.isChecked()
     dialog.play_check.click()
     assert host.play is True

@@ -4181,6 +4181,12 @@ def test_channels_that_failed_the_stream_test_are_marked_later_and_can_be_retest
         window._mark_failed_channels()
         assert window.channel_model.index(1, COL_STATUS).data() == 'Not working'
         assert window.channel_model.index(0, COL_STATUS).data() == ''
+        # Marking can be turned off and on in Settings; on by default.
+        assert window.marks_dead_channels() is True
+        window.set_marks_dead_channels(False)
+        assert window.channel_model.index(1, COL_STATUS).data() == ''
+        window.set_marks_dead_channels(True)
+        assert window.channel_model.index(1, COL_STATUS).data() == 'Not working'
 
         started = []
 

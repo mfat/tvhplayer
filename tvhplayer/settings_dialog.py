@@ -53,7 +53,11 @@ SCHEME_NAMES = {SCHEME_SYSTEM: 'Follow System', SCHEME_LIGHT: 'Light', SCHEME_DA
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
     'When on, channels that fail are hidden and come back once a later test finds them working. '
-    'When off, they stay in the list, marked Not working.'
+    'When off, they stay in the list.'
+)
+MARK_HELP = (
+    "Channels that failed the server's last test are faded in the channel list and say Not working. "
+    'Right-click one to test it again.'
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
 FAST_START_HELP = (
@@ -217,6 +221,7 @@ class SettingsDialog(QDialog):
         self._delete_row.setEnabled(self.convert_check.isChecked())
         self._show_convert_problem(self.convert_edit.text())
         self.hide_check.toggled.connect(self._toggled)
+        self.mark_check.toggled.connect(self._mark_toggled)
         self.check_btn.clicked.connect(self._check)
         self._sync()
 
@@ -288,6 +293,10 @@ class SettingsDialog(QDialog):
         self.hide_check.setChecked(host.hides_dead_channels())
         describe(self.hide_check, description=HIDE_HELP)
         imported.add_row(SettingRow('&Hide channels that do not work', HIDE_HELP, self.hide_check))
+        self.mark_check = ToggleSwitch('Mark channels that do not work')
+        self.mark_check.setChecked(host.marks_dead_channels())
+        describe(self.mark_check, description=MARK_HELP)
+        imported.add_row(SettingRow('&Mark channels that do not work', MARK_HELP, self.mark_check))
         self.check_btn = QPushButton('&Check Now')
         describe(self.check_btn, 'Check Channels Now', CHECK_HELP)
         self.check_btn.setToolTip(CHECK_HELP)
@@ -680,7 +689,15 @@ class SettingsDialog(QDialog):
         if on:
             announce_label(self.status_label, 'Channels that do not work are hidden from the next import or refresh on.')
         else:
-            announce_label(self.status_label, 'Hidden channels are shown again. Imports no longer test channels.')
+            announce_label(self.status_label, 'Hidden channels are shown again.')
+
+    def _mark_toggled(self, on):
+        self._host.set_marks_dead_channels(on)
+        announce_label(
+            self.status_label,
+            'Channels that do not work are marked in the channel list.' if on
+            else 'Channels that do not work are no longer marked.',
+        )
 
     def _check(self):
         self._jobs = self._host.check_playlist_channels()

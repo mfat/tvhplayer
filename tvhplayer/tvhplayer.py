@@ -4846,7 +4846,7 @@ class TVHeadendClient(QMainWindow):
         """Mark the listed channels whose stream failed the server's last test."""
         server = self.current_server()
         playlists = self.config.get('playlists') or []
-        key = server_key(server) if server else ''
+        key = server_key(server) if server and self.config['mark_dead_channels'] else ''
         cache = (self._playlists_revision, id(self.config), key)
         if cache != self._failed_marks_for:
             self._failed_marks_for = cache
@@ -8319,6 +8319,14 @@ class TVHeadendClient(QMainWindow):
 
     def hides_dead_channels(self):
         return self.config['hide_dead_channels']
+
+    def marks_dead_channels(self):
+        return self.config['mark_dead_channels']
+
+    def set_marks_dead_channels(self, on):
+        self.config['mark_dead_channels'] = bool(on)
+        self.save_config()
+        self._mark_failed_channels()
 
     def set_hides_dead_channels(self, on):
         self.config['hide_dead_channels'] = bool(on)
