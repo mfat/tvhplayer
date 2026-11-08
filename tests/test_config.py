@@ -202,7 +202,7 @@ def test_every_setting_has_a_default_and_bad_values_are_replaced(tmp_path):
     assert data['convert_options'] == ''
     assert data['last_channel'] == {}
     assert data['hide_dead_channels'] is False
-    assert default_config()['hide_dead_channels'] is True
+    assert default_config()['hide_dead_channels'] is False
 
 
 def test_timeshift_size_falls_back_when_unusable(tmp_path):

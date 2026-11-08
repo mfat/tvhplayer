@@ -201,7 +201,7 @@ Press F1 (**Help → Keyboard Shortcuts**) for the full list. The most used ones
 - **A channel will not start**: read the reason on the picture or in the status bar. **No free adapter** means every tuner is busy; a weak signal shows while the channel starts.
 - **Cannot connect to a server**: check that Tvheadend is running and reachable, and that the address includes `http://` and the port. **Test Connection** in Manage servers says what went wrong.
 - **Built-in server problems**: open its log from Manage servers → **Server Log**.
-- **Imported channels are missing**: channels that fail the stream test are hidden. Turn off **Settings → Channels → Hide channels that do not work** to see them all, or **Check channels now** to test them again.
+- **Imported channels are missing**: when **Settings → Channels → Hide channels that do not work** is on (it is off by default), channels that fail the stream test are hidden. Turn it off to see them all, or **Check channels now** to test them again.
 
 **Help → Open Log Folder** opens the folder with `app.log` (TVHplayer) and `tvheadend.log` (the built-in server). Please attach both when you [report a bug](https://github.com/mfat/tvhplayer/issues/new).
 

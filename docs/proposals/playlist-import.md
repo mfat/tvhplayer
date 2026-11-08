@@ -126,7 +126,7 @@ The network's bouquet is enabled with *Map to channels* and the options *Map zer
 
 ### Channels that do not work are hidden
 
-Free playlists carry many dead entries: on iptv-org's Persian list, 147 of 202 streams failed Tvheadend's scan. The app uses that scan as the test of whether a channel works. Settings → *Hide channels that do not work* (on by default, `hide_dead_channels` in the config) turns this off.
+Free playlists carry many dead entries: on iptv-org's Persian list, 147 of 202 streams failed Tvheadend's scan. The app uses that scan as the test of whether a channel works. Settings → *Hide channels that do not work* (off by default, `hide_dead_channels` in the config) turns this on.
 
 - Every channel is shown as soon as it is imported; the check runs afterwards. Disabling a service makes the bouquet delete its channel; enabling it maps the channel again (`bouquet_notify_service_enabled`).
 - The import then polls the muxes and applies each verdict as it lands: scan result *OK* or *OK (partial)* keeps the service enabled, *FAIL* disables it. The dialog shows "Checking channels… n of total" and can be closed; the check goes on and the status bar reports the result.

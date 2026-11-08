@@ -85,7 +85,7 @@ def default_config():
         'stream_profiles': {},
         'cast_profiles': {},
         'cast_auto_profiles': {},
-        'hide_dead_channels': True,
+        'hide_dead_channels': False,
         # Empty until chosen: the Videos folder, or asked the first time where that cannot be written.
         'local_recording_dir': '',
         'local_recording_display': '',
