@@ -52,7 +52,8 @@ WINDOW_COLOR_SHORT = 'Background of windows and panels in the TVHplayer and Orga
 SCHEME_NAMES = {SCHEME_SYSTEM: 'Follow System', SCHEME_LIGHT: 'Light', SCHEME_DARK: 'Dark'}
 HIDE_HELP = (
     'After an import or refresh, the server tests each channel in the background. '
-    'Channels that fail are hidden and come back once a later test finds them working.'
+    'When on, channels that fail are hidden and come back once a later test finds them working. '
+    'When off, they stay in the list, marked Not working.'
 )
 PLAY_HELP = 'Once the channel list has loaded, the channel you watched last starts playing.'
 FAST_START_HELP = (
