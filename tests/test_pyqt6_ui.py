@@ -2533,6 +2533,30 @@ def test_channel_list_reloads_at_most_every_30_seconds_during_a_playlist_check(m
         window.close()
 
 
+def test_channel_list_reloads_at_once_when_an_import_adds_channels(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        reloads = []
+        server = {'name': 'Built-in Server', 'url': 'http://127.0.0.1:1', 'builtin': True}
+        monkeypatch.setattr(window, 'is_current_server', lambda candidate: candidate is server)
+        monkeypatch.setattr(window, 'fetch_channels', lambda keep_place=False: keep_place and reloads.append(server))
+        clock = [1000.0]
+        monkeypatch.setattr(ui.time, 'monotonic', lambda: clock[0])
+        # The list loaded a moment ago, and a check reload is already waiting.
+        window._last_channel_reload = clock[0]
+        clock[0] += 5
+        window.playlist_channels_changed(server)
+        assert window._channel_reload_timer.isActive()
+
+        window.playlist_channels_changed(server, added=True)
+        assert reloads == [server]
+        assert not window._channel_reload_timer.isActive()
+        window.playlist_channels_changed({'url': 'http://other'}, added=True)
+        assert reloads == [server]
+    finally:
+        window.close()
+
+
 def test_reload_channel_list_reads_the_channels_again_in_place(monkeypatch, tmp_path):
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
     try:

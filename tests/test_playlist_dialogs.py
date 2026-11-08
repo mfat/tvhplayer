@@ -121,7 +121,7 @@ class FakeHost:
     def playlist_imported(self, server):
         self.imported.append(server)
 
-    def playlist_channels_changed(self, server):
+    def playlist_channels_changed(self, server, added=False):
         self.changed.append(server)
 
     def show_server(self, server):

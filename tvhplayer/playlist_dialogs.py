@@ -101,6 +101,7 @@ class _Task(QThread):
     status = pyqtSignal(str)
     checkpoint = pyqtSignal(object)
     channels_changed = pyqtSignal()
+    channels_added = pyqtSignal()
     succeeded = pyqtSignal(object)
     failed = pyqtSignal(object)
 
@@ -324,7 +325,7 @@ class PlaylistJob(QObject):
             )
             result.films = self._playlist.films
             # Removed duplicates and newly hidden channels are already gone from the server.
-            task.channels_changed.emit()
+            task.channels_added.emit()
             # A server on this computer takes the guide with the other guide sources.
             if self._playlist.guide_url and not result.cancelled and not is_local_server(self.server):
                 task.status.emit('Loading the program guide…')
@@ -422,6 +423,7 @@ class PlaylistJob(QObject):
         task.status.connect(self.status.emit)
         task.checkpoint.connect(self._host.store_playlist_source)
         task.channels_changed.connect(lambda: self._host.playlist_channels_changed(self.server))
+        task.channels_added.connect(lambda: self._host.playlist_channels_changed(self.server, added=True))
         task.succeeded.connect(on_success)
         task.failed.connect(self._failed)
         self._task = task
@@ -598,7 +600,7 @@ def show_skipped(parent, skipped):
 
 def check_hint(hides: bool) -> str:
     fate = 'are hidden' if hides else 'are marked'
-    return f'The channels are in the list. Those that do not work {fate} as the check finds them. You can close this window; checking goes on.'
+    return f'Channels were imported successfully. Those that do not work {fate} as the check finds them. You can close this window; checking goes on.'
 
 
 class ImportPlaylistDialog(QDialog):

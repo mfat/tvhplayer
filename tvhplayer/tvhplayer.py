@@ -8489,9 +8489,19 @@ class TVHeadendClient(QMainWindow):
             self.close_backend()
             self.fetch_channels()
 
-    def playlist_channels_changed(self, server):
-        """A running import showed or hid channels on ``server``."""
-        if not self.is_current_server(server) or self._channel_reload_timer.isActive():
+    def playlist_channels_changed(self, server, added=False):
+        """A running import showed or hid channels on ``server``.
+
+        Channels it ``added`` are shown at once; the check's changes after
+        that wait their turn so a big list is not reloaded over and over.
+        """
+        if not self.is_current_server(server):
+            return
+        if added:
+            self._channel_reload_timer.stop()
+            self._reload_changed_channels()
+            return
+        if self._channel_reload_timer.isActive():
             return
         spacing = max(CHANNEL_RELOAD_SECONDS, len(self._channels) / CHANNELS_PER_RELOAD_SECOND)
         wait = self._last_channel_reload + spacing - time.monotonic()
