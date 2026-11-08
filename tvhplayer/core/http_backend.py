@@ -270,9 +270,9 @@ class HttpBackend(TvhBackend):
         self._post_form('idnode/delete', {'uuid': entry_uuid(entry)})
 
     def create_autorec_by_series(self, event_id: int, config_uuid: str = '') -> str:
-        data = {'event_id': int(event_id)}
-        if config_uuid:
-            data['config_uuid'] = config_uuid
+        # The server refuses a single programme without config_uuid; an empty
+        # one means the default recording profile.
+        data = {'event_id': int(event_id), 'config_uuid': config_uuid or ''}
         return response_id(self._post_form('dvr/autorec/create_by_series', data))
 
     def list_timerec_entries(self) -> List[TimerecEntry]:

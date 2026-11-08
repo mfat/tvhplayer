@@ -280,6 +280,15 @@ def _until(predicate, timeout=30):
     return predicate()
 
 
+class _Ports(int):
+    """The HTTP port, which the older tests use as is, with the HTSP port beside it."""
+
+    def __new__(cls, http_port, htsp_port):
+        ports = super().__new__(cls, http_port)
+        ports.htsp = htsp_port
+        return ports
+
+
 @pytest.fixture
 def tvheadend():
     # Short config path: the XMLTV socket inside it must fit a Unix socket name.
@@ -300,7 +309,7 @@ def tvheadend():
 
     try:
         assert _until(ready, 60), 'Tvheadend did not start'
-        yield http_port
+        yield _Ports(http_port, htsp_port)
     finally:
         process.terminate()
         try:
@@ -349,3 +358,49 @@ def test_real_server_shows_the_guide_on_every_channel(tvheadend, tmp_path):
         found = _until(titles)
         assert sorted(found['BBC One']) == sorted(found['BBC One HD'])
         assert min(found['Other +1']) == min(found['BBC One']) + 1
+
+
+@pytest.mark.skipif(not TVHEADEND, reason='needs a Tvheadend build')
+def test_real_server_records_a_series_from_the_guide(tvheadend, tmp_path):
+    # The guide's Record Series button gives only the programme. The server
+    # answered "Bad request" until the app also sent the recording profile.
+    from tvhplayer.core.htsp_backend import HtspBackend
+    from tvhplayer.core.http_backend import HttpBackend
+    from tvhplayer.core.models import ServerConfig
+
+    port = tvheadend
+    server = {'url': f'http://127.0.0.1:{port}', 'builtin': True}
+    now = int(time.time()) // 3600 * 3600
+    location = tmp_path / 'guide.xml'
+    location.write_text(
+        '<tv><channel id="News.test"><display-name>News</display-name></channel>'
+        + ''.join(
+            f'<programme start="{format_time(now + h * 3600)}" stop="{format_time(now + (h + 1) * 3600)}" '
+            f'channel="News.test"><title>News {h}</title>'
+            f'<episode-num system="dd_progid">EP{h + 1:02d}345678.{h + 1:04d}</episode-num></programme>'
+            for h in range(1, 3)
+        )
+        + '</tv>'
+    )
+    with TvhAdmin(server) as admin:
+        network = admin.create_network({'networkname': 'Test', 'service_sid': 1, 'skipinitscan': True,
+                                        'bouquet': True, 'epgauto_default': True})
+        admin.create_mux(network, {'enabled': 1, 'iptv_url': 'http://127.0.0.1:1/0', 'iptv_sname': 'News',
+                                   'iptv_muxname': 'News', 'iptv_epgid': 'News.test', 'epg': 0})
+        admin.map_network_bouquet(network)
+        _until(lambda: len(admin.list_channels()) == 1)
+        report = update_server_guide(admin, server, GuideCache(tmp_path / 'cache'),
+                                     [GuideSource(str(location), 'builtin')], {})
+        assert report.covered == 1
+        rows = _until(lambda: _api(port, 'epg/events/grid?limit=10')['entries'])
+        events = sorted(rows, key=lambda row: row['start'])
+        assert all(row.get('serieslinkUri') for row in events)
+
+    settings = ServerConfig('Test', f'http://127.0.0.1:{port}', htsp_port=port.htsp)
+    for backend, event in ((HttpBackend(settings), events[0]), (HtspBackend(settings), events[1])):
+        try:
+            assert backend.create_autorec_by_series(event['eventId'])
+        finally:
+            backend.close()
+    rules = _api(port, 'dvr/autorec/grid')['entries']
+    assert sorted(rule['title'] for rule in rules) == ['News 1', 'News 2']
