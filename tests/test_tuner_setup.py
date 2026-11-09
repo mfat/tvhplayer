@@ -3,11 +3,14 @@ import json
 from tvhplayer.core.tuner_setup import (
     create_tuner_network,
     map_services,
+    fallback_name,
     mapper_progress,
+    name_unnamed_channels,
     network_name,
     scan_progress,
     scan_regions,
     services_to_map,
+    us_rf_channel,
 )
 from tvhplayer.core.tuners import Tuner
 
@@ -20,9 +23,12 @@ class Admin:
         self.tree = {}
         self.muxes = []
         self.services = []
+        self.streams = {}
 
     def request(self, path, data=None, params=None):
         self.requests.append((path, data, params))
+        if path == 'api/service/streams':
+            return {'streams': [{'type': kind} for kind in self.streams.get(params['uuid'], [])]}
         if path == 'api/dvb/scanfile/list':
             return {'entries': [
                 {'key': 'dvbt/uk/dvb-t_uk-CrystalPalace', 'val': 'United Kingdom: uk-CrystalPalace'},
@@ -124,14 +130,56 @@ def test_scan_progress_and_services():
         {'uuid': 's2', 'svcname': 'Sky', 'encrypted': True},
         {'uuid': 's3', 'svcname': ''},
         {'uuid': 's4', 'svcname': 'Mapped', 'channel': ['c']},
+        {'uuid': 's5', 'svcname': None, 'sid': 3},
+        {'uuid': 's6', 'sid': 4},
     ]
-    assert services_to_map(admin, 'net') == ['s1']
-    assert services_to_map(admin, 'net', include_encrypted=True) == ['s1', 's2']
+    # A nameless service is a channel when it has picture or sound, and data otherwise.
+    admin.streams = {'s3': ['PCR', 'PMT'], 's5': ['PCR', 'PMT', 'H264', 'AC3'], 's6': ['AC-4']}
+    assert services_to_map(admin, 'net') == ['s1', 's5', 's6']
+    assert services_to_map(admin, 'net', include_encrypted=True) == ['s1', 's2', 's5', 's6']
     map_services(admin, ['s1'])
     path, data, _params = admin.requests[-1]
     assert path == 'api/service/mapper/save'
     assert json.loads(data['node'])['services'] == ['s1']
     assert mapper_progress(admin) == (3, 4)
+
+
+def test_us_rf_channel_from_scan_table_frequencies():
+    assert us_rf_channel(57000000) == 2
+    assert us_rf_channel(85000000) == 6
+    assert us_rf_channel(177000000) == 7
+    assert us_rf_channel(213000000) == 13
+    assert us_rf_channel(473000000) == 14
+    assert us_rf_channel(527000000) == 23
+    assert us_rf_channel(695028615) == 51
+    assert us_rf_channel(100000000) is None
+    assert us_rf_channel(None) is None
+
+
+def test_fallback_names():
+    assert fallback_name({'delsys': 'ATSC-T', 'frequency': 545000000, 'name': '545MHz'}, 3) == 'RF 26 – 3'
+    assert fallback_name({'delsys': 'DVB-T', 'frequency': 191500000, 'name': '191.5MHz'}, 7) == '191.5MHz – 7'
+    assert fallback_name({'delsys': 'ATSC-C', 'frequency': 57000000, 'name': '57MHz'}, 1) == '57MHz – 1'
+    assert fallback_name({}, 5) == 'Channel 5'
+
+
+def test_name_unnamed_channels_renames_only_channels_of_nameless_services():
+    admin = Admin()
+    admin.muxes = [{'uuid': 'm1', 'delsys': 'ATSC-T', 'frequency': 545000000, 'name': '545MHz'}]
+    admin.services = [
+        {'uuid': 's1', 'multiplex_uuid': 'm1', 'sid': 1, 'svcname': 'WBTV', 'channel': ['c1']},
+        {'uuid': 's2', 'multiplex_uuid': 'm1', 'sid': 3, 'svcname': '', 'channel': ['c2']},
+        {'uuid': 's3', 'multiplex_uuid': 'm1', 'sid': 4, 'channel': ['c3']},
+    ]
+    admin.services.append({'uuid': 's4', 'multiplex_uuid': 'm1', 'sid': 5, 'channel': []})
+    named = set()
+    # s3 was not mapped in this run, so its channel keeps whatever name it has.
+    # s4's channel is not made yet, so it is waited for.
+    assert name_unnamed_channels(admin, 'net', ['s1', 's2', 's4'], named) == 1
+    assert admin.saved == [{'uuid': 'c2', 'name': 'RF 26 – 3'}]
+    admin.services[3]['channel'] = ['c4']
+    assert name_unnamed_channels(admin, 'net', ['s1', 's2', 's4'], named) == 0
+    assert admin.saved == [{'uuid': 'c2', 'name': 'RF 26 – 3'}, {'uuid': 'c4', 'name': 'RF 26 – 5'}]
 
 
 def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
@@ -149,14 +197,17 @@ def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
         'ad0': [{'uuid': 'fe0', 'text': 'DVB-T #0', 'class': 'linuxdvb_frontend_dvbt', 'leaf': 1,
                  'params': [{'id': 'enabled', 'value': True}]}],
     }
-    admin.muxes = [{'uuid': 'm1', 'scan_state': 0, 'scan_result': 1, 'num_svc': 2}]
-    admin.services = [{'uuid': 's1', 'svcname': 'One'}, {'uuid': 's2', 'svcname': 'Two'}]
+    admin.muxes = [{'uuid': 'm1', 'scan_state': 0, 'scan_result': 1, 'num_svc': 3, 'name': '506MHz'}]
+    admin.services = [{'uuid': 's1', 'svcname': 'One'}, {'uuid': 's2', 'svcname': 'Two'},
+                      {'uuid': 's3', 'multiplex_uuid': 'm1', 'sid': 9}]
+    admin.streams = {'s3': ['MPEG2VIDEO', 'MPEG2AUDIO']}
     admin.request_status = None
     original = admin.request
 
     def request(path, data=None, params=None):
         if path == 'api/service/mapper/status':
-            return {'total': 2, 'ok': 2}
+            # The server reports the mapping done before it makes the channels.
+            return {'total': 3, 'ok': 3}
         return original(path, data, params)
 
     admin.request = request
@@ -181,9 +232,14 @@ def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
     scan = wizard.scan_page
     scan._poll()
     scan._poll()
+    assert not scan.isComplete()
+    # The channel of the nameless service arrives, and gets a readable name.
+    admin.services[2]['channel'] = ['c3']
+    scan._poll()
     assert scan.isComplete()
-    assert 'Added 2 channels' in scan.status.text()
+    assert 'Added 3 channels' in scan.status.text()
     assert admin.saved[0] == {'uuid': 'fe0', 'enabled': True, 'networks': ['net']}
+    assert admin.saved[-1] == {'uuid': 'c3', 'name': '506MHz – 9'}
     wizard.done(QWizard.DialogCode.Accepted)
     assert done == [{'name': 'Built-in'}] and iptv == []
     app.processEvents()

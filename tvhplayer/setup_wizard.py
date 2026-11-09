@@ -46,6 +46,7 @@ try:
         discover_satip,
         map_services,
         mapper_progress,
+        name_unnamed_channels,
         network_name,
         scan_progress,
         scan_regions,
@@ -65,6 +66,7 @@ except ImportError:
         discover_satip,
         map_services,
         mapper_progress,
+        name_unnamed_channels,
         network_name,
         scan_progress,
         scan_regions,
@@ -80,6 +82,9 @@ SOURCE_IPTV = 'iptv'
 POLL_MS = 2000
 # A scan that finds nothing new for this long has stalled.
 SCAN_STALL_SECONDS = 600
+# The server makes channels a few seconds after it is asked to; wait this long
+# for the channels of nameless services before leaving them with its names.
+NAME_WAIT_SECONDS = 30
 # SAT>IP servers answer discovery within a few seconds. The server looks for HDHomeRun
 # tuners by itself every 15 seconds.
 DISCOVERY_WAIT_SECONDS = 4
@@ -825,6 +830,9 @@ class ScanPage(QWizardPage):
             self._wizard.call(lambda admin: scan_progress(admin, network), self._scanned)
         elif self._step == 'map':
             self._wizard.call(mapper_progress, self._mapped)
+        elif self._step == 'name':
+            network, services, named = self._network, self._services, self._named_channels
+            self._wizard.call(lambda admin: name_unnamed_channels(admin, network, services, named), self._named)
         else:
             self._polling = False
 
@@ -861,6 +869,7 @@ class ScanPage(QWizardPage):
             )
             return
         self._expected = len(services)
+        self._services = services
         self._step = 'map'
         announce_label(self.status, f'Adding {len(services)} channels…')
         self.progress.setRange(0, len(services))
@@ -881,6 +890,17 @@ class ScanPage(QWizardPage):
         handled, total = counts
         self.progress.setValue(min(handled, self.progress.maximum()))
         if total and handled < total:
+            return
+        self._step = 'name'
+        self._named_channels = set()
+        self._name_deadline = time.monotonic() + NAME_WAIT_SECONDS
+        self._poll()
+
+    def _named(self, waiting, error):
+        self._polling = False
+        # A channel left with the server's own name still works, so a failed
+        # rename does not fail the setup.
+        if not error and waiting and time.monotonic() < self._name_deadline:
             return
         self._timer.stop()
         self.added = self._expected
