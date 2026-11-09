@@ -187,7 +187,10 @@ def test_title_follows_a_palette_change_while_the_window_is_open(qapp):
 def _framer(qapp):
     from tvhplayer.window_frame import DialogFramer
 
-    return DialogFramer(qapp, button_layout='icon:minimize,maximize,close')
+    framer = DialogFramer(qapp, button_layout='icon:minimize,maximize,close')
+    # deleteLater() alone left it watching: processEvents() does not run deferred deletes.
+    framer.deleteLater = lambda: qapp.removeEventFilter(framer)
+    return framer
 
 
 def test_dialogs_get_the_apps_title_bar_too(qapp):
@@ -613,6 +616,94 @@ def test_qt_file_dialog_fixed_size_and_modal_dialogs_are_framed_and_close(qapp):
         QTimer.singleShot(50, lambda: finish('modal', modal))
         modal.exec()
         assert seen == {'file': (True, 8, True), 'fixed': (True, 8, False), 'modal': (True, 8, True)}
+    finally:
+        framer.deleteLater()
+        parent.deleteLater()
+        qapp.processEvents()
+
+
+def test_main_window_is_framed_once_while_the_dialog_framer_runs(qapp, monkeypatch):
+    # A framer running already prepared the main window as it was given its
+    # frame, and framed it a second time as a dialog when shown.
+    from tvhplayer.window_frame import TitleBar
+
+    framer = _framer(qapp)
+    window = QMainWindow()
+    window.setCentralWidget(QWidget())
+    frame = WindowFrame(window, QMenuBar(window), button_layout=':close')
+    try:
+        window.show()
+        qapp.processEvents()
+        assert window.findChildren(TitleBar) == [frame.title_bar]
+    finally:
+        framer.deleteLater()
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_compositor_is_told_where_the_shadow_ends(qapp, monkeypatch):
+    # GNOME snapped and tiled the window by its shadow: a gap was left at the
+    # screen's edge. It is told the shadow's margins, none while maximized.
+    from tvhplayer import window_frame
+
+    told = []
+    monkeypatch.setattr(
+        window_frame.window_menu, 'set_shadow_margins', lambda window, margins: told.append(QMargins(margins)) or True,
+    )
+    window = QMainWindow()
+    window.setCentralWidget(QWidget())
+    menubar = QMenuBar(window)
+    frame = WindowFrame(window, menubar, button_layout=':close')
+    try:
+        assert told == []  # no native window yet
+        window.resize(600, 400)
+        window.show()
+        qapp.processEvents()
+        assert told == [SHADOW_MARGINS]
+        assert window.size() == QSize(600, 400)
+        window.setWindowState(Qt.WindowState.WindowMaximized)
+        qapp.processEvents()
+        assert told[-1] == QMargins()
+        window.setWindowState(Qt.WindowState.WindowNoState)
+        qapp.processEvents()
+        assert told[-1] == SHADOW_MARGINS
+        # Told only when they change.
+        count = len(told)
+        frame._sync()
+        assert len(told) == count
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_shadow_margins_are_only_told_on_wayland(qapp):
+    from tvhplayer import window_menu
+
+    assert window_menu.set_shadow_margins(QWidget(), QMargins(1, 1, 1, 1)) is False
+
+
+def test_frames_of_dialogs_qt_makes_itself_are_kept_alive(qapp):
+    # Nothing in Python held the frame of a message box Qt made: its Python
+    # half was thrown away while Qt still used it, and its next event failed.
+    import gc
+
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QMessageBox
+
+    framer = _framer(qapp)
+    parent = QWidget()
+    seen = []
+
+    def check():
+        box = qapp.activeModalWidget()
+        gc.collect()
+        seen.extend(type(child).__name__ for child in box.children())
+        box.close()
+
+    try:
+        QTimer.singleShot(50, check)
+        QMessageBox.warning(parent, 'Oops', 'Something went wrong.')
+        assert 'DialogFrame' in seen and 'TitleBar' in seen, seen
     finally:
         framer.deleteLater()
         parent.deleteLater()

@@ -46,6 +46,10 @@ SLOT_LAST_INPUT_SEAT = 9
 # holding the window's xdg_toplevel. Called by name: its place in the vtable
 # moved in Qt 6.11.
 SURFACE_ROLE_SYMBOL = b'_ZNK15QtWaylandClient14QWaylandWindow12_surfaceRoleEv'
+# QtWaylandClient::QWaylandWindow::setCustomMargins(const QMargins &): the part
+# of the window that is shadow, left out of the window geometry the compositor
+# snaps and tiles by.
+CUSTOM_MARGINS_SYMBOL = b'_ZN15QtWaylandClient14QWaylandWindow16setCustomMarginsERK8QMargins'
 RESOLVE_APP_SYMBOL = b'_ZNK15QGuiApplication16resolveInterfaceEPKci'
 RESOLVE_WINDOW_SYMBOL = b'_ZNK7QWindow16resolveInterfaceEPKci'
 # Qt versions (major, minor) whose QtWaylandClient::QWaylandWindow was checked:
@@ -136,6 +140,10 @@ def _library(*names):
     return None
 
 
+class _QMargins(ctypes.Structure):
+    _fields_ = [('left', ctypes.c_int), ('top', ctypes.c_int), ('right', ctypes.c_int), ('bottom', ctypes.c_int)]
+
+
 class _StdAny(ctypes.Structure):
     """libstdc++'s std::any: its manager, then a pointer kept in place."""
 
@@ -146,10 +154,6 @@ class _Wayland:
     """The Qt and libwayland-client calls that ask a Wayland compositor for the window menu."""
 
     def __init__(self, guard):
-        # The std::any comes back through a hidden pointer, passed first only
-        # on x86-64; elsewhere it travels in a register ctypes cannot set.
-        if platform.machine() not in ('x86_64', 'AMD64'):
-            raise OSError('unsupported architecture')
         self.guard = guard
         self.trusted = guard.state() == 'ok'
         gui = _library('libQt6Gui.so.6')
@@ -162,6 +166,9 @@ class _Wayland:
         self.resolve_window = resolve(ctypes.cast(getattr(gui, RESOLVE_WINDOW_SYMBOL.decode()), ctypes.c_void_p).value)
         self.surface_role = ctypes.CFUNCTYPE(None, ctypes.POINTER(_StdAny), ctypes.c_void_p)(
             ctypes.cast(getattr(client, SURFACE_ROLE_SYMBOL.decode()), ctypes.c_void_p).value
+        )
+        self.custom_margins = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(_QMargins))(
+            ctypes.cast(getattr(client, CUSTOM_MARGINS_SYMBOL.decode()), ctypes.c_void_p).value
         )
         self.get_class = wayland.wl_proxy_get_class
         self.get_class.restype = ctypes.c_char_p
@@ -185,13 +192,45 @@ class _Wayland:
         vtable = ctypes.cast(interface, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p))).contents
         return ctypes.CFUNCTYPE(restype, ctypes.c_void_p)(vtable[slot])(interface)
 
-    def toplevel(self, window):
-        """The window's xdg_toplevel, or None."""
+    def _trust(self):
+        """True once a private call is known to work on this Qt; the first is noted on disk."""
+        if self.trusted:
+            return True
+        if not self.guard.begin():
+            return False
+        self.trusted = True
+        return True
+
+    def _confirm(self):
+        # Still here after a private call: it works on this Qt.
+        self.guard.done()
+
+    def _window_interface(self, window):
         handle = window.windowHandle()
         if handle is None:
             return None
-        interface = self.resolve_window(sip.unwrapinstance(handle), b'QWaylandWindow', 1)
-        if not interface:
+        return self.resolve_window(sip.unwrapinstance(handle), b'QWaylandWindow', 1) or None
+
+    def set_margins(self, window, margins):
+        """Tell Qt which part of ``window`` is shadow. False if it could not be told."""
+        if not self._trust():
+            return False
+        interface = self._window_interface(window)
+        if interface is None:
+            return False
+        value = _QMargins(margins.left(), margins.top(), margins.right(), margins.bottom())
+        self.custom_margins(interface, ctypes.byref(value))
+        self._confirm()
+        return True
+
+    def toplevel(self, window):
+        """The window's xdg_toplevel, or None."""
+        # The std::any comes back through a hidden pointer, passed first only
+        # on x86-64; elsewhere it travels in a register ctypes cannot set.
+        if platform.machine() not in ('x86_64', 'AMD64'):
+            return None
+        interface = self._window_interface(window)
+        if interface is None:
             return None
         role = _StdAny()
         self.surface_role(ctypes.byref(role), interface)
@@ -203,15 +242,10 @@ class _Wayland:
         return role.value
 
     def show(self, window, pos):
-        if not self.trusted:
-            if not self.guard.begin():
-                return False
-            toplevel = self.toplevel(window)
-            # Still here: the private call works on this Qt.
-            self.guard.done()
-            self.trusted = True
-        else:
-            toplevel = self.toplevel(window)
+        if not self._trust():
+            return False
+        toplevel = self.toplevel(window)
+        self._confirm()
         app = self._app_interface()
         if toplevel is None or not app:
             return False
@@ -354,6 +388,19 @@ def _backend_for(platform_name):
         except (OSError, AttributeError):
             _backend = None
     return _backend
+
+
+def set_shadow_margins(window, margins) -> bool:
+    """Tell the compositor that ``margins`` of ``window`` are shadow, not window:
+    it then snaps, tiles and places the window by its visible edge. Wayland
+    only; False if it could not be told."""
+    backend = _backend_for(QGuiApplication.platformName())
+    if not isinstance(backend, _Wayland):
+        return False
+    try:
+        return backend.set_margins(window, margins)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
 
 
 def show(window, pos, global_pos) -> bool:

@@ -530,6 +530,8 @@ class _Frame(QObject):
         self.margins = QMargins(SHADOW_MARGINS)
         self._shadow = None
         self._shadow_key = None
+        # The shadow margins the compositor was told of, None until it was.
+        self._native_margins = None
 
     def _start(self):
         self.grips = [_ResizeGrip(self) for _ in range(4)]
@@ -549,7 +551,17 @@ class _Frame(QObject):
         self._place_title_bar()
         self._place_grips()
         self.title_bar.sync_state()
+        self._tell_compositor()
         self.window.update()
+
+    def _tell_compositor(self):
+        """Tell the compositor where the shadow ends, so that it snaps and
+        tiles the window by its visible edge rather than its shadow's."""
+        if self.window.windowHandle() is None or self._native_margins == self.margins:
+            return
+        # First told as the window is about to be shown, which keeps its size.
+        if window_menu.set_shadow_margins(self.window, self.margins):
+            self._native_margins = QMargins(self.margins)
 
     def _place_grips(self):
         m, w, h = self.margins, self.window.width(), self.window.height()
@@ -572,6 +584,9 @@ class _Frame(QObject):
             kind = event.type()
             if kind == QEvent.Type.Paint:
                 self._paint()
+            elif kind == QEvent.Type.Show:
+                # Its native window is made by now.
+                self._tell_compositor()
             elif kind == QEvent.Type.WindowStateChange:
                 self._sync()
             elif kind == QEvent.Type.Resize:
@@ -652,6 +667,10 @@ class WindowFrame(_Frame):
     and becomes see-through outside its content, where the shadow is drawn."""
 
     def __init__(self, window, menubar, button_layout=None):
+        # Before anything else: the dialog framer, if it runs already, must not
+        # frame this window too, though it may have prepared it as it was built.
+        window.setProperty(SKIP_PROPERTY, True)
+        window.setProperty(PREPARED_PROPERTY, None)
         super().__init__(window)
         window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -710,6 +729,10 @@ class DialogFrame(_Frame):
             if window.minimumHeight() == window.maximumHeight():
                 window.setFixedHeight(height)
             window.resize(width, height)
+        # Fixing a size sets the minimum, then the maximum: a resize between the
+        # two found the window resizable and showed Maximize. Now it is settled.
+        self.title_bar.sync_state()
+        self._place_grips()
 
     def _place_title_bar(self):
         m = self.margins
@@ -719,6 +742,7 @@ class DialogFrame(_Frame):
 
 # Windows that keep the system's frame, or have none: menus, tool tips and the like.
 FRAMED_TYPES = (Qt.WindowType.Window, Qt.WindowType.Dialog)
+# Set before the window is built: one already prepared would be shown see-through, unframed.
 SKIP_PROPERTY = 'systemFrame'
 # A window that restored a saved size has its frame in it already.
 RESTORED_PROPERTY = 'geometryRestored'
@@ -789,7 +813,12 @@ class DialogFramer(QObject):
         kind = event.type()
         if kind == QEvent.Type.Show:
             # A prepared window is see-through: without its frame it would show nothing around its content.
-            if obj.property(PREPARED_PROPERTY) is not None and not obj.property(FRAMED_PROPERTY) and obj.isWindow():
+            if (
+                obj.property(PREPARED_PROPERTY) is not None
+                and not obj.property(FRAMED_PROPERTY)
+                and not obj.property(SKIP_PROPERTY)
+                and obj.isWindow()
+            ):
                 # Kept off screen, as by a dialog that shows the desktop's own in its place.
                 if obj.testAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen):
                     return False
