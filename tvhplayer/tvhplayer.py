@@ -4057,7 +4057,9 @@ class TVHeadendClient(QMainWindow):
         exit_action.setMenuRole(QAction.MenuRole.QuitRole)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        self.window_frame = window_frame.install(self, menubar, self.draws_title_bar())
+        self.window_frame = window_frame.install(
+            self, menubar, self.draws_title_bar(), guard_path=os.path.join(self.config_dir, 'window-menu.json'),
+        )
         
         # Create main widget and layout
         main_widget = QWidget()

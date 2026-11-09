@@ -442,3 +442,178 @@ def test_widgets_built_alone_and_then_placed_in_a_window_stay_plain(qapp):
         framer.deleteLater()
         host.deleteLater()
         qapp.processEvents()
+
+
+# --- the native window menu is tried only where it is known to be safe ---
+
+
+def test_native_window_menu_only_on_checked_qt_versions():
+    from tvhplayer.window_menu import verified_qt
+
+    assert not verified_qt((6, 4, 2))  # no native interface yet
+    assert verified_qt((6, 5, 0))
+    assert verified_qt((6, 10, 2))
+    assert verified_qt((6, 11, 3))
+    # Not checked yet: the app's own menu until it is.
+    assert not verified_qt((6, 12, 0))
+    assert not verified_qt((7, 0, 0))
+
+
+def test_a_crash_while_trying_turns_the_native_menu_off_for_good(tmp_path):
+    from tvhplayer.window_menu import CrashGuard
+
+    path = tmp_path / 'window-menu.json'
+    guard = CrashGuard(path, (6, 10, 2))
+    assert guard.begin()
+    assert guard.state() == 'trying'
+    # The app crashed in the try: the next start finds it unfinished.
+    again = CrashGuard(path, (6, 10, 2))
+    assert not again.begin()
+    assert again.state() == 'crashed'
+    assert not CrashGuard(path, (6, 10, 2)).begin()
+    # Another Qt version is tried on its own.
+    other = CrashGuard(path, (6, 11, 3))
+    assert other.begin()
+    other.done()
+    assert CrashGuard(path, (6, 11, 3)).begin()
+    assert CrashGuard(path, (6, 11, 3)).state() == 'ok'
+
+
+def test_without_a_note_on_disk_the_native_menu_is_not_tried(tmp_path):
+    from tvhplayer.window_menu import CrashGuard
+
+    blocked = tmp_path / 'file'
+    blocked.write_text('')
+    # Its folder is a file: nothing can be written, so a crash would go unnoticed.
+    assert not CrashGuard(blocked / 'window-menu.json', (6, 10, 2)).begin()
+
+
+def test_the_private_call_is_made_only_after_the_note_is_written(tmp_path):
+    from tvhplayer.window_menu import CrashGuard, _Wayland
+
+    path = tmp_path / 'window-menu.json'
+    calls = []
+    backend = object.__new__(_Wayland)
+    backend.guard = CrashGuard(path, (6, 10, 2))
+    backend.trusted = False
+    backend.toplevel = lambda window: calls.append(CrashGuard(path, (6, 10, 2)).state())
+    backend._app_interface = lambda: None
+    assert backend.show(None, QPoint(1, 1)) is False
+    assert calls == ['trying']
+    assert backend.trusted and backend.guard.state() == 'ok'
+    # Known to work: no more notes.
+    backend.show(None, QPoint(1, 1))
+    assert calls == ['trying', 'ok']
+
+    crashed = object.__new__(_Wayland)
+    crashed.guard = CrashGuard(tmp_path / 'other.json', (6, 10, 2))
+    crashed.guard._write('crashed')
+    crashed.trusted = False
+    crashed.toplevel = lambda window: calls.append('called')
+    assert crashed.show(None, QPoint(1, 1)) is False
+    assert 'called' not in calls
+
+
+def test_wayland_menu_needs_a_guard_and_a_checked_qt(monkeypatch, tmp_path):
+    from tvhplayer import window_menu
+
+    monkeypatch.setattr(window_menu, '_Wayland', lambda guard: ('backend', guard.version))
+    monkeypatch.setattr(window_menu, 'qt_version', lambda: (6, 10, 2))
+    window_menu.set_guard_path(None)
+    assert window_menu._backend_for('wayland') is None
+    window_menu.set_guard_path(tmp_path / 'window-menu.json')
+    assert window_menu._backend_for('wayland') == ('backend', '6.10.2')
+    monkeypatch.setattr(window_menu, 'qt_version', lambda: (6, 12, 0))
+    window_menu.set_guard_path(tmp_path / 'window-menu.json')
+    assert window_menu._backend_for('wayland') is None
+    window_menu.set_guard_path(None)
+
+
+def test_fallback_menu_offers_what_the_window_can_do_whatever_buttons_show(qapp, monkeypatch):
+    # A desktop layout of only a close button took Minimize and Maximize out of the menu.
+    window = QMainWindow()
+    window.setCentralWidget(QWidget())
+    menubar = QMenuBar(window)
+    frame = WindowFrame(window, menubar, button_layout=':close')
+    try:
+        assert set(frame.title_bar.buttons) == {'close'}
+        menu = frame.title_bar.fallback_menu()
+        names = [action.text() for action in menu.actions() if not action.isSeparator()]
+        assert names == ['Mi&nimize', 'Ma&ximize', '&Close']
+        menu.deleteLater()
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
+# --- dialogs of every kind ---
+
+
+def test_dialog_kept_off_screen_is_not_framed(qapp):
+    # As a dialog that shows the desktop's own in its place, such as a portal file chooser.
+    from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout
+
+    from tvhplayer.window_frame import TitleBar
+
+    framer = _framer(qapp)
+    dialog = QDialog()
+    QVBoxLayout(dialog).addWidget(QLabel('Hello'))
+    dialog.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        assert dialog.findChild(TitleBar) is None
+    finally:
+        framer.deleteLater()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def test_qt_file_dialog_fixed_size_and_modal_dialogs_are_framed_and_close(qapp):
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QDialog, QDialogButtonBox, QFileDialog, QLabel, QVBoxLayout
+
+    from tvhplayer.window_frame import TitleBar
+
+    framer = _framer(qapp)
+    parent = QWidget()
+    seen = {}
+
+    def finish(name, dialog):
+        bar = dialog.findChild(TitleBar)
+        seen[name] = (
+            bar is not None, dialog.windowHandle().format().alphaBufferSize(),
+            bar is not None and not bar.buttons['maximize'].isHidden(),
+        )
+        dialog.reject()
+
+    try:
+        files = QFileDialog(parent, 'Recordings folder')
+        files.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+        files.setFileMode(QFileDialog.FileMode.Directory)
+        QTimer.singleShot(50, lambda: finish('file', files))
+        assert files.exec() == QDialog.DialogCode.Rejected
+
+        fixed = QDialog(parent)
+        QVBoxLayout(fixed).addWidget(QLabel('Fixed'))
+        fixed.setFixedSize(300, 120)
+        QTimer.singleShot(50, lambda: finish('fixed', fixed))
+        fixed.exec()
+        # The frame is added around it: its content keeps the fixed size.
+        assert fixed.contentsRect().size() == QSize(300, 120)
+        assert fixed.minimumSize() == fixed.maximumSize()
+
+        modal = QDialog(parent)
+        layout = QVBoxLayout(modal)
+        layout.addWidget(QLabel('Modal'))
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.rejected.connect(modal.reject)
+        layout.addWidget(buttons)
+        modal.setModal(True)
+        QTimer.singleShot(50, lambda: finish('modal', modal))
+        modal.exec()
+        assert seen == {'file': (True, 8, True), 'fixed': (True, 8, False), 'modal': (True, 8, True)}
+    finally:
+        framer.deleteLater()
+        parent.deleteLater()
+        qapp.processEvents()

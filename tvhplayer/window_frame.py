@@ -298,6 +298,8 @@ class TitleBar(QMenuBar):
         self.setProperty('titlebar', True)
         self.setAccessibleName('Title bar')
         self.setFixedHeight(TITLE_BAR_HEIGHT)
+        # What the window can do, whichever buttons the desktop's layout shows.
+        self.kinds = tuple(kinds)
         left, right = parse_button_layout(button_layout)
         left = [kind for kind in left if kind in kinds]
         right = [kind for kind in right if kind in kinds]
@@ -415,15 +417,18 @@ class TitleBar(QMenuBar):
             self.fallback_menu().popup(global_pos)
 
     def fallback_menu(self):
-        """Minimize, Maximize or Restore, and Close, for desktops that cannot be asked for theirs."""
+        """Minimize, Maximize or Restore, and Close, for desktops that cannot be asked for theirs.
+
+        Offered as far as the window can do them, even where the desktop's
+        button layout leaves out their buttons."""
         menu = QMenu(self)
         menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         window = self._window
-        if 'minimize' in self.buttons:
+        if 'minimize' in self.kinds:
             menu.addAction('Mi&nimize', window.showMinimized)
         if window.isMaximized():
             menu.addAction('&Restore', window.showNormal)
-        elif self.can_maximize() and 'maximize' in self.buttons:
+        elif self.can_maximize() and 'maximize' in self.kinds:
             menu.addAction('Ma&ximize', window.showMaximized)
         if not menu.isEmpty():
             menu.addSeparator()
@@ -696,12 +701,15 @@ class DialogFrame(_Frame):
         self.title_bar.show()
         self._start()
         if grow:
-            # The content keeps the size it was given.
+            # The content keeps the size it was given, a fixed one too.
             after = window.contentsMargins()
-            window.resize(
-                window.width() + after.left() + after.right() - before.left() - before.right(),
-                window.height() + after.top() + after.bottom() - before.top() - before.bottom(),
-            )
+            width = window.width() + after.left() + after.right() - before.left() - before.right()
+            height = window.height() + after.top() + after.bottom() - before.top() - before.bottom()
+            if window.minimumWidth() == window.maximumWidth():
+                window.setFixedWidth(width)
+            if window.minimumHeight() == window.maximumHeight():
+                window.setFixedHeight(height)
+            window.resize(width, height)
 
     def _place_title_bar(self):
         m = self.margins
@@ -782,6 +790,9 @@ class DialogFramer(QObject):
         if kind == QEvent.Type.Show:
             # A prepared window is see-through: without its frame it would show nothing around its content.
             if obj.property(PREPARED_PROPERTY) is not None and not obj.property(FRAMED_PROPERTY) and obj.isWindow():
+                # Kept off screen, as by a dialog that shows the desktop's own in its place.
+                if obj.testAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen):
+                    return False
                 DialogFrame(obj, self._button_layout, grow=not obj.property(RESTORED_PROPERTY))
         elif kind in PREPARE_EVENTS and self.wants(obj) and obj.windowHandle() is None:
             prepare(obj)
@@ -795,12 +806,13 @@ class DialogFramer(QObject):
         return False
 
 
-def install(window, menubar, wanted):
+def install(window, menubar, wanted, guard_path=None):
     """Give ``window`` its own frame and title bar if ``wanted`` and the desktop leaves them to the app,
     and every dialog and other window after it too.
 
     Returns the frame, or None after ``menubar`` was made the window's menu bar as usual."""
     if wanted and wants_own_title_bar(QGuiApplication.platformName()):
+        window_menu.set_guard_path(guard_path)
         layout = desktop_button_layout()
         # The main window first: it is frameless then, and the framer leaves it alone.
         frame = WindowFrame(window, menubar, layout)
