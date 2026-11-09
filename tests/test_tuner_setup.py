@@ -249,6 +249,16 @@ def test_scan_progress_tells_why_each_frequency_failed():
     assert progress.frequencies[3].state == FREQ_CHANNELS and progress.done
 
 
+def test_scan_activity_line():
+    from tvhplayer.setup_wizard import _scan_activity
+    scanning = [Frequency('a', 'a', state=FREQ_SCANNING), Frequency('b', 'b', state=FREQ_SCANNING)]
+    assert _scan_activity(ScanProgress(muxes=3, frequencies=scanning)) == 'Scanning…'
+    assert _scan_activity(ScanProgress(muxes=3, scanned=1, frequencies=[Frequency('a', 'a', state=FREQ_CHANNELS)])) == (
+        'Waiting for a free tuner…')
+    assert _scan_activity(ScanProgress(muxes=3)) == 'Starting the scan…'
+    assert _scan_activity(ScanProgress(muxes=1, scanned=1)) == 'Scan finished.'
+
+
 def test_frequency_labels():
     assert frequency_label({'delsys': 'ATSC-T', 'frequency': 545000000, 'name': '545MHz'}) == 'RF 26 (545MHz)'
     assert frequency_label({'delsys': 'DVB-T', 'frequency': 554000000, 'name': '554MHz'}) == '554MHz'

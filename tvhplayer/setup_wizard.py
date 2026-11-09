@@ -880,11 +880,9 @@ def _scan_activity(progress):
     """What the tuners are doing now."""
     if progress.done:
         return 'Scan finished.'
-    active = [item for item in progress.frequencies if item.state == FREQ_SCANNING]
-    if len(active) == 1:
-        return f'Scanning {active[0].label}…'
-    if active:
-        return f'Scanning {len(active)} frequencies at once…'
+    # Which frequencies, the list below shows.
+    if any(item.state == FREQ_SCANNING for item in progress.frequencies):
+        return 'Scanning…'
     if progress.scanned:
         return 'Waiting for a free tuner…'
     return 'Starting the scan…'
@@ -1036,7 +1034,7 @@ class ScanPage(QWizardPage):
         self._network = network
         self._step = 'scan'
         self._last_change = time.monotonic()
-        announce_label(self.status, 'Scanning frequencies…')
+        announce_label(self.status, 'Scanning…')
         self.counts.show()
         self.frequency_list.show()
         self._timer.start()
