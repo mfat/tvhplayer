@@ -654,21 +654,24 @@ class DialogFrame(_Frame):
     window, without menus. The title bar lies in the window's contents margins,
     over the space the dialog's layout leaves free.
 
-    Called while the window is about to be shown for the first time: it then
-    has a native window, which takes the new flags before it is on screen."""
+    The window must have been made see-through before its native window was
+    made (see :func:`prepare`). Called while the window is about to be shown
+    for the first time: it then has a native window, which takes new flags
+    before it is on screen."""
 
     title_room = TITLE_BAR_HEIGHT
 
     def __init__(self, window, button_layout=None, grow=True):
         super().__init__(window)
+        window.setProperty(FRAMED_PROPERTY, True)
         before = window.contentsMargins()
+        # Again: the dialog may have set flags of its own since it was prepared.
         flags = window.windowFlags() | Qt.WindowType.FramelessWindowHint
         # Not setWindowFlags(), which would make a new native window and hide this one.
         window.overrideWindowFlags(flags)
         handle = window.windowHandle()
         if handle is not None:
             handle.setFlags(flags)
-        window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.title_bar = TitleBar(
             window, None, desktop_button_layout() if button_layout is None else button_layout,
             dialog_buttons(window),
@@ -695,12 +698,35 @@ FRAMED_TYPES = (Qt.WindowType.Window, Qt.WindowType.Dialog)
 SKIP_PROPERTY = 'systemFrame'
 # A window that restored a saved size has its frame in it already.
 RESTORED_PROPERTY = 'geometryRestored'
+PREPARED_PROPERTY = '_tvhFramePrepared'
+FRAMED_PROPERTY = '_tvhFramed'
+# Events a window gets while it is built, before its native window is made:
+# a dialog adds its widgets and layout, a message box its title.
+PREPARE_EVENTS = (
+    QEvent.Type.ChildAdded, QEvent.Type.WindowTitleChange, QEvent.Type.PolishRequest,
+    QEvent.Type.Polish, QEvent.Type.LayoutRequest,
+)
+
+
+def prepare(window):
+    """Make ``window`` frameless and see-through, before its native window is made.
+
+    A native window takes its see-through background only as it is made; one
+    made opaque shows the shadow drawn around the window as a black frame."""
+    window.setProperty(PREPARED_PROPERTY, True)
+    # Not setWindowFlags(), which also hides the window.
+    window.overrideWindowFlags(window.windowFlags() | Qt.WindowType.FramelessWindowHint)
+    window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
 
 class DialogFramer(QObject):
     """Frames each dialog and further window of the app as it is first shown,
     so that they all look like the main window. Dialogs the app makes itself
-    and those Qt makes, such as message boxes, alike."""
+    and those Qt makes, such as message boxes, alike.
+
+    The window is made see-through while it is being built, the first time it
+    hears of anything, and gets its title bar when it is shown. A window whose
+    native window was made before that keeps the system's frame."""
 
     def __init__(self, app, button_layout=None):
         super().__init__(app)
@@ -712,14 +738,19 @@ class DialogFramer(QObject):
             isinstance(widget, QWidget)
             and widget.isWindow()
             and widget.windowType() in FRAMED_TYPES
+            and not widget.property(PREPARED_PROPERTY)
             and not widget.windowFlags() & Qt.WindowType.FramelessWindowHint
             and not widget.property(SKIP_PROPERTY)
-            and widget.findChild(TitleBar, options=Qt.FindChildOption.FindDirectChildrenOnly) is None
         )
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Show and self.wants(obj):
-            DialogFrame(obj, self._button_layout, grow=not obj.property(RESTORED_PROPERTY))
+        kind = event.type()
+        if kind == QEvent.Type.Show:
+            # A prepared window is see-through: without its frame it would show nothing around its content.
+            if obj.property(PREPARED_PROPERTY) and not obj.property(FRAMED_PROPERTY):
+                DialogFrame(obj, self._button_layout, grow=not obj.property(RESTORED_PROPERTY))
+        elif kind in PREPARE_EVENTS and self.wants(obj) and obj.windowHandle() is None:
+            prepare(obj)
         return False
 
 

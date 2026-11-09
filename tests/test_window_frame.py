@@ -251,9 +251,12 @@ def test_menus_and_marked_windows_keep_their_frame(qapp):
 def test_a_restored_size_is_not_grown_again(qapp):
     from PyQt6.QtWidgets import QDialog
 
+    from PyQt6.QtWidgets import QLabel, QVBoxLayout
+
     framer = _framer(qapp)
     dialog = QDialog()
     dialog.setProperty('geometryRestored', True)
+    QVBoxLayout(dialog).addWidget(QLabel('Guide'))
     try:
         dialog.resize(700, 500)
         dialog.show()
@@ -341,3 +344,44 @@ def test_window_menu_is_not_asked_for_where_it_cannot_be(qapp):
 
     # The tests run offscreen: neither Wayland nor X11.
     assert window_menu.show(QWidget(), QPoint(1, 1), QPoint(1, 1)) is False
+
+
+def test_dialogs_are_see_through_from_the_start(qapp):
+    # A native window takes its see-through background only as it is made.
+    # Dialogs were framed when shown, after it was made: their shadow was black.
+    from PyQt6.QtWidgets import QDialog, QLabel, QMessageBox, QVBoxLayout
+
+    framer = _framer(qapp)
+    dialog = QDialog()
+    QVBoxLayout(dialog).addWidget(QLabel('Hello'))
+    # As QMessageBox.warning() makes one: built and shown at once.
+    box = QMessageBox(QMessageBox.Icon.Warning, 'Oops', 'Something went wrong.')
+    try:
+        for window in (dialog, box):
+            window.show()
+            qapp.processEvents()
+            assert window.windowHandle().format().alphaBufferSize() == 8, type(window).__name__
+    finally:
+        framer.deleteLater()
+        dialog.deleteLater()
+        box.deleteLater()
+        qapp.processEvents()
+
+
+def test_a_window_made_before_it_could_be_prepared_keeps_the_system_frame(qapp):
+    from PyQt6.QtWidgets import QDialog
+
+    from tvhplayer.window_frame import TitleBar
+
+    dialog = QDialog()
+    dialog.winId()  # its native window is made before the framer sees it
+    framer = _framer(qapp)
+    try:
+        dialog.show()
+        qapp.processEvents()
+        assert dialog.findChild(TitleBar) is None
+        assert not dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
+    finally:
+        framer.deleteLater()
+        dialog.deleteLater()
+        qapp.processEvents()
