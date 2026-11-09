@@ -7,10 +7,13 @@ The steps the first-run wizard runs, in order:
    the dtv-scan-tables built into Tvheadend.
 3. ``create_tuner_network`` makes a network with the chosen table, gives it
    the chosen tuners, and starts the scan.
-4. ``scan_progress`` follows the muxes until each has a result.
-5. ``map_services`` turns the services found into channels, and
-   ``mapper_progress`` follows that.
-6. ``name_unnamed_channels`` names the channels whose name never arrived.
+4. ``scan_progress`` follows the muxes until each has a result, and what
+   the tuners saw on each.
+5. ``plan_channels`` picks the services to make channels of, and
+   ``map_services`` asks the server to make them.
+6. ``follow_new_channels`` counts the channels made, and names those whose
+   name never arrived.
+7. ``scan_summary`` says how it went.
 
 Tvheadend grabs the over-the-air guide on its own once channels exist.
 """
@@ -19,11 +22,13 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Tuple
 
-from .tuners import Tuner
 from .errors import TvhError
+from .guide import parse_input_status
+from .playback_status import SIGNAL_FAIR, SIGNAL_GOOD, SIGNAL_NONE, SIGNAL_POOR, signal_report
+from .tuners import Tuner
 
 # Tuner type -> (network class, scan table type).
 NETWORKS = {
@@ -45,9 +50,12 @@ KIND_WORDS = {
 }
 # Mux scan_state and scan_result values (Tvheadend's mpegts.h).
 SCAN_IDLE = 0
+SCAN_ACTIVE = 3
 RESULT_NONE = 0
 RESULT_OK = 1
+RESULT_FAIL = 2
 RESULT_PARTIAL = 3
+RESULT_IGNORE = 4
 # Tvheadend's names for picture and sound streams (SCT_ISVIDEO and
 # SCT_ISAUDIO in esstream.h, named in streaming.c).
 AV_STREAMS = {
@@ -134,21 +142,101 @@ def create_tuner_network(admin, kind: str, scanfile: str, name: str, tuners: Ite
     return uuid
 
 
+# What a frequency came to, in the scan.
+FREQ_WAITING = 'waiting'        # not scanned yet
+FREQ_SCANNING = 'scanning'      # a tuner is on it now
+FREQ_CHANNELS = 'channels'      # received, with channels
+FREQ_EMPTY = 'empty'            # received, but no channels on it
+FREQ_NO_SIGNAL = 'no_signal'    # no station, or too weak; normal for most frequencies
+FREQ_NO_DATA = 'no_data'        # the tuner locked on, but no data reached the server
+FREQ_SKIPPED = 'skipped'        # left out of the scan
+
+
+@dataclass
+class Reception:
+    """The best a tuner did on one frequency while it was being scanned."""
+
+    level: str = SIGNAL_NONE
+    words: str = ''
+    data: bool = False
+
+
+@dataclass
+class Frequency:
+    uuid: str
+    label: str
+    frequency: int = 0
+    state: str = FREQ_WAITING
+    services: int = 0
+    reception: Optional[Reception] = None
+
+
 @dataclass
 class ScanProgress:
     muxes: int = 0
     scanned: int = 0
     working: int = 0
     services: int = 0
+    frequencies: List[Frequency] = field(default_factory=list)
 
     @property
     def done(self) -> bool:
         return self.muxes > 0 and self.scanned >= self.muxes
 
+    def count(self, state: str) -> int:
+        return sum(1 for item in self.frequencies if item.state == state)
 
-def scan_progress(admin, network_uuid: str) -> ScanProgress:
+
+def frequency_label(mux: dict) -> str:
+    """``RF 26 (545 MHz)`` for ATSC, else the server's name for the mux, like ``554MHz``."""
+    name = (mux.get('name') or '').strip()
+    if mux.get('delsys') in ('ATSC-T', 'ATSC'):
+        channel = us_rf_channel(mux.get('frequency'))
+        if channel is not None:
+            return f'RF {channel} ({name})' if name else f'RF {channel}'
+    return name or 'Frequency'
+
+
+def _better(old: Optional[Reception], new: Reception) -> Reception:
+    if old is None:
+        return new
+    rank = {SIGNAL_NONE: 0, SIGNAL_POOR: 1, SIGNAL_FAIR: 2, SIGNAL_GOOD: 3}
+    best = new if rank.get(new.level, 0) >= rank.get(old.level, 0) else old
+    return Reception(best.level, best.words, old.data or new.data)
+
+
+def _frequency_state(mux: dict, reception: Optional[Reception]) -> str:
+    state = int(mux.get('scan_state') or 0)
+    result = int(mux.get('scan_result') or 0)
+    if state != SCAN_IDLE:
+        return FREQ_SCANNING if state == SCAN_ACTIVE else FREQ_WAITING
+    if result == RESULT_NONE:
+        return FREQ_WAITING
+    if result == RESULT_IGNORE:
+        return FREQ_SKIPPED
+    if result in (RESULT_OK, RESULT_PARTIAL):
+        return FREQ_CHANNELS if int(mux.get('num_svc') or 0) else FREQ_EMPTY
+    # Failed. Tvheadend does not say why; what the tuner saw while on it does.
+    if reception is not None and reception.data:
+        return FREQ_EMPTY
+    if reception is not None and reception.level in (SIGNAL_GOOD, SIGNAL_FAIR):
+        return FREQ_NO_DATA
+    return FREQ_NO_SIGNAL
+
+
+def scan_progress(admin, network_uuid: str, seen: Optional[dict] = None) -> ScanProgress:
+    """Where the scan is, frequency by frequency.
+
+    ``seen`` keeps, across calls, what the tuners reported for each frequency
+    while it was scanned: a frequency that failed with a good signal but no
+    data points at the network between tuner and server, not at the aerial.
+    """
+    seen = {} if seen is None else seen
+    muxes = admin.list_muxes(network_uuid)
+    if any(int(mux.get('scan_state') or 0) == SCAN_ACTIVE for mux in muxes):
+        _note_reception(admin, muxes, seen)
     progress = ScanProgress()
-    for mux in admin.list_muxes(network_uuid):
+    for mux in muxes:
         progress.muxes += 1
         state = int(mux.get('scan_state') or 0)
         result = int(mux.get('scan_result') or 0)
@@ -157,7 +245,35 @@ def scan_progress(admin, network_uuid: str) -> ScanProgress:
         if result in (RESULT_OK, RESULT_PARTIAL):
             progress.working += 1
         progress.services += int(mux.get('num_svc') or 0)
+        uuid = mux.get('uuid') or ''
+        progress.frequencies.append(Frequency(
+            uuid=uuid,
+            label=frequency_label(mux),
+            frequency=int(mux.get('frequency') or 0),
+            state=_frequency_state(mux, seen.get(uuid)),
+            services=int(mux.get('num_svc') or 0),
+            reception=seen.get(uuid),
+        ))
+    progress.frequencies.sort(key=lambda item: (item.frequency, item.label))
     return progress
+
+
+def _note_reception(admin, muxes, seen: dict) -> None:
+    """Record what each busy tuner reports for the frequency it is scanning."""
+    data = admin.request('api/status/inputs')
+    rows = data.get('entries') if isinstance(data, dict) else None
+    by_stream = {f"{mux.get('name')} in {mux.get('network')}": mux.get('uuid') for mux in muxes
+                 if int(mux.get('scan_state') or 0) == SCAN_ACTIVE and mux.get('uuid')}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        uuid = by_stream.get(str(row.get('stream') or ''))
+        if not uuid:
+            continue
+        tuner = parse_input_status(row)
+        report = signal_report(tuner)
+        level, words = report if report else (SIGNAL_NONE, '')
+        seen[uuid] = _better(seen.get(uuid), Reception(level, words, bool(tuner.bps)))
 
 
 def _has_picture_or_sound(admin, service_uuid: str) -> bool:
@@ -166,15 +282,26 @@ def _has_picture_or_sound(admin, service_uuid: str) -> bool:
     return any(isinstance(stream, dict) and stream.get('type') in AV_STREAMS for stream in streams or [])
 
 
-def services_to_map(admin, network_uuid: str, include_encrypted: bool = False) -> List[str]:
+@dataclass
+class ChannelPlan:
+    """The services to make channels of, and what the scan left unclear about them."""
+
+    services: List[str] = field(default_factory=list)
+    # Named services the server knows no picture or sound for. They are kept,
+    # as the streams can still come when the channel is tuned, but some do
+    # not play (Tvheadend issue #2372, on ATSC).
+    silent: int = 0
+
+
+def plan_channels(admin, network_uuid: str, include_encrypted: bool = False) -> ChannelPlan:
     """The services to make channels of.
 
     A service without a name is taken only when it carries picture or sound:
     a real channel whose name table did not arrive in the scan, rather than
-    a data or update service. ``name_unnamed_channels`` names it afterwards.
+    a data or update service. ``follow_new_channels`` names it afterwards.
     """
     muxes = [mux['uuid'] for mux in admin.list_muxes(network_uuid) if mux.get('uuid')]
-    services = []
+    plan = ChannelPlan()
     for service in admin.list_services(muxes):
         if not service.get('uuid'):
             continue
@@ -182,10 +309,18 @@ def services_to_map(admin, network_uuid: str, include_encrypted: bool = False) -
             continue
         if service.get('channel'):
             continue
-        if not (service.get('svcname') or '').strip() and not _has_picture_or_sound(admin, service['uuid']):
-            continue
-        services.append(service['uuid'])
-    return services
+        audible = _has_picture_or_sound(admin, service['uuid'])
+        if not (service.get('svcname') or '').strip():
+            if not audible:
+                continue
+        elif not audible:
+            plan.silent += 1
+        plan.services.append(service['uuid'])
+    return plan
+
+
+def services_to_map(admin, network_uuid: str, include_encrypted: bool = False) -> List[str]:
+    return plan_channels(admin, network_uuid, include_encrypted).services
 
 
 def us_rf_channel(frequency_hz) -> Optional[int]:
@@ -214,30 +349,72 @@ def fallback_name(mux: dict, sid) -> str:
     return f'Channel {sid}' if program else 'Channel'
 
 
-def name_unnamed_channels(admin, network_uuid: str, services: Iterable[str], named: set) -> int:
-    """Rename the just-made channels of services without a name, which the server names like ``net/mux/{PMT:48}``.
+def follow_new_channels(admin, network_uuid: str, services: Iterable[str], named: set) -> Tuple[int, int]:
+    """``(made, waiting)``: services of ``services`` that have a channel now, and those still without.
 
-    The server makes the channels a few seconds after it is asked to, so call
-    this until it returns 0: the number of such services still without a
-    channel. ``named`` holds the channels renamed so far, so each is renamed once.
+    The server makes the channels a few seconds after it is asked to, when
+    it next saves its settings, and its mapper status still shows the run
+    before until then; so this counts the channels themselves.
+
+    Channels of services without a name, which the server names like
+    ``net/mux/{PMT:48}``, get a readable name. ``named`` holds the channels
+    renamed so far, so each is renamed once.
     """
     wanted = set(services)
     muxes = {mux['uuid']: mux for mux in admin.list_muxes(network_uuid) if mux.get('uuid')}
     nodes = []
-    waiting = 0
+    made = waiting = 0
     for service in admin.list_services(muxes):
-        if service.get('uuid') not in wanted or (service.get('svcname') or '').strip():
+        if service.get('uuid') not in wanted:
             continue
         channels = [channel for channel in service.get('channel') or [] if channel]
         if not channels:
             waiting += 1
+            continue
+        made += 1
+        if (service.get('svcname') or '').strip():
             continue
         name = fallback_name(muxes.get(service.get('multiplex_uuid')) or {}, service.get('sid'))
         nodes.extend({'uuid': channel, 'name': name} for channel in channels if channel not in named)
     if nodes:
         admin.save(nodes)
         named.update(node['uuid'] for node in nodes)
-    return waiting
+    return made, waiting
+
+
+def _count(number: int, one: str, many: str) -> str:
+    return f'{number} {one if number == 1 else many}'
+
+
+def scan_summary(progress: ScanProgress, plan: ChannelPlan, made: int) -> str:
+    """What the scan came to, in words: the channels added, and what went wrong if anything did."""
+    lines = []
+    if made:
+        lines.append(f"Added {_count(made, 'channel', 'channels')}.")
+    elif plan.services:
+        lines.append(f"The server did not add any of the {_count(len(plan.services), 'channel', 'channels')} found.")
+    else:
+        lines.append('No channels were found.')
+    no_data = progress.count(FREQ_NO_DATA)
+    if no_data:
+        lines.append(
+            f"On {_count(no_data, 'frequency', 'frequencies')} the tuner found a signal, but no data reached "
+            'the server. A firewall on the server computer, or a weak Wi-Fi or network connection, can cause this.'
+        )
+    elif not plan.services:
+        received = progress.count(FREQ_CHANNELS) + progress.count(FREQ_EMPTY)
+        if progress.frequencies and not received:
+            lines.append('No frequency had a signal. Check that the aerial, cable, or dish is connected to the tuner, '
+                         'and that you chose the right region or satellite.')
+        else:
+            lines.append('Check that the aerial, cable, or dish is connected to the tuner, '
+                         'or run Set Up Channels again with another region.')
+    if plan.silent:
+        lines.append(f"{_count(plan.silent, 'channel has', 'channels have')} no picture or sound information "
+                     'from the scan and may not play.')
+    if made:
+        lines.append('The TV guide fills in over the next minutes as the channels broadcast it.')
+    return ' '.join(lines)
 
 
 def map_services(admin, services: List[str]) -> None:

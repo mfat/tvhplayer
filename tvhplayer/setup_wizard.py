@@ -44,15 +44,25 @@ try:
         KIND_WORDS,
         create_tuner_network,
         discover_satip,
+        ChannelPlan,
+        FREQ_CHANNELS,
+        FREQ_EMPTY,
+        FREQ_NO_DATA,
+        FREQ_NO_SIGNAL,
+        FREQ_SCANNING,
+        FREQ_SKIPPED,
+        FREQ_WAITING,
+        ScanProgress,
+        follow_new_channels,
         map_services,
-        mapper_progress,
-        name_unnamed_channels,
         network_name,
+        plan_channels,
         scan_progress,
         scan_regions,
-        services_to_map,
+        scan_summary,
         supported,
     )
+    from .core.playback_status import SIGNAL_NONE
     from .core.tuners import read_tuners
     from .core.hdhomerun import read_windows_builtin_tuners
     from .core.tvh_admin import TvhAdmin
@@ -64,15 +74,25 @@ except ImportError:
         KIND_WORDS,
         create_tuner_network,
         discover_satip,
+        ChannelPlan,
+        FREQ_CHANNELS,
+        FREQ_EMPTY,
+        FREQ_NO_DATA,
+        FREQ_NO_SIGNAL,
+        FREQ_SCANNING,
+        FREQ_SKIPPED,
+        FREQ_WAITING,
+        ScanProgress,
+        follow_new_channels,
         map_services,
-        mapper_progress,
-        name_unnamed_channels,
         network_name,
+        plan_channels,
         scan_progress,
         scan_regions,
-        services_to_map,
+        scan_summary,
         supported,
     )
+    from core.playback_status import SIGNAL_NONE
     from core.tuners import read_tuners
     from core.hdhomerun import read_windows_builtin_tuners
     from core.tvh_admin import TvhAdmin
@@ -82,9 +102,9 @@ SOURCE_IPTV = 'iptv'
 POLL_MS = 2000
 # A scan that finds nothing new for this long has stalled.
 SCAN_STALL_SECONDS = 600
-# The server makes channels a few seconds after it is asked to; wait this long
-# for the channels of nameless services before leaving them with its names.
-NAME_WAIT_SECONDS = 30
+# The server makes channels a few seconds after it is asked to; wait at most
+# this long for them.
+ADD_WAIT_SECONDS = 30
 # SAT>IP servers answer discovery within a few seconds. The server looks for HDHomeRun
 # tuners by itself every 15 seconds.
 DISCOVERY_WAIT_SECONDS = 4
@@ -752,6 +772,64 @@ class TunerPage(QWizardPage):
         return bool(self.chosen_tuners()) and self.region() is not None
 
 
+def _plural(number, one, many):
+    return f'{number} {one if number == 1 else many}'
+
+
+def _scan_activity(progress):
+    """What the tuners are doing now."""
+    if progress.done:
+        return 'Scan finished.'
+    active = [item for item in progress.frequencies if item.state == FREQ_SCANNING]
+    if len(active) == 1:
+        return f'Scanning {active[0].label}…'
+    if active:
+        return f'Scanning {len(active)} frequencies at once…'
+    if progress.scanned:
+        return 'Waiting for a free tuner…'
+    return 'Starting the scan…'
+
+
+def _scan_counts(progress):
+    """The scan so far, in one sentence."""
+    parts = []
+    for state, words in (
+        (FREQ_CHANNELS, 'with channels'),
+        (FREQ_EMPTY, 'received with no channels'),
+        (FREQ_NO_SIGNAL, 'with no station'),
+        (FREQ_NO_DATA, 'with a signal but no data'),
+    ):
+        number = progress.count(state)
+        if number:
+            parts.append(f'{number} {words}')
+    found = _plural(progress.services, 'channel', 'channels')
+    text = f'Checked {progress.scanned} of {_plural(progress.muxes, "frequency", "frequencies")}'
+    if parts:
+        text += ': ' + ', '.join(parts)
+    return f'{text}. Found {found} so far.'
+
+
+def _frequency_text(item):
+    """One frequency's row in the scan list."""
+    if item.state == FREQ_SCANNING:
+        reception = item.reception
+        # Most frequencies have no station, so no advice while one is scanned:
+        # only the reading, like "Signal good (quality 82%)".
+        if reception is None or reception.level == SIGNAL_NONE or not reception.words:
+            return f'{item.label}: scanning, looking for a signal'
+        reading = reception.words.split(':', 1)[0]
+        return f'{item.label}: scanning. {reading}'
+    if item.state == FREQ_CHANNELS:
+        return f"{item.label}: {_plural(item.services, 'channel', 'channels')}"
+    if item.state == FREQ_EMPTY:
+        return f'{item.label}: received, but no channels on it'
+    if item.state == FREQ_NO_DATA:
+        return f'{item.label}: signal found, but no data reached the server'
+    if item.state == FREQ_SKIPPED:
+        return f'{item.label}: skipped'
+    return f'{item.label}: no station'
+
+
 class ScanPage(QWizardPage):
     def __init__(self, wizard):
         super().__init__()
@@ -779,15 +857,28 @@ class ScanPage(QWizardPage):
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setAccessibleName('Scan progress')
+        self.counts = QLabel('')
+        self.counts.setWordWrap(True)
+        self.counts.setObjectName('rowDesc')
+        self.counts.hide()
+        self.frequency_list = QListWidget()
+        self.frequency_list.setAccessibleName('Frequencies scanned')
+        self.frequency_list.setAccessibleDescription('Each frequency checked so far, and what was found on it')
+        self.frequency_list.hide()
+        self._rows = {}
         inner.addWidget(self.status)
         inner.addWidget(self.progress)
-        layout.addWidget(card)
-        layout.addStretch(1)
+        inner.addWidget(self.counts)
+        inner.addWidget(self.frequency_list, 1)
+        layout.addWidget(card, 1)
         self._timer = QTimer(self)
         self._timer.setInterval(POLL_MS)
         self._timer.timeout.connect(self._poll)
         self._polling = False
         self._step = ''
+        self._seen = {}
+        self._progress = ScanProgress()
+        self._plan = ChannelPlan()
 
     def changeEvent(self, event):
         if event.type() == QEvent.Type.StyleChange:
@@ -819,6 +910,8 @@ class ScanPage(QWizardPage):
         self._step = 'scan'
         self._last_change = time.monotonic()
         announce_label(self.status, 'Scanning frequencies…')
+        self.counts.show()
+        self.frequency_list.show()
         self._timer.start()
 
     def _poll(self):
@@ -826,13 +919,11 @@ class ScanPage(QWizardPage):
             return
         self._polling = True
         if self._step == 'scan':
-            network = self._network
-            self._wizard.call(lambda admin: scan_progress(admin, network), self._scanned)
+            network, seen = self._network, self._seen
+            self._wizard.call(lambda admin: scan_progress(admin, network, seen), self._scanned)
         elif self._step == 'map':
-            self._wizard.call(mapper_progress, self._mapped)
-        elif self._step == 'name':
-            network, services, named = self._network, self._services, self._named_channels
-            self._wizard.call(lambda admin: name_unnamed_channels(admin, network, services, named), self._named)
+            network, services, named = self._network, self._plan.services, self._named_channels
+            self._wizard.call(lambda admin: follow_new_channels(admin, network, services, named), self._mapped)
         else:
             self._polling = False
 
@@ -841,36 +932,49 @@ class ScanPage(QWizardPage):
         if error or progress is None:
             self._fail(f'Could not follow the scan: {error}')
             return
+        self._progress = progress
         if (progress.scanned, progress.services) != self._best:
             self._best = (progress.scanned, progress.services)
             self._last_change = time.monotonic()
         self.progress.setRange(0, max(progress.muxes, 1))
         self.progress.setValue(progress.scanned)
-        services = '1 channel' if progress.services == 1 else f'{progress.services} channels'
-        self.status.setText(
-            f'Scanned {progress.scanned} of {progress.muxes} frequencies. Found {services} so far.'
-        )
+        self.status.setText(_scan_activity(progress))
+        self.counts.setText(_scan_counts(progress))
+        self._show_frequencies(progress)
         if progress.done or time.monotonic() - self._last_change > SCAN_STALL_SECONDS:
             self._timer.stop()
             self._step = 'list'
+            announce_label(self.status, 'Reading the channels found…')
             include = self._include_encrypted
             network = self._network
-            self._wizard.call(lambda admin: services_to_map(admin, network, include), self._listed)
+            self._wizard.call(lambda admin: plan_channels(admin, network, include), self._listed)
 
-    def _listed(self, services, error):
+    def _show_frequencies(self, progress):
+        """One row a frequency once it is scanned, in frequency order, updated in place."""
+        shown = [item for item in progress.frequencies if item.state != FREQ_WAITING]
+        for index, item in enumerate(shown):
+            text = _frequency_text(item)
+            row = self._rows.get(item.uuid)
+            if row is None:
+                row = QListWidgetItem(text)
+                self._rows[item.uuid] = row
+                self.frequency_list.insertItem(index, row)
+            elif row.text() != text:
+                row.setText(text)
+
+    def _listed(self, plan, error):
         if error:
             self._fail(f'Could not read the channels found: {error}')
             return
-        services = services or []
-        if not services:
-            self._finish(
-                'No channels were found. Check that the aerial, cable, or dish is connected to the tuner, '
-                'or run Set Up Channels again with another region.'
-            )
+        self._plan = plan or ChannelPlan()
+        if not self._plan.services:
+            self._finish(scan_summary(self._progress, self._plan, 0))
             return
-        self._expected = len(services)
-        self._services = services
+        services = self._plan.services
         self._step = 'map'
+        self._named_channels = set()
+        self._made = -1
+        self._add_deadline = time.monotonic() + ADD_WAIT_SECONDS
         announce_label(self.status, f'Adding {len(services)} channels…')
         self.progress.setRange(0, len(services))
         self.progress.setValue(0)
@@ -887,27 +991,18 @@ class ScanPage(QWizardPage):
         if error or counts is None:
             self._fail(f'Could not follow the channels being added: {error}')
             return
-        handled, total = counts
-        self.progress.setValue(min(handled, self.progress.maximum()))
-        if total and handled < total:
-            return
-        self._step = 'name'
-        self._named_channels = set()
-        self._name_deadline = time.monotonic() + NAME_WAIT_SECONDS
-        self._poll()
-
-    def _named(self, waiting, error):
-        self._polling = False
-        # A channel left with the server's own name still works, so a failed
-        # rename does not fail the setup.
-        if not error and waiting and time.monotonic() < self._name_deadline:
+        made, waiting = counts
+        self.progress.setValue(min(made, self.progress.maximum()))
+        # The server makes all the channels at once. Some services it does
+        # not take (data ones), so once channels came and stopped coming, or
+        # the time is up, the rest are not coming.
+        settled = made > 0 and made == self._made
+        self._made = made
+        if waiting and not settled and time.monotonic() < self._add_deadline:
             return
         self._timer.stop()
-        self.added = self._expected
-        channels = '1 channel' if self.added == 1 else f'{self.added} channels'
-        self._finish(
-            f'Added {channels}. The TV guide fills in over the next minutes as the channels broadcast it.'
-        )
+        self.added = made
+        self._finish(scan_summary(self._progress, self._plan, made))
 
     def _fail(self, text):
         self._timer.stop()

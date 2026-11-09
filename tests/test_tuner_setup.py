@@ -1,14 +1,26 @@
 import json
 
 from tvhplayer.core.tuner_setup import (
+    FREQ_CHANNELS,
+    FREQ_EMPTY,
+    FREQ_NO_DATA,
+    FREQ_NO_SIGNAL,
+    FREQ_SCANNING,
+    FREQ_WAITING,
+    ChannelPlan,
+    Frequency,
+    ScanProgress,
     create_tuner_network,
-    map_services,
     fallback_name,
+    follow_new_channels,
+    frequency_label,
+    map_services,
     mapper_progress,
-    name_unnamed_channels,
     network_name,
+    plan_channels,
     scan_progress,
     scan_regions,
+    scan_summary,
     services_to_map,
     us_rf_channel,
 )
@@ -24,9 +36,12 @@ class Admin:
         self.muxes = []
         self.services = []
         self.streams = {}
+        self.inputs = []
 
     def request(self, path, data=None, params=None):
         self.requests.append((path, data, params))
+        if path == 'api/status/inputs':
+            return {'entries': self.inputs}
         if path == 'api/service/streams':
             return {'streams': [{'type': kind} for kind in self.streams.get(params['uuid'], [])]}
         if path == 'api/dvb/scanfile/list':
@@ -137,6 +152,9 @@ def test_scan_progress_and_services():
     admin.streams = {'s3': ['PCR', 'PMT'], 's5': ['PCR', 'PMT', 'H264', 'AC3'], 's6': ['AC-4']}
     assert services_to_map(admin, 'net') == ['s1', 's5', 's6']
     assert services_to_map(admin, 'net', include_encrypted=True) == ['s1', 's2', 's5', 's6']
+    # s1 has a name but no picture or sound: kept, and counted as possibly silent.
+    plan = plan_channels(admin, 'net')
+    assert plan.services == ['s1', 's5', 's6'] and plan.silent == 1
     map_services(admin, ['s1'])
     path, data, _params = admin.requests[-1]
     assert path == 'api/service/mapper/save'
@@ -163,23 +181,96 @@ def test_fallback_names():
     assert fallback_name({}, 5) == 'Channel 5'
 
 
-def test_name_unnamed_channels_renames_only_channels_of_nameless_services():
+def test_follow_new_channels_counts_them_and_names_those_of_nameless_services():
     admin = Admin()
     admin.muxes = [{'uuid': 'm1', 'delsys': 'ATSC-T', 'frequency': 545000000, 'name': '545MHz'}]
     admin.services = [
         {'uuid': 's1', 'multiplex_uuid': 'm1', 'sid': 1, 'svcname': 'WBTV', 'channel': ['c1']},
         {'uuid': 's2', 'multiplex_uuid': 'm1', 'sid': 3, 'svcname': '', 'channel': ['c2']},
         {'uuid': 's3', 'multiplex_uuid': 'm1', 'sid': 4, 'channel': ['c3']},
+        {'uuid': 's4', 'multiplex_uuid': 'm1', 'sid': 5, 'channel': []},
     ]
-    admin.services.append({'uuid': 's4', 'multiplex_uuid': 'm1', 'sid': 5, 'channel': []})
     named = set()
     # s3 was not mapped in this run, so its channel keeps whatever name it has.
-    # s4's channel is not made yet, so it is waited for.
-    assert name_unnamed_channels(admin, 'net', ['s1', 's2', 's4'], named) == 1
+    # s4's channel is not made yet.
+    assert follow_new_channels(admin, 'net', ['s1', 's2', 's4'], named) == (2, 1)
     assert admin.saved == [{'uuid': 'c2', 'name': 'RF 26 – 3'}]
     admin.services[3]['channel'] = ['c4']
-    assert name_unnamed_channels(admin, 'net', ['s1', 's2', 's4'], named) == 0
+    assert follow_new_channels(admin, 'net', ['s1', 's2', 's4'], named) == (3, 0)
     assert admin.saved == [{'uuid': 'c2', 'name': 'RF 26 – 3'}, {'uuid': 'c4', 'name': 'RF 26 – 5'}]
+
+
+def _input(stream, snr=0, bps=0):
+    return {'input': 'HDHomeRun Tuner #0', 'stream': stream, 'subs': 1,
+            'signal': 30000, 'signal_scale': 1, 'snr': snr, 'snr_scale': 1, 'bps': bps}
+
+
+def test_scan_progress_tells_why_each_frequency_failed():
+    """What the tuners report while a frequency is scanned decides its result.
+
+    The readings are the ones a real HDHomeRun gave: about 40% strength and
+    0 quality with no station, 84% quality once it locks on.
+    """
+    admin = Admin()
+    base = {'network': 'ATSC-T us', 'delsys': 'ATSC-T', 'num_svc': 0, 'scan_result': 0}
+    admin.muxes = [
+        dict(base, uuid='a', name='473MHz', frequency=473000000, scan_state=3),
+        dict(base, uuid='b', name='479MHz', frequency=479000000, scan_state=3),
+        dict(base, uuid='c', name='485MHz', frequency=485000000, scan_state=3),
+        dict(base, uuid='d', name='491MHz', frequency=491000000, scan_state=1),
+    ]
+    admin.inputs = [
+        _input('473MHz in ATSC-T us', snr=55000, bps=0),       # locked on, no data yet
+        _input('479MHz in ATSC-T us', snr=0, bps=0),           # nothing there
+        _input('485MHz in ATSC-T us', snr=55000, bps=157920),  # data arriving
+    ]
+    seen = {}
+    progress = scan_progress(admin, 'net', seen)
+    states = {item.uuid: item.state for item in progress.frequencies}
+    assert states == {'a': FREQ_SCANNING, 'b': FREQ_SCANNING, 'c': FREQ_SCANNING, 'd': FREQ_WAITING}
+    assert progress.frequencies[0].label == 'RF 14 (473MHz)'
+    assert progress.frequencies[0].reception.words.startswith('Signal good')
+    from tvhplayer.setup_wizard import _frequency_text
+    assert _frequency_text(progress.frequencies[0]) == 'RF 14 (473MHz): scanning. Signal good (quality 84%)'
+    assert _frequency_text(progress.frequencies[1]) == 'RF 15 (479MHz): scanning, looking for a signal'
+    # All three fail; the tuners are free again and report nothing.
+    for mux in admin.muxes[:3]:
+        mux.update(scan_state=0, scan_result=2)
+    admin.inputs = []
+    progress = scan_progress(admin, 'net', seen)
+    states = {item.uuid: item.state for item in progress.frequencies}
+    assert states == {'a': FREQ_NO_DATA, 'b': FREQ_NO_SIGNAL, 'c': FREQ_EMPTY, 'd': FREQ_WAITING}
+    assert (progress.scanned, progress.muxes) == (3, 4)
+    admin.muxes[3].update(scan_state=0, scan_result=1, num_svc=6)
+    progress = scan_progress(admin, 'net', seen)
+    assert progress.frequencies[3].state == FREQ_CHANNELS and progress.done
+
+
+def test_frequency_labels():
+    assert frequency_label({'delsys': 'ATSC-T', 'frequency': 545000000, 'name': '545MHz'}) == 'RF 26 (545MHz)'
+    assert frequency_label({'delsys': 'DVB-T', 'frequency': 554000000, 'name': '554MHz'}) == '554MHz'
+
+
+def _progress(*states):
+    return ScanProgress(muxes=len(states), scanned=len(states), frequencies=[
+        Frequency(uuid=str(index), label=str(index), state=state) for index, state in enumerate(states)])
+
+
+def test_scan_summary_says_what_went_wrong():
+    assert scan_summary(_progress(FREQ_CHANNELS, FREQ_NO_SIGNAL), ChannelPlan(['s1', 's2']), 2) == (
+        'Added 2 channels. The TV guide fills in over the next minutes as the channels broadcast it.')
+    text = scan_summary(_progress(FREQ_CHANNELS, FREQ_NO_DATA, FREQ_NO_DATA), ChannelPlan(['s1'], silent=1), 1)
+    assert text.startswith('Added 1 channel. On 2 frequencies the tuner found a signal, but no data reached the server.')
+    assert '1 channel has no picture or sound information' in text
+    assert scan_summary(_progress(FREQ_NO_SIGNAL, FREQ_NO_SIGNAL), ChannelPlan(), 0) == (
+        'No channels were found. No frequency had a signal. Check that the aerial, cable, or dish is '
+        'connected to the tuner, and that you chose the right region or satellite.')
+    assert scan_summary(_progress(FREQ_NO_DATA), ChannelPlan(), 0).startswith(
+        'No channels were found. On 1 frequency the tuner found a signal, but no data reached the server.')
+    assert scan_summary(_progress(FREQ_EMPTY), ChannelPlan(), 0).startswith(
+        'No channels were found. Check that the aerial')
+    assert scan_summary(_progress(FREQ_CHANNELS), ChannelPlan(['s1', 's2']), 0).startswith(
+        'The server did not add any of the 2 channels found.')
 
 
 def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
@@ -197,20 +288,13 @@ def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
         'ad0': [{'uuid': 'fe0', 'text': 'DVB-T #0', 'class': 'linuxdvb_frontend_dvbt', 'leaf': 1,
                  'params': [{'id': 'enabled', 'value': True}]}],
     }
-    admin.muxes = [{'uuid': 'm1', 'scan_state': 0, 'scan_result': 1, 'num_svc': 3, 'name': '506MHz'}]
+    admin.muxes = [
+        {'uuid': 'm1', 'scan_state': 0, 'scan_result': 1, 'num_svc': 3, 'name': '506MHz', 'frequency': 506000000},
+        {'uuid': 'm2', 'scan_state': 0, 'scan_result': 2, 'num_svc': 0, 'name': '514MHz', 'frequency': 514000000},
+    ]
     admin.services = [{'uuid': 's1', 'svcname': 'One'}, {'uuid': 's2', 'svcname': 'Two'},
                       {'uuid': 's3', 'multiplex_uuid': 'm1', 'sid': 9}]
-    admin.streams = {'s3': ['MPEG2VIDEO', 'MPEG2AUDIO']}
-    admin.request_status = None
-    original = admin.request
-
-    def request(path, data=None, params=None):
-        if path == 'api/service/mapper/status':
-            # The server reports the mapping done before it makes the channels.
-            return {'total': 3, 'ok': 3}
-        return original(path, data, params)
-
-    admin.request = request
+    admin.streams = {'s1': ['H264', 'AAC'], 's2': ['H264', 'AAC'], 's3': ['MPEG2VIDEO', 'MPEG2AUDIO']}
     monkeypatch.setattr(setup_wizard.SetupWizard, 'call', lambda self, fn, slot: slot(fn(admin), ''))
     done, iptv = [], []
     wizard = setup_wizard.SetupWizard({'name': 'Built-in'}, iptv.append, done.append)
@@ -231,13 +315,19 @@ def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
     wizard.next()
     scan = wizard.scan_page
     scan._poll()
+    assert [scan.frequency_list.item(row).text() for row in range(scan.frequency_list.count())] == [
+        '506MHz: 3 channels', '514MHz: no station']
+    assert scan.counts.text() == (
+        'Checked 2 of 2 frequencies: 1 with channels, 1 with no station. Found 3 channels so far.')
+    # The server makes the channels a moment after it is asked to.
     scan._poll()
     assert not scan.isComplete()
-    # The channel of the nameless service arrives, and gets a readable name.
-    admin.services[2]['channel'] = ['c3']
+    for service, channel in zip(admin.services, ('c1', 'c2', 'c3')):
+        service['channel'] = [channel]
     scan._poll()
     assert scan.isComplete()
-    assert 'Added 3 channels' in scan.status.text()
+    assert scan.status.text().startswith('Added 3 channels.')
+    assert scan.added == 3
     assert admin.saved[0] == {'uuid': 'fe0', 'enabled': True, 'networks': ['net']}
     assert admin.saved[-1] == {'uuid': 'c3', 'name': '506MHz – 9'}
     wizard.done(QWizard.DialogCode.Accepted)
