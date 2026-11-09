@@ -48,7 +48,7 @@ def main():
     Backend = lambda: demo.Backend(events)  # noqa: E731
 
     store = ConfigStore(home / 'tvhplayer.conf')
-    store.data['own_title_bar'] = True
+    store.data['title_bar'] = True
     ui.ConfigStore = lambda *a, **k: store
     ui.windows_backend_enabled = lambda: False
     ui.default_picon_dir = lambda: home / 'picons'

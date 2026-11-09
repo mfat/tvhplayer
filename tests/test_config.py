@@ -233,11 +233,30 @@ def test_live_resize_stays_unset_until_chosen(tmp_path):
     assert 'resize_on_release' not in ConfigStore(path).data
 
 
-def test_own_title_bar_is_off_unless_chosen(tmp_path):
+def test_title_bar_is_left_to_the_desktop_until_chosen(tmp_path):
     path = tmp_path / 'config.json'
-    assert default_config()['own_title_bar'] is False
+    assert default_config()['title_bar'] is None
+    path.write_text(json.dumps({'title_bar': False}), encoding='utf-8')
+    assert ConfigStore(path).data['title_bar'] is False
+    path.write_text(json.dumps({'title_bar': True}), encoding='utf-8')
+    assert ConfigStore(path).data['title_bar'] is True
+
+
+def test_earlier_title_bar_switch_carries_over_only_when_on(tmp_path):
+    # Every config up to 4.6 held own_title_bar, false unless it was switched
+    # on: a false one is the old default, not a choice.
+    path = tmp_path / 'config.json'
     path.write_text(json.dumps({'own_title_bar': True}), encoding='utf-8')
-    assert ConfigStore(path).data['own_title_bar'] is True
+    data = ConfigStore(path).data
+    assert data['title_bar'] is True and 'own_title_bar' not in data
+    path.write_text(json.dumps({'own_title_bar': False}), encoding='utf-8')
+    data = ConfigStore(path).data
+    assert data['title_bar'] is None and 'own_title_bar' not in data
+    # Once saved, the choice stays as it is.
+    store = ConfigStore(path)
+    store.data['title_bar'] = False
+    store.save()
+    assert ConfigStore(path).data['title_bar'] is False
 
 
 def test_legacy_player_engine_choice_is_dropped(tmp_path):

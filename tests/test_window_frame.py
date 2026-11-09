@@ -12,6 +12,8 @@ from tvhplayer.window_frame import (
     kde_button_layout,
     kwin_button_layout,
     parse_button_layout,
+    own_title_bar_by_default,
+    uses_own_title_bar,
     wants_own_title_bar,
 )
 
@@ -28,6 +30,24 @@ def test_gnome_and_kde_can_have_the_apps_title_bar():
     assert not wants_own_title_bar('wayland', {'XDG_CURRENT_DESKTOP': 'XFCE'})
     assert not wants_own_title_bar('wayland', {})
     assert not wants_own_title_bar('cocoa', KDE)
+
+
+def test_only_gnome_on_wayland_has_it_until_chosen():
+    assert own_title_bar_by_default('wayland', GNOME)
+    assert own_title_bar_by_default('wayland-egl', {'XDG_CURRENT_DESKTOP': 'GNOME'})
+    # KDE draws a title bar of its own; elsewhere the app cannot draw one.
+    assert not own_title_bar_by_default('wayland', KDE)
+    assert not own_title_bar_by_default('xcb', GNOME)
+    assert not own_title_bar_by_default('windows', {})
+    assert not own_title_bar_by_default('cocoa', {})
+    assert uses_own_title_bar(None, 'wayland', GNOME)
+    assert not uses_own_title_bar(None, 'wayland', KDE)
+    # A choice made in Settings wins where the switch is offered.
+    assert not uses_own_title_bar(False, 'wayland', GNOME)
+    assert uses_own_title_bar(True, 'wayland', KDE)
+    # And is ignored where it is not.
+    assert not uses_own_title_bar(True, 'xcb', GNOME)
+    assert not uses_own_title_bar(True, 'windows', {})
 
 
 def test_kde_on_x11_needs_a_compositor_for_the_shadow():

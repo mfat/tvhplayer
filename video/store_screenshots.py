@@ -75,7 +75,7 @@ def main():
     events = demo.schedule(now)
     backend = demo.Backend(events)
     store = ConfigStore(home / 'tvhplayer.conf')
-    store.data['own_title_bar'] = True
+    store.data['title_bar'] = True
     ui.ConfigStore = lambda *a, **k: store
     ui.windows_backend_enabled = lambda: False
     ui.default_picon_dir = lambda: home / 'picons'

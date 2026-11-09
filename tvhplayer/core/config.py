@@ -112,7 +112,8 @@ def default_config():
         'accent_color': 'default',
         'window_color': 'default',
         # On GNOME and KDE, the app's own title bar instead of the desktop's. Read before the window is built.
-        'own_title_bar': False,
+        # None until chosen: on for GNOME on Wayland, off elsewhere.
+        'title_bar': None,
         # None until chosen: live resize is off before Qt 6.11, and on from 6.11.
         'live_resize': None,
         # Minutes the built-in server starts recordings early and ends them late.
@@ -181,7 +182,7 @@ def _normalize(data):
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
     for key in (
         'play_on_start', 'hide_dead_channels', 'mark_dead_channels', 'convert_after_recording', 'delete_converted_original',
-        'stay_awake_for_scheduled', 'setup_offered', 'own_title_bar', 'check_for_updates', 'fast_channel_start',
+        'stay_awake_for_scheduled', 'setup_offered', 'check_for_updates', 'fast_channel_start',
         'timeshift_on_disk', 'setup_started', 'setup_completed', 'setup_dismissed',
     ):
         cfg[key] = bool(cfg.get(key))
@@ -191,6 +192,13 @@ def _normalize(data):
         cfg['last_update_check'] = 0.0
     # Left unset so the Qt version picks the default, until Settings saves true or false.
     cfg.pop('resize_on_release', None)
+    # Up to 4.6 every config held own_title_bar, false unless switched on, so a
+    # false one says nothing: only an earlier "on" is kept as a choice.
+    earlier = cfg.pop('own_title_bar', None)
+    choice = cfg.get('title_bar', None)
+    if choice is None and earlier is True:
+        choice = True
+    cfg['title_bar'] = None if choice is None else bool(choice)
     choice = cfg.get('live_resize', None)
     cfg['live_resize'] = None if choice is None else bool(choice)
     for key in ('local_recording_dir', 'local_recording_display', 'local_recording_ffmpeg_options', 'convert_options', 'skipped_update_version'):

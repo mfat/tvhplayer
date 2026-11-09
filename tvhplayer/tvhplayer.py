@@ -4057,7 +4057,7 @@ class TVHeadendClient(QMainWindow):
         exit_action.setMenuRole(QAction.MenuRole.QuitRole)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        self.window_frame = window_frame.install(self, menubar, self.config['own_title_bar'])
+        self.window_frame = window_frame.install(self, menubar, self.draws_title_bar())
         
         # Create main widget and layout
         main_widget = QWidget()
@@ -8060,11 +8060,13 @@ class TVHeadendClient(QMainWindow):
         return window_frame.wants_own_title_bar(QApplication.platformName(), environ)
 
     def draws_title_bar(self):
-        """The Settings choice; the window in use keeps its title bar until the next start."""
-        return self.config['own_title_bar']
+        """The Settings choice, or the desktop's default until one is made; the
+        window in use keeps its title bar until the next start."""
+        environ = LAUNCH_ENVIRON or os.environ
+        return window_frame.uses_own_title_bar(self.config.get('title_bar'), QApplication.platformName(), environ)
 
     def set_draws_title_bar(self, on):
-        self.config['own_title_bar'] = bool(on)
+        self.config['title_bar'] = bool(on)
         self.save_config()
 
     def theme_choice(self):

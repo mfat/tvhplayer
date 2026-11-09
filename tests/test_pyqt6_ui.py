@@ -4258,7 +4258,7 @@ def test_channels_that_failed_the_stream_test_are_marked_later_and_can_be_retest
 def test_own_title_bar_frames_the_window_and_not_its_parts(monkeypatch, tmp_path):
     # The window's parts are built on their own and put in later; with the
     # app's title bar on, each got a title bar of its own inside the window.
-    (tmp_path / 'tvhplayer.conf').write_text(json.dumps({'own_title_bar': True}), encoding='utf-8')
+    (tmp_path / 'tvhplayer.conf').write_text(json.dumps({'title_bar': True}), encoding='utf-8')
     from tvhplayer import window_frame
 
     monkeypatch.setattr(window_frame, 'wants_own_title_bar', lambda *a, **k: True)

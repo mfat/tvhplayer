@@ -62,6 +62,20 @@ def wants_own_title_bar(platform_name, environ=None, compositing=None) -> bool:
     return False
 
 
+def own_title_bar_by_default(platform_name, environ=None) -> bool:
+    """Until it is chosen in Settings, only GNOME on Wayland has the app's title
+    bar: there Qt's stand-in is all there is. KDE draws a title bar of its own."""
+    environ = os.environ if environ is None else environ
+    return platform_name.startswith('wayland') and 'gnome' in _desktops(environ)
+
+
+def uses_own_title_bar(choice, platform_name, environ=None) -> bool:
+    """The Settings choice (None until made) as whether the app draws its title bar."""
+    if not wants_own_title_bar(platform_name, environ):
+        return False
+    return own_title_bar_by_default(platform_name, environ) if choice is None else bool(choice)
+
+
 def x11_compositing() -> bool:
     """True while an X11 compositor runs: it owns the _NET_WM_CM_S<screen> selection."""
     try:
