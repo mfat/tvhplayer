@@ -249,6 +249,14 @@ def test_scan_progress_tells_why_each_frequency_failed():
     assert progress.frequencies[3].state == FREQ_CHANNELS and progress.done
 
 
+def test_scan_counts_line():
+    from tvhplayer.setup_wizard import _scan_counts
+    assert _scan_counts(ScanProgress(muxes=57, scanned=46, services=76)) == (
+        'Checked 46 of 57 frequencies. 76 channels found so far.')
+    assert _scan_counts(ScanProgress(muxes=1, scanned=0, services=1)) == (
+        'Checked 0 of 1 frequency. 1 channel found so far.')
+
+
 def test_scan_activity_line():
     from tvhplayer.setup_wizard import _scan_activity
     scanning = [Frequency('a', 'a', state=FREQ_SCANNING), Frequency('b', 'b', state=FREQ_SCANNING)]
@@ -338,7 +346,7 @@ def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
     # No reading came in, so no meter.
     assert not scan.frequency_list.itemWidget(rows[0]).meter.isVisibleTo(scan)
     assert scan.counts.text() == (
-        'Checked 2 of 2 frequencies: 1 with channels, 1 with no station. Found 3 channels so far.')
+        'Checked 2 of 2 frequencies. 3 channels found so far.')
     # The server makes the channels a moment after it is asked to.
     scan._poll()
     assert not scan.isComplete()

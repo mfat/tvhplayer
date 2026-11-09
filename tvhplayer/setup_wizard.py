@@ -50,7 +50,6 @@ try:
         FREQ_CHANNELS,
         FREQ_EMPTY,
         FREQ_NO_DATA,
-        FREQ_NO_SIGNAL,
         FREQ_SCANNING,
         FREQ_SKIPPED,
         FREQ_WAITING,
@@ -86,7 +85,6 @@ except ImportError:
         FREQ_CHANNELS,
         FREQ_EMPTY,
         FREQ_NO_DATA,
-        FREQ_NO_SIGNAL,
         FREQ_SCANNING,
         FREQ_SKIPPED,
         FREQ_WAITING,
@@ -889,22 +887,9 @@ def _scan_activity(progress):
 
 
 def _scan_counts(progress):
-    """The scan so far, in one sentence."""
-    parts = []
-    for state, words in (
-        (FREQ_CHANNELS, 'with channels'),
-        (FREQ_EMPTY, 'received with no channels'),
-        (FREQ_NO_SIGNAL, 'with no station'),
-        (FREQ_NO_DATA, 'with a signal but no data'),
-    ):
-        number = progress.count(state)
-        if number:
-            parts.append(f'{number} {words}')
-    found = _plural(progress.services, 'channel', 'channels')
-    text = f'Checked {progress.scanned} of {_plural(progress.muxes, "frequency", "frequencies")}'
-    if parts:
-        text += ': ' + ', '.join(parts)
-    return f'{text}. Found {found} so far.'
+    """The scan so far: how far it got, and the channels found. Each frequency's result is in the list."""
+    checked = f'Checked {progress.scanned} of {_plural(progress.muxes, "frequency", "frequencies")}.'
+    return f"{checked} {_plural(progress.services, 'channel', 'channels')} found so far."
 
 
 def _frequency_text(item):
