@@ -230,9 +230,12 @@ def test_scan_progress_tells_why_each_frequency_failed():
     assert states == {'a': FREQ_SCANNING, 'b': FREQ_SCANNING, 'c': FREQ_SCANNING, 'd': FREQ_WAITING}
     assert progress.frequencies[0].label == 'RF 14 (473MHz)'
     assert progress.frequencies[0].reception.words.startswith('Signal good')
-    from tvhplayer.setup_wizard import _frequency_text
-    assert _frequency_text(progress.frequencies[0]) == 'RF 14 (473MHz): scanning. Signal good (quality 84%)'
-    assert _frequency_text(progress.frequencies[1]) == 'RF 15 (479MHz): scanning, looking for a signal'
+    from tvhplayer.setup_wizard import _frequency_access, _frequency_text
+    assert _frequency_text(progress.frequencies[0]) == 'RF 14 (473MHz): scanning'
+    assert _frequency_access(progress.frequencies[0]) == (
+        'RF 14 (473MHz): scanning. Strength 46% (fair), quality 84% (good)')
+    # Nothing on 479 MHz: some strength, no quality.
+    assert _frequency_access(progress.frequencies[1]) == 'RF 15 (479MHz): scanning. Strength 46% (fair), quality 0%'
     # All three fail; the tuners are free again and report nothing.
     for mux in admin.muxes[:3]:
         mux.update(scan_state=0, scan_result=2)
@@ -318,8 +321,12 @@ def test_wizard_scans_a_tuner_and_adds_channels(monkeypatch):
     wizard.next()
     scan = wizard.scan_page
     scan._poll()
-    assert [scan.frequency_list.item(row).text() for row in range(scan.frequency_list.count())] == [
-        '506MHz: 3 channels', '514MHz: no station']
+    from PyQt6.QtCore import Qt
+    rows = [scan.frequency_list.item(row) for row in range(scan.frequency_list.count())]
+    assert [row.data(Qt.ItemDataRole.AccessibleTextRole) for row in rows] == ['506MHz: 3 channels', '514MHz: no station']
+    assert [scan.frequency_list.itemWidget(row).text.text() for row in rows] == ['506MHz: 3 channels', '514MHz: no station']
+    # No reading came in, so no meter.
+    assert not scan.frequency_list.itemWidget(rows[0]).meter.isVisibleTo(scan)
     assert scan.counts.text() == (
         'Checked 2 of 2 frequencies: 1 with channels, 1 with no station. Found 3 channels so far.')
     # The server makes the channels a moment after it is asked to.

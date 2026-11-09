@@ -37,7 +37,9 @@ from PyQt6.QtWidgets import (
 )
 
 try:
-    from .a11y import announce_label, buddy_label, describe
+    from .a11y import announce_label, buddy_label, describe, set_item_access
+    from .core.signal import SignalReadings
+    from .signal_meter import SignalMeter
     from .ui_theme import color as theme_color, is_active as theme_is_active, is_organic
     from .core.errors import TvhAuthError
     from .core.tuner_setup import (
@@ -62,7 +64,6 @@ try:
         scan_summary,
         supported,
     )
-    from .core.playback_status import SIGNAL_NONE
     from .core.tuners import read_tuners
     from .core.hdhomerun import (
         firewall_allow_command,
@@ -72,7 +73,9 @@ try:
     )
     from .core.tvh_admin import TvhAdmin
 except ImportError:
-    from a11y import announce_label, buddy_label, describe
+    from a11y import announce_label, buddy_label, describe, set_item_access
+    from core.signal import SignalReadings
+    from signal_meter import SignalMeter
     from ui_theme import color as theme_color, is_active as theme_is_active, is_organic
     from core.errors import TvhAuthError
     from core.tuner_setup import (
@@ -97,7 +100,6 @@ except ImportError:
         scan_summary,
         supported,
     )
-    from core.playback_status import SIGNAL_NONE
     from core.tuners import read_tuners
     from core.hdhomerun import (
         firewall_allow_command,
@@ -908,15 +910,12 @@ def _scan_counts(progress):
 
 
 def _frequency_text(item):
-    """One frequency's row in the scan list."""
+    """One frequency's line in the scan list. Its signal readings go in the meter below it."""
     if item.state == FREQ_SCANNING:
         reception = item.reception
-        # Most frequencies have no station, so no advice while one is scanned:
-        # only the reading, like "Signal good (quality 82%)".
-        if reception is None or reception.level == SIGNAL_NONE or not reception.words:
+        if reception is None or not reception.signal:
             return f'{item.label}: scanning, looking for a signal'
-        reading = reception.words.split(':', 1)[0]
-        return f'{item.label}: scanning. {reading}'
+        return f'{item.label}: scanning'
     if item.state == FREQ_CHANNELS:
         return f"{item.label}: {_plural(item.services, 'channel', 'channels')}"
     if item.state == FREQ_EMPTY:
@@ -926,6 +925,35 @@ def _frequency_text(item):
     if item.state == FREQ_SKIPPED:
         return f'{item.label}: skipped'
     return f'{item.label}: no station'
+
+
+def _frequency_readings(item):
+    return item.reception.signal if item.reception is not None else SignalReadings()
+
+
+def _frequency_access(item):
+    """The row in words for assistive technology: the line, then the readings."""
+    readings = _frequency_readings(item)
+    text = _frequency_text(item)
+    return f'{text}. {readings.describe()}' if readings else text
+
+
+class _FrequencyRow(QWidget):
+    """A frequency and what it came to, with its signal strength and quality below."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+        self.text = QLabel('')
+        self.meter = SignalMeter()
+        layout.addWidget(self.text)
+        layout.addWidget(self.meter)
+
+    def show_frequency(self, item):
+        self.text.setText(_frequency_text(item))
+        self.meter.set_readings(_frequency_readings(item))
 
 
 class ScanPage(QWizardPage):
@@ -1052,14 +1080,19 @@ class ScanPage(QWizardPage):
         """One row a frequency once it is scanned, in frequency order, updated in place."""
         shown = [item for item in progress.frequencies if item.state != FREQ_WAITING]
         for index, item in enumerate(shown):
-            text = _frequency_text(item)
             row = self._rows.get(item.uuid)
             if row is None:
-                row = QListWidgetItem(text)
+                # The widget draws the row; the item carries its words for screen readers.
+                row = QListWidgetItem()
                 self._rows[item.uuid] = row
                 self.frequency_list.insertItem(index, row)
-            elif row.text() != text:
-                row.setText(text)
+                self.frequency_list.setItemWidget(row, _FrequencyRow())
+            widget = self.frequency_list.itemWidget(row)
+            access = _frequency_access(item)
+            if row.data(Qt.ItemDataRole.AccessibleTextRole) != access:
+                widget.show_frequency(item)
+                set_item_access(row, access)
+                row.setSizeHint(widget.sizeHint())
 
     def _listed(self, plan, error):
         if error:

@@ -28,6 +28,7 @@ from typing import Iterable, List, Optional, Tuple
 from .errors import TvhError
 from .guide import parse_input_status
 from .playback_status import SIGNAL_FAIR, SIGNAL_GOOD, SIGNAL_NONE, SIGNAL_POOR, signal_report
+from .signal import SignalReadings, better as better_signal, signal_readings
 from .tuners import Tuner
 
 # Tuner type -> (network class, scan table type).
@@ -159,6 +160,7 @@ class Reception:
     level: str = SIGNAL_NONE
     words: str = ''
     data: bool = False
+    signal: SignalReadings = field(default_factory=SignalReadings)
 
 
 @dataclass
@@ -202,7 +204,7 @@ def _better(old: Optional[Reception], new: Reception) -> Reception:
         return new
     rank = {SIGNAL_NONE: 0, SIGNAL_POOR: 1, SIGNAL_FAIR: 2, SIGNAL_GOOD: 3}
     best = new if rank.get(new.level, 0) >= rank.get(old.level, 0) else old
-    return Reception(best.level, best.words, old.data or new.data)
+    return Reception(best.level, best.words, old.data or new.data, better_signal(old.signal, new.signal))
 
 
 def _frequency_state(mux: dict, reception: Optional[Reception]) -> str:
@@ -273,7 +275,7 @@ def _note_reception(admin, muxes, seen: dict) -> None:
         tuner = parse_input_status(row)
         report = signal_report(tuner)
         level, words = report if report else (SIGNAL_NONE, '')
-        seen[uuid] = _better(seen.get(uuid), Reception(level, words, bool(tuner.bps)))
+        seen[uuid] = _better(seen.get(uuid), Reception(level, words, bool(tuner.bps), signal_readings(tuner)))
 
 
 def _has_picture_or_sound(admin, service_uuid: str) -> bool:
