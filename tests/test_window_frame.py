@@ -162,3 +162,182 @@ def test_title_follows_a_palette_change_while_the_window_is_open(qapp):
         qapp.setPalette(saved)
         window.deleteLater()
         qapp.processEvents()
+
+
+def _framer(qapp):
+    from tvhplayer.window_frame import DialogFramer
+
+    return DialogFramer(qapp, button_layout='icon:minimize,maximize,close')
+
+
+def test_dialogs_get_the_apps_title_bar_too(qapp):
+    # Only the main window had it; dialogs kept the desktop's pale stand-in.
+    from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout
+
+    from tvhplayer.window_frame import TitleBar
+
+    framer = _framer(qapp)
+    parent = QWidget()
+    dialog = QDialog(parent)
+    dialog.setWindowTitle('Settings')
+    QVBoxLayout(dialog).addWidget(QLabel('Hello'))
+    try:
+        dialog.resize(400, 300)
+        dialog.show()
+        qapp.processEvents()
+        assert dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
+        assert dialog.windowHandle().flags() & Qt.WindowType.FramelessWindowHint
+        bar = dialog.findChild(TitleBar)
+        assert bar is not None and bar.menubar is None
+        m = SHADOW_MARGINS
+        assert dialog.contentsMargins() == m + QMargins(0, TITLE_BAR_HEIGHT, 0, 0)
+        assert bar.geometry().topLeft() == QPoint(m.left(), m.top())
+        # The content keeps the size it was given.
+        assert dialog.size() == QSize(400 + m.left() + m.right(), 300 + m.top() + m.bottom() + TITLE_BAR_HEIGHT)
+        # A dialog of another window is not minimized on its own.
+        assert set(bar.buttons) == {'maximize', 'close'}
+        assert bar.title.text() == 'Settings'
+    finally:
+        framer.deleteLater()
+        parent.deleteLater()
+        qapp.processEvents()
+
+
+def test_message_boxes_get_it_without_maximize(qapp):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from tvhplayer.window_frame import TitleBar
+
+    framer = _framer(qapp)
+    box = QMessageBox(QMessageBox.Icon.Warning, 'Oops', 'Something went wrong.')
+    try:
+        box.show()
+        qapp.processEvents()
+        bar = box.findChild(TitleBar)
+        assert bar is not None
+        assert box.minimumSize() == box.maximumSize()
+        assert bar.buttons['maximize'].isHidden()
+        assert not bar.buttons['close'].isHidden()
+        assert box.contentsMargins().top() == SHADOW_MARGINS.top() + TITLE_BAR_HEIGHT
+    finally:
+        framer.deleteLater()
+        box.deleteLater()
+        qapp.processEvents()
+
+
+def test_menus_and_marked_windows_keep_their_frame(qapp):
+    from PyQt6.QtWidgets import QMenu
+
+    from tvhplayer.window_frame import TitleBar
+
+    framer = _framer(qapp)
+    menu = QMenu()
+    menu.addAction('One')
+    plain = QWidget()
+    plain.setProperty('systemFrame', True)
+    try:
+        assert not framer.wants(menu)
+        assert not framer.wants(plain)
+        plain.show()
+        qapp.processEvents()
+        assert plain.findChild(TitleBar) is None
+    finally:
+        framer.deleteLater()
+        menu.deleteLater()
+        plain.deleteLater()
+        qapp.processEvents()
+
+
+def test_a_restored_size_is_not_grown_again(qapp):
+    from PyQt6.QtWidgets import QDialog
+
+    framer = _framer(qapp)
+    dialog = QDialog()
+    dialog.setProperty('geometryRestored', True)
+    try:
+        dialog.resize(700, 500)
+        dialog.show()
+        qapp.processEvents()
+        assert dialog.size() == QSize(700, 500)
+        # Each further window of its own, not a dialog of another, can be minimized.
+        from tvhplayer.window_frame import TitleBar
+
+        assert 'minimize' in dialog.findChild(TitleBar).buttons
+    finally:
+        framer.deleteLater()
+        dialog.deleteLater()
+        qapp.processEvents()
+
+
+def _right_click(qapp, widget):
+    from PyQt6.QtCore import QPointF
+    from PyQt6.QtGui import QMouseEvent
+
+    pos = QPointF(widget.width() / 2, widget.height() / 2)
+    event = QMouseEvent(
+        QEvent.Type.MouseButtonPress, pos, widget.mapToGlobal(pos), Qt.MouseButton.RightButton,
+        Qt.MouseButton.RightButton, Qt.KeyboardModifier.NoModifier,
+    )
+    qapp.sendEvent(widget, event)
+
+
+from PyQt6.QtCore import QEvent  # noqa: E402
+
+
+def test_right_click_asks_the_desktop_for_its_window_menu(qapp, monkeypatch):
+    # The title bar ignored right clicks: GNOME's window menu was gone.
+    from tvhplayer import window_frame
+
+    asked = []
+    monkeypatch.setattr(window_frame.window_menu, 'show', lambda window, pos, global_pos: asked.append(pos) or True)
+    window = QMainWindow()
+    window.setCentralWidget(QWidget())
+    menubar = QMenuBar(window)
+    menubar.addMenu('&File')
+    frame = WindowFrame(window, menubar, button_layout='icon:minimize,maximize,close')
+    try:
+        window.resize(800, 600)
+        window.show()
+        qapp.processEvents()
+        _right_click(qapp, frame.title_bar)
+        assert len(asked) == 1
+        # Where the press was, in the window: the title bar sits inside the shadow margins.
+        assert asked[0].y() >= SHADOW_MARGINS.top()
+        assert qapp.activePopupWidget() is None
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_right_click_shows_the_apps_menu_where_the_desktop_has_none(qapp, monkeypatch):
+    from tvhplayer import window_frame
+
+    monkeypatch.setattr(window_frame.window_menu, 'show', lambda *args: False)
+    window = QMainWindow()
+    window.setCentralWidget(QWidget())
+    menubar = QMenuBar(window)
+    menubar.addMenu('&File')
+    frame = WindowFrame(window, menubar, button_layout='icon:minimize,maximize,close')
+    try:
+        window.resize(800, 600)
+        window.show()
+        qapp.processEvents()
+        menu = frame.title_bar.fallback_menu()
+        names = [action.text() for action in menu.actions() if not action.isSeparator()]
+        assert names == ['Mi&nimize', 'Ma&ximize', '&Close']
+        menu.deleteLater()
+        _right_click(qapp, frame.title_bar)
+        qapp.processEvents()
+        popup = qapp.activePopupWidget()
+        assert popup is not None
+        popup.close()
+    finally:
+        window.deleteLater()
+        qapp.processEvents()
+
+
+def test_window_menu_is_not_asked_for_where_it_cannot_be(qapp):
+    from tvhplayer import window_menu
+
+    # The tests run offscreen: neither Wayland nor X11.
+    assert window_menu.show(QWidget(), QPoint(1, 1), QPoint(1, 1)) is False

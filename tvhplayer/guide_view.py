@@ -1344,6 +1344,8 @@ class GuideWindow(QDialog):
         if saved:
             try:
                 self.restoreGeometry(QByteArray.fromHex(saved.encode('ascii')))
+                # The saved size has the app's own frame in it, if it draws one.
+                self.setProperty('geometryRestored', True)
             except Exception:
                 pass
 
