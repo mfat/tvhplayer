@@ -4253,3 +4253,35 @@ def test_channels_that_failed_the_stream_test_are_marked_later_and_can_be_retest
     finally:
         window.close()
         app.processEvents()
+
+
+def test_own_title_bar_frames_the_window_and_not_its_parts(monkeypatch, tmp_path):
+    # The window's parts are built on their own and put in later; with the
+    # app's title bar on, each got a title bar of its own inside the window.
+    (tmp_path / 'tvhplayer.conf').write_text(json.dumps({'own_title_bar': True}), encoding='utf-8')
+    from tvhplayer import window_frame
+
+    monkeypatch.setattr(window_frame, 'wants_own_title_bar', lambda *a, **k: True)
+    monkeypatch.setattr(window_frame, 'desktop_button_layout', lambda *a, **k: window_frame.DEFAULT_BUTTON_LAYOUT)
+    app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QWidget
+
+        assert window.window_frame is not None
+        window.resize(1000, 700)
+        window.show()
+        app.processEvents()
+        assert window.findChildren(window_frame.TitleBar) == [window.window_frame.title_bar]
+        see_through = [
+            widget for widget in window.findChildren(QWidget)
+            if widget.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            and widget.property(window_frame.PREPARED_PROPERTY) is not None
+        ]
+        assert see_through == []
+    finally:
+        app.removeEventFilter(window._dialog_framer)
+        window._dialog_framer.deleteLater()
+        window.close()
+        window.deleteLater()
+        app.processEvents()

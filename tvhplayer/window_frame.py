@@ -19,7 +19,9 @@ from pathlib import Path
 
 from PyQt6.QtCore import QEvent, QMargins, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPalette, QPen, QPixmap
-from PyQt6.QtWidgets import QAbstractButton, QApplication, QDialog, QHBoxLayout, QLabel, QMenu, QMenuBar, QWidget
+from PyQt6.QtWidgets import (
+    QAbstractButton, QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMenuBar, QWidget,
+)
 
 try:
     from . import ui_theme, window_menu
@@ -712,21 +714,39 @@ def prepare(window):
     """Make ``window`` frameless and see-through, before its native window is made.
 
     A native window takes its see-through background only as it is made; one
-    made opaque shows the shadow drawn around the window as a black frame."""
-    window.setProperty(PREPARED_PROPERTY, True)
+    made opaque shows the shadow drawn around the window as a black frame.
+    What the window had before is kept, for :func:`unprepare`."""
+    window.setProperty(PREPARED_PROPERTY, (
+        bool(window.windowFlags() & Qt.WindowType.FramelessWindowHint),
+        window.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground),
+        window.testAttribute(Qt.WidgetAttribute.WA_NoSystemBackground),
+    ))
     # Not setWindowFlags(), which also hides the window.
     window.overrideWindowFlags(window.windowFlags() | Qt.WindowType.FramelessWindowHint)
     window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
 
+def unprepare(widget):
+    """Undo :func:`prepare` for a window that was put inside another one before it was shown."""
+    frameless, translucent, no_background = widget.property(PREPARED_PROPERTY)
+    widget.setProperty(PREPARED_PROPERTY, None)
+    if not frameless:
+        widget.overrideWindowFlags(widget.windowFlags() & ~Qt.WindowType.FramelessWindowHint)
+    widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, translucent)
+    widget.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, no_background)
+
+
 class DialogFramer(QObject):
-    """Frames each dialog and further window of the app as it is first shown,
-    so that they all look like the main window. Dialogs the app makes itself
-    and those Qt makes, such as message boxes, alike.
+    """Frames each dialog and further main window of the app as it is first
+    shown, so that they all look like the main window. Dialogs the app makes
+    itself and those Qt makes, such as message boxes, alike.
 
     The window is made see-through while it is being built, the first time it
     hears of anything, and gets its title bar when it is shown. A window whose
-    native window was made before that keeps the system's frame."""
+    native window was made before that keeps the system's frame.
+
+    Only dialogs and main windows: other widgets are often built on their own,
+    windows for a moment, and then put inside a window."""
 
     def __init__(self, app, button_layout=None):
         super().__init__(app)
@@ -735,10 +755,10 @@ class DialogFramer(QObject):
 
     def wants(self, widget):
         return (
-            isinstance(widget, QWidget)
+            isinstance(widget, (QDialog, QMainWindow))
             and widget.isWindow()
             and widget.windowType() in FRAMED_TYPES
-            and not widget.property(PREPARED_PROPERTY)
+            and widget.property(PREPARED_PROPERTY) is None
             and not widget.windowFlags() & Qt.WindowType.FramelessWindowHint
             and not widget.property(SKIP_PROPERTY)
         )
@@ -747,10 +767,17 @@ class DialogFramer(QObject):
         kind = event.type()
         if kind == QEvent.Type.Show:
             # A prepared window is see-through: without its frame it would show nothing around its content.
-            if obj.property(PREPARED_PROPERTY) and not obj.property(FRAMED_PROPERTY):
+            if obj.property(PREPARED_PROPERTY) is not None and not obj.property(FRAMED_PROPERTY) and obj.isWindow():
                 DialogFrame(obj, self._button_layout, grow=not obj.property(RESTORED_PROPERTY))
         elif kind in PREPARE_EVENTS and self.wants(obj) and obj.windowHandle() is None:
             prepare(obj)
+        elif (
+            kind == QEvent.Type.ParentChange
+            and obj.property(PREPARED_PROPERTY) is not None
+            and not obj.property(FRAMED_PROPERTY)
+            and not obj.isWindow()
+        ):
+            unprepare(obj)
         return False
 
 
@@ -761,7 +788,9 @@ def install(window, menubar, wanted):
     Returns the frame, or None after ``menubar`` was made the window's menu bar as usual."""
     if wanted and wants_own_title_bar(QGuiApplication.platformName()):
         layout = desktop_button_layout()
+        # The main window first: it is frameless then, and the framer leaves it alone.
+        frame = WindowFrame(window, menubar, layout)
         window._dialog_framer = DialogFramer(QApplication.instance(), layout)
-        return WindowFrame(window, menubar, layout)
+        return frame
     window.setMenuBar(menubar)
     return None

@@ -385,3 +385,40 @@ def test_a_window_made_before_it_could_be_prepared_keeps_the_system_frame(qapp):
         framer.deleteLater()
         dialog.deleteLater()
         qapp.processEvents()
+
+
+def test_widgets_built_alone_and_then_placed_in_a_window_stay_plain(qapp):
+    # The main window's parts are built without a parent, so for a moment they
+    # are windows of their own: each got a title bar inside the main window.
+    from PyQt6.QtWidgets import QLabel, QVBoxLayout
+
+    from tvhplayer.window_frame import TitleBar
+
+    framer = _framer(qapp)
+    host = QWidget()
+    QVBoxLayout(host)
+    part = QWidget()
+    QVBoxLayout(part).addWidget(QLabel('Channels'))
+    part.setWindowTitle('TVHplayer')
+    # A main window is prepared while it is built, then put inside another window.
+    inner = QMainWindow()
+    inner.setCentralWidget(QLabel('Guide'))
+    inner.setWindowTitle('Guide')
+    try:
+        assert inner.property('_tvhFramePrepared') is not None
+        assert part.property('_tvhFramePrepared') is None
+        host.layout().addWidget(part)
+        host.layout().addWidget(inner)
+        assert inner.property('_tvhFramePrepared') is None
+        host.show()
+        qapp.processEvents()
+        for widget in (part, inner):
+            assert widget.findChild(TitleBar) is None
+            assert not widget.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            assert not widget.testAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+            assert not widget.windowFlags() & Qt.WindowType.FramelessWindowHint
+            assert widget.contentsMargins() == QMargins()
+    finally:
+        framer.deleteLater()
+        host.deleteLater()
+        qapp.processEvents()
