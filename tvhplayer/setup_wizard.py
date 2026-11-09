@@ -64,7 +64,12 @@ try:
     )
     from .core.playback_status import SIGNAL_NONE
     from .core.tuners import read_tuners
-    from .core.hdhomerun import read_windows_builtin_tuners
+    from .core.hdhomerun import (
+        firewall_allow_command,
+        firewall_blocked_devices,
+        hdhomerun_address,
+        read_windows_builtin_tuners,
+    )
     from .core.tvh_admin import TvhAdmin
 except ImportError:
     from a11y import announce_label, buddy_label, describe
@@ -94,7 +99,12 @@ except ImportError:
     )
     from core.playback_status import SIGNAL_NONE
     from core.tuners import read_tuners
-    from core.hdhomerun import read_windows_builtin_tuners
+    from core.hdhomerun import (
+        firewall_allow_command,
+        firewall_blocked_devices,
+        hdhomerun_address,
+        read_windows_builtin_tuners,
+    )
     from core.tvh_admin import TvhAdmin
 
 SOURCE_TUNER = 'tuner'
@@ -486,8 +496,31 @@ class SourcePage(QWizardPage):
         actions = QHBoxLayout()
         actions.addWidget(self.look_btn)
         actions.addStretch(1)
+        # An HDHomeRun that a firewall on this computer hides from the built-in server.
+        self.firewall = QWidget()
+        firewall_rows = QVBoxLayout(self.firewall)
+        firewall_rows.setContentsMargins(0, 0, 0, 0)
+        firewall_rows.setSpacing(8)
+        self.firewall_note = QLabel('')
+        self.firewall_note.setWordWrap(True)
+        self.firewall_command = QLineEdit()
+        self.firewall_command.setReadOnly(True)
+        describe(self.firewall_command, 'Command', 'The command that lets the HDHomeRun through the firewall.')
+        self.copy_command_btn = QPushButton('&Copy Command')
+        describe(self.copy_command_btn, 'Copy command', 'Copy the firewall command, to paste in a terminal.')
+        self.copy_command_btn.clicked.connect(
+            lambda: QApplication.clipboard().setText(self.firewall_command.text()))
+        command_row = QHBoxLayout()
+        command_row.setContentsMargins(0, 0, 0, 0)
+        command_row.addWidget(self.firewall_command, 1)
+        command_row.addWidget(self.copy_command_btn)
+        firewall_rows.addWidget(self.firewall_note)
+        firewall_rows.addLayout(command_row)
+        self.firewall.hide()
+        self._blocked = []
         self.tuner_card.body.addWidget(self.status)
         self.tuner_card.body.addWidget(self.found)
+        self.tuner_card.body.addWidget(self.firewall)
         self.tuner_card.body.addLayout(actions)
         layout.addWidget(self.tuner_card)
         layout.addWidget(self.iptv_card)
@@ -572,7 +605,38 @@ class SourcePage(QWizardPage):
     def _tuner_reader(self):
         if sys.platform == 'win32' and self._wizard.server.get('builtin'):
             return read_windows_builtin_tuners
+        if sys.platform.startswith('linux') and self._wizard.server.get('builtin'):
+            return self._read_local_tuners
         return read_tuners
+
+    def _read_local_tuners(self, admin):
+        """The built-in server's tuners, and any HDHomeRun a firewall on this computer hides from it."""
+        tuners = read_tuners(admin)
+        self._blocked = []
+        if not any(hdhomerun_address(tuner) for tuner in tuners):
+            self._blocked = firewall_blocked_devices()
+        return tuners
+
+    def _show_firewall(self):
+        blocked = self._blocked
+        if not blocked:
+            self.firewall.hide()
+            return
+        where = blocked[0] if len(blocked) == 1 else ', '.join(blocked[:-1]) + f' and {blocked[-1]}'
+        device = 'an HDHomeRun' if len(blocked) == 1 else 'HDHomeRuns'
+        commands = [firewall_allow_command(address) for address in blocked]
+        if all(commands):
+            how = 'To allow it, run this in a terminal, then choose Look again:' if len(blocked) == 1 else \
+                'To allow them, run this in a terminal, then choose Look again:'
+            self.firewall_command.setText(' && '.join(commands))
+        else:
+            how = f'Allow UDP traffic from {where} in the firewall, then choose Look again.'
+            self.firewall_command.clear()
+        self.firewall_command.setVisible(bool(self.firewall_command.text()))
+        self.copy_command_btn.setVisible(bool(self.firewall_command.text()))
+        announce_label(self.firewall_note, f'Found {device} at {where}, but a firewall on this computer '
+                                           f'blocks it from the built-in server. {how}')
+        self.firewall.show()
 
     def _read_tuners(self):
         self._looking = True
@@ -586,6 +650,7 @@ class SourcePage(QWizardPage):
         self.look_btn.setEnabled(True)
         if error:
             self._wizard.tuners = []
+            self._blocked = []
             announce_label(self.status, f'Could not look for tuners: {error}')
         else:
             self._wizard.tuners = [tuner for tuner in tuners or [] if supported(tuner.kind)]
@@ -596,6 +661,8 @@ class SourcePage(QWizardPage):
             elif tuners:
                 kinds = ', '.join(sorted({tuner.kind for tuner in tuners}))
                 announce_label(self.status, f'Found tuners for {kinds}, which TVHplayer cannot set up yet.')
+            elif self._blocked:
+                announce_label(self.status, 'No tuner the server can use was found.')
             else:
                 announce_label(
                     self.status,
@@ -603,6 +670,7 @@ class SourcePage(QWizardPage):
                     'network, then choose Look again.',
                 )
         self._show_found(self._wizard.tuners)
+        self._show_firewall()
         self.tuner_radio.setEnabled(bool(self._wizard.tuners))
         if self.group.checkedButton() is None or not self._wizard.tuners:
             (self.tuner_radio if self._wizard.tuners else self.iptv_radio).setChecked(True)
@@ -776,6 +844,18 @@ def _plural(number, one, many):
     return f'{number} {one if number == 1 else many}'
 
 
+def _firewall_advice(server, tuners):
+    """For a scan on this computer's built-in server: the command that lets its HDHomeRuns through ufw."""
+    if not (server.get('builtin') and sys.platform.startswith('linux')):
+        return ''
+    commands = [firewall_allow_command(address) for address in
+                dict.fromkeys(hdhomerun_address(tuner) for tuner in tuners) if address]
+    commands = [command for command in commands if command]
+    if not commands:
+        return ''
+    return 'If ufw is on, this lets the HDHomeRun through: ' + ' && '.join(commands)
+
+
 def _scan_activity(progress):
     """What the tuners are doing now."""
     if progress.done:
@@ -894,6 +974,7 @@ class ScanPage(QWizardPage):
         key, label = page.region()
         tuners = page.chosen_tuners()
         self._include_encrypted = page.encrypted_check.isChecked()
+        self._advice = _firewall_advice(self._wizard.server, tuners)
         self._step = 'create'
         self.progress.setRange(0, 0)
         announce_label(self.status, 'Setting up the tuners…')
@@ -968,7 +1049,7 @@ class ScanPage(QWizardPage):
             return
         self._plan = plan or ChannelPlan()
         if not self._plan.services:
-            self._finish(scan_summary(self._progress, self._plan, 0))
+            self._finish(scan_summary(self._progress, self._plan, 0, self._advice))
             return
         services = self._plan.services
         self._step = 'map'
@@ -1002,7 +1083,7 @@ class ScanPage(QWizardPage):
             return
         self._timer.stop()
         self.added = made
-        self._finish(scan_summary(self._progress, self._plan, made))
+        self._finish(scan_summary(self._progress, self._plan, made, self._advice))
 
     def _fail(self, text):
         self._timer.stop()

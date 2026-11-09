@@ -292,11 +292,60 @@ def test_existing_tuners_do_not_trigger_host_discovery(monkeypatch):
 def test_wizard_uses_host_fallback_only_for_windows_builtin(monkeypatch):
     pytest.importorskip('PyQt6')
     from tvhplayer.setup_wizard import SourcePage, read_tuners, read_windows_builtin_tuners
-    page = types.SimpleNamespace(_wizard=types.SimpleNamespace(server={'builtin': True}))
+    local = object()
+    page = types.SimpleNamespace(_wizard=types.SimpleNamespace(server={'builtin': True}), _read_local_tuners=local)
     monkeypatch.setattr('sys.platform', 'win32')
     assert SourcePage._tuner_reader(page) is read_windows_builtin_tuners
     page._wizard.server = {'name': 'googlerouter'}
     assert SourcePage._tuner_reader(page) is read_tuners
+    # On Linux the built-in server's reader also checks for a firewall on this computer.
     page._wizard.server = {'builtin': True}
     monkeypatch.setattr('sys.platform', 'linux')
+    assert SourcePage._tuner_reader(page) is local
+    page._wizard.server = {'name': 'googlerouter'}
     assert SourcePage._tuner_reader(page) is read_tuners
+
+
+def test_directed_search_finds_a_device_a_firewall_hides_from_broadcasts(monkeypatch):
+    """Each address of the network is asked on its own; this one answers."""
+    import ipaddress
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as device:
+        device.bind(('127.0.0.1', 0))
+        device.settimeout(3)
+        monkeypatch.setattr(hdhomerun, 'DISCOVERY_PORT', device.getsockname()[1])
+
+        def respond():
+            packet, source = device.recvfrom(2048)
+            if packet == hdhomerun.discovery_request():
+                device.sendto(reply(bytes.fromhex('01040000000102041240c1f5100102')), source)
+        thread = threading.Thread(target=respond)
+        thread.start()
+        try:
+            networks = [('127.0.0.2', ipaddress.IPv4Network('127.0.0.0/30')),
+                        ('127.0.0.3', ipaddress.IPv4Network('127.0.0.0/16'))]
+            devices = hdhomerun.sweep_host_devices(timeout=.5, networks=networks, max_hosts=8)
+        finally:
+            thread.join(4)
+    # The /16 is too big to ask address by address, so only the /30 was asked.
+    assert devices == [hdhomerun.HostTuner('127.0.0.1', '127.0.0.2', 2, 0x1240C1F5)]
+
+
+def test_firewall_blocked_devices_answer_directly_but_not_to_a_broadcast():
+    seen = hdhomerun.HostTuner('192.168.8.150')
+    hidden = hdhomerun.HostTuner('192.168.8.148')
+    assert hdhomerun.firewall_blocked_devices(broadcast=lambda: [seen], sweep=lambda: [hidden, seen]) == [
+        '192.168.8.148']
+    assert hdhomerun.firewall_blocked_devices(broadcast=lambda: [hidden], sweep=lambda: [hidden]) == []
+
+
+def test_firewall_allow_command_only_for_ufw():
+    ufw = lambda name: '/usr/sbin/ufw' if name == 'ufw' else None
+    assert hdhomerun.firewall_allow_command('192.168.8.148', which=ufw) == 'sudo ufw allow from 192.168.8.148 proto udp'
+    assert hdhomerun.firewall_allow_command('192.168.8.148', which=lambda _name: None) == ''
+    assert hdhomerun.firewall_allow_command('not an address', which=ufw) == ''
+
+
+def test_hdhomerun_address_from_the_tuner_name():
+    tuner = types.SimpleNamespace(name='HDHomeRun DVB-T Tuner #0 (192.168.8.148)', hardware='')
+    assert hdhomerun.hdhomerun_address(tuner) == '192.168.8.148'
+    assert hdhomerun.hdhomerun_address(types.SimpleNamespace(name='DVB-T #0 (10.0.0.1)', hardware='')) == ''

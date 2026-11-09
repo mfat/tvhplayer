@@ -386,8 +386,12 @@ def _count(number: int, one: str, many: str) -> str:
     return f'{number} {one if number == 1 else many}'
 
 
-def scan_summary(progress: ScanProgress, plan: ChannelPlan, made: int) -> str:
-    """What the scan came to, in words: the channels added, and what went wrong if anything did."""
+def scan_summary(progress: ScanProgress, plan: ChannelPlan, made: int, advice: str = '') -> str:
+    """What the scan came to, in words: the channels added, and what went wrong if anything did.
+
+    ``advice`` follows the sentence about frequencies with no data, such as
+    the firewall command for the tuner.
+    """
     lines = []
     if made:
         lines.append(f"Added {_count(made, 'channel', 'channels')}.")
@@ -401,6 +405,8 @@ def scan_summary(progress: ScanProgress, plan: ChannelPlan, made: int) -> str:
             f"On {_count(no_data, 'frequency', 'frequencies')} the tuner found a signal, but no data reached "
             'the server. A firewall on the server computer, or a weak Wi-Fi or network connection, can cause this.'
         )
+        if advice:
+            lines.append(advice)
     elif not plan.services:
         received = progress.count(FREQ_CHANNELS) + progress.count(FREQ_EMPTY)
         if progress.frequencies and not received:

@@ -222,6 +222,116 @@ def discover_host_devices(timeout=2.0, cancel=None, interfaces=None) -> List[Hos
     return [found[ip] for ip in sorted(found)]
 
 
+# The directed search asks each address of a local network up to this size,
+# and skips bigger ones (container bridges, for example).
+SWEEP_MAX_HOSTS = 1024
+
+
+def host_networks():
+    """``(local address, network)`` of each usable IPv4 interface."""
+    import psutil
+    networks = []
+    for rows in psutil.net_if_addrs().values():
+        for row in rows:
+            if row.family != socket.AF_INET or not row.netmask:
+                continue
+            try:
+                interface = ipaddress.IPv4Interface(f'{row.address}/{row.netmask}')
+            except ValueError:
+                continue
+            if interface.ip.is_loopback or interface.ip.is_link_local or interface.network.prefixlen >= 31:
+                continue
+            networks.append((str(interface.ip), interface.network))
+    return sorted(set(networks), key=lambda item: (item[0], str(item[1])))
+
+
+def sweep_host_devices(timeout=1.0, cancel=None, networks=None, max_hosts=SWEEP_MAX_HOSTS) -> List[HostTuner]:
+    """HDHomeRuns answering a discovery request sent to each address of the local networks.
+
+    A broadcast's replies come from addresses it was not sent to, so a
+    firewall that blocks unrequested traffic, like ufw's default, drops them.
+    Each reply here answers a request sent to that very address, which such a
+    firewall lets through.
+    """
+    request = discovery_request()
+    sockets = {}
+    found = {}
+    try:
+        for local, network in (networks if networks is not None else host_networks()):
+            if network.num_addresses - 2 > max_hosts:
+                continue
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                # A blocking send waits about 12 ms for each address the system
+                # has to look up first: 3 s for a /24. Not blocking, they all
+                # go out at once.
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1 << 20)
+                sock.bind((local, 0))
+                sock.setblocking(False)
+                for host in network.hosts():
+                    if str(host) != local:
+                        try:
+                            sock.sendto(request, (str(host), DISCOVERY_PORT))
+                        except OSError:
+                            pass  # An address with no route; the others still go.
+                sockets[sock] = local
+            except OSError:
+                sock.close()
+        deadline = time.monotonic() + timeout
+        while sockets and time.monotonic() < deadline:
+            if cancel is not None and cancel.is_set():
+                break
+            ready, _, _ = select.select(list(sockets), [], [], min(.2, max(0, deadline - time.monotonic())))
+            for sock in ready:
+                try:
+                    packet, source = sock.recvfrom(2048)
+                except OSError:
+                    continue
+                if source[1] != DISCOVERY_PORT:
+                    continue
+                device = parse_tuner_reply(packet, source[0], sockets[sock])
+                if device is not None and device.ip not in found:
+                    found[device.ip] = device
+    finally:
+        for sock in sockets:
+            sock.close()
+    return [found[ip] for ip in sorted(found)]
+
+
+def firewall_blocked_devices(broadcast=discover_host_devices, sweep=sweep_host_devices) -> List[str]:
+    """Addresses of HDHomeRuns that answer when asked directly but not a broadcast.
+
+    That is what a firewall on this computer does: Tvheadend finds HDHomeRuns
+    by broadcast, and receives their streams unasked, and it blocks both.
+    """
+    answered = {device.ip for device in broadcast()}
+    return [device.ip for device in sweep() if device.ip not in answered]
+
+
+def firewall_allow_command(address: str, which=None) -> str:
+    """The command that lets this HDHomeRun through the firewall, or '' when not known.
+
+    Only ufw's is given: it was checked to let both the discovery replies and
+    the streams through.
+    """
+    import shutil
+    which = which or shutil.which
+    if _usable_ipv4(address) and which('ufw'):
+        return f'sudo ufw allow from {address} proto udp'
+    return ''
+
+
+def hdhomerun_address(tuner) -> str:
+    """The IPv4 address in an HDHomeRun tuner's name, like ``HDHomeRun DVB-T Tuner #0 (192.168.8.148)``, or ''."""
+    text = f"{getattr(tuner, 'hardware', '')} {getattr(tuner, 'name', '')}"
+    if 'hdhomerun' not in text.lower():
+        return ''
+    for candidate in re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', text):
+        if _usable_ipv4(candidate):
+            return candidate
+    return ''
+
+
 def discover_host_tuners(timeout=2.0, cancel=None) -> List[str]:
     """IPv4 addresses of devices answering a bounded Windows-side UDP discovery."""
     return [device.ip for device in discover_host_devices(timeout=timeout, cancel=cancel)]

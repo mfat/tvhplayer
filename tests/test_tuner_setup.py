@@ -262,6 +262,9 @@ def test_scan_summary_says_what_went_wrong():
     text = scan_summary(_progress(FREQ_CHANNELS, FREQ_NO_DATA, FREQ_NO_DATA), ChannelPlan(['s1'], silent=1), 1)
     assert text.startswith('Added 1 channel. On 2 frequencies the tuner found a signal, but no data reached the server.')
     assert '1 channel has no picture or sound information' in text
+    advice = 'If ufw is on, this lets the HDHomeRun through: sudo ufw allow from 192.168.8.148 proto udp'
+    text = scan_summary(_progress(FREQ_NO_DATA), ChannelPlan(), 0, advice)
+    assert text.endswith('can cause this. ' + advice)
     assert scan_summary(_progress(FREQ_NO_SIGNAL, FREQ_NO_SIGNAL), ChannelPlan(), 0) == (
         'No channels were found. No frequency had a signal. Check that the aerial, cable, or dish is '
         'connected to the tuner, and that you chose the right region or satellite.')
@@ -389,4 +392,38 @@ def test_wizard_hands_iptv_to_the_playlist_import(monkeypatch):
     assert page.nextId() == -1
     wizard.done(QWizard.DialogCode.Accepted)
     assert iptv == [{'name': 'Built-in'}] and done == []
+    app.processEvents()
+
+
+def test_wizard_says_when_a_firewall_hides_an_hdhomerun(monkeypatch):
+    import os
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+
+    from tvhplayer import setup_wizard
+
+    app = QApplication.instance() or QApplication([])
+    admin = Admin()
+    monkeypatch.setattr(setup_wizard.sys, 'platform', 'linux')
+    monkeypatch.setattr(setup_wizard, 'firewall_blocked_devices', lambda: ['192.168.8.148'])
+    monkeypatch.setattr(setup_wizard, 'firewall_allow_command',
+                        lambda address: f'sudo ufw allow from {address} proto udp')
+    monkeypatch.setattr(setup_wizard.SetupWizard, 'call', lambda self, fn, slot: slot(fn(admin), ''))
+    wizard = setup_wizard.SetupWizard({'name': 'Built-in', 'builtin': True}, lambda _s: None, lambda _s: None)
+    wizard.show()
+    page = wizard.source_page
+    assert page.status.text() == 'No tuner the server can use was found.'
+    assert page.firewall.isVisibleTo(page)
+    assert page.firewall_note.text() == (
+        'Found an HDHomeRun at 192.168.8.148, but a firewall on this computer blocks it from the built-in '
+        'server. To allow it, run this in a terminal, then choose Look again:')
+    assert page.firewall_command.text() == 'sudo ufw allow from 192.168.8.148 proto udp'
+    page.copy_command_btn.click()
+    assert QApplication.clipboard().text() == 'sudo ufw allow from 192.168.8.148 proto udp'
+    # Once allowed, the server finds it and the note goes.
+    monkeypatch.setattr(setup_wizard, 'firewall_blocked_devices', lambda: [])
+    page.look_again()
+    assert not page.firewall.isVisibleTo(page)
+    wizard.close()
     app.processEvents()
