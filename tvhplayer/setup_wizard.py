@@ -510,12 +510,11 @@ class SourcePage(QWizardPage):
         describe(self.copy_command_btn, 'Copy command', 'Copy the firewall command, to paste in a terminal.')
         self.copy_command_btn.clicked.connect(
             lambda: QApplication.clipboard().setText(self.firewall_command.text()))
-        command_row = QHBoxLayout()
-        command_row.setContentsMargins(0, 0, 0, 0)
-        command_row.addWidget(self.firewall_command, 1)
-        command_row.addWidget(self.copy_command_btn)
+        # The command has the card's whole width, so it fits without scrolling.
         firewall_rows.addWidget(self.firewall_note)
-        firewall_rows.addLayout(command_row)
+        firewall_rows.addWidget(self.firewall_command)
+        actions.insertWidget(1, self.copy_command_btn)
+        self.copy_command_btn.hide()
         self.firewall.hide()
         self._blocked = []
         self.tuner_card.body.addWidget(self.status)
@@ -621,6 +620,7 @@ class SourcePage(QWizardPage):
         blocked = self._blocked
         if not blocked:
             self.firewall.hide()
+            self.copy_command_btn.hide()
             return
         where = blocked[0] if len(blocked) == 1 else ', '.join(blocked[:-1]) + f' and {blocked[-1]}'
         device = 'an HDHomeRun' if len(blocked) == 1 else 'HDHomeRuns'
@@ -629,6 +629,8 @@ class SourcePage(QWizardPage):
             how = 'To allow it, run this in a terminal, then choose Look again:' if len(blocked) == 1 else \
                 'To allow them, run this in a terminal, then choose Look again:'
             self.firewall_command.setText(' && '.join(commands))
+            # Show its start, "sudo ufw", when the box is too narrow for all of it.
+            self.firewall_command.setCursorPosition(0)
         else:
             how = f'Allow UDP traffic from {where} in the firewall, then choose Look again.'
             self.firewall_command.clear()
@@ -637,6 +639,22 @@ class SourcePage(QWizardPage):
         announce_label(self.firewall_note, f'Found {device} at {where}, but a firewall on this computer '
                                            f'blocks it from the built-in server. {how}')
         self.firewall.show()
+        QTimer.singleShot(0, self._fit_window)
+
+    def _fit_window(self):
+        """Grow the window when the page outgrows it.
+
+        Qt squeezes wrapped text, not the window, when a page's content no
+        longer fits, so the note would be cut to a line or two.
+        """
+        layout = self.layout()
+        if layout.hasHeightForWidth():
+            needed = layout.totalHeightForWidth(self.width())
+        else:
+            needed = layout.totalSizeHint().height()
+        extra = needed - self.height()
+        if extra > 0:
+            self._wizard.resize(self._wizard.width(), self._wizard.height() + extra)
 
     def _read_tuners(self):
         self._looking = True

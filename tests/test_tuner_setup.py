@@ -404,6 +404,10 @@ def test_wizard_says_when_a_firewall_hides_an_hdhomerun(monkeypatch):
     from tvhplayer import setup_wizard
 
     app = QApplication.instance() or QApplication([])
+    font = app.font()
+    bigger = app.font()
+    bigger.setPointSizeF(12)
+    app.setFont(bigger)
     admin = Admin()
     monkeypatch.setattr(setup_wizard.sys, 'platform', 'linux')
     monkeypatch.setattr(setup_wizard, 'firewall_blocked_devices', lambda: ['192.168.8.148'])
@@ -419,11 +423,18 @@ def test_wizard_says_when_a_firewall_hides_an_hdhomerun(monkeypatch):
         'Found an HDHomeRun at 192.168.8.148, but a firewall on this computer blocks it from the built-in '
         'server. To allow it, run this in a terminal, then choose Look again:')
     assert page.firewall_command.text() == 'sudo ufw allow from 192.168.8.148 proto udp'
+    # The window grows for the note: Qt would squeeze it to a line or two.
+    for _ in range(3):
+        app.processEvents()
+    note = page.firewall_note
+    assert note.height() >= note.heightForWidth(note.width())
     page.copy_command_btn.click()
     assert QApplication.clipboard().text() == 'sudo ufw allow from 192.168.8.148 proto udp'
     # Once allowed, the server finds it and the note goes.
     monkeypatch.setattr(setup_wizard, 'firewall_blocked_devices', lambda: [])
     page.look_again()
     assert not page.firewall.isVisibleTo(page)
+    assert not page.copy_command_btn.isVisibleTo(page)
     wizard.close()
+    app.setFont(font)
     app.processEvents()
