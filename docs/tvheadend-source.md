@@ -25,6 +25,8 @@ The deb and rpm builds download `<repo>/archive/<commit>.tar.gz`, and the deb bu
 | `40e88d4ce` | htsp: send a tag's members once after many channels join it | not yet |
 | `fb4c98deb` | htsmsg: reject different field prefixes before string comparison | not yet |
 | `f02aee227` | startup: development-only monotonic stage and EPG/HTSP timing | not yet |
+| `cab97c72d` | idnode: faster sorted-set insertion with binary search and memmove | not yet |
+| `576105975` | settings: reuse directories during configuration loading | not yet |
 
 Base: upstream `51ec612fa`.
 
@@ -44,3 +46,7 @@ and the larger loading changes that still need design.
 5. Update the table above.
 
 When the branch has no fixes left on top of upstream, point all three files back to `https://github.com/tvheadend/tvheadend` at that upstream commit.
+
+The earlier local sorted-set and settings-directory optimizations are now published
+and pinned as well. The normal source checkout should track the fork’s `tvhplayer`
+branch; a separate temporary publishing checkout is no longer required.
