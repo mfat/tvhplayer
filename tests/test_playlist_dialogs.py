@@ -1125,3 +1125,16 @@ def test_refresh_says_when_no_chosen_channel_is_left(app, tmp_path):
     host = FakeHost([BUILTIN], current=BUILTIN)
     source = PlaylistSource('news', _playlist(tmp_path, GROUPS), 'builtin', chosen_groups=['Films'])
     assert _finish(app, dialogs.PlaylistJob(host, source, BUILTIN)) == [('failed', dialogs.NONE_CHOSEN)]
+
+
+def test_user_agent_offers_common_players_and_still_takes_typed_text(app):
+    dialog = dialogs.ImportPlaylistDialog(FakeHost([BUILTIN], current=BUILTIN))
+    combo = dialog.user_agent_combo
+    assert combo.itemText(0) == ''
+    assert [combo.itemText(i) for i in range(1, combo.count())] == list(dialogs.USER_AGENT_PRESETS)
+    combo.setCurrentIndex(1)
+    assert dialog.user_agent_input.text() == 'VLC/3.0.21 LibVLC/3.0.21'
+    dialog.user_agent_input.setText('My App')
+    assert combo.currentText() == 'My App'
+    dialog._set_running(True)
+    assert not combo.isEnabled()

@@ -120,6 +120,12 @@ BUSY = 'This playlist is being updated. Try again in a moment.'
 NONE_CHOSEN = 'None of the channels you chose are in this playlist any more. Use Choose Channels to pick others.'
 NO_GROUP = 'No group'
 BUSY_POLL_MS = 1000
+# Agents of common players, for providers that serve only known apps.
+USER_AGENT_PRESETS = (
+    'VLC/3.0.21 LibVLC/3.0.21',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/131.0.0.0 Safari/537.36',
+)
 # How often a running stream test saves the verdicts it has so far.
 VERDICT_SAVE_SECONDS = 30
 REMOVED_SERVERS = 'Removed servers'
@@ -726,11 +732,19 @@ class ImportPlaylistDialog(QDialog):
         layout.addWidget(self.password_label)
         layout.addWidget(self.password_input)
 
-        self.user_agent_input = QLineEdit()
+        # Editable, with common players' agents for providers that accept only those.
+        self.user_agent_combo = QComboBox()
+        self.user_agent_combo.setEditable(True)
+        self.user_agent_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.user_agent_combo.addItems(['', *USER_AGENT_PRESETS])
+        self.user_agent_input = self.user_agent_combo.lineEdit()
         self.user_agent_input.setPlaceholderText('Optional provider user agent')
-        describe(self.user_agent_input, description='User-Agent sent to the provider and its streams.')
-        layout.addWidget(buddy_label('User &agent:', self.user_agent_input))
-        layout.addWidget(self.user_agent_input)
+        describe(
+            self.user_agent_combo,
+            description='User-Agent sent to the provider and its streams. Type one or pick a common player.',
+        )
+        layout.addWidget(buddy_label('User &agent:', self.user_agent_combo))
+        layout.addWidget(self.user_agent_combo)
         self.headers_input = QLineEdit()
         self.headers_input.setPlaceholderText('{"Referer":"https://example.com/"}')
         describe(self.headers_input, description='Optional HTTP headers as a JSON object.')
@@ -829,7 +843,7 @@ class ImportPlaylistDialog(QDialog):
     def _set_running(self, running):
         for widget in (
             self.source_type_combo, self.location_input, self.browse_btn, self.username_input,
-            self.password_input, self.user_agent_input, self.headers_input,
+            self.password_input, self.user_agent_combo, self.headers_input,
         ):
             widget.setEnabled(not running)
         if not running and self._source is not None:
