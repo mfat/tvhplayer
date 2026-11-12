@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QAbstractItemModel, QEvent, QModelIndex, QObject, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -26,8 +26,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QTreeWidget,
-    QTreeWidgetItem,
+    QTreeView,
     QVBoxLayout,
     QWidget,
 )
@@ -517,10 +516,194 @@ def ask_to_choose(parent, plans, source, accept_text='A&dd Channels'):
     return True
 
 
+class ChannelChoiceModel(QAbstractItemModel):
+    """The playlist's channels under their groups, each with a check box.
+
+    A playlist can list a hundred thousand channels. The model keeps the
+    check marks in a list and counts them as they change, so a click or a
+    search never walks every row through Qt.
+    """
+
+    _GROUP = 0
+
+    def __init__(self, plans, chosen, parent=None):
+        super().__init__(parent)
+        self._plans = list(plans)
+        self._names = [plan.name.casefold() for plan in self._plans]
+        self._checked = bytearray(1 if plan.key in chosen else 0 for plan in self._plans)
+        self.checked_total = sum(self._checked)
+        members = {}
+        for index, plan in enumerate(self._plans):
+            members.setdefault(plan_group(plan), []).append(index)
+        self._groups = list(members)
+        self._group_keys = [group.casefold() for group in self._groups]
+        self._members = [members[group] for group in self._groups]
+        self._group_checked = [sum(self._checked[index] for index in rows) for rows in self._members]
+        self.flat = len(self._groups) < 2
+        self._shown_groups = list(range(len(self._groups)))
+        self._shown = [list(rows) for rows in self._members]
+        self.needle = ''
+
+    def filter(self, text):
+        """Show only channels whose name, or whose group's name, contains ``text``."""
+        needle = text.strip().casefold()
+        self.beginResetModel()
+        self.needle = needle
+        shown_groups, shown = [], []
+        for group, rows in enumerate(self._members):
+            if not needle or needle in self._group_keys[group]:
+                kept = list(rows)
+            else:
+                kept = [index for index in rows if needle in self._names[index]]
+            shown.append(kept)
+            if kept or self.flat:
+                shown_groups.append(group)
+        self._shown_groups, self._shown = shown_groups, shown
+        self.endResetModel()
+
+    def set_all(self, state, shown_only=False):
+        """Check or clear every channel, or only those the search shows."""
+        value = 1 if state == Qt.CheckState.Checked else 0
+        groups = self._shown_groups if shown_only else range(len(self._groups))
+        for group in groups:
+            rows = self._shown[group] if shown_only else self._members[group]
+            self._set_rows(group, rows, value)
+        self._changed_everything()
+
+    def chosen_keys(self):
+        return [plan.key for plan, checked in zip(self._plans, self._checked) if checked]
+
+    def _set_rows(self, group, rows, value):
+        checked = self._checked
+        change = 0
+        for index in rows:
+            if checked[index] != value:
+                checked[index] = value
+                change += 1 if value else -1
+        self._group_checked[group] += change
+        self.checked_total += change
+
+    def _changed_everything(self):
+        if self.flat:
+            rows = self.rowCount()
+            if rows:
+                self.dataChanged.emit(self.index(0, 0), self.index(rows - 1, 0), [Qt.ItemDataRole.CheckStateRole])
+            return
+        for row, group in enumerate(self._shown_groups):
+            parent = self.index(row, 0)
+            self.dataChanged.emit(parent, parent, [Qt.ItemDataRole.CheckStateRole])
+            children = len(self._shown[group])
+            if children:
+                self.dataChanged.emit(
+                    self.index(0, 0, parent), self.index(children - 1, 0, parent), [Qt.ItemDataRole.CheckStateRole]
+                )
+
+    # Rows: in a flat list, the channels; otherwise groups, each with its channels.
+    # A channel's internal id is its group's place in the shown groups plus one.
+
+    def _leaf(self, index):
+        if self.flat:
+            return self._shown[self._shown_groups[0]][index.row()] if self._shown_groups else None
+        if index.internalId() == self._GROUP:
+            return None
+        group = self._shown_groups[index.internalId() - 1]
+        return self._shown[group][index.row()]
+
+    def _group_of(self, index):
+        if self.flat:
+            return self._shown_groups[0]
+        if index.internalId() == self._GROUP:
+            return self._shown_groups[index.row()]
+        return self._shown_groups[index.internalId() - 1]
+
+    def index(self, row, column=0, parent=QModelIndex()):
+        if column != 0 or row < 0:
+            return QModelIndex()
+        if not parent.isValid():
+            if row >= self.rowCount():
+                return QModelIndex()
+            return self.createIndex(row, 0, self._GROUP)
+        if self.flat or parent.internalId() != self._GROUP:
+            return QModelIndex()
+        if row >= len(self._shown[self._shown_groups[parent.row()]]):
+            return QModelIndex()
+        return self.createIndex(row, 0, parent.row() + 1)
+
+    def parent(self, index=QModelIndex()):
+        if not index.isValid() or self.flat or index.internalId() == self._GROUP:
+            return QModelIndex()
+        return self.createIndex(index.internalId() - 1, 0, self._GROUP)
+
+    def rowCount(self, parent=QModelIndex()):
+        if not parent.isValid():
+            if self.flat:
+                return len(self._shown[self._shown_groups[0]]) if self._shown_groups else 0
+            return len(self._shown_groups)
+        if self.flat or parent.internalId() != self._GROUP or parent.column() != 0:
+            return 0
+        return len(self._shown[self._shown_groups[parent.row()]])
+
+    def columnCount(self, parent=QModelIndex()):
+        return 1
+
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+        return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        leaf = self._leaf(index)
+        if role == Qt.ItemDataRole.DisplayRole:
+            if leaf is not None:
+                return self._plans[leaf].name
+            group = self._group_of(index)
+            return f'{self._groups[group] or NO_GROUP} ({len(self._members[group])})'
+        if role == Qt.ItemDataRole.CheckStateRole:
+            if leaf is not None:
+                return Qt.CheckState.Checked if self._checked[leaf] else Qt.CheckState.Unchecked
+            group = self._group_of(index)
+            count = self._group_checked[group]
+            if count == 0:
+                return Qt.CheckState.Unchecked
+            if count == len(self._members[group]):
+                return Qt.CheckState.Checked
+            return Qt.CheckState.PartiallyChecked
+        return None
+
+    def setData(self, index, value, role=Qt.ItemDataRole.EditRole):
+        if not index.isValid() or role != Qt.ItemDataRole.CheckStateRole:
+            return False
+        state = Qt.CheckState(value) if not isinstance(value, Qt.CheckState) else value
+        checked = 1 if state == Qt.CheckState.Checked else 0
+        group = self._group_of(index)
+        leaf = self._leaf(index)
+        if leaf is not None:
+            self._set_rows(group, [leaf], checked)
+            self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
+            if not self.flat:
+                parent = index.parent()
+                self.dataChanged.emit(parent, parent, [Qt.ItemDataRole.CheckStateRole])
+            return True
+        # A group: all of its channels, as a check box with a tristate group does.
+        self._set_rows(group, self._members[group], checked)
+        self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
+        children = self.rowCount(index)
+        if children:
+            self.dataChanged.emit(
+                self.index(0, 0, index), self.index(children - 1, 0, index), [Qt.ItemDataRole.CheckStateRole]
+            )
+        return True
+
+
+# Playlists this big filter as the user stops typing, not on every key.
+FILTER_AT_ONCE = 5000
+FILTER_DELAY_MS = 200
+
+
 class ChooseChannelsDialog(QDialog):
     """The playlist's channels by group, each with a check box."""
-
-    _KEY = Qt.ItemDataRole.UserRole
 
     def __init__(self, plans, source, parent=None, accept_text='A&dd Channels'):
         super().__init__(parent)
@@ -539,19 +722,25 @@ class ChooseChannelsDialog(QDialog):
         self.search_input.setPlaceholderText('Channel or group name')
         self.search_input.setClearButtonEnabled(True)
         describe(self.search_input, description='Show only channels whose name or group contains this text.')
-        self.search_input.textChanged.connect(self._filter)
         layout.addWidget(buddy_label('&Search:', self.search_input))
         layout.addWidget(self.search_input)
 
-        self.tree = QTreeWidget()
+        self.model = ChannelChoiceModel(plans, chosen, self)
+        self.tree = QTreeView()
         self.tree.setHeaderHidden(True)
         self.tree.setUniformRowHeights(True)
+        self.tree.setModel(self.model)
+        if self.model.flat:
+            self.tree.setRootIsDecorated(False)
         describe(self.tree, 'Channels', 'Channels of the playlist by group. Selected channels are imported.')
         layout.addWidget(buddy_label('&Channels:', self.tree))
         layout.addWidget(self.tree, 1)
-        self._leaves = []
-        self._groups = []
-        self._fill(plans, chosen)
+
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(FILTER_DELAY_MS if len(plans) > FILTER_AT_ONCE else 0)
+        self._filter_timer.timeout.connect(self._apply_filter)
+        self.search_input.textChanged.connect(lambda _text: self._filter_timer.start())
 
         row = QHBoxLayout()
         self.all_btn = QPushButton('Select &All')
@@ -575,79 +764,29 @@ class ChooseChannelsDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
 
-        # Selecting a group changes all its channels; count once they have changed.
-        self._count_timer = QTimer(self)
-        self._count_timer.setSingleShot(True)
-        self._count_timer.timeout.connect(self._count)
-        self.tree.itemChanged.connect(lambda _item, _column: self._count_timer.start(0))
+        self.model.dataChanged.connect(lambda *_args: self._count())
         self._count()
 
-    def _fill(self, plans, chosen):
-        by_group = {}
-        for plan in plans:
-            by_group.setdefault(plan_group(plan), []).append(plan)
-        flat = len(by_group) < 2
-        for group, members in by_group.items():
-            if flat:
-                parent = self.tree.invisibleRootItem()
-            else:
-                parent = QTreeWidgetItem([f'{group or NO_GROUP} ({len(members)})'])
-                parent.setFlags(
-                    parent.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate
-                )
-                parent.setData(0, self._KEY, group.casefold())
-                self._groups.append(parent)
-            leaves = []
-            for plan in members:
-                item = QTreeWidgetItem([plan.name])
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setData(0, self._KEY, plan.key)
-                item.setCheckState(0, Qt.CheckState.Checked if plan.key in chosen else Qt.CheckState.Unchecked)
-                leaves.append(item)
-                self._leaves.append(item)
-            parent.addChildren(leaves)
-        self.tree.addTopLevelItems(self._groups)
-
-    def _filter(self, text):
-        needle = text.strip().casefold()
-        for group in self._groups or [self.tree.invisibleRootItem()]:
-            whole = bool(needle) and needle in (group.data(0, self._KEY) or '')
-            shown = 0
-            for index in range(group.childCount()):
-                item = group.child(index)
-                hide = bool(needle) and not whole and needle not in item.text(0).casefold()
-                item.setHidden(hide)
-                shown += not hide
-            if group is not self.tree.invisibleRootItem():
-                group.setHidden(shown == 0)
-                group.setExpanded(bool(needle) and shown > 0)
+    def _apply_filter(self):
+        self._filter_timer.stop()
+        self.model.filter(self.search_input.text())
+        if self.model.needle and not self.model.flat:
+            self.tree.expandAll()
 
     def _select_shown(self, state):
-        self.tree.blockSignals(True)
-        if self.search_input.text().strip():
-            for item in self._leaves:
-                if not item.isHidden():
-                    item.setCheckState(0, state)
-        elif self._groups:
-            for group in self._groups:
-                group.setCheckState(0, state)
-        else:
-            for item in self._leaves:
-                item.setCheckState(0, state)
-        self.tree.blockSignals(False)
+        # A search still waiting to run decides what is shown.
+        if self._filter_timer.isActive():
+            self._apply_filter()
+        self.model.set_all(state, shown_only=bool(self.search_input.text().strip()))
         self._count()
 
     def _count(self):
-        selected = len(self.chosen_keys())
-        total = len(self._leaves)
-        self.count_label.setText(f'{selected} of {total} selected')
+        selected = self.model.checked_total
+        self.count_label.setText(f'{selected} of {len(self.model._plans)} selected')
         self.ok_btn.setEnabled(selected > 0)
 
     def chosen_keys(self):
-        return [
-            item.data(0, self._KEY) for item in self._leaves
-            if item.checkState(0) == Qt.CheckState.Checked
-        ]
+        return self.model.chosen_keys()
 
 
 def show_skipped(parent, skipped):
@@ -1225,7 +1364,8 @@ class PlaylistsDialog(QDialog):
         sources = self._sources_for(server) if has_row else []
         for source in sources:
             item = QListWidgetItem(self._label(source))
-            item.setData(Qt.ItemDataRole.UserRole, source.to_dict())
+            # The source itself, not a dict: reading a dict back copied its whole channel map, every second.
+            item.setData(Qt.ItemDataRole.UserRole, source)
             self.playlist_list.addItem(item)
         if sources:
             self.playlist_list.setCurrentRow(min(max(selected, 0), len(sources) - 1))
@@ -1252,14 +1392,14 @@ class PlaylistsDialog(QDialog):
     def _follow_busy(self):
         for row in range(self.playlist_list.count()):
             item = self.playlist_list.item(row)
-            text = self._label(PlaylistSource.from_dict(item.data(Qt.ItemDataRole.UserRole)))
+            text = self._label(item.data(Qt.ItemDataRole.UserRole))
             if item.text() != text:
                 item.setText(text)
         self._sync_buttons()
 
     def _selected(self):
         item = self.playlist_list.currentItem()
-        return PlaylistSource.from_dict(item.data(Qt.ItemDataRole.UserRole)) if item is not None else None
+        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
 
     def _sync_buttons(self):
         source = self._selected()

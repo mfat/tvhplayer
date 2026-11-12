@@ -58,7 +58,7 @@ class FakeAdmin:
         self.muxes[uuid] = dict(conf, scan_state=0, scan_result=1)
         return uuid
 
-    def list_services(self, _mux_uuids, fields=None):
+    def list_services(self, _mux_uuids, fields=None, network_uuid=""):
         return []
 
     def scan_network(self, _network_uuid):
@@ -557,7 +557,7 @@ class _OneDead(FakeAdmin):
             self.muxes[uuid].update(scan_result=2)
         return uuid
 
-    def list_services(self, mux_uuids, fields=None):
+    def list_services(self, mux_uuids, fields=None, network_uuid=""):
         return [{'uuid': f's{uuid}', 'multiplex_uuid': uuid, 'enabled': True, 'channel': [f'c{uuid}']}
                 for uuid in self.muxes if uuid in set(mux_uuids)]
 
@@ -1074,12 +1074,16 @@ def test_choose_window_selects_groups_and_searches(app):
     plans = _grouped_plans()
     source = PlaylistSource('news', '/tmp/news.m3u', 'builtin', left_out=['name:B'])
     dialog = dialogs.ChooseChannelsDialog(plans, source)
-    assert [dialog.tree.topLevelItem(i).text(0) for i in range(2)] == ['News (2)', 'Sport (1)']
+    model = dialog.model
+    groups = [model.index(row, 0) for row in range(model.rowCount())]
+    assert [index.data() for index in groups] == ['News (2)', 'Sport (1)']
+    assert groups[0].data(dialogs.Qt.ItemDataRole.CheckStateRole) == dialogs.Qt.CheckState.PartiallyChecked
     assert dialog.chosen_keys() == ['name:A', 'name:C']
     assert dialog.count_label.text() == '2 of 3 selected'
 
     dialog.search_input.setText('sport')
-    assert dialog.tree.topLevelItem(0).isHidden()
+    app.processEvents()
+    assert [model.index(row, 0).data() for row in range(model.rowCount())] == ['Sport (1)']
     dialog.none_btn.click()
     assert dialog.chosen_keys() == ['name:A']
     dialog.search_input.setText('')
@@ -1088,10 +1092,42 @@ def test_choose_window_selects_groups_and_searches(app):
     assert not dialog.ok_btn.isEnabled()
     dialog.all_btn.click()
     assert dialog.chosen_keys() == ['name:A', 'name:B', 'name:C']
-    dialog.tree.topLevelItem(1).setCheckState(0, dialogs.Qt.CheckState.Unchecked)
-    app.processEvents()
+    sport = model.index(1, 0)
+    assert model.setData(sport, dialogs.Qt.CheckState.Unchecked.value, dialogs.Qt.ItemDataRole.CheckStateRole)
     assert dialog.chosen_keys() == ['name:A', 'name:B']
     assert dialog.count_label.text() == '2 of 3 selected'
+    news_b = model.index(1, 0, model.index(0, 0))
+    assert news_b.data() == 'B'
+    model.setData(news_b, dialogs.Qt.CheckState.Unchecked.value, dialogs.Qt.ItemDataRole.CheckStateRole)
+    assert dialog.chosen_keys() == ['name:A']
+    assert model.index(0, 0).data(dialogs.Qt.ItemDataRole.CheckStateRole) == dialogs.Qt.CheckState.PartiallyChecked
+
+
+def test_choose_window_stays_quick_with_a_huge_playlist(app):
+    # Opening it took 2 seconds for 50000 channels, and each click or key in
+    # Search a third of a second, because every row was a widget item.
+    from tvhplayer.core.playlist import ChannelPlan
+    plans = [ChannelPlan(f'id:{i}', f'Channel {i}', 'x', groups=[f'Group {i % 300}']) for i in range(50000)]
+    source = PlaylistSource('big', '/tmp/big.m3u', 'builtin')
+    started = time.perf_counter()
+    dialog = dialogs.ChooseChannelsDialog(plans, source)
+    dialog.show()
+    app.processEvents()
+    assert time.perf_counter() - started < 1.0
+    model = dialog.model
+    started = time.perf_counter()
+    for row in range(20):
+        model.setData(model.index(row, 0), dialogs.Qt.CheckState.Unchecked.value, dialogs.Qt.ItemDataRole.CheckStateRole)
+        app.processEvents()
+    assert (time.perf_counter() - started) / 20 < 0.05
+    assert dialog.count_label.text() == f'{50000 - 20 * 167} of 50000 selected'
+    started = time.perf_counter()
+    dialog._apply_filter()
+    dialog.search_input.setText('channel 4999')
+    dialog._apply_filter()
+    app.processEvents()
+    assert time.perf_counter() - started < 0.3
+    dialog.close()
 
 
 def test_job_adds_only_the_chosen_channels(app, tmp_path):
