@@ -172,73 +172,32 @@ def command_args(binary, config_dir, http_port: int, htsp_port: int) -> list[str
     ]
 
 
-# Run by the app's Python before Tvheadend: ask Linux to send SIGTERM when
-# TVHplayer exits, even when it crashes or is killed, then become Tvheadend.
+# Run by the app's Python before Tvheadend: ask Linux to kill Tvheadend the
+# moment TVHplayer's process ends, even when it crashes or is force quit, then
+# become Tvheadend. SIGKILL, not SIGTERM: a hung Tvheadend ignores SIGTERM and,
+# in the Flatpak, keeps the sandbox and the server settings busy for the next
+# launch. A normal quit still stops it cleanly first (``BuiltinServerSupervisor.stop``).
 # Qt has no process flag for this, and the Flatpak has no setpriv.
-#
-# A Tvheadend that hangs can ignore that SIGTERM for minutes, and the Flatpak
-# sandbox stays up while it runs, holding the settings for the next launch. So
-# a small watchdog, detached before the exec, waits for the app to go, gives
-# Tvheadend ``argv[2]`` seconds to finish, then kills it. While the app runs,
-# stopping the server is the app's job.
 PARENT_DEATH_LAUNCHER = (
-    'import ctypes, os, signal, sys, time\n'
-    'ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGTERM, 0, 0, 0)\n'
-    'app, grace = int(sys.argv[1]), float(sys.argv[2])\n'
-    'if os.getppid() != app:\n'
+    'import ctypes, os, signal, sys\n'
+    'ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL, 0, 0, 0)\n'
+    'if os.getppid() != int(sys.argv[1]):\n'
     '    sys.exit(1)\n'
-    'server = os.getpid()\n'
-    'def state():\n'
-    '    try:\n'
-    '        with open("/proc/%d/stat" % server) as f:\n'
-    '            fields = f.read().rsplit(")", 1)[1].split()\n'
-    '        return fields[0], int(fields[1]), fields[19]\n'
-    '    except (OSError, IndexError, ValueError):\n'
-    '        return "X", 0, None\n'
-    'started = state()[2]\n'
-    'def running():\n'
-    '    status, _, start = state()\n'
-    '    return start == started and status not in "ZX"\n'
-    'child = os.fork()\n'
-    'if child == 0:\n'
-    '    if os.fork():\n'
-    '        os._exit(0)\n'
-    '    try:\n'
-    '        os.setsid()\n'
-    '        null = os.open(os.devnull, os.O_RDWR)\n'
-    '        for fd in (0, 1, 2):\n'
-    '            os.dup2(null, fd)\n'
-    '        os.closerange(3, 65536)\n'
-    '        while running() and state()[1] == app:\n'
-    '            time.sleep(1)\n'
-    '        deadline = time.monotonic() + grace\n'
-    '        while running() and time.monotonic() < deadline:\n'
-    '            time.sleep(0.2)\n'
-    '        if running():\n'
-    '            os.kill(server, signal.SIGKILL)\n'
-    '    finally:\n'
-    '        os._exit(0)\n'
-    'os.waitpid(child, 0)\n'
-    'os.execv(sys.argv[3], sys.argv[3:])\n'
+    'os.execv(sys.argv[2], sys.argv[2:])\n'
 )
 
-# Seconds a Tvheadend left behind by a crashed or killed app gets to shut down.
-SERVER_KILL_AFTER = 15.0
 
+def launch_command(argv, parent_pid=None, python=None):
+    """``(program, args)`` that start ``argv`` so it dies when this app dies.
 
-def launch_command(argv, parent_pid=None, python=None, kill_after=SERVER_KILL_AFTER):
-    """``(program, args)`` that start ``argv`` so it stops when this app stops.
-
-    If the app dies and the server has not stopped ``kill_after`` seconds
-    later, it is killed. Linux only, and only when this app runs on a Python
-    interpreter; a frozen build starts Tvheadend directly.
+    Linux only, and only when this app runs on a Python interpreter; a frozen
+    build starts Tvheadend directly.
     """
     python = sys.executable if python is None else python
     if not sys.platform.startswith('linux') or getattr(sys, 'frozen', False) or not python:
         return str(argv[0]), [str(arg) for arg in argv[1:]]
     parent_pid = os.getpid() if parent_pid is None else parent_pid
-    return python, ['-I', '-c', PARENT_DEATH_LAUNCHER, str(parent_pid), str(float(kill_after))] + [
-        str(arg) for arg in argv]
+    return python, ['-I', '-c', PARENT_DEATH_LAUNCHER, str(parent_pid)] + [str(arg) for arg in argv]
 
 
 def _cmdline(pid, proc) -> list[str]:

@@ -393,7 +393,7 @@ def test_launched_server_stops_when_the_app_dies(tmp_path):
         pytest.fail('the launched process outlived its parent')
     program, args = launch_command(['/bin/tvheadend', '-c', 'x'], parent_pid=42, python='/usr/bin/python3')
     assert program == '/usr/bin/python3'
-    assert args[-5:] == ['42', '15.0', '/bin/tvheadend', '-c', 'x']
+    assert args[-4:] == ['42', '/bin/tvheadend', '-c', 'x']
 
 
 def _gone(pid) -> bool:
@@ -405,8 +405,8 @@ def _gone(pid) -> bool:
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'), reason='Linux parent-death signal')
-def test_hung_server_is_killed_soon_after_the_app_is_killed(tmp_path):
-    """A server stuck in shutdown must not outlive a force-quit app."""
+def test_hung_server_dies_with_a_killed_app(tmp_path):
+    """A server stuck in shutdown dies the moment a force-quit app does."""
     import signal
     import subprocess
 
@@ -416,7 +416,7 @@ def test_hung_server_is_killed_soon_after_the_app_is_killed(tmp_path):
     app = (
         'import os, signal, subprocess, sys, time\n'
         'from tvhplayer.core.builtin_server import launch_command\n'
-        f'program, args = launch_command([sys.executable, "-c", {hung_server!r}], kill_after=1.0)\n'
+        f'program, args = launch_command([sys.executable, "-c", {hung_server!r}])\n'
         'child = subprocess.Popen([program] + args)\n'
         f'open({str(pid_file)!r}, "w").write(str(child.pid))\n'
         'time.sleep(1)\n'
@@ -424,25 +424,13 @@ def test_hung_server_is_killed_soon_after_the_app_is_killed(tmp_path):
     )
     subprocess.run([sys.executable, '-c', app], cwd=str(Path(__file__).resolve().parents[1]))
     child = int(pid_file.read_text())
-    for _ in range(60):
+    for _ in range(10):
         if _gone(child):
             break
         time.sleep(0.1)
     else:
         os.kill(child, signal.SIGKILL)
         pytest.fail('a server that ignores SIGTERM outlived the killed app')
-
-
-@pytest.mark.skipif(not sys.platform.startswith('linux'), reason='Linux parent-death signal')
-def test_server_that_stops_on_its_own_is_left_to_finish(tmp_path):
-    """While the app runs, the watchdog never touches the server."""
-    import subprocess
-
-    from tvhplayer.core.builtin_server import launch_command
-
-    program, args = launch_command([sys.executable, '-c', 'import time; time.sleep(2)'], kill_after=0.5)
-    child = subprocess.Popen([program] + args)
-    assert child.wait(timeout=10) == 0
 
 
 def test_builtin_server_gets_its_ready_to_use_defaults():
