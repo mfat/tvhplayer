@@ -44,6 +44,15 @@ def test_source_checkout_looks_beside_the_repo():
     assert repo / 'build' / 'tvheadend' in bundled_binary_candidates()
 
 
+def test_a_system_python_does_not_pick_the_hosts_tvheadend(monkeypatch):
+    # Run from a source checkout with /usr/bin/python3, the app took the
+    # distribution's /usr/bin/tvheadend over the fork build beside the repo.
+    monkeypatch.setattr(builtin_server.sys, 'executable', '/usr/bin/python3')
+    assert Path('/usr/bin/tvheadend') not in bundled_binary_candidates()
+    monkeypatch.setattr(builtin_server.sys, 'executable', '/tmp/.mount_TVHabc/usr/bin/python3')
+    assert Path('/tmp/.mount_TVHabc/usr/bin/tvheadend') in bundled_binary_candidates()
+
+
 def test_command_stays_in_the_foreground_without_a_pid_file():
     args = command_args('/app/bin/tvheadend', '/tmp/tvhplayer/tvheadend', 24111, 24112)
     assert args[0] == '/app/bin/tvheadend'

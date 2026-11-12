@@ -82,12 +82,18 @@ def builtin_requests_ready(server, running: bool) -> bool:
     return bool(running) and bool((server.get('url') or '').strip())
 
 
+HOST_BIN_DIRS = {'/bin', '/usr/bin', '/usr/local/bin', '/sbin', '/usr/sbin'}
+
+
 def bundled_binary_candidates() -> list[Path]:
     """Binaries this package may have shipped. A host install is not included."""
     # Flatpak, then the deb and rpm packages' private copy.
     candidates = [Path('/app/bin/tvheadend'), Path('/usr/libexec/tvhplayer/tvheadend')]
+    # The AppImage carries Tvheadend beside its Python. A system Python's
+    # folder holds the host's Tvheadend, which is not ours to run.
     executable = Path(sys.executable).resolve()
-    candidates.append(executable.with_name('tvheadend'))
+    if str(executable.parent) not in HOST_BIN_DIRS:
+        candidates.append(executable.with_name('tvheadend'))
     frozen_root = getattr(sys, '_MEIPASS', None)
     if frozen_root:
         candidates.append(Path(frozen_root) / 'tvheadend')
