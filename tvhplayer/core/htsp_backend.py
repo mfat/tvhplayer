@@ -8,6 +8,7 @@ TVHplayer always uses that HTTP path because mpv/ffmpeg cannot demux HTSP muxpkt
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import List, Optional
 
@@ -94,6 +95,36 @@ class HtspBackend(TvhBackend):
         self._ready = False
         # Whether the server sends this connection its channels, tags, and recordings.
         self._metadata = False
+        self._metadata_requested = False
+        self._metadata_lock = threading.RLock()
+        self._channel_changes = {}
+        self._tags_changed = False
+        self._channels_reset = False
+
+    def take_channel_changes(self):
+        """Coalesced deltas, consumed by the UI timer rather than per-message signals."""
+        with self._metadata_lock:
+            changes, self._channel_changes = self._channel_changes, {}
+            tags = list(self._tags.values()) if self._tags_changed else None
+            reset, self._channels_reset = self._channels_reset, False
+            self._tags_changed = False
+        return changes, tags, reset
+
+    def channel_snapshot(self):
+        """Commit the current metadata snapshot and retire already included deltas."""
+        with self._metadata_lock:
+            if not self._synced:
+                return None  # An optional RPC may have reconnected since the fetch.
+            channels = list(self._channels.values())
+            tags = list(self._tags.values())
+            self._channel_changes.clear()
+            self._tags_changed = False
+            self._channels_reset = False
+        return sorted(channels, key=channel_sort_key), sort_channel_tags(tags)
+
+    @property
+    def metadata_disconnected(self):
+        return self._metadata_requested and (not self._metadata or self._conn._sock is None)
 
     def close(self):
         self._ready = False
@@ -102,16 +133,26 @@ class HtspBackend(TvhBackend):
         self._conn.close()
 
     def _on_async(self, msg):
+        with self._metadata_lock:
+            self._store_async(msg)
+
+    def _store_async(self, msg):
         method = msg.get('method')
         if method in ('channelAdd', 'channelUpdate'):
             self._store_channel(msg, replace=(method == 'channelAdd'))
+            channel_id = msg.get('channelId')
+            if channel_id in self._channels:
+                self._channel_changes[channel_id] = self._channels[channel_id]
         elif method == 'channelDelete':
             channel_id = msg.get('channelId')
             self._channels.pop(channel_id, None)
+            self._channel_changes[channel_id] = None
         elif method in ('tagAdd', 'tagUpdate'):
             self._store_tag(msg, replace=(method == 'tagAdd'))
+            self._tags_changed = True
         elif method == 'tagDelete':
             self._tags.pop(_tag_key(msg.get('tagId')), None)
+            self._tags_changed = True
         elif method in ('dvrEntryAdd', 'dvrEntryUpdate'):
             self._store_dvr(msg)
         elif method == 'dvrEntryDelete':
@@ -229,12 +270,16 @@ class HtspBackend(TvhBackend):
         """
         if self._ready and self._conn._sock is not None:
             return
-        self._channels.clear()
-        self._tags.clear()
-        self._dvr.clear()
+        self._conn.connect()
+        with self._metadata_lock:
+            self._channels.clear()
+            self._tags.clear()
+            self._dvr.clear()
+            self._channel_changes.clear()
+            self._channels_reset = True
+            self._tags_changed = True
         self._synced = False
         self._metadata = False
-        self._conn.connect()
         self._conn.hello()
         self._conn.authenticate(
             self.server.username,
@@ -245,17 +290,24 @@ class HtspBackend(TvhBackend):
 
     def _ensure(self):
         """Log in and read the channels, tags, and recordings, which then stay up to date."""
+        self._metadata_requested = True
         self._connect()
         if self._metadata:
             return
         try:
+            start_reader = getattr(self._conn, 'start_reader', None)
+            if start_reader is not None:
+                start_reader(self._on_async)
             self._conn.rpc('enableAsyncMetadata', {'epg': 0}, on_async=self._on_async)
             if not self._synced:
-                self._conn.recv_until(
-                    lambda msg: msg.get('method') in SYNC_METHODS,
-                    timeout=30.0,
-                    on_async=self._on_async,
-                )
+                if start_reader is not None:
+                    self._conn.wait_for(lambda: self._synced, timeout=30.0)
+                else:
+                    self._conn.recv_until(
+                        lambda msg: msg.get('method') in SYNC_METHODS,
+                        timeout=30.0,
+                        on_async=self._on_async,
+                    )
         except Exception:
             self.close()
             raise
@@ -272,13 +324,15 @@ class HtspBackend(TvhBackend):
 
     def get_channels(self) -> List[Channel]:
         self._ensure()
-        channels = list(self._channels.values())
+        with self._metadata_lock:
+            channels = list(self._channels.values())
         channels.sort(key=channel_sort_key)
         return channels
 
     def list_channel_tags(self) -> List[ChannelTag]:
         self._ensure()
-        return sort_channel_tags(list(self._tags.values()))
+        with self._metadata_lock:
+            return sort_channel_tags(list(self._tags.values()))
 
     def query_epg(self, query: EpgQuery) -> List[EpgEvent]:
         self._connect()
@@ -373,7 +427,8 @@ class HtspBackend(TvhBackend):
         # Apply dvrEntryUpdate messages queued since the last RPC so a
         # recording that has already started is not still listed as scheduled.
         self._conn.drain_async(self._on_async)
-        return list(self._dvr.values())
+        with self._metadata_lock:
+            return list(self._dvr.values())
 
     def stop_dvr_entry(self, entry: DvrEntry) -> None:
         self._rpc_ok('stopDvrEntry', {'id': entry_htsp_id(entry)}, 'stopDvrEntry')

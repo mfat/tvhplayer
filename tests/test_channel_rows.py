@@ -150,3 +150,33 @@ def test_delegate_marks_the_playing_row_at_its_first_shown_column():
     app.processEvents()
     assert not marked(grab(), 0)
     view.close()
+
+
+def test_incremental_channels_preserve_selection_sort_filter_and_reuse_slots(capfd):
+    from PyQt6.QtCore import QPersistentModelIndex, Qt
+    from PyQt6.QtTest import QAbstractItemModelTester
+    from tvhplayer.channel_view import COL_NAME
+    from tvhplayer.core.models import Channel
+
+    app, model, view, _ = _view([Channel(uuid='a', name='Alpha'), Channel(uuid='b', name='Beta')])
+    tester = QAbstractItemModelTester(model, QAbstractItemModelTester.FailureReportingMode.Warning)
+    resets = []
+    model.modelReset.connect(lambda: resets.append(True))
+    model.sort(COL_NAME, Qt.SortOrder.AscendingOrder)
+    selected = QPersistentModelIndex(model.index(1, COL_NAME))
+    model.update_channels({'b': Channel(uuid='b', name='Aardvark'), 'c': Channel(uuid='c', name='Charlie')})
+    assert selected.isValid() and selected.row() == 0 and selected.data() == 'Aardvark'
+    assert model.rowCount() == 3
+    model.update_channels({'a': None})
+    assert model.rowCount() == 2 and selected.isValid()
+    model.update_channels({'d': Channel(uuid='d', name='Delta')})
+    assert len(model._channels) == 3  # The removed source slot is reused.
+    model.set_filter('delta')
+    assert model.rowCount() == 1 and model.index(0, COL_NAME).data() == 'Delta'
+    model.update_channels({'d': Channel(uuid='d', name='Echo')})
+    assert model.rowCount() == 0
+    model.set_filter('')
+    model.update_channels({'b': None})
+    assert not model.is_listed(lambda channel: channel.uuid == 'b')
+    assert resets == []
+    assert 'FAIL!' not in capfd.readouterr().err

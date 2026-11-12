@@ -4352,3 +4352,108 @@ def test_reading_the_builtin_servers_recordings_does_not_sync_every_channel(monk
     finally:
         window.close()
         app.processEvents()
+
+
+def test_htsp_batches_render_before_sync_and_ignore_old_server(monkeypatch, tmp_path):
+    from tvhplayer.core.htsp_backend import HtspBackend
+    from tvhplayer.core.models import ServerConfig
+
+    app, ui, window, _ = _make_player(monkeypatch, tmp_path)
+    backend = HtspBackend(ServerConfig(name='HTSP', url='http://127.0.0.1:9981', protocol='htsp'))
+    server = {'name': 'HTSP', 'url': 'http://127.0.0.1:9981', 'protocol': 'htsp'}
+    try:
+        window.servers = [server]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('HTSP')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+        window.channel_options['logos'] = False
+        fetch = types.SimpleNamespace(server=dict(server), backend=backend, key=ui.server_key(server),
+                                      keep_place=False, _now_next=False, deleteLater=lambda: None)
+        window._channel_fetch = fetch
+        backend._on_async({'method': 'channelAdd', 'channelId': 1, 'channelName': 'First', 'channelNumber': 1})
+        window._poll_channel_metadata()
+        assert not backend._synced
+        assert window.channel_model.rowCount() == 1
+        assert window.channel_from_row(0).name == 'First'
+        assert '1 received' in window.status_label.text()
+        assert window.channel_stack.currentWidget() is window.channel_list
+        resets = []
+        window.channel_model.modelReset.connect(lambda: resets.append(True))
+        backend._on_async({'method': 'channelUpdate', 'channelId': 1, 'channelName': 'New name'})
+        backend._on_async({'method': 'channelAdd', 'channelId': 2, 'channelName': 'Second', 'channelNumber': 2})
+        window._poll_channel_metadata()
+        assert window.channel_model.rowCount() == 2
+        assert window.channel_from_row(0).name == 'New name'
+        assert resets == []
+        # Credential changes at the same address are also a different session.
+        server['username'] = 'different-user'
+        backend._on_async({'method': 'channelDelete', 'channelId': 1})
+        window._poll_channel_metadata()
+        assert window.channel_model.rowCount() == 2
+        assert 1 in backend._channel_changes  # The stale batch wasn't consumed.
+    finally:
+        window._channel_fetch = None
+        backend.close()
+        window.close()
+        app.processEvents()
+
+
+def test_htsp_completion_keeps_updates_received_during_optional_requests(monkeypatch, tmp_path):
+    from tvhplayer.core.htsp_backend import HtspBackend
+    from tvhplayer.core.models import ServerConfig
+
+    app, ui, window, _ = _make_player(monkeypatch, tmp_path)
+    backend = HtspBackend(ServerConfig(name='HTSP', url='http://127.0.0.1:9981', protocol='htsp'))
+    server = {'name': 'HTSP', 'url': 'http://127.0.0.1:9981', 'protocol': 'htsp'}
+    try:
+        window.servers = [server]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('HTSP')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+        window.channel_options['logos'] = False
+        fetch = types.SimpleNamespace(server=server, backend=backend, key=ui.server_key(server),
+                                      keep_place=False, _now_next=False, deleteLater=lambda: None)
+        window._channel_fetch = fetch
+        backend._on_async({'method': 'channelAdd', 'channelId': 1, 'channelName': 'Old'})
+        stale = list(backend._channels.values())
+        backend._on_async({'method': 'channelUpdate', 'channelId': 1, 'channelName': 'Latest'})
+        backend._on_async({'method': 'initialSyncCompleted'})
+        window._poll_channel_metadata()
+        window._on_channels_loaded(fetch, {'channels': stale, 'tags': [], 'services': [], 'now_next': {}})
+        assert window.channel_from_row(0).name == 'Latest'
+        assert window._backend is backend
+        backend._on_async({'method': 'channelDelete', 'channelId': 1})
+        window._poll_channel_metadata()
+        assert window.channel_model.rowCount() == 0
+    finally:
+        window._channel_fetch = None
+        backend.close()
+        window.close()
+        app.processEvents()
+
+
+def test_disconnected_metadata_retries_are_throttled(monkeypatch, tmp_path):
+    app, ui, window, _ = _make_player(monkeypatch, tmp_path)
+    server = {'name': 'HTSP', 'url': 'http://127.0.0.1:9981', 'protocol': 'htsp'}
+    try:
+        window.servers = [server]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('HTSP')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+        window._backend = types.SimpleNamespace(metadata_disconnected=True, close=lambda: None)
+        window._backend_key = window._backend_key_for(server)
+        calls = []
+        monkeypatch.setattr(window, 'fetch_channels', lambda keep_place=False: calls.append(keep_place))
+        monkeypatch.setattr(ui.time, 'monotonic', lambda: 100)
+        window._poll_channel_metadata()
+        window._poll_channel_metadata()
+        assert calls == [True]
+        monkeypatch.setattr(ui.time, 'monotonic', lambda: 106)
+        window._poll_channel_metadata()
+        assert calls == [True, True]
+    finally:
+        window.close()
+        app.processEvents()

@@ -10,9 +10,11 @@ from __future__ import annotations
 import errno
 import hashlib
 import logging
+import select
 import socket
 import struct
 import threading
+import time
 from typing import Callable, Optional
 
 from .errors import TvhAuthError, TvhConnectionError, TvhError
@@ -41,6 +43,11 @@ class HtspConnection:
         self._rx = bytearray()
         self._lock = threading.RLock()
         self._seq = 0
+        self._reader = None
+        self._reader_stop = threading.Event()
+        self._condition = threading.Condition()
+        self._pending = {}
+        self._reader_error = None
         self._challenge = b''
         self._digest = None
         self._username = ''
@@ -60,14 +67,85 @@ class HtspConnection:
             raise TvhConnectionError(f'HTSP connect {self.host}:{self.port} failed: {exc}') from exc
 
     def close(self):
+        self._reader_stop.set()
         sock = self._sock
         self._sock = None
-        self._rx = bytearray()
         if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             try:
                 sock.close()
             except OSError:
                 pass
+        reader = self._reader
+        if reader is not None and reader is not threading.current_thread():
+            reader.join()
+        self._reader = None
+        self._rx = bytearray()
+        with self._condition:
+            self._reader_error = TvhConnectionError('HTSP connection closed')
+            self._condition.notify_all()
+
+    def start_reader(self, on_async):
+        """Give one thread ownership of reads; RPC callers only send and wait."""
+        with self._lock:
+            if self._reader is not None:
+                return
+            if self._sock is None:
+                raise TvhConnectionError('HTSP connection closed')
+            self._reader_stop = threading.Event()
+            self._reader_error = None
+            self._reader = threading.Thread(
+                target=self._read_loop, args=(self._sock, self._reader_stop, on_async),
+                name='htsp-metadata', daemon=True,
+            )
+            self._reader.start()
+
+    def _read_loop(self, sock, stop, on_async):
+        try:
+            while not stop.is_set():
+                # Parse only complete frames: an idle or fragmented stream must
+                # not discard a partially received length header or payload.
+                if not self._message_ready():
+                    if not select.select([sock], [], [], 0.2)[0]:
+                        continue
+                    chunk = sock.recv(65536)
+                    if not chunk:
+                        raise TvhConnectionError('HTSP connection closed')
+                    self._rx.extend(chunk)
+                    continue
+                msg = self._recv()
+                if 'seq' in msg:
+                    with self._condition:
+                        pending = self._pending.get(msg['seq'])
+                        if pending is not None:
+                            pending.append(msg)
+                        self._condition.notify_all()
+                else:
+                    on_async(msg)
+                    with self._condition:
+                        self._condition.notify_all()
+        except Exception as exc:
+            with self._condition:
+                self._reader_error = TvhConnectionError(f'HTSP reader stopped: {exc}')
+                self._condition.notify_all()
+        finally:
+            if self._sock is sock:
+                self._sock = None
+            sock.close()
+
+    def wait_for(self, predicate, timeout=30.0):
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while not predicate():
+                if self._reader_error is not None:
+                    raise self._reader_error
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TvhConnectionError('HTSP read timed out')
+                self._condition.wait(remaining)
 
     def _recv_exact(self, size: int) -> bytes:
         while len(self._rx) < size:
@@ -124,6 +202,10 @@ class HtspConnection:
         is already recording.
         """
         with self._lock:
+            if self._reader is not None:
+                if self._reader_error is not None:
+                    raise self._reader_error
+                return 0  # The reader continuously dispatches metadata.
             if self._sock is None:
                 return 0
             self._read_available()
@@ -137,8 +219,11 @@ class HtspConnection:
 
     def _send(self, msg: dict):
         payload = serialize(msg)
+        sock = self._sock
+        if sock is None:
+            raise TvhConnectionError('HTSP connection closed')
         try:
-            self._sock.sendall(payload)
+            sock.sendall(payload)
         except OSError as exc:
             raise TvhConnectionError(f'HTSP write failed: {exc}') from exc
 
@@ -163,6 +248,27 @@ class HtspConnection:
                 msg['username'] = self._username
             if self._digest is not None:
                 msg['digest'] = Binary(self._digest)
+            if self._reader is not None:
+                pending = []
+                with self._condition:
+                    if self._reader_error is not None:
+                        raise self._reader_error
+                    self._pending[seq] = pending
+                try:
+                    self._send(msg)
+                    self.wait_for(lambda: bool(pending), self.timeout if timeout is None else timeout)
+                    reply = pending[0]
+                    if reply.get('noaccess'):
+                        raise TvhAuthError(f'HTSP {method}: access denied')
+                    if reply.get('error'):
+                        raise TvhError(f"HTSP {method}: {reply['error']}")
+                    return reply
+                except TvhConnectionError:
+                    self.close()
+                    raise
+                finally:
+                    with self._condition:
+                        self._pending.pop(seq, None)
             old_timeout = self._sock.gettimeout() if self._sock else None
             if timeout is not None:
                 self._sock.settimeout(timeout)
@@ -230,6 +336,8 @@ class HtspConnection:
     def recv_until(self, predicate, timeout=30.0, on_async=None):
         """Read async messages until predicate(msg) is true."""
         with self._lock:
+            if self._reader is not None:
+                raise TvhError('Use wait_for while the HTSP metadata reader is running')
             old_timeout = self._sock.gettimeout() if self._sock else None
             self._sock.settimeout(timeout)
             try:

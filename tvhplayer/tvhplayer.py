@@ -3138,16 +3138,30 @@ class ChannelFetch(QObject):
         self._now_next = now_next
         self._open_backend = open_backend
         self.backend = None
+        self._cancelled = threading.Event()
         self._thread = threading.Thread(target=self._run, name='channel-fetch', daemon=True)
 
     def start(self):
         self._thread.start()
 
+    def cancel(self):
+        self._cancelled.set()
+        if self.backend is not None:
+            try:
+                self.backend.close()
+            except Exception:
+                pass
+
     def _run(self):
         backend = None
         try:
             backend = self._open_backend(self.server)
+            self.backend = backend
+            if self._cancelled.is_set():
+                raise TvhError('Channel fetch cancelled')
             channels = backend.get_channels()
+            if self._cancelled.is_set():
+                raise TvhError('Channel fetch cancelled')
             # Everything after the channels is optional. A server that refuses
             # one (the service grid needs admin rights) leaves that part empty.
             result = {'channels': channels, 'tags': [], 'services': [], 'now_next': {}}
@@ -3155,11 +3169,15 @@ class ChannelFetch(QObject):
                 result['tags'] = [tag for tag in backend.list_channel_tags() if tag.enabled]
             except Exception as e:
                 print(f"Debug: Could not load channel tags: {e}")
+            if self._cancelled.is_set():
+                raise TvhError('Channel fetch cancelled')
             if self._kinds:
                 try:
                     result['services'] = backend.list_channel_services()
                 except Exception as e:
                     print(f"Debug: Could not load channel services: {e}")
+            if self._cancelled.is_set():
+                raise TvhError('Channel fetch cancelled')
             if self._now_next and channels:
                 try:
                     result['now_next'] = backend.get_now_next(channels)
@@ -3174,10 +3192,28 @@ class ChannelFetch(QObject):
                     backend.close()
                 except Exception:
                     pass
-            self.failed.emit(str(e) or type(e).__name__)
+            self.backend = None
+            try:
+                self.failed.emit(str(e) or type(e).__name__)
+            except RuntimeError:
+                pass
+            return
+        if self._cancelled.is_set():
+            try:
+                backend.close()
+            except Exception:
+                pass
+            self.backend = None
+            try:
+                self.failed.emit('Channel fetch cancelled')
+            except RuntimeError:
+                pass
             return
         self.backend = backend
-        self.loaded.emit(result)
+        try:
+            self.loaded.emit(result)
+        except RuntimeError:
+            backend.close()
 
 
 class NowNextFetch(QObject):
@@ -3771,6 +3807,12 @@ class TVHeadendClient(QMainWindow):
         # server_key() of the server _channels came from, and the fetch still running.
         self._channels_server = None
         self._channel_fetch = None
+        self._live_channels = {}
+        self._metadata_retry_at = 0.0
+        self._metadata_timer = QTimer(self)
+        self._metadata_timer.setInterval(150)
+        self._metadata_timer.timeout.connect(self._poll_channel_metadata)
+        self._metadata_timer.start()
         self._channel_tags = []
         self._now_next = {}
         self._now_next_loaded = False
@@ -4604,6 +4646,7 @@ class TVHeadendClient(QMainWindow):
         server = self.current_server()
         if (
             fetch is self._channel_fetch
+            and not getattr(self, '_closing', False)
             and server
             and self._backend_key_for(server) == self._backend_key_for(fetch.server)
         ):
@@ -5397,7 +5440,10 @@ class TVHeadendClient(QMainWindow):
         the scroll position instead of moving to the playing channel.
         """
         # A fetch still running for an earlier request is ignored when it ends.
+        previous = self._channel_fetch
         self._channel_fetch = None
+        if previous is not None and hasattr(previous, 'cancel'):
+            previous.cancel()
         self.channel_busy.hide()
         server = self.current_server()
         if not server:
@@ -5452,6 +5498,13 @@ class TVHeadendClient(QMainWindow):
         return create_backend(server)
 
     def _on_channels_loaded(self, fetch, result):
+        if fetch is self._channel_fetch and hasattr(fetch.backend, 'channel_snapshot'):
+            # Extras may have taken time; do not overwrite newer batches with
+            # the snapshot taken before those RPCs.
+            snapshot = fetch.backend.channel_snapshot()
+            if snapshot is not None:
+                result['channels'], result['tags'] = snapshot
+                result['tags'] = [tag for tag in result['tags'] if tag.enabled]
         fetch.deleteLater()
         self._adopt_backend(fetch)
         if fetch is not self._channel_fetch:
@@ -5470,6 +5523,7 @@ class TVHeadendClient(QMainWindow):
             self._logo_pixmaps.clear()
             self._logo_server = url
         self._channels = result['channels']
+        self._live_channels = {channel.htsp_id: channel for channel in self._channels}
         self._channels_server = fetch.key
         self._channel_tags = result['tags']
         self._channel_kinds = channel_kinds(self._channels, result['services'], self._channel_tags)
@@ -5483,7 +5537,7 @@ class TVHeadendClient(QMainWindow):
         self._now_next_fetched = time.monotonic()
         self._recording_keys = recording_channel_keys(self._channels, getattr(self, '_dvr_entries', []))
         self._refresh_tag_combo()
-        if reload and fetch.keep_place:
+        if reload and (fetch.keep_place or getattr(fetch, 'progressive', False)):
             self._reload_channel_rows()
         else:
             self._fill_channel_rows()
@@ -5548,6 +5602,7 @@ class TVHeadendClient(QMainWindow):
 
     def _clear_channels(self):
         self._channels = []
+        self._live_channels = {}
         self._channels_server = None
         self._channel_tags = []
         self._channel_kinds = {}
@@ -5556,6 +5611,70 @@ class TVHeadendClient(QMainWindow):
         self.channel_model.set_channels([])
         self._refresh_tag_combo()
         self._guide_channels_changed()
+
+    def _poll_channel_metadata(self):
+        """Deliver coalesced HTSP updates on the Qt thread, including initial sync."""
+        if getattr(self, '_closing', False):
+            return
+        server = self.current_server()
+        if not server or not self._server_requests_ready():
+            return
+        fetch = self._channel_fetch
+        backend = fetch.backend if fetch is not None else getattr(self, '_backend', None)
+        expected = self._backend_key_for(fetch.server) if fetch is not None else self._backend_key
+        if expected != self._backend_key_for(server):
+            return
+        if fetch is None and getattr(backend, 'metadata_disconnected', False):
+            if time.monotonic() >= self._metadata_retry_at:
+                self._metadata_retry_at = time.monotonic() + 5
+                self.fetch_channels(keep_place=True)
+            return
+        take = getattr(backend, 'take_channel_changes', None)
+        if take is None:
+            return
+        changes, tags, reset = take()
+        if not changes and tags is None and not reset:
+            return
+        if reset:
+            self._clear_channels()
+        self._channels_server = server_key(server)
+        updates = {}
+        for channel_id, channel in changes.items():
+            old = self._live_channels.pop(channel_id, None)
+            if old is not None:
+                old_key = channel_key(old)
+                updates[old_key] = None
+                self._channel_kinds.pop(old_key, None)
+                if channel is None or channel_key(channel) != old_key:
+                    self._now_next.pop(old_key, None)
+            if channel is not None:
+                self._live_channels[channel_id] = channel
+                updates[channel_key(channel)] = (
+                    channel if channel.enabled or not self.channel_options['hide_disabled'] else None
+                )
+        self._channels = list(self._live_channels.values())
+        if tags is not None:
+            self._channel_tags = [tag for tag in tags if tag.enabled]
+        if tags is not None or (changes and self._channel_tags):
+            self._refresh_tag_combo()
+        changed_channels = [channel for channel in changes.values() if channel is not None]
+        self._channel_kinds.update(channel_kinds(changed_channels, (), self._channel_tags))
+        self.channel_model.set_kinds(self._channel_kinds)
+        references = {key: self.channel_logo_reference(channel) for key, channel in updates.items()
+                      if channel is not None} if self.channel_options['logos'] else {}
+        if any(references.values()):
+            self.channel_model.set_logos(True, self._logo_pixmaps, self._logo_placeholder())
+        self.channel_model.update_channels(updates, references)
+        self._apply_channel_filter()
+        if self._channels:
+            self._show_channel_list()
+        if fetch is not None:
+            fetch.progressive = True
+            self.channel_busy.show()
+            self.statusbar.showMessage(f'Loading channels… {len(self._channels):,} received')
+        else:
+            self._guide_channels_changed()
+        self._visible_logo_timer.start()
 
     def _show_channel_state(self, text, busy=False, retry=False):
         """Put a message, and a spinner or Retry button, where the channel list is."""
@@ -7445,6 +7564,10 @@ class TVHeadendClient(QMainWindow):
             event.ignore()
             return
         self._closing = True
+        self._metadata_timer.stop()
+        fetch, self._channel_fetch = self._channel_fetch, None
+        if fetch is not None and hasattr(fetch, 'cancel'):
+            fetch.cancel()
         timer = getattr(self, '_timeshift_timer', None)
         if timer is not None:
             timer.stop()

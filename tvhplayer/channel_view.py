@@ -264,10 +264,55 @@ class ChannelTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._channels = list(channels)
         self._keys = [channel_key(channel) for channel in self._channels]
+        self._position_by_key = {key: i for i, key in enumerate(self._keys)}
+        self._free_positions = []
         self._logo_refs = list(logo_refs) if logo_refs is not None else [''] * len(self._channels)
         self._order = self._sorted(range(len(self._channels)))
         self._rows = self._filtered(self._order)
         self.endResetModel()
+
+    def update_channels(self, changes, logo_refs=None):
+        """Apply a batch of key -> channel/None deltas without resetting the model.
+
+        Source slots stay stable so selection and persistent indexes survive
+        updates. Deleted slots are reused, bounding memory during live churn.
+        """
+        if not changes:
+            return
+        if not hasattr(self, '_position_by_key'):
+            self._position_by_key = {}
+            self._free_positions = []
+        self.layoutAboutToBeChanged.emit()
+        old = self.persistentIndexList()
+        old_keys = [self._keys[self._rows[index.row()]] for index in old]
+        for key, channel in changes.items():
+            position = self._position_by_key.get(key)
+            if channel is None:
+                if position is not None:
+                    del self._position_by_key[key]
+                    self._channels[position] = None
+                    self._free_positions.append(position)
+                continue
+            if position is None:
+                if self._free_positions:
+                    position = self._free_positions.pop()
+                else:
+                    position = len(self._channels)
+                    self._channels.append(None)
+                    self._keys.append('')
+                    self._logo_refs.append('')
+                self._position_by_key[key] = position
+            self._channels[position] = channel
+            self._keys[position] = key
+            self._logo_refs[position] = (logo_refs or {}).get(key, '')
+        self._order = self._sorted(self._position_by_key.values())
+        self._rows = self._filtered(self._order)
+        row_of = {self._keys[position]: row for row, position in enumerate(self._rows)}
+        new = [self.index(row_of[key], index.column()) if key in row_of else QModelIndex()
+               for index, key in zip(old, old_keys)]
+        self.changePersistentIndexList(old, new)
+        self.layoutChanged.emit()
+        self._changed(range(len(COLUMN_TITLES)))
 
     def set_filter(self, search, members=None):
         """Keep the channels whose name or number holds ``search``, and in ``members`` when given."""
@@ -357,7 +402,7 @@ class ChannelTableModel(QAbstractTableModel):
 
     def is_listed(self, matches):
         """Whether any channel matches, shown or left out by the filter."""
-        return any(matches(channel) for channel in self._channels)
+        return any(matches(channel) for channel in self._channels if channel is not None)
 
     def is_playing(self, channel):
         playing = self._playing
