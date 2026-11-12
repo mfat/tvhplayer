@@ -60,6 +60,10 @@ _VLC_HEADERS = {
 }
 _SPAWN_ESCAPES = {'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t'}
 _QUOTE_ESCAPES = {'\\': '\\\\', '"': '\\"', '\b': '\\b', '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t'}
+# A big playlist quotes a few hundred thousand arguments; these do it in C.
+_NEEDS_QUOTE = re.compile('[ "\'\\\\\b\f\n\r\t]')
+_QUOTE_TABLE = str.maketrans(_QUOTE_ESCAPES)
+_EXTINF_STOP = re.compile('[,"\']')
 
 
 @dataclass
@@ -355,6 +359,8 @@ def parse_playlist(text: str) -> Playlist:
 
 
 def _is_vod(url: str) -> bool:
+    if '/movie/' not in url and '/series/' not in url:
+        return False
     try:
         return bool(_VOD_PATH.match(urlsplit(url).path))
     except ValueError:
@@ -581,9 +587,9 @@ def _output_args(name, provider):
 
 
 def _quote(arg: str) -> str:
-    if arg and not any(char in arg for char in ' "\'\\\b\f\n\r\t'):
+    if arg and not _NEEDS_QUOTE.search(arg):
         return arg
-    return '"' + ''.join(_QUOTE_ESCAPES.get(char, char) for char in arg) + '"'
+    return '"' + arg.translate(_QUOTE_TABLE) + '"'
 
 
 def _attributes(text: str) -> Dict[str, str]:
@@ -596,16 +602,19 @@ def _attributes(text: str) -> Dict[str, str]:
 
 def _extinf(text: str) -> Tuple[Dict[str, str], str]:
     """Attributes and the name after the first comma outside quotes."""
-    quote = None
-    for index, char in enumerate(text):
-        if quote:
-            if char == quote:
-                quote = None
-        elif char in ('"', "'"):
-            quote = char
-        elif char == ',':
+    position = 0
+    while True:
+        found = _EXTINF_STOP.search(text, position)
+        if found is None:
+            return _attributes(text), ''
+        if found.group() == ',':
+            index = found.start()
             return _attributes(text[:index]), text[index + 1:].strip()
-    return _attributes(text), ''
+        # Jump over the quoted text; one never closed leaves no name.
+        close = text.find(found.group(), found.end())
+        if close < 0:
+            return _attributes(text), ''
+        position = close + 1
 
 
 def _split_url(line: str) -> Tuple[str, Dict[str, str]]:
