@@ -65,7 +65,9 @@ class FakeAdmin:
         pass
 
     def save(self, nodes):
-        pass
+        for node in nodes:
+            if node.get('uuid') in self.muxes:
+                self.muxes[node['uuid']].update({key: value for key, value in node.items() if key != 'uuid'})
 
     def delete(self, uuids):
         pass
@@ -1138,3 +1140,51 @@ def test_user_agent_offers_common_players_and_still_takes_typed_text(app):
     assert combo.currentText() == 'My App'
     dialog._set_running(True)
     assert not combo.isEnabled()
+
+
+def test_edit_saves_new_agent_and_password_into_channels_without_reading_the_playlist(app, monkeypatch):
+    from tvhplayer.core.playlist import ffmpeg_input, parse_playlist
+
+    loaded = []
+
+    def load(location, cancelled=None, headers=None):
+        loaded.append(location)
+        playlist = parse_playlist('#EXTM3U\n#EXTINF:-1,News\nhttp://provider.example/live/user/old/1.ts\n')
+        for entry in playlist.entries:
+            entry.headers = dict(headers or {})
+        return playlist
+
+    monkeypatch.setattr(dialogs, 'load_xtream', load)
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    dialog = dialogs.ImportPlaylistDialog(host)
+    dialog.source_type_combo.setCurrentIndex(1)
+    dialog.location_input.setText('http://provider.example')
+    dialog.username_input.setText('user')
+    dialog.password_input.setText('old')
+    dialog.user_agent_input.setText('Old App')
+    _run(app, dialog)
+    assert len(loaded) == 1
+    imported = PlaylistSource.from_dict(host.stored[-1])
+    assert imported.network_uuid
+
+    dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN, source=imported)
+    assert dialog.import_btn.text() == '&Save'
+    # A refresh changes the saved playlist while the window is open.
+    refreshed = PlaylistSource.from_dict(host.stored[-1])
+    refreshed.tags = ['Refreshed']
+    host.store_playlist_source(refreshed.to_dict())
+    dialog.password_input.setText('new')
+    dialog.user_agent_combo.setCurrentIndex(1)
+    _run(app, dialog)
+    assert len(loaded) == 1
+    assert dialog.status_label.text().startswith('Saved. 1 channel from')
+    [mux] = FakeAdmin.servers[BUILTIN['url']]['muxes'].values()
+    assert ffmpeg_input(mux['iptv_url'][7:]) == (
+        'http://provider.example/live/user/new/1.ts', {'User-Agent': 'VLC/3.0.21 LibVLC/3.0.21'},
+    )
+    assert len(host.stored) == 1
+    saved = PlaylistSource.from_dict(host.stored[0])
+    assert saved.location.endswith('username=user&password=new')
+    assert saved.request_headers == {'User-Agent': 'VLC/3.0.21 LibVLC/3.0.21'}
+    assert saved.tags == ['Refreshed']
+    assert host.synced[-1][2] == 'http://provider.example/xmltv.php?username=user&password=new'

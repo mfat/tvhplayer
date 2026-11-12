@@ -194,8 +194,15 @@ def load_xtream(
         connections = max(0, int((account.get('user_info') or {}).get('max_connections') or 0))
     except (AttributeError, TypeError, ValueError):
         pass
-    guide_url = f'{base}/xmltv.php?{urlencode(auth)}'
-    return Playlist(entries, guide_url=guide_url, max_connections=connections)
+    return Playlist(entries, guide_url=xtream_guide_url(location), max_connections=connections)
+
+
+def xtream_guide_url(location: str) -> str:
+    """The program guide of an Xtream Codes account, or an empty string."""
+    base, username, password = xtream_account(location)
+    if not base or not username or not password:
+        return ''
+    return f'{base}/xmltv.php?{urlencode({"username": username, "password": password})}'
 
 
 def xtream_playlist_url(server: str, username: str, password: str) -> str:

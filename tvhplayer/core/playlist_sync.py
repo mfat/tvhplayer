@@ -26,8 +26,10 @@ from typing import Callable, Dict, List, Optional
 
 from .errors import PlaylistError, TvhAuthError, TvhConnectionError
 from .ffmpeg_starter import install_starter
-from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, _quote, ffmpeg_input, xtream_identity
-from .playlist import tvh_split
+from urllib.parse import quote
+
+from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, _header_args, _quote, ffmpeg_input, xtream_identity
+from .playlist import tvh_split, xtream_account
 
 BUILTIN_SERVER_KEY = 'builtin'
 # Distro packages and the common Docker images install ffmpeg here. A bare
@@ -286,6 +288,77 @@ def guest_ffmpeg_changes(rows) -> List[dict]:
         args[0] = '/usr/bin/ffmpeg'
         changes.append({'uuid': row['uuid'], 'iptv_url': 'pipe://' + ' '.join(_quote(arg) for arg in args)})
     return changes
+
+
+_HEADER_OPTIONS = ('-user_agent', '-user-agent', '-headers', '-referer')
+
+
+def provider_changes(rows, old_headers, new_headers, old_location: str = '', new_location: str = '') -> List[dict]:
+    """Mux changes that give saved channels new provider headers or a new Xtream password.
+
+    The stream commands are rewritten in place, so the playlist is not read
+    again. A header a channel got from the playlist itself, rather than from
+    the provider's defaults, is kept.
+    """
+    old_headers = dict(old_headers or {})
+    new_headers = dict(new_headers or {})
+    swap = _password_swap(old_location, new_location)
+    changes = []
+    for row in rows:
+        url = row.get('iptv_url') or ''
+        wrapped = ffmpeg_input(url[7:]) if url.startswith('pipe://') else None
+        if not row.get('uuid') or wrapped is None:
+            continue
+        address, headers = wrapped
+        args = tvh_split(url[7:])
+        at = args.index('-i')
+        if swap:
+            args[at + 1] = address = address.replace(*swap)
+        if address.split(':', 1)[0].lower() in ('http', 'https'):
+            own = {key: value for key, value in headers.items() if old_headers.get(key) != value}
+            merged = dict(new_headers)
+            merged.update(own)
+            if merged != headers:
+                options, index = [], 1
+                while index < at:
+                    if args[index] in _HEADER_OPTIONS and index + 1 < at:
+                        index += 2
+                        continue
+                    options.append(args[index])
+                    index += 1
+                args = [args[0], *options, *_header_args(merged), *args[at:]]
+        command = 'pipe://' + ' '.join(_quote(arg) for arg in args)
+        if command != url:
+            changes.append({'uuid': row['uuid'], 'iptv_url': command})
+    return changes
+
+
+def update_provider(admin, source: PlaylistSource, old_headers, old_location: str) -> int:
+    """Give the playlist's channels on the server its new headers or password. Returns how many changed."""
+    admin.check_admin()
+    if not source.network_uuid or not admin.network_exists(source.network_uuid):
+        raise PlaylistError(NETWORK_GONE)
+    ours = set(source.muxes.values())
+    rows = [
+        row for row in admin.list_muxes(source.network_uuid, fields=('uuid', 'iptv_url'))
+        if row.get('uuid') in ours
+    ]
+    changes = provider_changes(rows, old_headers, source.request_headers, old_location, source.location)
+    if changes:
+        admin.save(changes)
+    return len(changes)
+
+
+def _password_swap(old_location: str, new_location: str):
+    """The ``/user/password/`` part of Xtream stream addresses before and after, or None."""
+    old_base, user, old_password = xtream_account(old_location)
+    new_base, new_user, new_password = xtream_account(new_location)
+    if not user or not old_password or not new_password or old_password == new_password:
+        return None
+    if old_base != new_base or user != new_user:
+        return None
+    name = quote(user, safe='')
+    return f'/{name}/{quote(old_password, safe="")}/', f'/{name}/{quote(new_password, safe="")}/'
 
 
 def source_identity(source_type: str, location: str):

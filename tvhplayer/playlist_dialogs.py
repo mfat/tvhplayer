@@ -36,7 +36,7 @@ try:
     from .a11y import announce_label, buddy_label, describe, set_item_access
     from .core.playlist import (
         load_playlist, load_xtream, plan_channels, playlist_commands, playlist_name,
-        xtream_account, xtream_connections, xtream_playlist_url,
+        xtream_account, xtream_connections, xtream_guide_url, xtream_playlist_url,
     )
     from .core.playlist_sync import (
         NETWORK_GONE,
@@ -53,9 +53,11 @@ try:
         plan_group,
         remove_playlist,
         result_message,
+        same_source,
         server_key,
         show_all_channels,
         sync_playlist,
+        update_provider,
         unique_name,
         wait_for_checks,
     )
@@ -66,7 +68,7 @@ except ImportError:
     from a11y import announce_label, buddy_label, describe, set_item_access
     from core.playlist import (
         load_playlist, load_xtream, plan_channels, playlist_commands, playlist_name,
-        xtream_account, xtream_connections, xtream_playlist_url,
+        xtream_account, xtream_connections, xtream_guide_url, xtream_playlist_url,
     )
     from core.playlist_sync import (
         NETWORK_GONE,
@@ -83,10 +85,12 @@ except ImportError:
         plan_group,
         remove_playlist,
         result_message,
+        same_source,
         server_key,
         show_all_channels,
         sync_playlist,
         unique_name,
+        update_provider,
         wait_for_checks,
     )
     from core.errors import PlaylistError, TvhError
@@ -162,7 +166,9 @@ class PlaylistJob(QObject):
     returns False to stop; without it the saved choice is used.
 
     ``action`` is SYNC (import or refresh), REMOVE, CHECK (test every
-    stream now), or SHOW (show every channel again). A sync and a check
+    stream now), SHOW (show every channel again), or SAVE (give the
+    channels the source's new headers or password without reading the
+    playlist; ``previous`` is the source as it was). A sync and a check
     both wait for the server's stream test and save its verdicts, which the
     channel list marks; channels that fail are hidden too while the host
     hides them.
@@ -171,7 +177,7 @@ class PlaylistJob(QObject):
     the server's stream test is left, which can take hours.
     """
 
-    SYNC, REMOVE, CHECK, SHOW = 'add', 'remove', 'check', 'show'
+    SYNC, REMOVE, CHECK, SHOW, SAVE = 'add', 'remove', 'check', 'show', 'update'
 
     status = pyqtSignal(str)
     progress = pyqtSignal(int, int)
@@ -180,9 +186,11 @@ class PlaylistJob(QObject):
     failed = pyqtSignal(str)
 
     def __init__(
-        self, host, source, server, first_import=False, ask_commands=None, choose=None, action=SYNC, parent=None
+        self, host, source, server, first_import=False, ask_commands=None, choose=None, action=SYNC, parent=None,
+        previous=None,
     ):
         super().__init__(parent)
+        self._previous = previous
         self._host = host
         self.source = source
         self.server = server
@@ -270,6 +278,10 @@ class PlaylistJob(QObject):
         if self.action == self.SHOW:
             self.status.emit('Showing channels…')
             self._run(self._show_all, self._shown)
+            return
+        if self.action == self.SAVE:
+            self.status.emit('Saving…')
+            self._run(self._save, self._saved)
             return
         self.status.emit('Reading the playlist…')
         location = self.source.location
@@ -409,6 +421,35 @@ class PlaylistJob(QObject):
     def _shown(self, _shown):
         self._release()
         self.finished.emit(f'Every channel from {self.source.name} is shown.', [])
+
+    def _save(self, task):
+        previous = self._previous or self.source
+        with TvhAdmin(self.server) as admin:
+            changed = update_provider(admin, self.source, previous.request_headers, previous.location)
+            guide_url = xtream_guide_url(self.source.location) if self.source.source_type == 'xc' else ''
+            if guide_url and guide_url != xtream_guide_url(previous.location) and not is_local_server(self.server):
+                # The server's guide grabber has the old password in its address.
+                admin.use_url_grabber(guide_url)
+        if changed:
+            task.channels_changed.emit()
+        return changed, guide_url
+
+    def _saved(self, saved):
+        changed, guide_url = saved
+        self._host.store_playlist_source(self.source.to_dict())
+        previous = self._previous or self.source
+        if guide_url and guide_url != xtream_guide_url(previous.location):
+            self._host.after_playlist_sync(self.server, self.source, guide_url, SyncResult())
+        self._release()
+        if changed:
+            channels = '1 channel' if changed == 1 else f'{changed} channels'
+            message = (
+                f'Saved. {channels} from {self.source.name} will use the new settings. To test them now, '
+                'choose Settings → Channels → Check channels now.'
+            )
+        else:
+            message = 'Saved.'
+        self.finished.emit(message, [])
 
     def _delete(self, _task):
         with TvhAdmin(self.server) as admin:
@@ -786,7 +827,7 @@ class ImportPlaylistDialog(QDialog):
 
         self.buttons = QDialogButtonBox()
         self.import_btn = self.buttons.addButton(
-            '&Save and Refresh' if self._source is not None else '&Import',
+            '&Save' if self._source is not None else '&Import',
             QDialogButtonBox.ButtonRole.AcceptRole,
         )
         self.details_btn = self.buttons.addButton('&Details', QDialogButtonBox.ButtonRole.HelpRole)
@@ -896,7 +937,8 @@ class ImportPlaylistDialog(QDialog):
         sources = self._host.playlist_sources()
         if self._source is not None:
             server = self._host.server_for_playlist(self._source)
-            existing = self._source
+            # The saved copy, which a refresh may have changed while this window was open.
+            existing = next((item for item in sources if same_source(item, self._source)), self._source)
             if server is None:
                 self._set_status('This playlist\'s server is no longer available.')
                 return
@@ -915,10 +957,15 @@ class ImportPlaylistDialog(QDialog):
         self.show_btn.hide()
         self.progress_bar.setRange(0, 0)
         self._set_running(True)
+        # An edit of the password or headers keeps the channels and rewrites them, without
+        # reading the playlist. Anything else, or channels never added, needs a refresh.
+        save_only = self._source is not None and bool(source.network_uuid) and same_source(existing, source)
         self._job = PlaylistJob(
             self._host,
             source,
             server,
+            action=PlaylistJob.SAVE if save_only else PlaylistJob.SYNC,
+            previous=existing if save_only else None,
             first_import=existing is None,
             ask_commands=lambda count, name: ask_to_run_commands(self, count, name),
             choose=(lambda plans, chosen: ask_to_choose(self, plans, chosen)) if existing is None else None,
@@ -1033,12 +1080,12 @@ class PlaylistsDialog(QDialog):
         header.addLayout(heading, 1)
         self.refresh_btn = QPushButton('&Refresh')
         self.choose_btn = QPushButton('&Choose Channels…')
-        self.edit_btn = QPushButton('Se&ttings…')
+        self.edit_btn = QPushButton('&Edit…')
         self.health_btn = QPushButton('&Health…')
         self.remove_btn = QPushButton('Re&move')
         describe(self.refresh_btn, 'Refresh', 'Read the playlist again and update its channels.')
         describe(self.choose_btn, 'Choose channels', 'Choose which channels of the playlist are added.')
-        describe(self.edit_btn, 'Source settings', 'Change provider credentials and HTTP headers.')
+        describe(self.edit_btn, 'Edit', 'Change provider credentials and HTTP headers.')
         describe(self.health_btn, 'Stream health', 'Show the latest check result for every channel.')
         describe(self.remove_btn, 'Remove', 'Remove the playlist and its channels from the server.')
         self.refresh_btn.clicked.connect(lambda: self._run(remove=False))

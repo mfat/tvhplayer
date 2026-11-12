@@ -13,7 +13,7 @@ import pytest
 
 from tvhplayer.core.builtin_server import find_bundled_binary
 from tvhplayer.core.errors import PlaylistError, TvhAuthError, TvhConnectionError
-from tvhplayer.core.playlist import SkippedEntry, parse_playlist, plan_channels
+from tvhplayer.core.playlist import SkippedEntry, ffmpeg_command, ffmpeg_input, parse_playlist, plan_channels
 from tvhplayer.core.playlist_sync import (
     failed_channels,
     retest_entry,
@@ -28,6 +28,7 @@ from tvhplayer.core.playlist_sync import (
     error_message,
     ffmpeg_for_server,
     find_source,
+    provider_changes,
     health_counts,
     mux_conf,
     remove_playlist,
@@ -881,3 +882,42 @@ def test_admin_grids_read_every_page(monkeypatch):
         monkeypatch.setattr(admin, '_request', request)
         assert [row['uuid'] for row in admin.list_muxes('net')] == ['0', '1', '2', '3', '4']
     assert calls == [(0, 2), (2, 2), (4, 2)]
+
+
+def test_provider_changes_swap_headers_and_password_in_place():
+    old = {'User-Agent': 'Old App', 'X-Token': 'shared'}
+    new = {'User-Agent': 'VLC/3.0.21 LibVLC/3.0.21'}
+    live = 'http://xc.example/live/u%40x/old/1.ts'
+    rows = [
+        # Got the provider's defaults.
+        {'uuid': 'a', 'iptv_url': ffmpeg_command('/usr/bin/ffmpeg', live, old, 'One', 'XC')},
+        # The playlist gave this channel its own agent.
+        {'uuid': 'b', 'iptv_url': ffmpeg_command(
+            '/usr/bin/ffmpeg', 'http://other/2.ts', dict(old, **{'User-Agent': 'Own'}), 'Two', 'XC')},
+        # A program from the playlist is left alone.
+        {'uuid': 'c', 'iptv_url': 'pipe:///bin/sh -c "streamer | ffmpeg -i pipe:0"'},
+    ]
+    changes = {row['uuid']: row['iptv_url'] for row in provider_changes(
+        rows, old, new,
+        'http://xc.example/get.php?username=u%40x&password=old',
+        'http://xc.example/get.php?username=u%40x&password=new',
+    )}
+    assert set(changes) == {'a', 'b'}
+    assert ffmpeg_input(changes['a'][7:]) == (
+        'http://xc.example/live/u%40x/new/1.ts', {'User-Agent': 'VLC/3.0.21 LibVLC/3.0.21'},
+    )
+    assert ffmpeg_input(changes['b'][7:]) == ('http://other/2.ts', {'User-Agent': 'Own'})
+    # The rest of the command is what an import would write.
+    assert changes['a'] == ffmpeg_command(
+        '/usr/bin/ffmpeg', 'http://xc.example/live/u%40x/new/1.ts', new, 'One', 'XC',
+    )
+
+
+def test_provider_changes_leave_unchanged_channels_alone():
+    headers = {'User-Agent': 'App'}
+    rows = [{'uuid': 'a', 'iptv_url': ffmpeg_command('/usr/bin/ffmpeg', 'http://x/1.ts', headers, 'One')}]
+    assert provider_changes(rows, headers, dict(headers)) == []
+    # Adding a header where there was none.
+    plain = [{'uuid': 'a', 'iptv_url': ffmpeg_command('/usr/bin/ffmpeg', 'http://x/1.ts', {}, 'One')}]
+    [change] = provider_changes(plain, {}, headers)
+    assert change['iptv_url'] == rows[0]['iptv_url']
