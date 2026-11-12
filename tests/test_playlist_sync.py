@@ -118,7 +118,7 @@ class FakeAdmin:
     def mux_state(self, uuid):
         return dict(self.muxes.get(uuid) or {})
 
-    def list_services(self, mux_uuids, fields=None):
+    def list_services(self, mux_uuids, fields=None, network_uuid=""):
         return [dict(row, uuid=uuid) for uuid, row in self.services.items() if row['multiplex_uuid'] in mux_uuids]
 
     def scan_network(self, network_uuid):
@@ -189,6 +189,41 @@ FIRST = (
     '#EXTINF:-1 tvg-id="a" tvg-chno="1",A\nhttp://x/a.ts\n'
     '#EXTINF:-1 tvg-id="b" tvg-chno="2",B\nhttp://x/b.ts\n'
 )
+
+
+def test_a_big_import_saves_its_channel_map_every_few_seconds_not_every_few_channels():
+    # Each save copies the whole map and wrote the settings on the UI thread:
+    # every 50 channels made a big import stutter more the further it got.
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    text = '#EXTM3U\n' + ''.join(f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://x/{i}.ts\n' for i in range(2000))
+    now = [0.0]
+
+    def clock():
+        # Each mux takes a millisecond to create.
+        now[0] += 0.001
+        return now[0]
+
+    checkpoints = []
+    sync_playlist(admin, source, _plans(text), checkpoint=lambda: checkpoints.append(len(source.muxes)), clock=clock)
+    during = [count for count in checkpoints if 0 < count < 2000]
+    # About 4 seconds of creating: none in between, and the full map at the end.
+    assert len(during) == 0
+    assert checkpoints[-1] == 2000
+
+    now[0] = 0.0
+    slow = [0.0]
+
+    def slow_clock():
+        slow[0] += 0.01
+        return slow[0]
+
+    other = PlaylistSource('Other', 'http://x/other.m3u', 'builtin')
+    checkpoints.clear()
+    sync_playlist(admin, other, _plans(text), checkpoint=lambda: checkpoints.append(len(other.muxes)), clock=slow_clock)
+    during = [count for count in checkpoints if 0 < count < 2000]
+    # About 20 seconds of creating: a save every 5 seconds or so.
+    assert 2 <= len(during) <= 5
 
 
 def test_first_import_creates_network_and_muxes():
@@ -870,7 +905,7 @@ def test_sync_removes_channels_no_longer_chosen():
 def test_admin_grids_read_every_page(monkeypatch):
     import tvhplayer.core.tvh_admin as tvh_admin
 
-    monkeypatch.setattr(tvh_admin, 'ADMIN_GRID_LIMIT', 2)
+    monkeypatch.setattr(tvh_admin, 'GRID_PAGE', 2)
     rows = [{'uuid': str(n), 'network_uuid': 'net'} for n in range(5)]
     calls = []
 
@@ -882,6 +917,46 @@ def test_admin_grids_read_every_page(monkeypatch):
         monkeypatch.setattr(admin, '_request', request)
         assert [row['uuid'] for row in admin.list_muxes('net')] == ['0', '1', '2', '3', '4']
     assert calls == [(0, 2), (2, 2), (4, 2)]
+
+
+def test_admin_asks_only_for_the_networks_rows_in_pages(monkeypatch):
+    # A server with a big playlist sent every mux and service it has in one
+    # reply, which Python reads while the window waits.
+    import tvhplayer.core.tvh_admin as tvh_admin
+
+    calls = []
+
+    def request(path, data=None, params=None):
+        calls.append((path, dict(params or {})))
+        if path == 'api/idnode/load':
+            return {'entries': [{'class': 'iptv_network', 'params': [{'id': 'networkname', 'value': 'My List'}]}]}
+        return {'total': 1, 'entries': [{'uuid': 'm1', 'network_uuid': 'n' * 32, 'multiplex_uuid': 'm1'}]}
+
+    with TvhAdmin({'url': 'http://127.0.0.1:9981'}) as admin:
+        monkeypatch.setattr(admin, '_request', request)
+        admin.list_muxes('n' * 32, fields=('name',))
+        admin.list_services(['m1'], fields=('enabled',), network_uuid='n' * 32)
+        admin.list_services(['m1'], fields=('enabled',))
+    muxes, _load, services, unfiltered = calls
+    assert json.loads(muxes[1]['filter']) == [{'type': 'string', 'field': 'network_uuid', 'value': f'^{"n" * 32}$'}]
+    assert muxes[1]['limit'] == tvh_admin.GRID_PAGE <= 5000
+    assert json.loads(services[1]['filter']) == [{'type': 'string', 'field': 'network', 'value': '^My List$'}]
+    assert 'filter' not in unfiltered[1]
+
+
+def test_a_network_name_with_regex_characters_is_not_filtered_on(monkeypatch):
+    calls = []
+
+    def request(path, data=None, params=None):
+        calls.append(dict(params or {}))
+        if path == 'api/idnode/load':
+            return {'entries': [{'params': [{'id': 'networkname', 'value': 'Sport (HD)+'}]}]}
+        return {'total': 0, 'entries': []}
+
+    with TvhAdmin({'url': 'http://127.0.0.1:9981'}) as admin:
+        monkeypatch.setattr(admin, '_request', request)
+        admin.list_services(['m1'], network_uuid='n' * 32)
+    assert 'filter' not in calls[-1]
 
 
 def test_provider_changes_swap_headers_and_password_in_place():

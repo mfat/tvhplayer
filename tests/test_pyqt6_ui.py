@@ -3392,11 +3392,14 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
         window.save_config = counting_save
         window._on_cast_profile_worked(learned, 'webm-profile')
         assert window.config['cast_auto_profiles'][learned] == 'webm-profile'
+        # The window saves on another thread.
+        assert window.config_store.flush(timeout=10)
         saved = json.loads((tmp_path / 'tvhplayer.conf').read_text(encoding='utf-8'))
         assert saved['cast_auto_profiles'][learned] == 'webm-profile'
         window._on_cast_profile_worked(learned, 'webm-profile')
         assert writes == [1]
         window._on_cast_profile_worked(learned, 'pass-profile')
+        assert window.config_store.flush(timeout=10)
         saved = json.loads((tmp_path / 'tvhplayer.conf').read_text(encoding='utf-8'))
         assert saved['cast_auto_profiles'][learned] == 'pass-profile'
         assert writes == [1, 1]

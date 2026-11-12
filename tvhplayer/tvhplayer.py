@@ -67,7 +67,10 @@ try:
     from .core.engine import mpv_missing
     from .core.mpv_player import MpvPlayer
     from .core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
-    from .core.playlist_sync import PlaylistSource, failed_channels, retest_entry, same_source, server_key, source_key
+    from .core.playlist_sync import (
+        PlaylistSource, failed_channels, retest_entry, same_source, saved_source_key, server_key, source_key,
+        valid_state_id,
+    )
     from .core.playback_status import (
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
         starting_caption, stream_path, stream_reason,
@@ -167,7 +170,10 @@ except ImportError:
     from core.engine import mpv_missing
     from core.mpv_player import MpvPlayer
     from core.player import DEINTERLACE_AUTO, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Timeshift
-    from core.playlist_sync import PlaylistSource, failed_channels, retest_entry, same_source, server_key, source_key
+    from core.playlist_sync import (
+        PlaylistSource, failed_channels, retest_entry, same_source, saved_source_key, server_key, source_key,
+        valid_state_id,
+    )
     from core.playback_status import (
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
         starting_caption, stream_path, stream_reason,
@@ -6828,7 +6834,8 @@ class TVHeadendClient(QMainWindow):
             self.config_store.servers = self.servers
             self.config['last_server'] = self.server_combo.currentIndex()
             self.config_store.data = self.config
-            self.config_store.save()
+            # Written to disk on another thread: a save comes with every channel change.
+            self.config_store.save(background=True)
             self.config = self.config_store.data
             self.servers = self.config_store.servers
             print("Debug: Configuration saved successfully")
@@ -7483,6 +7490,8 @@ class TVHeadendClient(QMainWindow):
             self.cast_manager.close()
         if getattr(self, 'player', None) is not None:
             self.player.close()
+        if not self.config_store.flush(timeout=30):
+            print("Debug: The settings were still being saved when TVHplayer closed")
         super().closeEvent(event)
 
     def _builtin_credentials(self):
@@ -7793,9 +7802,10 @@ class TVHeadendClient(QMainWindow):
 
     def forget_playlist_source(self, data):
         gone = PlaylistSource.from_dict(data)
+        key = source_key(gone)
+        # Saved playlists are compared without copying them: each holds its whole channel map.
         self.config['playlists'] = [
-            source.to_dict() for source in self.playlist_sources()
-            if not same_source(source, gone)
+            raw for raw in self.config.get('playlists') or [] if saved_source_key(raw) != key
         ]
         self._playlists_revision += 1
         self._failed_marks_timer.start()
@@ -8417,26 +8427,34 @@ class TVHeadendClient(QMainWindow):
         return [PlaylistSource.from_dict(raw) for raw in self.config.get('playlists') or []]
 
     def store_playlist_source(self, data, replaces=None):
-        """Save a playlist over its saved copy, or over ``replaces`` when its address or account changed."""
-        source = PlaylistSource.from_dict(data)
-        match = PlaylistSource.from_dict(replaces) if replaces is not None else source
-        sources = self.playlist_sources()
+        """Save a playlist over its saved copy, or over ``replaces`` when its address or account changed.
+
+        A running import calls this every few seconds, so only the playlist
+        that changed is touched: the others, each with its whole channel map,
+        are neither copied nor written to disk again.
+        """
+        raw = PlaylistSource.from_dict(data).to_dict()
+        key = saved_source_key(replaces if replaces is not None else raw)
+        playlists = list(self.config.get('playlists') or [])
         replaced_location = ''
-        for index, existing in enumerate(sources):
-            if same_source(existing, match):
-                replaced_location = existing.location if existing.location != source.location else ''
-                sources[index] = source
+        for index, existing in enumerate(playlists):
+            if saved_source_key(existing) == key:
+                location = str(existing.get('location') or '')
+                replaced_location = location if location != raw['location'] else ''
+                # The saved copy names the state file; a job's copy may have been made before it had one.
+                raw['state_id'] = valid_state_id(existing.get('state_id')) or raw['state_id']
+                playlists[index] = raw
                 break
         else:
-            sources.append(source)
-        self.config['playlists'] = [item.to_dict() for item in sources]
+            playlists.append(raw)
+        self.config['playlists'] = playlists
         self._playlists_revision += 1
         self._failed_marks_timer.start()
         if replaced_location:
             guides = self.all_guide_sources()
             for guide in guides:
-                if guide.server == source.server and guide.playlist == replaced_location:
-                    guide.playlist = source.location
+                if guide.server == raw['server'] and guide.playlist == replaced_location:
+                    guide.playlist = raw['location']
             self.config['guide_sources'] = [guide.to_dict() for guide in guides]
         self.save_config()
 

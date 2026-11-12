@@ -204,7 +204,7 @@ When the playlist header names an XMLTV address, the app loads that guide withou
 | Admin API calls: network, mux, bouquet, tag, guide modules | `tvhplayer/core/tvh_admin.py`, a small client on `requests` that reuses `urls.http_auth` and `proxy.configure_session` | no |
 | Sync: diff, batches, progress callback, cancel flag | `tvhplayer/core/playlist_sync.py` | no |
 | Guide download and socket | `tvhplayer/core/xmltv.py` | no |
-| Saved sources | `playlists` list in `tvhplayer.conf`, normalised in `core/config.py`; each source names its server by `builtin` or by URL | no |
+| Saved sources | `playlists` list in `tvhplayer.conf`, normalised in `core/config.py`; each source names its server by `builtin` or by URL. Its channel map (`muxes`) and stream verdicts (`health`) are kept in `playlists/<state_id>.json` beside it and written only when they change, on a background thread | no |
 | Import dialog, progress, Playlists dialog | `tvhplayer/playlist_dialogs.py` | yes |
 | Background run | a `QThread` worker that calls the sync and emits progress | yes |
 

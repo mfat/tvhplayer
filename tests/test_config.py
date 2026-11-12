@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -103,7 +104,7 @@ def test_failed_save_keeps_the_old_file(tmp_path, monkeypatch):
     def full_disk(*args, **kwargs):
         raise OSError(28, 'No space left on device')
 
-    monkeypatch.setattr(json, 'dump', full_disk)
+    monkeypatch.setattr(os, 'fsync', full_disk)
     store.data['volume'] = 70
     with pytest.raises(OSError):
         store.save()
@@ -167,6 +168,7 @@ def test_playlists_are_saved_and_cleaned(tmp_path):
         'junk',
     ]}), encoding='utf-8')
     store = ConfigStore(path)
+    assert len(store.data['playlists'][0].pop('state_id')) == 32
     assert store.data['playlists'] == [{
         'name': 'ir',
         'location': 'http://a/ir.m3u',
@@ -272,3 +274,95 @@ def test_light_or_dark_choice_is_kept_and_unknown_values_follow_the_system(tmp_p
     for saved, loaded in (('dark', 'dark'), ('light', 'light'), ('purple', 'system'), (None, 'system')):
         path.write_text(json.dumps({'color_scheme': saved}), encoding='utf-8')
         assert ConfigStore(path).data['color_scheme'] == loaded
+
+
+def _big_playlist(count=50000, **extra):
+    return dict({
+        'name': 'big', 'location': 'http://a/big.m3u', 'server': 'builtin',
+        'muxes': {f'id:{index}': f'{index:032x}' for index in range(count)},
+        'health': {'id:1': {'name': 'One', 'status': 'failed', 'scan_result': 2, 'checked': 1.0}},
+    }, **extra)
+
+
+def _record_writes(monkeypatch):
+    from tvhplayer.core import config
+    written = []
+    real = config._write_file
+
+    def record(target, text):
+        written.append((Path(target).name, len(text)))
+        real(target, text)
+
+    monkeypatch.setattr(config, '_write_file', record)
+    return written
+
+
+def test_a_playlists_channel_map_is_kept_beside_the_settings(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    store = ConfigStore(path)
+    store.data['playlists'] = [_big_playlist(10)]
+    store.save()
+    on_disk = json.loads(path.read_text())
+    playlist = on_disk['playlists'][0]
+    assert 'muxes' not in playlist and 'health' not in playlist
+    state = json.loads((tmp_path / 'playlists' / f"{playlist['state_id']}.json").read_text())
+    assert state['muxes']['id:3'] == f'{3:032x}'
+    assert state['health']['id:1']['status'] == 'failed'
+
+    again = ConfigStore(path).data['playlists'][0]
+    assert again['muxes'] == state['muxes'] and again['health'] == state['health']
+    assert again['state_id'] == playlist['state_id']
+
+
+def test_saving_other_settings_does_not_write_a_big_playlist_again(tmp_path, monkeypatch):
+    # Every channel change saves the settings. With a big playlist each save
+    # wrote its whole channel map, megabytes, on the UI thread.
+    path = tmp_path / 'tvhplayer.conf'
+    path.write_text(json.dumps({'playlists': [_big_playlist()]}), encoding='utf-8')
+    store = ConfigStore(path)
+    store.save()
+    written = _record_writes(monkeypatch)
+    store.data['last_channel'] = {'server': 'builtin', 'key': 'x', 'name': 'X'}
+    store.save()
+    assert written == [('tvhplayer.conf', written[0][1])]
+    assert written[0][1] < 10000
+
+    # Read back from disk, it is not written again either.
+    store = ConfigStore(path)
+    written.clear()
+    store.data['volume'] = 10
+    store.save()
+    assert [name for name, _size in written] == ['tvhplayer.conf']
+
+
+def test_a_changed_channel_map_is_written_and_a_removed_playlist_forgotten(tmp_path, monkeypatch):
+    path = tmp_path / 'tvhplayer.conf'
+    store = ConfigStore(path)
+    store.data['playlists'] = [_big_playlist(10)]
+    store.save()
+    state_id = store.data['playlists'][0]['state_id']
+    unknown = tmp_path / 'playlists' / ('f' * 32 + '.json')
+    unknown.write_text('{}')
+    written = _record_writes(monkeypatch)
+    store.data['playlists'] = [dict(store.data['playlists'][0], muxes={'id:new': 'n' * 32})]
+    store.save()
+    assert [name for name, _size in written] == [f'{state_id}.json', 'tvhplayer.conf']
+    assert ConfigStore(path).data['playlists'][0]['muxes'] == {'id:new': 'n' * 32}
+
+    store.data['playlists'] = []
+    store.save()
+    assert not (tmp_path / 'playlists' / f'{state_id}.json').exists()
+    # A file this app did not write, or no longer knows, is left alone.
+    assert unknown.exists()
+
+
+def test_background_saves_are_read_back_in_order(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    store = ConfigStore(path)
+    for volume in range(20):
+        store.data['volume'] = volume
+        store.data['playlists'] = [_big_playlist(volume + 1, state_id='a' * 32)]
+        store.save(background=True)
+    data = ConfigStore(path).data
+    assert data['volume'] == 19
+    assert len(data['playlists'][0]['muxes']) == 20

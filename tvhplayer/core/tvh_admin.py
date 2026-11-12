@@ -20,6 +20,9 @@ from .urls import http_auth, http_base_url
 DEFAULT_TIMEOUT = 30
 # Playlists can be far larger than the viewing API's 10000-row grids.
 ADMIN_GRID_LIMIT = 200000
+# Rows a grid request asks for. Python reads a reply while no other thread
+# runs: a reply of 50000 muxes held the window up for a quarter of a second.
+GRID_PAGE = 5000
 SAVE_BATCH = 100
 BOUQUET_WAIT_SECONDS = 10
 # mpegts_mux_t scan_state that queues a scan, as the web interface's Force Scan does.
@@ -72,16 +75,35 @@ class TvhAdmin:
         """One API call: POST with ``data``, GET without. Returns the decoded JSON."""
         return self._request(path, data=data, params=params)
 
-    def _grid(self, path, **params) -> List[dict]:
-        """Every row of a grid, ADMIN_GRID_LIMIT rows a request."""
+    def _grid(self, path, filters=None, **params) -> List[dict]:
+        """Every row of a grid, GRID_PAGE rows a request.
+
+        ``filters`` are Tvheadend grid filters: {field: regular expression}.
+        A row seen twice, because rows moved between two pages, is kept once.
+        """
+        if filters:
+            params['filter'] = json.dumps([
+                {'type': 'string', 'field': field, 'value': value} for field, value in filters.items()
+            ])
         entries = []
+        seen = set()
+        start = 0
         while True:
-            data = self._request(path, params=dict(params, start=len(entries), limit=ADMIN_GRID_LIMIT))
+            data = self._request(path, params=dict(params, start=start, limit=GRID_PAGE))
             batch = data.get('entries') or []
-            entries.extend(batch)
+            start += len(batch)
+            for row in batch:
+                if not isinstance(row, dict):
+                    continue
+                uuid = row.get('uuid')
+                if uuid is not None:
+                    if uuid in seen:
+                        continue
+                    seen.add(uuid)
+                entries.append(row)
             total = data.get('total')
-            if len(batch) < ADMIN_GRID_LIMIT or not isinstance(total, int) or len(entries) >= total:
-                return [row for row in entries if isinstance(row, dict)]
+            if len(batch) < GRID_PAGE or not isinstance(total, int) or start >= total:
+                return entries
 
     def check_admin(self) -> None:
         """Raise ``TvhAuthError`` when this login cannot change server settings."""
@@ -120,19 +142,29 @@ class TvhAdmin:
         params = {'hidemode': 'none'}
         if fields:
             params['list'] = ','.join({'uuid', 'network_uuid', *fields})
-        rows = self._grid('api/mpegts/mux/grid', **params)
+        # Only this network's rows are sent; they are still checked here.
+        filters = {'network_uuid': f'^{network_uuid}$'} if _plain_text(network_uuid) else None
+        rows = self._grid('api/mpegts/mux/grid', filters=filters, **params)
         return [row for row in rows if row.get('network_uuid') == network_uuid]
 
-    def list_services(self, mux_uuids, fields=None) -> List[dict]:
+    def list_services(self, mux_uuids, fields=None, network_uuid='') -> List[dict]:
         """Services of these muxes, including unverified and disabled ones.
 
-        With ``fields``, only those fields of each.
+        With ``fields``, only those fields of each. With the ``network_uuid``
+        the muxes are on, the server sends only that network's services.
         """
         mux_uuids = set(mux_uuids)
         params = {'hidemode': 'none'}
         if fields:
             params['list'] = ','.join({'uuid', 'multiplex_uuid', *fields})
-        rows = self._grid('api/mpegts/service/grid', **params)
+        filters = None
+        if network_uuid:
+            # A service names its network only by name. A name with characters a
+            # regular expression reads differently is not filtered on.
+            name = str(self._node(network_uuid).get('networkname') or '')
+            if _plain_text(name):
+                filters = {'network': f'^{name}$'}
+        rows = self._grid('api/mpegts/service/grid', filters=filters, **params)
         return [row for row in rows if row.get('multiplex_uuid') in mux_uuids]
 
     def scan_network(self, network_uuid: str) -> None:
@@ -320,6 +352,11 @@ class TvhAdmin:
         self.delete([network_uuid])
         if tag:
             self.delete([tag])
+
+
+def _plain_text(value: str) -> bool:
+    """Whether ``value`` matches only itself as a regular expression."""
+    return bool(value) and all(char.isalnum() or char in ' _-' for char in value)
 
 
 def _uuid(data, what) -> str:

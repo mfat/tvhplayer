@@ -7,6 +7,8 @@ import logging
 import os
 import sys
 import tempfile
+import threading
+import atexit
 from copy import deepcopy
 from pathlib import Path
 
@@ -16,7 +18,7 @@ from .guide_feeds import GuideSource
 from .guide_match import Choice
 from .models import ServerConfig
 from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES
-from .playlist_sync import PlaylistSource
+from .playlist_sync import PlaylistSource, valid_state_id
 from .recorder import DEFAULT_FORMAT, RECORDING_FORMATS
 from .urls import pin_http_port
 
@@ -36,6 +38,12 @@ TIMESHIFT_MAX_GB = 500
 log = logging.getLogger(__name__)
 
 DEFAULT_GEOMETRY = {'x': 100, 'y': 100, 'width': 1200, 'height': 700}
+# A playlist's channel map and stream verdicts grow with the playlist, to tens
+# of megabytes, while the settings are saved on every channel change. They are
+# kept in a file of their own in this folder beside the settings, named after
+# the playlist's state_id, and written only when they changed.
+PLAYLIST_STATE_DIR = 'playlists'
+PLAYLIST_STATE_FIELDS = ('muxes', 'health')
 
 
 def default_config_dir():
@@ -260,13 +268,35 @@ class ConfigStore:
     def __init__(self, path=None):
         self.path = Path(path) if path else default_config_path()
         self.data = default_config()
+        # state_id -> the (muxes, health) objects last written to its state file.
+        self._written = {}
+        # state_ids of the playlists in the settings this store read or wrote.
+        self._known = set()
+        self._written_lock = threading.Lock()
         self.load()
 
+    def _target(self):
+        # A link is followed, so a config kept elsewhere stays there.
+        return Path(os.path.realpath(self.path))
+
+    def _state_dir(self, target=None):
+        return (target or self._target()).parent / PLAYLIST_STATE_DIR
+
     def load(self):
+        # Settings still being written in the background are read as written.
+        _writer_for(self._target()).flush()
         try:
             if self.path.exists():
                 with self.path.open('r', encoding='utf-8') as handle:
-                    self.data = _normalize(json.load(handle))
+                    raw = json.load(handle)
+                from_files = self._attach_playlist_states(raw)
+                self.data = _normalize(raw)
+                with self._written_lock:
+                    self._written = {
+                        playlist['state_id']: tuple(playlist[key] for key in PLAYLIST_STATE_FIELDS)
+                        for playlist in self.data['playlists'] if playlist['state_id'] in from_files
+                    }
+                self._known = {playlist['state_id'] for playlist in self.data['playlists']}
             else:
                 self.data = default_config()
         except OSError as exc:
@@ -283,30 +313,108 @@ class ConfigStore:
             self.data = default_config()
         return self.data
 
-    def save(self):
-        # A link is followed, so a config kept elsewhere stays there.
-        target = Path(os.path.realpath(self.path))
-        target.parent.mkdir(parents=True, exist_ok=True)
-        payload = _normalize(self.data)
-        on_disk = dict(payload, servers=without_builtin_secrets(payload['servers']))
-        # Written whole beside the old file, then swapped in: a crash or full
-        # disk midway leaves the old settings. mkstemp makes it owner-only,
-        # as it holds server passwords.
-        fd, temp = tempfile.mkstemp(prefix=f'.{target.name}.', suffix='.tmp', dir=target.parent)
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as handle:
-                json.dump(on_disk, handle, indent=2)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temp, target)
-        except BaseException:
+    def _attach_playlist_states(self, raw):
+        """Put each playlist's state file back into it. Older configs hold it inline.
+
+        Returns the state_ids read from their files.
+        """
+        found = set()
+        if not isinstance(raw, dict) or not isinstance(raw.get('playlists'), list):
+            return found
+        folder = self._state_dir()
+        for playlist in raw['playlists']:
+            if not isinstance(playlist, dict) or 'muxes' in playlist:
+                continue
+            state_id = valid_state_id(playlist.get('state_id'))
+            if not state_id:
+                continue
             try:
-                os.unlink(temp)
-            except OSError:
-                pass
-            raise
+                with open(folder / f'{state_id}.json', 'r', encoding='utf-8') as handle:
+                    state = json.load(handle)
+            except (OSError, ValueError) as exc:
+                # The channels stay on the server; the next refresh finds them by address.
+                log.warning('Could not read the saved state of playlist %s: %s', playlist.get('name'), exc)
+                continue
+            if isinstance(state, dict):
+                for key in PLAYLIST_STATE_FIELDS:
+                    if isinstance(state.get(key), dict):
+                        playlist[key] = state[key]
+                found.add(state_id)
+        return found
+
+    def save(self, background=False):
+        """Write the settings. With ``background`` the disk is written on another thread.
+
+        The ``muxes`` and ``health`` of a saved playlist are never changed in
+        place: a change replaces the playlist's dict. That lets this compare
+        them by identity and hand them to the writer without a copy.
+        """
+        target = self._target()
+        playlists = self.data.get('playlists')
+        if isinstance(playlists, list):
+            for index, raw in enumerate(playlists):
+                if isinstance(raw, dict) and not valid_state_id(raw.get('state_id')):
+                    # Saved by an older version, or not by this app: normalized once, which names its state file.
+                    playlists[index] = PlaylistSource.from_dict(raw).to_dict()
+        payload = _normalize(_without_playlist_states(self.data))
+        heavy = {}
+        for raw in self.data.get('playlists') or []:
+            if isinstance(raw, dict) and valid_state_id(raw.get('state_id')):
+                heavy[raw['state_id']] = tuple(
+                    raw.get(key) if isinstance(raw.get(key), dict) else {} for key in PLAYLIST_STATE_FIELDS
+                )
+        states = {}
+        for playlist in payload['playlists']:
+            state = heavy.get(playlist['state_id'], ({}, {}))
+            playlist['muxes'], playlist['health'] = state
+            with self._written_lock:
+                previous = self._written.get(playlist['state_id'])
+            if previous is None or any(
+                old is not new and old != new for old, new in zip(previous, state)
+            ):
+                states[playlist['state_id']] = state
+        on_disk = _without_playlist_states(payload)
+        on_disk['servers'] = without_builtin_secrets(payload['servers'])
+        main = json.dumps(on_disk, indent=2)
+        keep = {playlist['state_id'] for playlist in payload['playlists']}
+        # Only the files of playlists removed since are deleted, never ones this store did not know.
+        gone, self._known = self._known - keep, set(keep)
+        with self._written_lock:
+            self._written.update(states)
+            for state_id in list(self._written):
+                if state_id not in keep:
+                    del self._written[state_id]
+        writer = _writer_for(target)
+        writer.submit(self, main, states, gone)
+        if not background:
+            writer.flush(raise_errors=True)
         self.data = payload
         return payload
+
+    def flush(self, timeout=None):
+        """Wait until background saves are on disk. False when the time ran out."""
+        return _writer_for(self._target()).flush(timeout)
+
+    def _write(self, target, main, states, gone):
+        """Write state files first, then the settings that name them."""
+        folder = self._state_dir(target)
+        if states:
+            folder.mkdir(parents=True, exist_ok=True)
+        for state_id, (muxes, health) in states.items():
+            try:
+                _write_file(folder / f'{state_id}.json', json.dumps({'muxes': muxes, 'health': health}))
+            except BaseException:
+                with self._written_lock:
+                    # Written again on the next save.
+                    self._written.pop(state_id, None)
+                raise
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _write_file(target, main)
+        for state_id in gone:
+            try:
+                os.unlink(folder / f'{state_id}.json')
+            except OSError:
+                pass
 
     @property
     def servers(self):
@@ -321,3 +429,114 @@ class ConfigStore:
 
     def snapshot(self):
         return deepcopy(self.data)
+
+
+def _without_playlist_states(data):
+    """``data`` with playlists that leave out their state, sharing everything else."""
+    result = dict(data)
+    result['playlists'] = [
+        {key: value for key, value in raw.items() if key not in PLAYLIST_STATE_FIELDS}
+        for raw in data.get('playlists') or [] if isinstance(raw, dict)
+    ]
+    return result
+
+
+def _write_file(target, text):
+    # Written whole beside the old file, then swapped in: a crash or full
+    # disk midway leaves the old one. mkstemp makes it owner-only, as the
+    # settings hold server passwords.
+    fd, temp = tempfile.mkstemp(prefix=f'.{target.name}.', suffix='.tmp', dir=target.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, target)
+    except BaseException:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        raise
+
+
+class _Writer:
+    """Writes one settings file on its own thread, newest content first.
+
+    Saves that come while one is written are merged: the newest settings,
+    and the newest state of each playlist.
+    """
+
+    def __init__(self, target):
+        self._target = target
+        self._cond = threading.Condition()
+        self._pending = None
+        self._busy = False
+        self._error = None
+        self._thread = None
+
+    def submit(self, store, main, states, gone):
+        with self._cond:
+            if self._pending is None:
+                self._pending = [store, main, dict(states), set(gone)]
+            else:
+                self._pending[0] = store
+                self._pending[1] = main
+                for state_id in gone:
+                    self._pending[2].pop(state_id, None)
+                self._pending[2].update(states)
+                self._pending[3] = (self._pending[3] | set(gone)) - set(states)
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name='config-writer', daemon=True)
+                self._thread.start()
+            self._cond.notify_all()
+
+    def _run(self):
+        while True:
+            with self._cond:
+                if self._pending is None:
+                    self._thread = None
+                    self._cond.notify_all()
+                    return
+                store, main, states, gone = self._pending
+                self._pending = None
+                self._busy = True
+            error = None
+            try:
+                store._write(self._target, main, states, gone)
+            except BaseException as exc:  # reported by flush, or logged
+                error = exc
+                log.warning('Could not save settings to %s: %s', self._target, exc)
+            with self._cond:
+                self._busy = False
+                self._error = error
+                self._cond.notify_all()
+
+    def flush(self, timeout=None, raise_errors=False):
+        with self._cond:
+            done = self._cond.wait_for(lambda: self._pending is None and not self._busy, timeout)
+            error, self._error = self._error, None
+        if raise_errors and error is not None:
+            raise error
+        return done
+
+
+_writers = {}
+_writers_lock = threading.Lock()
+
+
+def _writer_for(target):
+    key = str(target)
+    with _writers_lock:
+        writer = _writers.get(key)
+        if writer is None:
+            writer = _writers[key] = _Writer(Path(target))
+        return writer
+
+
+@atexit.register
+def _flush_all():
+    with _writers_lock:
+        writers = list(_writers.values())
+    for writer in writers:
+        writer.flush(timeout=30)

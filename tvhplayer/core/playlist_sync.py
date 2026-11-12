@@ -21,6 +21,7 @@ import re
 import shutil
 import sys
 import time
+import uuid as uuid_module
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
@@ -40,7 +41,10 @@ NO_FFMPEG = 'TVHplayer could not find ffmpeg, which it needs to play imported ch
 # An Xtream Codes account that allows fewer gets its own limit: a stream over it
 # would cut off the oldest, and a viewer takes the place of a test, never the reverse.
 MAX_STREAMS = 6
-CHECKPOINT_EVERY = 50
+# While channels are added, how often the playlist's channel map is saved. A
+# map lost in a crash is found again on the next refresh, by stream address;
+# saving it more often made the window stutter on big playlists.
+CHECKPOINT_SECONDS = 5
 CHECK_POLL_SECONDS = 2
 # Each poll reads every mux and service of the server. A big playlist is read
 # less often: a second between polls for every thousand muxes.
@@ -50,6 +54,7 @@ CHECK_SERVICE_FIELDS = ('enabled', 'channel')
 NOT_WORKING = 'It is not working right now.'
 NETWORK_GONE = 'The channels from this playlist are no longer on the server. Import it again.'
 _HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+_STATE_ID = re.compile(r'^[0-9a-f]{32}$')
 
 # mpegts_mux_t scan_state and scan_result values.
 SCAN_IDLE = 0
@@ -97,6 +102,8 @@ class PlaylistSource:
     # All statuses are counted, while ``health`` keeps only channels needing attention.
     health_totals: Dict[str, int] = field(default_factory=dict)
     last_checked: float = 0.0
+    # Names the file that keeps ``muxes`` and ``health`` beside the settings.
+    state_id: str = field(default_factory=lambda: uuid_module.uuid4().hex)
 
     @classmethod
     def from_dict(cls, data):
@@ -120,6 +127,7 @@ class PlaylistSource:
             if isinstance(data.get('health'), dict) else {},
             health_totals=_health_totals(data.get('health_totals')),
             last_checked=_seconds(data.get('last_checked')),
+            state_id=valid_state_id(data.get('state_id')) or uuid_module.uuid4().hex,
         )
 
     def to_dict(self):
@@ -139,11 +147,17 @@ class PlaylistSource:
             'health': dict(self.health),
             'health_totals': dict(self.health_totals),
             'last_checked': self.last_checked,
+            'state_id': self.state_id,
         }
 
     def stream_limit(self) -> int:
         """The network's max_streams: the account's limit, at most MAX_STREAMS."""
         return min(self.max_streams, MAX_STREAMS) if self.max_streams > 0 else MAX_STREAMS
+
+
+def valid_state_id(value) -> str:
+    """``value`` when it can name a playlist's state file, else ''."""
+    return value if isinstance(value, str) and _STATE_ID.match(value) else ''
 
 
 def _count(value) -> int:
@@ -372,6 +386,14 @@ def source_key(source: PlaylistSource):
     return source.server, *source_identity(source.source_type, source.location)
 
 
+def saved_source_key(data):
+    """``source_key`` of a saved playlist dict, read without copying its channel map."""
+    if not isinstance(data, dict):
+        return None
+    source_type = 'xc' if data.get('source_type') == 'xc' else 'm3u'
+    return str(data.get('server') or ''), *source_identity(source_type, str(data.get('location') or ''))
+
+
 def same_source(left: PlaylistSource, right: PlaylistSource) -> bool:
     return source_key(left) == source_key(right)
 
@@ -493,6 +515,11 @@ def error_message(exc: Exception, server_name: str, verb: str = 'add') -> str:
     return f'{server_name} could not {verb} the channels: {exc}'
 
 
+MUX_CONF_FIELDS = (
+    'enabled', 'iptv_url', 'iptv_sname', 'iptv_muxname', 'channel_number', 'iptv_icon', 'iptv_epgid', 'iptv_tags', 'epg',
+)
+
+
 def mux_conf(plan: ChannelPlan) -> dict:
     return {
         'enabled': 1,
@@ -518,6 +545,7 @@ def sync_playlist(
     checkpoint: Optional[Callable[[], None]] = None,
     check: bool = True,
     hide: bool = True,
+    clock: Callable[[], float] = time.monotonic,
 ) -> SyncResult:
     """Create, update, and remove muxes so the network matches ``plans``.
 
@@ -553,7 +581,9 @@ def sync_playlist(
         })
     bouquets = admin.has_network_bouquets(source.network_uuid)
 
-    rows = {row['uuid']: row for row in admin.list_muxes(source.network_uuid) if row.get('uuid')}
+    rows = {
+        row['uuid']: row for row in admin.list_muxes(source.network_uuid, fields=MUX_CONF_FIELDS) if row.get('uuid')
+    }
     known = {key: uuid for key, uuid in source.muxes.items() if uuid in rows}
     if known != source.muxes:
         source.muxes = known
@@ -576,7 +606,7 @@ def sync_playlist(
         leftover = [uuid for uuids in untracked.values() for uuid in uuids]
         if leftover:
             if not bouquets:
-                _delete_channels_of(admin, leftover)
+                _delete_channels_of(admin, leftover, source.network_uuid)
             admin.delete(leftover)
             result.removed += len(leftover)
         checkpoint()
@@ -589,6 +619,7 @@ def sync_playlist(
     # A new address may work where the old one failed, or fail where it worked.
     retest = []
     created_since_checkpoint = 0
+    last_checkpoint = clock()
     for plan in plans:
         if cancelled():
             result.cancelled = True
@@ -604,9 +635,10 @@ def sync_playlist(
             source.muxes[plan.key] = admin.create_mux(source.network_uuid, conf)
             result.added += 1
             created_since_checkpoint += 1
-            if created_since_checkpoint >= CHECKPOINT_EVERY:
+            if clock() - last_checkpoint >= CHECKPOINT_SECONDS:
                 checkpoint()
                 created_since_checkpoint = 0
+                last_checkpoint = clock()
         done += 1
         progress(done, total)
     if created_since_checkpoint:
@@ -618,7 +650,7 @@ def sync_playlist(
 
     if not result.cancelled and stale:
         if not bouquets:
-            _delete_channels_of(admin, [source.muxes[key] for key in stale])
+            _delete_channels_of(admin, [source.muxes[key] for key in stale], source.network_uuid)
         admin.delete([source.muxes[key] for key in stale])
         for key in stale:
             del source.muxes[key]
@@ -657,7 +689,7 @@ def map_channels(admin, source: PlaylistSource) -> int:
     were added or deleted.
     """
     muxes = {row['uuid']: row for row in admin.list_muxes(source.network_uuid, fields=('iptv_tags',))}
-    services = admin.list_services(muxes, fields=('enabled',))
+    services = admin.list_services(muxes, fields=('enabled',), network_uuid=source.network_uuid)
     ours = {row['uuid'] for row in services}
     enabled = {row['uuid'] for row in services if row.get('enabled')}
     mapped = set()
@@ -699,9 +731,11 @@ def _map_without_bouquet(admin, source: PlaylistSource) -> None:
         map_channels(admin, source)
 
 
-def _delete_channels_of(admin, mux_uuids) -> None:
+def _delete_channels_of(admin, mux_uuids, network_uuid='') -> None:
     """Delete the channels of these muxes, which Tvheadend 4.2 keeps without a stream."""
-    services = {row['uuid'] for row in admin.list_services(set(mux_uuids), fields=('enabled',))}
+    services = {
+        row['uuid'] for row in admin.list_services(set(mux_uuids), fields=('enabled',), network_uuid=network_uuid)
+    }
     if services:
         admin.delete([
             row['uuid'] for row in admin.list_channels()
@@ -724,7 +758,9 @@ def apply_checks(admin, source: PlaylistSource, hide_failed: bool = True):
         row for row in admin.list_muxes(source.network_uuid, fields=CHECK_MUX_FIELDS)
         if row.get('uuid') in ours
     ]
-    services = admin.list_services([row['uuid'] for row in rows], fields=CHECK_SERVICE_FIELDS)
+    services = admin.list_services(
+        [row['uuid'] for row in rows], fields=CHECK_SERVICE_FIELDS, network_uuid=source.network_uuid,
+    )
     channels = {}
     for service in services:
         channels.setdefault(service.get('multiplex_uuid'), []).extend(
@@ -961,7 +997,10 @@ def remove_playlist(admin, source: PlaylistSource) -> None:
     """Delete the playlist's network, its channels, and tags no other channel uses."""
     if admin.network_exists(source.network_uuid):
         if not admin.has_network_bouquets(source.network_uuid):
-            _delete_channels_of(admin, [row['uuid'] for row in admin.list_muxes(source.network_uuid, fields=('uuid',))])
+            _delete_channels_of(
+                admin, [row['uuid'] for row in admin.list_muxes(source.network_uuid, fields=('uuid',))],
+                source.network_uuid,
+            )
         admin.delete_network(source.network_uuid)
     admin.delete_unused_tags(source.tags)
     source.network_uuid = ''
