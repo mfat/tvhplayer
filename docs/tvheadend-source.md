@@ -23,8 +23,17 @@ The deb and rpm builds download `<repo>/archive/<commit>.tar.gz`, and the deb bu
 | `e507a3ca2` | idnode: map a large bouquet to channels quickly | not yet |
 | `afa7ce08d` | idnode: save pending changes before services are torn down | not yet |
 | `40e88d4ce` | htsp: send a tag's members once after many channels join it | not yet |
+| `fb4c98deb` | htsmsg: reject different field prefixes before string comparison | not yet |
+| `f02aee227` | startup: development-only monotonic stage and EPG/HTSP timing | not yet |
 
 Base: upstream `51ec612fa`.
+
+For startup investigation, enable the existing stderr/main trace with `-d --trace main`
+on a disposable, disk-backed copy of the configuration. Stage timing is emitted
+only at trace level. HTSP enqueue timing is separate from the client's receipt of
+`initialSyncCompleted`. See [the measured investigation](cold-startup-profile.md)
+for cache conditions, data-preservation checks, the limited EPG-stage improvement,
+and the larger loading changes that still need design.
 
 ## Changing the pin
 

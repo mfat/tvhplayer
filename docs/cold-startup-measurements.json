@@ -1,0 +1,223 @@
+{
+  "source_baseline": "40e88d4ce with pre-existing local idnode/settings improvements",
+  "candidate": "f02aee227",
+  "filesystem": "ext4",
+  "cold_method": "syncfs followed by per-file POSIX_FADV_DONTNEED; inode/directory caches warm",
+  "excluded": "tmpfs experiments and disk trials overlapping interactive playback",
+  "runs": {
+    "release-before-1": {
+      "snapshots": {},
+      "startup_seconds": 14.235547594995296,
+      "htsp_sync_seconds": 2.905090051004663,
+      "first_channel_seconds": 0.019417326999246143,
+      "metadata_counts": {
+        "tagAdd": 1034,
+        "channelAdd": 58868,
+        "tagUpdate": 1034,
+        "dvrEntryAdd": 1,
+        "initialSyncCompleted": 1
+      },
+      "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+      "timings": [
+        "2026-11-13 01:29:08.334 [   INFO] epgdb: parsing 110281811 bytes",
+        "2026-11-13 01:29:10.376 [   INFO] epgdb:   broadcasts 229041"
+      ]
+    },
+    "release-before-2": {
+      "snapshots": {},
+      "startup_seconds": 17.8837266920018,
+      "htsp_sync_seconds": 3.777468741995108,
+      "first_channel_seconds": 0.0182798969981377,
+      "metadata_counts": {
+        "tagAdd": 1034,
+        "channelAdd": 58868,
+        "tagUpdate": 1034,
+        "dvrEntryAdd": 1,
+        "initialSyncCompleted": 1
+      },
+      "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+      "timings": [
+        "2026-11-13 01:29:47.055 [   INFO] epgdb: parsing 110281811 bytes",
+        "2026-11-13 01:29:49.734 [   INFO] epgdb:   broadcasts 228999"
+      ]
+    },
+    "release-after-1": {
+      "snapshots": {},
+      "startup_seconds": 15.122423000997514,
+      "htsp_sync_seconds": 4.683284389000619,
+      "first_channel_seconds": 0.02427199399971869,
+      "metadata_counts": {
+        "tagAdd": 1034,
+        "channelAdd": 58868,
+        "tagUpdate": 1034,
+        "dvrEntryAdd": 1,
+        "initialSyncCompleted": 1
+      },
+      "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+      "timings": [
+        "2026-11-13 01:28:34.462 [   INFO] epgdb: parsing 110281811 bytes",
+        "2026-11-13 01:28:35.911 [   INFO] epgdb:   broadcasts 229041"
+      ]
+    },
+    "release-after-2": {
+      "snapshots": {},
+      "startup_seconds": 13.452011611996568,
+      "htsp_sync_seconds": 3.50482160399406,
+      "first_channel_seconds": 0.022119330998975784,
+      "metadata_counts": {
+        "tagAdd": 1034,
+        "channelAdd": 58868,
+        "tagUpdate": 1034,
+        "dvrEntryAdd": 1,
+        "initialSyncCompleted": 1
+      },
+      "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+      "timings": [
+        "2026-11-13 01:30:25.901 [   INFO] epgdb: parsing 110281811 bytes",
+        "2026-11-13 01:30:27.667 [   INFO] epgdb:   broadcasts 226922"
+      ]
+    },
+    "cold-release-before": {
+      "snapshots": {},
+      "startup_seconds": 39.70905083199614,
+      "htsp_sync_seconds": 3.0307757089976803,
+      "first_channel_seconds": 0.025876651001453865,
+      "metadata_counts": {
+        "tagAdd": 1034,
+        "channelAdd": 58868,
+        "tagUpdate": 1034,
+        "dvrEntryAdd": 1,
+        "initialSyncCompleted": 1
+      },
+      "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+      "timings": [
+        "2026-11-13 01:31:33.967 [   INFO] epgdb: parsing 110281811 bytes",
+        "2026-11-13 01:31:36.728 [   INFO] epgdb:   broadcasts 226916"
+      ]
+    },
+    "cold-release-after": {
+      "snapshots": {},
+      "startup_seconds": 33.03947456400056,
+      "htsp_sync_seconds": 3.323840413999278,
+      "first_channel_seconds": 0.030126530000416096,
+      "metadata_counts": {
+        "tagAdd": 1034,
+        "channelAdd": 58868,
+        "tagUpdate": 1034,
+        "dvrEntryAdd": 1,
+        "initialSyncCompleted": 1
+      },
+      "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+      "timings": [
+        "2026-11-13 01:32:33.793 [   INFO] epgdb: parsing 110281811 bytes",
+        "2026-11-13 01:32:36.411 [   INFO] epgdb:   broadcasts 226890"
+      ]
+    },
+    "warm-after": {
+      "snapshots": {
+        "epg/events/grid": {
+          "rows": 224575,
+          "sha256": "1234cbf190ccb4053ab19c68e82810aeff332f61eda54355ca8803c30a88b699"
+        },
+        "channel/grid": {
+          "rows": 58868,
+          "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+        },
+        "channeltag/grid": {
+          "rows": 1034,
+          "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+        },
+        "mpegts/network/grid": {
+          "rows": 11,
+          "sha256": "f62e85fd6144763fc8514b96f7cc0a5a8d9a1788be1c738de4bc01bcab7cf887"
+        },
+        "mpegts/mux/grid": {
+          "rows": 58865,
+          "sha256": "02414d470fb497de75d2b1f7e1c61542c7f8ec8eff5eca3a2124532dc7df65c2"
+        },
+        "mpegts/service/grid": {
+          "rows": 58868,
+          "sha256": "143294ca3fac8930aa03209fe11ae233fe68e7a2c8071ffb39515c8ead7036e3"
+        },
+        "bouquet/grid": {
+          "rows": 21,
+          "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+        }
+      },
+      "startup_seconds": 19.05151604099956,
+      "htsp_sync_seconds": 4.707165496001835,
+      "first_channel_seconds": 0.016084033995866776,
+      "metadata_counts": {
+        "tagAdd": 1034,
+        "channelAdd": 58868,
+        "tagUpdate": 1034,
+        "dvrEntryAdd": 1,
+        "initialSyncCompleted": 1
+      },
+      "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+      "timings": [
+        "2026-11-13 01:24:55.889 [  TRACE] main: startup iptv_network_init: 7748 ms",
+        "2026-11-13 01:24:55.891 [  TRACE] main: startup iptv threads: 2 ms (2 thread(s))",
+        "2026-11-13 01:24:55.891 [  TRACE] main: startup mpegts_init: 7760 ms",
+        "2026-11-13 01:24:58.960 [  TRACE] main: startup channel_init: 3068 ms",
+        "2026-11-13 01:25:00.113 [  TRACE] main: startup bouquet_service_resolve: 1153 ms",
+        "2026-11-13 01:25:02.077 [  TRACE] main: startup epggrab_init: 1963 ms",
+        "2026-11-13 01:25:02.833 [  TRACE] main: startup epg inflate: 755 ms",
+        "2026-11-13 01:25:02.833 [   INFO] epgdb: parsing 110281811 bytes",
+        "2026-11-13 01:25:06.764 [  TRACE] main: startup epg parse: 3931 ms",
+        "2026-11-13 01:25:06.764 [  TRACE] main: startup epg decode/restore/destroy: 220/3565/108 ms",
+        "2026-11-13 01:25:06.764 [   INFO] epgdb:   broadcasts 229223",
+        "2026-11-13 01:25:06.779 [  TRACE] main: startup epg_init: 4702 ms",
+        "2026-11-13 01:25:06.780 [  TRACE] main: startup htsp_register: 0 ms",
+        "2026-11-13 01:25:07.575 [  TRACE] main: startup initial metadata sync: 526 ms, 58868 channels"
+      ]
+    },
+    "warm-before": {
+      "snapshots": {
+        "epg/events/grid": {
+          "rows": 224575,
+          "sha256": "1234cbf190ccb4053ab19c68e82810aeff332f61eda54355ca8803c30a88b699"
+        },
+        "channel/grid": {
+          "rows": 58868,
+          "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+        },
+        "channeltag/grid": {
+          "rows": 1034,
+          "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+        },
+        "mpegts/network/grid": {
+          "rows": 11,
+          "sha256": "f62e85fd6144763fc8514b96f7cc0a5a8d9a1788be1c738de4bc01bcab7cf887"
+        },
+        "mpegts/mux/grid": {
+          "rows": 58865,
+          "sha256": "02414d470fb497de75d2b1f7e1c61542c7f8ec8eff5eca3a2124532dc7df65c2"
+        },
+        "mpegts/service/grid": {
+          "rows": 58868,
+          "sha256": "143294ca3fac8930aa03209fe11ae233fe68e7a2c8071ffb39515c8ead7036e3"
+        },
+        "bouquet/grid": {
+          "rows": 21,
+          "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+        }
+      },
+      "startup_seconds": 17.795750327997666,
+      "htsp_sync_seconds": 3.431181309999374,
+      "first_channel_seconds": 0.022223797997867223,
+      "metadata_counts": {
+        "tagAdd": 1034,
+        "channelAdd": 58868,
+        "tagUpdate": 1034,
+        "dvrEntryAdd": 1,
+        "initialSyncCompleted": 1
+      },
+      "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+      "timings": [
+        "2026-11-13 01:26:06.227 [   INFO] epgdb: parsing 110281811 bytes",
+        "2026-11-13 01:26:10.857 [   INFO] epgdb:   broadcasts 229104"
+      ]
+    }
+  }
+}
