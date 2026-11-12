@@ -101,14 +101,24 @@ class HtspBackend(TvhBackend):
         self._tags_changed = False
         self._channels_reset = False
 
-    def take_channel_changes(self):
+    def take_channel_changes(self, limit=None):
         """Coalesced deltas, consumed by the UI timer rather than per-message signals."""
         with self._metadata_lock:
-            changes, self._channel_changes = self._channel_changes, {}
-            tags = list(self._tags.values()) if self._tags_changed else None
+            if limit is None or len(self._channel_changes) <= limit:
+                changes, self._channel_changes = self._channel_changes, {}
+            else:
+                keys = list(self._channel_changes)[:limit]
+                changes = {key: self._channel_changes.pop(key) for key in keys}
+            tags = list(self._tags.values()) if self._tags_changed and not self._channel_changes else None
             reset, self._channels_reset = self._channels_reset, False
-            self._tags_changed = False
+            if tags is not None:
+                self._tags_changed = False
         return changes, tags, reset
+
+    @property
+    def pending_channel_count(self):
+        with self._metadata_lock:
+            return len(self._channel_changes)
 
     def channel_snapshot(self):
         """Commit the current metadata snapshot and retire already included deltas."""

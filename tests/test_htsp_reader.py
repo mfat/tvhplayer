@@ -206,3 +206,17 @@ def test_backend_reconnect_replaces_old_metadata(monkeypatch):
             if worker.ident is not None:
                 worker.join(3)
     assert not errors
+
+
+def test_channel_batches_are_bounded_and_keep_latest_pending_changes():
+    backend = HtspBackend(ServerConfig(name='test', url='http://localhost', protocol='htsp'))
+    for i in range(5000):
+        backend._on_async({'method': 'channelAdd', 'channelId': i, 'channelName': str(i)})
+    first, _, _ = backend.take_channel_changes(limit=2000)
+    assert len(first) == 2000 and backend.pending_channel_count == 3000
+    backend._on_async({'method': 'channelUpdate', 'channelId': 4000, 'channelName': 'Latest'})
+    second, _, _ = backend.take_channel_changes(limit=2000)
+    third, _, _ = backend.take_channel_changes(limit=2000)
+    assert len(second) == 2000 and len(third) == 1000
+    assert third[4000].name == 'Latest'
+    assert backend.pending_channel_count == 0

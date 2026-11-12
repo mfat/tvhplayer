@@ -1,9 +1,9 @@
 # Progressive HTSP metadata
 
 The channel fetch still waits for `initialSyncCompleted` before reporting success.
-While it waits, the window consumes accumulated channel changes every 150 ms, so
+While it waits, the window consumes accumulated channel changes every 50 ms, with at most 2,000 channel changes per turn, so
 channels can appear before the complete list, service details and now/next have
-arrived. Partial metadata does not complete channel onboarding.
+arrived. Tag counts, kinds and logo preparation are deferred until initial row delivery finishes. Partial metadata does not complete channel onboarding.
 
 After authentication, metadata connections start one socket reader. RPC callers
 serialize writes and wait for their sequence-numbered replies; the reader alone
@@ -40,3 +40,9 @@ A local synthetic 60,000-channel socket-to-model run displayed its first batch i
 0.18 seconds and completed in 3.9 seconds across 24 batches, without a model reset.
 This isolates the client pipeline; it excludes Tvheadend startup, authentication,
 server/network latency, optional service/EPG requests and a fully populated UI.
+
+Built-in playback builds its HTTP stream URL from the endpoint and Basic login
+already configured by readiness, avoiding an HTSP ticket RPC on the GUI thread
+while initial metadata is arriving. Column content measurements use at most 100
+rows and are deferred during the initial fetch. These changes address UI stalls;
+the native server must still finish initialization before live channels arrive.

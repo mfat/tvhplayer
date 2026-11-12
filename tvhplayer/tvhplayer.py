@@ -60,7 +60,7 @@ try:
     from .core.errors import TvhAuthError, TvhError
     from .core.server_log import ServerLogFeed
     from .core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
-    from .core.urls import http_base_url
+    from .core.urls import http_base_url, append_profile, insert_basic_auth
     from .core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from .core import convert
     from .core import frozen_libs
@@ -163,7 +163,7 @@ except ImportError:
     from core.errors import TvhAuthError, TvhError
     from core.server_log import ServerLogFeed
     from core.models import PROTOCOL_HTTP, PROTOCOL_HTSP, Channel, DvrEntryUpdate, recordings_to_stop
-    from core.urls import http_base_url
+    from core.urls import http_base_url, append_profile, insert_basic_auth
     from core.recorder import DEFAULT_FORMAT, STALL_LIMIT, LocalRecorder, free_path, parse_ffmpeg_options
     from core import convert
     from core import frozen_libs
@@ -3810,7 +3810,7 @@ class TVHeadendClient(QMainWindow):
         self._live_channels = {}
         self._metadata_retry_at = 0.0
         self._metadata_timer = QTimer(self)
-        self._metadata_timer.setInterval(150)
+        self._metadata_timer.setInterval(50)
         self._metadata_timer.timeout.connect(self._poll_channel_metadata)
         self._metadata_timer.start()
         self._channel_tags = []
@@ -4197,6 +4197,7 @@ class TVHeadendClient(QMainWindow):
         # number, status, and type fit their contents and the others share
         # the rest of the width (see _fit_channel_columns).
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setResizeContentsPrecision(100)
         header.setStretchLastSection(False)
         header.setSectionsMovable(True)
         header.sectionMoved.connect(self._channel_columns_moved)
@@ -5274,6 +5275,8 @@ class TVHeadendClient(QMainWindow):
         what is left of the list's width. ``measure`` reads the contents again,
         which is slow on a long list, so a plain resize of the pane skips it.
         """
+        if self._channel_fetch is not None:
+            measure = False
         table = self.channel_list
         header = table.horizontalHeader()
         widths = self.channel_options['widths']
@@ -5498,6 +5501,11 @@ class TVHeadendClient(QMainWindow):
         return create_backend(server)
 
     def _on_channels_loaded(self, fetch, result):
+        if (fetch is self._channel_fetch
+                and getattr(fetch.backend, 'pending_channel_count', 0) > 2000):
+            # Finish queued rows in bounded UI turns before applying extras.
+            QTimer.singleShot(50, lambda: self._on_channels_loaded(fetch, result))
+            return
         if fetch is self._channel_fetch and hasattr(fetch.backend, 'channel_snapshot'):
             # Extras may have taken time; do not overwrite newer batches with
             # the snapshot taken before those RPCs.
@@ -5632,7 +5640,7 @@ class TVHeadendClient(QMainWindow):
         take = getattr(backend, 'take_channel_changes', None)
         if take is None:
             return
-        changes, tags, reset = take()
+        changes, tags, reset = take(limit=2000)
         if not changes and tags is None and not reset:
             return
         if reset:
@@ -5655,13 +5663,14 @@ class TVHeadendClient(QMainWindow):
         self._channels = list(self._live_channels.values())
         if tags is not None:
             self._channel_tags = [tag for tag in tags if tag.enabled]
-        if tags is not None or (changes and self._channel_tags):
+        if fetch is None and (tags is not None or (changes and self._channel_tags)):
             self._refresh_tag_combo()
         changed_channels = [channel for channel in changes.values() if channel is not None]
-        self._channel_kinds.update(channel_kinds(changed_channels, (), self._channel_tags))
-        self.channel_model.set_kinds(self._channel_kinds)
+        if fetch is None:
+            self._channel_kinds.update(channel_kinds(changed_channels, (), self._channel_tags))
+            self.channel_model.set_kinds(self._channel_kinds)
         references = {key: self.channel_logo_reference(channel) for key, channel in updates.items()
-                      if channel is not None} if self.channel_options['logos'] else {}
+                      if channel is not None} if fetch is None and self.channel_options['logos'] else {}
         if any(references.values()):
             self.channel_model.set_logos(True, self._logo_pixmaps, self._logo_placeholder())
         self.channel_model.update_channels(updates, references)
@@ -8927,7 +8936,17 @@ class TVHeadendClient(QMainWindow):
             if casting:
                 self._stream = None
             else:
-                stream_url = self.get_backend().stream_url(channel, profile=profile or None)
+                if is_builtin_server(server) and channel.htsp_id is not None:
+                    # The owned server's HTTP endpoint and Basic login are
+                    # configured by readiness. Do not wait for an HTSP ticket
+                    # on the GUI thread while its metadata is still arriving.
+                    base = http_base_url(server['url']).rstrip('/')
+                    stream_url = append_profile(insert_basic_auth(
+                        f'{base}/stream/channelid/{int(channel.htsp_id)}',
+                        server.get('username') or '', server.get('password') or '',
+                    ), profile or None)
+                else:
+                    stream_url = self.get_backend().stream_url(channel, profile=profile or None)
                 self._watch_stream_log()
                 self._stream = {'path': stream_path(stream_url), 'name': channel.name, 'started': False,
                                 'scrambled': '', 'failed_at': None}
