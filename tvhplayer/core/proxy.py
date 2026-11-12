@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 
 import requests
 
+USER_AGENT = 'TVHplayer'
+
 _HIDDEN = object()
 _saved_http_proxy = _HIDDEN
 
@@ -42,7 +44,12 @@ def is_loopback_url(url) -> bool:
 
 
 def configure_session(session, base_url) -> None:
-    """Point a requests session at the right proxy for one Tvheadend server."""
+    """Point a requests session at the right proxy and name the app in its User-Agent.
+
+    Some IPTV providers sit behind a firewall that answers 403 to the default
+    ``python-requests`` agent. Headers the caller sets afterwards still win.
+    """
+    session.headers['User-Agent'] = USER_AGENT
     if is_loopback_url(base_url):
         session.trust_env = False
         return
