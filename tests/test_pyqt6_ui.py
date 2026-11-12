@@ -4326,3 +4326,29 @@ def test_a_playlist_moved_to_a_new_address_keeps_one_entry_and_its_guide(monkeyp
         assert [guide.playlist for guide in window.all_guide_sources()] == [moved.location]
     finally:
         window.close()
+
+
+def test_reading_the_builtin_servers_recordings_does_not_sync_every_channel(monkeypatch, tmp_path):
+    # The awake check opened an HTSP connection every 30 seconds, and HTSP
+    # first sends every channel: most of a second of decoding with 50000.
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    try:
+        opened = []
+
+        class Backend:
+            def __init__(self, server):
+                opened.append(server)
+
+            def list_dvr_entries(self):
+                return []
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(ui, 'create_backend', Backend)
+        window._read_builtin_entries({'name': 'Built-in Server', 'builtin': True, 'protocol': 'htsp',
+                                      'url': 'http://127.0.0.1:24111'})
+        assert [server['protocol'] for server in opened] == ['http']
+    finally:
+        window.close()
+        app.processEvents()

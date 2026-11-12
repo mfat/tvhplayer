@@ -5038,7 +5038,9 @@ class TVHeadendClient(QMainWindow):
         backend = None
         entries = None
         try:
-            backend = create_backend(server)
+            # Over HTTP: an HTSP connection first sends every channel, which
+            # took the app most of a second for 50000 channels, every 30 seconds.
+            backend = create_backend(dict(server, protocol=PROTOCOL_HTTP))
             entries = backend.list_dvr_entries()
         except Exception as exc:
             print(f"Debug: Could not read the built-in server's recordings: {exc}")
