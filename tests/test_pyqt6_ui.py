@@ -4285,3 +4285,41 @@ def test_own_title_bar_frames_the_window_and_not_its_parts(monkeypatch, tmp_path
         window.close()
         window.deleteLater()
         app.processEvents()
+
+
+def test_a_waiting_playlist_job_starts_with_the_saved_playlist(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        _fake_playlist_jobs(monkeypatch, ui, window)
+        first, second, _third = window.check_playlist_channels()
+        # The second waits for the first, which checks the same server.
+        assert first.running and not second.running
+        edited = ui.PlaylistSource.from_dict(window.config['playlists'][1])
+        edited.request_headers = {'User-Agent': 'New App'}
+        window.store_playlist_source(edited.to_dict())
+        first.end()
+        _run_queued(app)
+        assert second.running
+        # Its copy is the edited one, so saving it does not undo the edit.
+        assert second.source.request_headers == {'User-Agent': 'New App'}
+    finally:
+        window.close()
+
+
+def test_a_playlist_moved_to_a_new_address_keeps_one_entry_and_its_guide(monkeypatch, tmp_path):
+    _app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        monkeypatch.setattr(window, 'save_config', lambda: None)
+        old = ui.PlaylistSource('Provider', 'http://old.example/get.php?username=u&password=p', 'builtin',
+                                source_type='xc')
+        window.config['playlists'] = [old.to_dict()]
+        window.config['guide_sources'] = [
+            {'location': 'http://old.example/xmltv.php', 'server': 'builtin', 'playlist': old.location},
+        ]
+        moved = ui.PlaylistSource.from_dict(old.to_dict())
+        moved.location = 'http://new.example/get.php?username=u&password=p'
+        window.store_playlist_source(moved.to_dict(), replaces=old.to_dict())
+        assert [source.location for source in window.playlist_sources()] == [moved.location]
+        assert [guide.playlist for guide in window.all_guide_sources()] == [moved.location]
+    finally:
+        window.close()

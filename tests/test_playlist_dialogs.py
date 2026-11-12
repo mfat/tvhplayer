@@ -107,8 +107,8 @@ class FakeHost:
     def playlist_sources(self):
         return [PlaylistSource.from_dict(data) for data in self.stored]
 
-    def store_playlist_source(self, data):
-        source = PlaylistSource.from_dict(data)
+    def store_playlist_source(self, data, replaces=None):
+        source = PlaylistSource.from_dict(replaces if replaces is not None else data)
         self.stored = [
             item for item in self.stored
             if not same_source(PlaylistSource.from_dict(item), source)
@@ -335,7 +335,7 @@ def test_xtream_settings_rotate_password_without_duplicating_source(app, monkeyp
     dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN, source=original)
     assert dialog.windowTitle() == 'Edit Source'
     assert not dialog.source_type_combo.isEnabled()
-    assert not dialog.username_input.isEnabled()
+    assert dialog.username_input.isEnabled() and dialog.location_input.isEnabled()
     assert not dialog.server_combo.isEnabled()
     dialog.password_input.setText('new')
     dialog.user_agent_input.setText('New App')
@@ -1188,3 +1188,71 @@ def test_edit_saves_new_agent_and_password_into_channels_without_reading_the_pla
     assert saved.request_headers == {'User-Agent': 'VLC/3.0.21 LibVLC/3.0.21'}
     assert saved.tags == ['Refreshed']
     assert host.synced[-1][2] == 'http://provider.example/xmltv.php?username=user&password=new'
+
+
+def _imported_xtream(app, monkeypatch, fail_at=None):
+    """Import an Xtream Codes account once; returns the host, the source and the addresses read."""
+    from tvhplayer.core.playlist import parse_playlist, xtream_account
+
+    loaded = []
+
+    def load(location, cancelled=None, headers=None):
+        loaded.append(location)
+        if location == fail_at:
+            raise dialogs.PlaylistError('Could not download the playlist.')
+        base, user, password = xtream_account(location)
+        return parse_playlist(f'#EXTM3U\n#EXTINF:-1,News\n{base}/live/{user}/{password}/1.ts\n')
+
+    monkeypatch.setattr(dialogs, 'load_xtream', load)
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    dialog = dialogs.ImportPlaylistDialog(host)
+    dialog.source_type_combo.setCurrentIndex(1)
+    dialog.location_input.setText('http://old.example')
+    dialog.username_input.setText('user')
+    dialog.password_input.setText('pass')
+    _run(app, dialog)
+    return host, PlaylistSource.from_dict(host.stored[-1]), loaded
+
+
+def test_edit_moves_a_playlist_to_the_providers_new_address(app, monkeypatch):
+    from tvhplayer.core.playlist import ffmpeg_input
+
+    host, source, loaded = _imported_xtream(app, monkeypatch)
+    [uuid] = source.muxes.values()
+    dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN, source=source)
+    dialog.location_input.setText('http://new.example')
+    dialog.username_input.setText('renewed')
+    _run(app, dialog)
+    assert loaded[-1] == 'http://new.example/get.php?username=renewed&password=pass'
+    # One playlist, at the new address, with the same channel updated in place.
+    assert len(host.stored) == 1
+    saved = PlaylistSource.from_dict(host.stored[0])
+    assert saved.location == 'http://new.example/get.php?username=renewed&password=pass'
+    assert saved.network_uuid == source.network_uuid and list(saved.muxes.values()) == [uuid]
+    mux = FakeAdmin.servers[BUILTIN['url']]['muxes'][uuid]
+    assert ffmpeg_input(mux['iptv_url'][7:])[0] == 'http://new.example/live/renewed/pass/1.ts'
+    assert not host.busy
+
+
+def test_edit_to_an_address_that_does_not_work_changes_nothing(app, monkeypatch):
+    bad = 'http://wrong.example/get.php?username=user&password=pass'
+    host, source, _loaded = _imported_xtream(app, monkeypatch, fail_at=bad)
+    dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN, source=source)
+    dialog.location_input.setText('http://wrong.example')
+    _run(app, dialog)
+    assert 'Could not download the playlist.' in dialog.status_label.text()
+    assert [PlaylistSource.from_dict(item).location for item in host.stored] == [source.location]
+    assert not host.busy
+
+
+def test_edit_cannot_take_the_address_of_another_playlist(app, monkeypatch):
+    host, source, loaded = _imported_xtream(app, monkeypatch)
+    other = PlaylistSource('Other', 'http://taken.example/get.php?username=user&password=x', 'builtin',
+                           source_type='xc')
+    host.stored.append(other.to_dict())
+    dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN, source=source)
+    dialog.location_input.setText('http://taken.example')
+    dialog.import_btn.click()
+    assert dialog._job is None
+    assert dialog.status_label.text().startswith('Other already reads from this address')
+    assert len(loaded) == 1

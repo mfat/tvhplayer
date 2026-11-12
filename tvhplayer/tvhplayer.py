@@ -8376,7 +8376,7 @@ class TVHeadendClient(QMainWindow):
         """
         if self._closing:
             return
-        saved = {source_key(source) for source in self.playlist_sources()}
+        saved = {source_key(source): source for source in self.playlist_sources()}
         checking = {
             job.source.server for job in self._playlist_jobs
             if job.action == PlaylistJob.CHECK and job.is_running()
@@ -8396,6 +8396,8 @@ class TVHeadendClient(QMainWindow):
                     continue
                 checking.add(job.source.server)
             self._waiting_playlist_jobs.remove(job)
+            # The playlist may have been edited while the job waited; saving an old copy would undo that.
+            job.source = saved[source_key(job.source)]
             job.start()
 
     def _playlist_refreshed(self, message, server):
@@ -8414,12 +8416,14 @@ class TVHeadendClient(QMainWindow):
     def playlist_sources(self):
         return [PlaylistSource.from_dict(raw) for raw in self.config.get('playlists') or []]
 
-    def store_playlist_source(self, data):
+    def store_playlist_source(self, data, replaces=None):
+        """Save a playlist over its saved copy, or over ``replaces`` when its address or account changed."""
         source = PlaylistSource.from_dict(data)
+        match = PlaylistSource.from_dict(replaces) if replaces is not None else source
         sources = self.playlist_sources()
         replaced_location = ''
         for index, existing in enumerate(sources):
-            if same_source(existing, source):
+            if same_source(existing, match):
                 replaced_location = existing.location if existing.location != source.location else ''
                 sources[index] = source
                 break

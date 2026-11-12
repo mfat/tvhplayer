@@ -168,7 +168,10 @@ class PlaylistJob(QObject):
     ``action`` is SYNC (import or refresh), REMOVE, CHECK (test every
     stream now), SHOW (show every channel again), or SAVE (give the
     channels the source's new headers or password without reading the
-    playlist; ``previous`` is the source as it was). A sync and a check
+    playlist; ``previous`` is the source as it was).
+    ``replaces`` is the saved source a SYNC takes the place of when its
+    address or account changed. It is replaced once the playlist has been
+    read from the new address, so an address that does not work changes nothing. A sync and a check
     both wait for the server's stream test and save its verdicts, which the
     channel list marks; channels that fail are hidden too while the host
     hides them.
@@ -187,10 +190,11 @@ class PlaylistJob(QObject):
 
     def __init__(
         self, host, source, server, first_import=False, ask_commands=None, choose=None, action=SYNC, parent=None,
-        previous=None,
+        previous=None, replaces=None,
     ):
         super().__init__(parent)
         self._previous = previous
+        self._replaces = replaces
         self._host = host
         self.source = source
         self.server = server
@@ -207,8 +211,12 @@ class PlaylistJob(QObject):
         self._checking = False
         self._cancelled = False
 
+    def _claimed(self):
+        # Until it is replaced, the saved source is the one other jobs know.
+        return self._replaces if self._replaces is not None else self.source
+
     def start(self):
-        if not self._host.claim_playlist(self.source):
+        if not self._host.claim_playlist(self._claimed()):
             self.failed.emit(BUSY)
             return
         self._busy = True
@@ -256,7 +264,7 @@ class PlaylistJob(QObject):
 
     def _release(self):
         self._busy = False
-        self._host.release_playlist(self.source)
+        self._host.release_playlist(self._claimed())
 
     def _stop_with(self, message):
         self._release()
@@ -298,6 +306,12 @@ class PlaylistJob(QObject):
         if self._cancelled:
             self._stop_with('Import stopped.')
             return
+        if self._replaces is not None:
+            # The new address works: the saved source takes it, and the job holds it under its new name.
+            old, self._replaces = self._replaces, None
+            self._host.store_playlist_source(self.source.to_dict(), replaces=old.to_dict())
+            self._host.release_playlist(old)
+            self._host.claim_playlist(self.source)
         commands = playlist_commands(playlist)
         if commands and not self.source.allow_commands and self._ask_commands is not None:
             self.source.allow_commands = bool(self._ask_commands(len(commands), self.server.get('name', '')))
@@ -859,15 +873,12 @@ class ImportPlaylistDialog(QDialog):
             self.location_input.setText(base)
             self.username_input.setText(username)
             self.password_input.setText(password)
-            # Server and account identify the existing source; password and headers are editable.
-            self.location_input.setEnabled(False)
-            self.username_input.setEnabled(False)
         else:
             self.location_input.setText(source.location)
-            self.location_input.setEnabled(False)
         headers = dict(source.request_headers)
         self.user_agent_input.setText(headers.pop('User-Agent', ''))
         self.headers_input.setText(json.dumps(headers, separators=(',', ':')) if headers else '')
+        # Changing these means a new import: other channels, or another server.
         self.source_type_combo.setEnabled(False)
         self.server_combo.setEnabled(False)
 
@@ -889,10 +900,7 @@ class ImportPlaylistDialog(QDialog):
             widget.setEnabled(not running)
         if not running and self._source is not None:
             self.source_type_combo.setEnabled(False)
-            self.location_input.setEnabled(False)
             self.server_combo.setEnabled(False)
-            if self._source.source_type == 'xc':
-                self.username_input.setEnabled(False)
         else:
             self.server_combo.setEnabled(not running)
         self.import_btn.setEnabled(not running)
@@ -953,19 +961,28 @@ class ImportPlaylistDialog(QDialog):
         source.location = location
         source.source_type = source_type
         source.request_headers = normalize_request_headers(headers)
+        # A new address or account is read from there; the channels stay and are updated.
+        moved = self._source is not None and not same_source(existing, source)
+        if moved:
+            other = find_source(sources, location, key, source_type)
+            if other is not None and not same_source(other, existing):
+                self._set_status(f'{other.name} already reads from this address on {server.get("name", "this server")}.')
+                self.location_input.setFocus()
+                return
         self.details_btn.hide()
         self.show_btn.hide()
         self.progress_bar.setRange(0, 0)
         self._set_running(True)
         # An edit of the password or headers keeps the channels and rewrites them, without
         # reading the playlist. Anything else, or channels never added, needs a refresh.
-        save_only = self._source is not None and bool(source.network_uuid) and same_source(existing, source)
+        save_only = self._source is not None and bool(source.network_uuid) and not moved
         self._job = PlaylistJob(
             self._host,
             source,
             server,
             action=PlaylistJob.SAVE if save_only else PlaylistJob.SYNC,
             previous=existing if save_only else None,
+            replaces=existing if moved else None,
             first_import=existing is None,
             ask_commands=lambda count, name: ask_to_run_commands(self, count, name),
             choose=(lambda plans, chosen: ask_to_choose(self, plans, chosen)) if existing is None else None,
@@ -1085,7 +1102,7 @@ class PlaylistsDialog(QDialog):
         self.remove_btn = QPushButton('Re&move')
         describe(self.refresh_btn, 'Refresh', 'Read the playlist again and update its channels.')
         describe(self.choose_btn, 'Choose channels', 'Choose which channels of the playlist are added.')
-        describe(self.edit_btn, 'Edit', 'Change provider credentials and HTTP headers.')
+        describe(self.edit_btn, 'Edit', 'Change the provider address, account, and HTTP headers.')
         describe(self.health_btn, 'Stream health', 'Show the latest check result for every channel.')
         describe(self.remove_btn, 'Remove', 'Remove the playlist and its channels from the server.')
         self.refresh_btn.clicked.connect(lambda: self._run(remove=False))
