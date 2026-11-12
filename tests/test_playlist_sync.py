@@ -38,6 +38,7 @@ from tvhplayer.core.playlist_sync import (
     sync_playlist,
     unique_name,
     wait_for_checks,
+    BUSY_SERVER_SECONDS,
 )
 from tvhplayer.core.tvh_admin import TvhAdmin
 from tvhplayer.core.xmltv import load_guide
@@ -996,3 +997,60 @@ def test_provider_changes_leave_unchanged_channels_alone():
     plain = [{'uuid': 'a', 'iptv_url': ffmpeg_command('/usr/bin/ffmpeg', 'http://x/1.ts', {}, 'One')}]
     [change] = provider_changes(plain, {}, headers)
     assert change['iptv_url'] == rows[0]['iptv_url']
+
+
+def test_a_check_waits_while_the_server_is_too_busy_to_answer():
+    # A Tvheadend mapping 50000 services to channels answered nothing for
+    # minutes, and the first timeout ended the check with "Could not reach".
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST))
+    real = admin.list_muxes
+    silent = [3]
+
+    def busy(network_uuid, fields=None):
+        if silent[0]:
+            silent[0] -= 1
+            raise TvhConnectionError('Read timed out. (read timeout=30)')
+        for row in admin.muxes.values():
+            row.update(scan_state=0, scan_result=1)
+        return real(network_uuid, fields)
+
+    admin.list_muxes = busy
+    now = [0.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    wait_for_checks(admin, source, result, sleep=sleep, clock=lambda: now[0])
+    assert silent[0] == 0
+    assert result.working == 2 and not result.check_stopped
+
+
+def test_a_check_gives_up_on_a_server_silent_for_too_long():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    result = sync_playlist(admin, source, _plans(FIRST))
+
+    def gone(_network_uuid, fields=None):
+        raise TvhConnectionError('Connection refused')
+
+    admin.list_muxes = gone
+    now = [0.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    with pytest.raises(TvhConnectionError):
+        wait_for_checks(admin, source, result, sleep=sleep, clock=lambda: now[0])
+    assert now[0] >= BUSY_SERVER_SECONDS
+
+    # Stopping while it waits ends the check without an error.
+    stop = [False]
+
+    def stopping(seconds):
+        now[0] += seconds
+        stop[0] = True
+
+    wait_for_checks(admin, source, result, sleep=stopping, clock=lambda: now[0], cancelled=lambda: stop[0])
+    assert result.check_stopped

@@ -49,6 +49,10 @@ CHECK_POLL_SECONDS = 2
 # Each poll reads every mux and service of the server. A big playlist is read
 # less often: a second between polls for every thousand muxes.
 MUXES_PER_POLL_SECOND = 1000
+# A Tvheadend without the fork's bouquet fix maps a big playlist's services
+# to channels in one go and answers nothing meanwhile: 50000 took 12 minutes.
+# A check waits that long for it before it gives up.
+BUSY_SERVER_SECONDS = 15 * 60
 CHECK_MUX_FIELDS = ('scan_result', 'scan_state', 'name', 'iptv_sname')
 CHECK_SERVICE_FIELDS = ('enabled', 'channel')
 NOT_WORKING = 'It is not working right now.'
@@ -861,23 +865,44 @@ def wait_for_checks(
     sleep=time.sleep,
     hide: Callable[[], bool] = lambda: True,
     verdicts: Optional[Callable[[], None]] = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
     """Apply scan verdicts as the server finishes them, until every mux is checked.
 
     ``changed`` is called whenever channels were shown or hidden, and
     ``verdicts`` whenever the server finished more of them. ``hide`` says,
     each round, whether channels that fail are hidden or only marked.
+    A server that does not answer is asked again, for BUSY_SERVER_SECONDS.
     """
     progress = progress or (lambda _done, _total: None)
     cancelled = cancelled or (lambda: False)
     changed = changed or (lambda: None)
     verdicts = verdicts or (lambda: None)
     seen = -1
+    silent_since = None
+    checked = total = untested = 0
+    failed = []
+    hidden = bool(hide())
     while True:
         hidden = bool(hide())
-        checked, total, failed, shown_or_hidden, untested = apply_checks(admin, source, hide_failed=hidden)
+        try:
+            checked, total, failed, shown_or_hidden, untested = apply_checks(admin, source, hide_failed=hidden)
+            if shown_or_hidden:
+                _map_without_bouquet(admin, source)
+        except TvhConnectionError:
+            now = clock()
+            silent_since = now if silent_since is None else silent_since
+            if cancelled():
+                break
+            if now - silent_since >= BUSY_SERVER_SECONDS:
+                raise
+            waited = 0
+            while waited < CHECK_POLL_SECONDS * 5 and not cancelled():
+                sleep(CHECK_POLL_SECONDS)
+                waited += CHECK_POLL_SECONDS
+            continue
+        silent_since = None
         if shown_or_hidden:
-            _map_without_bouquet(admin, source)
             changed()
         if checked != seen:
             verdicts()
@@ -889,7 +914,7 @@ def wait_for_checks(
         while waited < max(CHECK_POLL_SECONDS, total / MUXES_PER_POLL_SECOND) and not cancelled():
             sleep(CHECK_POLL_SECONDS)
             waited += CHECK_POLL_SECONDS
-    result.check_stopped = checked < total
+    result.check_stopped = checked < total or silent_since is not None
     result.hidden = hidden
     result.working = checked - len(failed) - untested
     result.not_working = failed
