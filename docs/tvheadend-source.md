@@ -50,3 +50,10 @@ When the branch has no fixes left on top of upstream, point all three files back
 The earlier local sorted-set and settings-directory optimizations are now published
 and pinned as well. The normal source checkout should track the fork’s `tvhplayer`
 branch; a separate temporary publishing checkout is no longer required.
+
+The unshipped descriptor-relative loader candidate `47207c800` is retained as a
+[reviewable patch](startup-optimization/0001-filebundle-directory-relative.patch).
+Its Linux/Flatpak SDK checks and limited synthetic loader measurements are recorded
+in the [startup investigation](cold-startup-profile.md#continuation-descriptor-relative-configuration-loading).
+It has not changed the production pins; large-profile startup/EPG/DVR verification
+is still required before considering it for packaging.

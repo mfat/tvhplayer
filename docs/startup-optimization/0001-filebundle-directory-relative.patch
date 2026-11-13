@@ -1,0 +1,201 @@
+From 47207c8001b4e4cfa2ef39b9be3e09e00f175279 Mon Sep 17 00:00:00 2001
+From: Mehdi <mah.fat@gmail.com>
+Date: Fri, 13 Nov 2026 09:54:45 +0330
+Subject: [PATCH] filebundle: load direct children relative to the open
+ directory
+
+---
+ src/filebundle.c               | 12 ++++++++----
+ src/tvheadend.h                |  1 +
+ src/wrappers.c                 | 18 ++++++++++++++++++
+ support/startup-performance.md | 30 ++++++++++++++++++++++++++++++
+ support/test-settings-load.py  | 31 +++++++++++++++++++++++++++----
+ 5 files changed, 84 insertions(+), 8 deletions(-)
+
+diff --git a/src/filebundle.c b/src/filebundle.c
+index 931357dc2..46d2b88f3 100644
+--- a/src/filebundle.c
++++ b/src/filebundle.c
+@@ -26,6 +26,7 @@
+ #include <sys/types.h>
+ #include <sys/stat.h>
+ #include <assert.h>
++#include <fcntl.h>
+ 
+ /* **************************************************************************
+  * Opaque data types
+@@ -321,12 +322,15 @@ fb_file *fb_open2
+ 
+   /* Direct file */
+   } else {
+-    char path[512];
+-    snprintf(path, sizeof(path), "%s/%s", dir->d.root, name);
+-    FILE *fp = tvh_fopen(path, "rb");
++    /* The directory is already open. Avoid resolving its full path for
++     * both open and stat on every child during bulk settings loading. */
++    int fd = tvh_openat(dirfd(dir->d.cur), name, O_RDONLY, 0);
++    FILE *fp = fd < 0 ? NULL : fdopen(fd, "rb");
++    if (fd >= 0 && !fp)
++      close(fd);
+     if (fp) {
+       struct stat st;
+-      if (!stat(path, &st)) {
++      if (!fstat(fileno(fp), &st)) {
+         ret         = calloc(1, sizeof(fb_file));
+         ret->type   = FB_DIRECT;
+         ret->size   = st.st_size;
+diff --git a/src/tvheadend.h b/src/tvheadend.h
+index 3ddf9e119..ac0980b9e 100644
+--- a/src/tvheadend.h
++++ b/src/tvheadend.h
+@@ -241,6 +241,7 @@ typedef struct th_pipe
+ void doexit(int x);
+ 
+ int tvh_open(const char *pathname, int flags, mode_t mode);
++int tvh_openat(int dirfd, const char *pathname, int flags, mode_t mode);
+ 
+ int tvh_socket(int domain, int type, int protocol);
+ 
+diff --git a/src/wrappers.c b/src/wrappers.c
+index 1f93b22c5..c58461442 100644
+--- a/src/wrappers.c
++++ b/src/wrappers.c
+@@ -23,6 +23,24 @@ tvh_open(const char *pathname, int flags, mode_t mode)
+   return fd;
+ }
+ 
++int
++tvh_openat(int dirfd, const char *pathname, int flags, mode_t mode)
++{
++#ifdef O_CLOEXEC
++  /* Set close-on-exec atomically without two fcntl calls per child. */
++  return openat(dirfd, pathname, flags | O_CLOEXEC, mode);
++#else
++  int fd;
++
++  tvh_mutex_lock(&fork_lock);
++  fd = openat(dirfd, pathname, flags, mode);
++  if (fd != -1)
++    fcntl(fd, F_SETFD, fcntl(fd, F_GETFD) | FD_CLOEXEC);
++  tvh_mutex_unlock(&fork_lock);
++  return fd;
++#endif
++}
++
+ int
+ tvh_socket(int domain, int type, int protocol)
+ {
+diff --git a/support/startup-performance.md b/support/startup-performance.md
+index 82c4394bf..4da483cc4 100644
+--- a/support/startup-performance.md
++++ b/support/startup-performance.md
+@@ -54,3 +54,33 @@ main or starting a server. It requires symbols, zlib and bundled defaults; it
+ covers individual files, directory reads, recursion, gzip, symlinks, ignored
+ hidden/backup files, missing paths and packaged fallback. All checks passed,
+ including AddressSanitizer and UndefinedBehaviorSanitizer for set insertion.
++
++## Descriptor-relative file loading (2026-11-13 continuation)
++
++The published baseline `576105975` already reuses filebundle directories, but
++`fb_open2()` still concatenates and resolves the directory pathname for `fopen`
++and again for `stat` on every child. Direct files now use `tvh_openat()` on the
++existing directory descriptor, followed by `fdopen` and `fstat`. Close-on-exec is set atomically with `O_CLOEXEC` where available, with the
++fork-locked `fcntl` fallback retained on other platforms. Bundle lookup,
++compression, settings formats, and object creation remain unchanged.
++
++A disposable ext4 fixture with 58,865 synthetic mux directories, each containing
++one JSON config, produced identical complete serialized maps in all comparisons.
++Three consecutive loader calls per process, including allocation and decoding but
++excluding map destruction and fixture creation, gave these warm-cache medians:
++
++| Order | Baseline | Descriptor-relative |
++| --- | ---: | ---: |
++| Baseline first | 7.411 s | 6.614 s |
++| Candidate first | 7.447 s | 4.391 s |
++
++CPU medians were 7.410/6.610 s and 7.440/4.390 s (baseline/candidate).
++Candidate times varied substantially between processes, so these runs do not
++establish a stable percentage improvement. Resident memory after each final load
++was 47,040/46,848 KiB; serialization also contributes to the process high-water mark.
++
++These are isolated settings-loader measurements, not native startup or playback
++speedups. The previous real large fixture was unavailable. No new storage backend
++or startup cache is introduced. The expanded `test-settings-load.py` also checks
++long directory paths, dangling/directory symlinks, renamed open directories, and
++close-on-exec. It runs in the Flatpak SDK without libc debug types.
+diff --git a/support/test-settings-load.py b/support/test-settings-load.py
+index 2f9efe88d..be64d15ce 100644
+--- a/support/test-settings-load.py
++++ b/support/test-settings-load.py
+@@ -24,6 +24,14 @@ with tempfile.TemporaryDirectory(prefix='tvh-settings-test-') as directory:
+     (records / 'backup~').write_text('{"value": 0}')
+     (records / 'invalid').write_text('invalid JSON')
+     (records / 'linked').symlink_to('plain')
++    (records / 'dangling').symlink_to('absent')
++    (records / 'directory-link').symlink_to('nested', target_is_directory=True)
++    # Exercise the descriptor-relative open beyond the old 512-byte buffer.
++    longdir = root
++    for i in range(7):
++        longdir = longdir / (str(i) + 'x' * 79)
++    longdir.mkdir(parents=True)
++    (longdir / 'plain').write_text('{"value": 13}')
+     # HTSMSG binary v1: one integer field named "value", value 11.
+     payload = bytes([2, 5, 0, 0, 0, 1]) + b'value' + bytes([11])
+     (records / 'compressed').write_bytes(
+@@ -33,7 +41,7 @@ set confirm off
+ set debuginfod enabled off
+ start
+ python
+-import gdb, json
++import gdb, json, os
+ root = ROOT
+ # Invoke the real loader in the built executable; main is never continued.
+ gdb.execute('call hts_settings_init(%s)' % json.dumps(root), to_string=True)
+@@ -47,7 +55,7 @@ def load(path, recursive=False, bundled=False):
+     address = int(message)
+     text = gdb.parse_and_eval('htsmsg_json_serialize_to_str((htsmsg_t *)%d, 0)' % address)
+     result = json.loads(text.string())
+-    gdb.execute('call free((void *)%d)' % int(text), to_string=True)
++    gdb.execute('call (void)free((void *)%d)' % int(text), to_string=True)
+     gdb.execute('call htsmsg_destroy((htsmsg_t *)%d)' % address, to_string=True)
+     return result
+ expected = {'plain': {'value': 7}, 'linked': {'value': 7}, 'compressed': {'value': 11}}
+@@ -57,16 +65,31 @@ assert load('records/plain') == {'value': 7}
+ assert load('records/compressed') == {'value': 11}
+ assert load('empty') == {}
+ assert load('missing-settings-test') is None
++longdir = LONGDIR
++assert load(longdir) == {'plain': {'value': 13}}
++# An open filebundle directory must remain usable if its pathname changes.
++directory = int(gdb.parse_and_eval('fb_opendir(%s)' % json.dumps(root + '/records')))
++assert directory
++os.rename(root + '/records', root + '/moved')
++file = int(gdb.parse_and_eval('fb_open2((fb_dir *)%d, "plain", 1, 0)' % directory))
++assert file
++assert int(gdb.parse_and_eval('fb_size((fb_file *)%d)' % file)) == len('{"value": 7}')
++# The descriptor must carry the same close-on-exec protection as tvh_fopen.
++fd = int(gdb.parse_and_eval('(int)fileno(((struct filebundle_file *)%d)->d.cur)' % file))
++assert int(gdb.parse_and_eval('(int)fcntl(%d, 1)' % fd)) & 1  # F_GETFD, FD_CLOEXEC
++gdb.execute('call fb_close((fb_file *)%d)' % file, to_string=True)
++assert not int(gdb.parse_and_eval('fb_open2((fb_dir *)%d, "absent", 1, 0)' % directory))
++gdb.execute('call fb_closedir((fb_dir *)%d)' % directory, to_string=True)
+ # A missing local file/directory must still fall back to packaged defaults.
+ assert load('profiles') == load('data/conf/profiles', bundled=True)
+ assert load('profiles')
+ assert load('epggrab/eit/scrape') == load('data/conf/epggrab/eit/scrape', bundled=True)
+ assert load('epggrab/eit/scrape')
+-print('PASS: plain, gzip, recursive, symlink, hidden/backup exclusion, missing and bundled settings')
++print('PASS: plain, gzip, recursive, symlinks, exclusions, missing, bundled, long path, renamed directory and CLOEXEC')
+ end
+ kill
+ quit
+-'''.replace('root = ROOT', 'root = ' + repr(str(root)))
++'''.replace('root = ROOT', 'root = ' + repr(str(root))).replace('longdir = LONGDIR', 'longdir = ' + repr(str(longdir)))
+     script = root / 'test.gdb'
+     script.write_text(commands)
+     subprocess.run(['gdb', '-q', '-batch', '-x', str(script), '--args',
+
+base-commit: 57610597563a3f49ac1d132c4735cb0bee6d4364
+-- 
+2.53.0
+

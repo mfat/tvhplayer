@@ -219,5 +219,534 @@
         "2026-11-13 01:26:10.857 [   INFO] epgdb:   broadcasts 229104"
       ]
     }
+  },
+  "descriptor_relative_continuation": {
+    "date": "2026-11-13",
+    "baseline_audit": {
+      "tvhplayer_local_head": "018ddf06925afaefc43b9ee6396894a4533535c6",
+      "tvhplayer_remote_main_at_start": "98dac3e277e28691fcac76f94cd61999cfa5803d",
+      "tvheadend_local_and_remote_head": "57610597563a3f49ac1d132c4735cb0bee6d4364",
+      "packaged_revision": "57610597563a3f49ac1d132c4735cb0bee6d4364",
+      "previously_local_changes_committed": [
+        "cab97c72d9f2b3dbb5c84e1963b12e15050e576b",
+        "57610597563a3f49ac1d132c4735cb0bee6d4364"
+      ]
+    },
+    "candidate_source": "47207c8001b4e4cfa2ef39b9be3e09e00f175279",
+    "candidate_branch": "startup-descriptor-loading",
+    "candidate_checkout": "packaging/tvheadend/work/startup-next",
+    "patch": "startup-optimization/0001-filebundle-directory-relative.patch",
+    "packaging_pins_changed": false,
+    "binary_sha256": {
+      "baseline": "cdf7b1d99ee99b425789b703c8ef1b20f5f4daaf9ea63849335734ca18168013",
+      "candidate": "ed04b81614fc0950e0b7b39c23557e07143595fc36facb757084e576df9a7bc1"
+    },
+    "benchmark": {
+      "scope": "production hts_settings_load_r(1, absolute mux directory); no server main, object registration or streaming",
+      "filesystem": "ext4",
+      "cache_method": "file data left populated; no eviction; directory/inode caches not dropped",
+      "fixture": {
+        "kind": "synthetic, disposable",
+        "mux_directories": 58865,
+        "uuid_format": "32 hexadecimal digits of zero-based integer",
+        "network_uuid": "11111111111111111111111111111111",
+        "file": "config",
+        "json_fields": {
+          "enabled": true,
+          "iptv_url": "http://127.0.0.1/test/{i}",
+          "iptv_muxname": "Mux {i}",
+          "scan_result": 2,
+          "services": {}
+        }
+      },
+      "clock": "Python monotonic around GDB inferior function call; /proc user/system CPU deltas at SC_CLK_TCK resolution",
+      "excluded_work": [
+        "fixture creation",
+        "message destruction",
+        "serialization",
+        "JSON comparison"
+      ],
+      "calls_per_process": 3,
+      "process_order": [
+        "before-1",
+        "after-1",
+        "after-2",
+        "before-2"
+      ],
+      "runs": {
+        "before-1": {
+          "runs": [
+            {
+              "seconds": 6.735534327002824,
+              "user_seconds": 0.77,
+              "system_seconds": 5.95,
+              "memory": [
+                "VmHWM:\t   46584 kB",
+                "VmRSS:\t   46352 kB"
+              ]
+            },
+            {
+              "seconds": 7.704718691005837,
+              "user_seconds": 0.9,
+              "system_seconds": 6.8,
+              "memory": [
+                "VmHWM:\t   65188 kB",
+                "VmRSS:\t   47012 kB"
+              ]
+            },
+            {
+              "seconds": 7.4105796170042595,
+              "user_seconds": 0.9000000000000001,
+              "system_seconds": 6.510000000000002,
+              "memory": [
+                "VmHWM:\t   65188 kB",
+                "VmRSS:\t   47040 kB"
+              ]
+            }
+          ],
+          "rows": 58865,
+          "sha256": "365b39911fb605f157108a0538f182a7d08d2db0f0b00e1738e145f0fd1e0c49"
+        },
+        "after-1": {
+          "runs": [
+            {
+              "seconds": 6.688639247993706,
+              "user_seconds": 0.78,
+              "system_seconds": 5.9,
+              "memory": [
+                "VmHWM:\t   46480 kB",
+                "VmRSS:\t   46240 kB"
+              ]
+            },
+            {
+              "seconds": 5.976386681009899,
+              "user_seconds": 0.7099999999999999,
+              "system_seconds": 5.26,
+              "memory": [
+                "VmHWM:\t   64996 kB",
+                "VmRSS:\t   46820 kB"
+              ]
+            },
+            {
+              "seconds": 6.613820024998859,
+              "user_seconds": 0.8200000000000001,
+              "system_seconds": 5.789999999999999,
+              "memory": [
+                "VmHWM:\t   64996 kB",
+                "VmRSS:\t   46848 kB"
+              ]
+            }
+          ],
+          "rows": 58865,
+          "sha256": "365b39911fb605f157108a0538f182a7d08d2db0f0b00e1738e145f0fd1e0c49"
+        },
+        "after-2": {
+          "runs": [
+            {
+              "seconds": 4.5096079890063265,
+              "user_seconds": 0.54,
+              "system_seconds": 3.96,
+              "memory": [
+                "VmHWM:\t   46352 kB",
+                "VmRSS:\t   46240 kB"
+              ]
+            },
+            {
+              "seconds": 4.3908386529947165,
+              "user_seconds": 0.5199999999999999,
+              "system_seconds": 3.8699999999999997,
+              "memory": [
+                "VmHWM:\t   64884 kB",
+                "VmRSS:\t   46820 kB"
+              ]
+            },
+            {
+              "seconds": 3.7159939390112413,
+              "user_seconds": 0.45999999999999996,
+              "system_seconds": 3.25,
+              "memory": [
+                "VmHWM:\t   64884 kB",
+                "VmRSS:\t   46848 kB"
+              ]
+            }
+          ],
+          "rows": 58865,
+          "sha256": "365b39911fb605f157108a0538f182a7d08d2db0f0b00e1738e145f0fd1e0c49"
+        },
+        "before-2": {
+          "runs": [
+            {
+              "seconds": 7.446847137005534,
+              "user_seconds": 0.84,
+              "system_seconds": 6.6,
+              "memory": [
+                "VmHWM:\t   46712 kB",
+                "VmRSS:\t   46352 kB"
+              ]
+            },
+            {
+              "seconds": 7.777775437003584,
+              "user_seconds": 0.9199999999999999,
+              "system_seconds": 6.8500000000000005,
+              "memory": [
+                "VmHWM:\t   65220 kB",
+                "VmRSS:\t   47012 kB"
+              ]
+            },
+            {
+              "seconds": 7.244830049996381,
+              "user_seconds": 0.8900000000000001,
+              "system_seconds": 6.359999999999999,
+              "memory": [
+                "VmHWM:\t   65220 kB",
+                "VmRSS:\t   47040 kB"
+              ]
+            }
+          ],
+          "rows": 58865,
+          "sha256": "365b39911fb605f157108a0538f182a7d08d2db0f0b00e1738e145f0fd1e0c49"
+        }
+      },
+      "interpretation": "Both pairs favor the candidate, with substantial inter-process variability. No stable percentage or end-to-end startup gain established."
+    },
+    "superseded_locked_fcntl_prototype": {
+      "source_description": "descriptor-relative open + fstat, retaining F_GETFD/F_SETFD in the new wrapper",
+      "runs": {
+        "before-1": {
+          "runs": [
+            {
+              "seconds": 7.376142578003055,
+              "memory": [
+                "VmHWM:\t   46540 kB",
+                "VmRSS:\t   46448 kB"
+              ]
+            },
+            {
+              "seconds": 7.36904888600111,
+              "memory": [
+                "VmHWM:\t   65176 kB",
+                "VmRSS:\t   47156 kB"
+              ]
+            },
+            {
+              "seconds": 7.247533301000658,
+              "memory": [
+                "VmHWM:\t   65176 kB",
+                "VmRSS:\t   47184 kB"
+              ]
+            },
+            {
+              "seconds": 7.2513257390019135,
+              "memory": [
+                "VmHWM:\t   65176 kB",
+                "VmRSS:\t   47220 kB"
+              ]
+            },
+            {
+              "seconds": 7.1981544669979485,
+              "memory": [
+                "VmHWM:\t   65176 kB",
+                "VmRSS:\t   47224 kB"
+              ]
+            }
+          ],
+          "rows": 58865,
+          "sha256": "365b39911fb605f157108a0538f182a7d08d2db0f0b00e1738e145f0fd1e0c49"
+        },
+        "after-1": {
+          "runs": [
+            {
+              "seconds": 7.410309054001118,
+              "memory": [
+                "VmHWM:\t   46468 kB",
+                "VmRSS:\t   46252 kB"
+              ]
+            },
+            {
+              "seconds": 6.492218131999834,
+              "memory": [
+                "VmHWM:\t   65036 kB",
+                "VmRSS:\t   46832 kB"
+              ]
+            },
+            {
+              "seconds": 6.682746544996917,
+              "memory": [
+                "VmHWM:\t   65036 kB",
+                "VmRSS:\t   46860 kB"
+              ]
+            },
+            {
+              "seconds": 6.818019107995497,
+              "memory": [
+                "VmHWM:\t   65036 kB",
+                "VmRSS:\t   46896 kB"
+              ]
+            },
+            {
+              "seconds": 6.944439315004274,
+              "memory": [
+                "VmHWM:\t   65036 kB",
+                "VmRSS:\t   46900 kB"
+              ]
+            }
+          ],
+          "rows": 58865,
+          "sha256": "365b39911fb605f157108a0538f182a7d08d2db0f0b00e1738e145f0fd1e0c49"
+        },
+        "after-2": {
+          "runs": [
+            {
+              "seconds": 7.077964397998585,
+              "memory": [
+                "VmHWM:\t   46604 kB",
+                "VmRSS:\t   46252 kB"
+              ]
+            },
+            {
+              "seconds": 7.143091136000294,
+              "memory": [
+                "VmHWM:\t   65116 kB",
+                "VmRSS:\t   46832 kB"
+              ]
+            },
+            {
+              "seconds": 5.99290650599869,
+              "memory": [
+                "VmHWM:\t   65116 kB",
+                "VmRSS:\t   46860 kB"
+              ]
+            },
+            {
+              "seconds": 6.871633142000064,
+              "memory": [
+                "VmHWM:\t   65116 kB",
+                "VmRSS:\t   46896 kB"
+              ]
+            },
+            {
+              "seconds": 7.54227986800106,
+              "memory": [
+                "VmHWM:\t   65116 kB",
+                "VmRSS:\t   46900 kB"
+              ]
+            }
+          ],
+          "rows": 58865,
+          "sha256": "365b39911fb605f157108a0538f182a7d08d2db0f0b00e1738e145f0fd1e0c49"
+        },
+        "before-2": {
+          "runs": [
+            {
+              "seconds": 6.366845682998246,
+              "memory": [
+                "VmHWM:\t   46732 kB",
+                "VmRSS:\t   46448 kB"
+              ]
+            },
+            {
+              "seconds": 7.243708745001641,
+              "memory": [
+                "VmHWM:\t   65352 kB",
+                "VmRSS:\t   47156 kB"
+              ]
+            },
+            {
+              "seconds": 7.3554243440012215,
+              "memory": [
+                "VmHWM:\t   65352 kB",
+                "VmRSS:\t   47184 kB"
+              ]
+            },
+            {
+              "seconds": 7.458189760996902,
+              "memory": [
+                "VmHWM:\t   65352 kB",
+                "VmRSS:\t   47220 kB"
+              ]
+            },
+            {
+              "seconds": 7.371292422998522,
+              "memory": [
+                "VmHWM:\t   65352 kB",
+                "VmRSS:\t   47224 kB"
+              ]
+            }
+          ],
+          "rows": 58865,
+          "sha256": "365b39911fb605f157108a0538f182a7d08d2db0f0b00e1738e145f0fd1e0c49"
+        }
+      },
+      "later_cpu_check": {
+        "before": [
+          {
+            "wall_seconds": 20.200933389001875,
+            "user_seconds": 1.43,
+            "system_seconds": 9.43
+          },
+          {
+            "wall_seconds": 5.948149641997588,
+            "user_seconds": 0.6900000000000002,
+            "system_seconds": 5.26
+          },
+          {
+            "wall_seconds": 6.464817579995724,
+            "user_seconds": 0.8000000000000003,
+            "system_seconds": 5.660000000000002
+          }
+        ],
+        "after": [
+          {
+            "wall_seconds": 6.98052451100375,
+            "user_seconds": 0.86,
+            "system_seconds": 6.16
+          },
+          {
+            "wall_seconds": 6.811994066003535,
+            "user_seconds": 0.85,
+            "system_seconds": 5.98
+          },
+          {
+            "wall_seconds": 7.138942799996585,
+            "user_seconds": 0.9400000000000002,
+            "system_seconds": 6.210000000000001
+          }
+        ]
+      },
+      "decision": "Later CPU observations were inconsistent with a reliable improvement; superseded by atomic O_CLOEXEC with locked fallback."
+    },
+    "stream_smoke": {
+      "scope": "separate disposable one-channel IPTV configuration and loopback MPEG-TS source, not TVHplayer launch or large-profile benchmark",
+      "start_notice_is_not_a_separately_timed_HTTP_readiness_probe": true,
+      "http_api_verified_before_metadata": true,
+      "baseline": [
+        {
+          "iteration": 0,
+          "start_notice_seconds": 1.772746514994651,
+          "first_channel_from_launch_seconds": 1.7767997789997025,
+          "sync_from_launch_seconds": 1.7768506689972128,
+          "stream_bytes_seconds": 2.281207899999572,
+          "decoded_frames": 3,
+          "decoded_seconds": 2.4393818379976437,
+          "stream_bytes": 188000,
+          "codecs": [
+            "mp2",
+            "mpeg2video"
+          ],
+          "scan_state": 0,
+          "scan_result": 1,
+          "metadata_counts": {
+            "tagAdd": 1,
+            "channelAdd": 1,
+            "tagUpdate": 1,
+            "initialSyncCompleted": 1
+          }
+        },
+        {
+          "iteration": 1,
+          "start_notice_seconds": 1.9605419420040562,
+          "first_channel_from_launch_seconds": 1.9640190470017842,
+          "sync_from_launch_seconds": 1.96404153900221,
+          "stream_bytes_seconds": 2.467953250001301,
+          "decoded_frames": 3,
+          "decoded_seconds": 2.674851937001222,
+          "stream_bytes": 188000,
+          "codecs": [
+            "mp2",
+            "mpeg2video"
+          ],
+          "scan_state": 0,
+          "scan_result": 1,
+          "metadata_counts": {
+            "tagAdd": 1,
+            "channelAdd": 1,
+            "tagUpdate": 1,
+            "initialSyncCompleted": 1
+          }
+        }
+      ],
+      "candidate": [
+        {
+          "iteration": 0,
+          "start_notice_seconds": 1.835754806001205,
+          "first_channel_from_launch_seconds": 1.8396989760076394,
+          "sync_from_launch_seconds": 1.8397314840112813,
+          "stream_bytes_seconds": 2.3435854470008053,
+          "decoded_frames": 3,
+          "decoded_seconds": 2.5747291370062158,
+          "stream_bytes": 188000,
+          "codecs": [
+            "mp2",
+            "mpeg2video"
+          ],
+          "scan_state": 0,
+          "scan_result": 1,
+          "metadata_counts": {
+            "tagAdd": 1,
+            "channelAdd": 1,
+            "tagUpdate": 1,
+            "initialSyncCompleted": 1
+          }
+        },
+        {
+          "iteration": 1,
+          "start_notice_seconds": 1.7707806230027927,
+          "first_channel_from_launch_seconds": 1.7741782350058202,
+          "sync_from_launch_seconds": 1.774232280004071,
+          "stream_bytes_seconds": 2.2783776769938413,
+          "decoded_frames": 3,
+          "decoded_seconds": 2.474241080999491,
+          "stream_bytes": 188000,
+          "codecs": [
+            "mp2",
+            "mpeg2video"
+          ],
+          "scan_state": 0,
+          "scan_result": 1,
+          "metadata_counts": {
+            "tagAdd": 1,
+            "channelAdd": 1,
+            "tagUpdate": 1,
+            "initialSyncCompleted": 1
+          }
+        }
+      ],
+      "assertions": [
+        "channel UUID/name/number/services/tags preserved",
+        "mux/service/tag identities preserved",
+        "188000 HTTP stream bytes received",
+        "MPEG2VIDEO and MP2 identified",
+        "three video frames decoded",
+        "manual mux scan completed with OK result",
+        "clean shutdown and successful restart"
+      ]
+    },
+    "validation": {
+      "native_linux_build": "pass",
+      "native_loader_regression": "pass",
+      "native_sorted_set_and_field_lookup_regressions": "pass",
+      "kde_6_11_sdk_server_module_build": "pass with manifest flags, pinned local DVB scan data, static HDHomeRun/libdvbcsa",
+      "sdk_loader_sorted_set_and_field_lookup_regressions": "pass",
+      "packaging_pin_tests": "6 passed",
+      "hardware_tuners": "not exercised",
+      "windows_wsl": "Linux API compatibility assessed; no Windows build/runtime test",
+      "full_flatpak_application_bundle": "not rebuilt"
+    },
+    "unverified": [
+      "real large-profile native initialization time",
+      "TVHplayer launch-to-successful-playback time",
+      "cold-file-data candidate performance",
+      "real large-profile API snapshot equality including EPG/bouquets/access/DVR",
+      "EPG now-next/expiration/overlap and DVR scheduling under real profile"
+    ],
+    "fixture_limitation": "Original .startup-profile/fixture is absent; live server configuration was not used.",
+    "candidate_binary_source_note": "Native benchmark/stream executable built from the C source content of 47207c800 before commit metadata was finalized; its SHA-256 identifies the exact tested executable. SDK C sources and regression tests were compared byte-for-byte with that checkout.",
+    "build_configuration": {
+      "native_configure_args": "--disable-tvhcsa --disable-uriparser --disable-avahi --disable-libav --enable-bundle --disable-ffmpeg_static --disable-hdhomerun_static --disable-vue_build --disable-pcloud_cache --disable-ccache",
+      "native_compiler": "cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+      "sdk": "org.kde.Sdk//6.11",
+      "sdk_configure_args": "--disable-libav --disable-ffmpeg_static --disable-hdhomerun_static --enable-hdhomerun_client --disable-vue_build --disable-pcloud_cache --disable-avahi --disable-ccache",
+      "make": "make -j4 CFLAGS_NO_WERROR=yes"
+    }
   }
 }
