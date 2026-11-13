@@ -57,3 +57,10 @@ Its Linux/Flatpak SDK checks and limited synthetic loader measurements are recor
 in the [startup investigation](cold-startup-profile.md#continuation-descriptor-relative-configuration-loading).
 It has not changed the production pins; large-profile startup/EPG/DVR verification
 is still required before considering it for packaging.
+
+The subsequent [read-only SQLite experiment](startup-optimization/0002-sqlite-startup-prototype.patch),
+local commit `79f13bdbf`, uses a consistent disposable copy of the real large
+configuration. It provides startup/data-equivalence evidence, but does not
+implement transactional writes, migration or recovery. Its private database stays
+in ignored benchmark work. See the [results and limitations](cold-startup-profile.md#sqlite-experiment-after-recovering-a-real-fixture);
+neither experiment is enabled by release packaging.

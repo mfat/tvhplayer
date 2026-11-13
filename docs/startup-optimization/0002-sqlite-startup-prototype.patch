@@ -1,0 +1,382 @@
+From 79f13bdbf8642944a6fa629f266b651ffc5e788f Mon Sep 17 00:00:00 2001
+From: Mehdi <mah.fat@gmail.com>
+Date: Fri, 13 Nov 2026 16:42:42 +0330
+Subject: [PATCH] Experiment with a read-only SQLite settings loader for
+ startup
+
+---
+ src/settings.c                      |  48 ++++++++-----
+ support/sqlite-startup-import.py    |  65 +++++++++++++++++
+ support/sqlite-startup-prototype.c  | 105 ++++++++++++++++++++++++++++
+ support/sqlite-startup-prototype.md |  44 ++++++++++++
+ support/test-settings-load.py       |  10 ++-
+ 5 files changed, 253 insertions(+), 19 deletions(-)
+ create mode 100644 support/sqlite-startup-import.py
+ create mode 100644 support/sqlite-startup-prototype.c
+ create mode 100644 support/sqlite-startup-prototype.md
+
+diff --git a/src/settings.c b/src/settings.c
+index 723119ae9..5a66d69cb 100644
+--- a/src/settings.c
++++ b/src/settings.c
+@@ -38,6 +38,7 @@
+ #include "../vendor/xdg-user-dirs/xdg-user-dir-lookup.c"
+ 
+ static char *settingspath = NULL;
++static void sqlite_settings_done(void);
+ 
+ /**
+  *
+@@ -64,6 +65,7 @@ hts_settings_init(const char *confpath)
+ void
+ hts_settings_done(void)
+ {
++  sqlite_settings_done();
+   free(settingspath);
+ }
+ 
+@@ -218,25 +220,10 @@ hts_settings_save(htsmsg_t *record, const char *pathfmt, ...)
+  *
+  */
+ static htsmsg_t *
+-hts_settings_load_one(const char *filename, const fb_dir *dir, const char *name)
++hts_settings_decode(const char *filename, char *mem, ssize_t size)
+ {
+-  ssize_t n, size;
+-  char *mem;
+-  fb_file *fp;
+   htsmsg_t *r = NULL;
+-
+-  /* Open */
+-  fp = dir ? fb_open2(dir, name, 1, 0) : fb_open(filename, 1, 0);
+-  if (!fp) return NULL;
+-  size = fb_size(fp);
+-
+-  /* Load data */
+-  mem    = malloc(size+1);
+-  n      = fb_read(fp, mem, size);
+-  if (n >= 0) mem[n] = 0;
+-
+-  /* Decode */
+-  if(n == size) {
++  {
+     if (size > 12 && memcmp(mem, "\xff\xffGZIP0", 7) == 0 &&
+         (mem[7] == '0' || mem[7] == '1')) {
+ #if ENABLE_ZLIB
+@@ -261,7 +248,29 @@ hts_settings_load_one(const char *filename, const fb_dir *dir, const char *name)
+     }
+   }
+ 
+-  /* Close */
++  return r;
++}
++
++/* Startup-only experiment: no production writer or migration is provided. */
++#include "../support/sqlite-startup-prototype.c"
++
++static htsmsg_t *
++hts_settings_load_one(const char *filename, const fb_dir *dir, const char *name)
++{
++  ssize_t n, size;
++  char *mem;
++  fb_file *fp;
++  htsmsg_t *r = NULL;
++
++  fp = dir ? fb_open2(dir, name, 1, 0) : fb_open(filename, 1, 0);
++  if (!fp) return NULL;
++  size = fb_size(fp);
++  mem = malloc(size + 1);
++  n = fb_read(fp, mem, size);
++  if (n == size) {
++    mem[n] = 0;
++    r = hts_settings_decode(filename, mem, size);
++  }
+   fb_close(fp);
+   free(mem);
+ 
+@@ -282,6 +291,9 @@ hts_settings_load_path(const char *fullpath, int depth)
+   htsmsg_t *r, *c;
+   int n, i;
+ 
++  if (sqlite_settings_load_path(fullpath, depth, &r))
++    return r;
++
+   /* Invalid */
+   if (fb_stat(fullpath, &st)) return NULL;
+ 
+diff --git a/support/sqlite-startup-import.py b/support/sqlite-startup-import.py
+new file mode 100644
+index 000000000..d661cc70e
+--- /dev/null
++++ b/support/sqlite-startup-import.py
+@@ -0,0 +1,65 @@
++#!/usr/bin/env python3
++"""Import a disposable configuration tree for the read-only startup experiment."""
++import json
++import os
++from pathlib import Path
++import sqlite3
++import sys
++import time
++
++
++def main():
++    if len(sys.argv) != 3:
++        raise SystemExit('usage: sqlite-startup-import.py FIXTURE DATABASE')
++    root = Path(sys.argv[1]).resolve()
++    target = Path(sys.argv[2]).absolute()
++    started = time.monotonic()
++    # Refuse replacement and protect credentials before writing the first byte.
++    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
++    os.close(descriptor)
++    excluded = {target, Path(str(target) + '-journal'),
++                Path(str(target) + '-wal'), Path(str(target) + '-shm')}
++    counts = {'files': 0, 'directories': 0, 'payload_bytes': 0}
++    db = sqlite3.connect(target)
++    try:
++        db.executescript('''
++            CREATE TABLE nodes(path TEXT PRIMARY KEY, parent TEXT, name TEXT,
++                               kind INTEGER, ordinal INTEGER, data BLOB);
++            CREATE INDEX children ON nodes(parent, ordinal);
++        ''')
++
++        def visit(path, key, parent, name, ordinal):
++            if path.absolute() in excluded:
++                return
++            directory = path.is_dir() and not path.is_symlink()
++            data = None
++            if directory:
++                counts['directories'] += 1
++            else:
++                try:
++                    data = path.read_bytes()
++                except (OSError, ValueError):
++                    pass  # Preserve an unreadable/invalid file as a skipped row.
++                counts['files'] += 1
++                counts['payload_bytes'] += len(data) if data is not None else 0
++            db.execute('INSERT INTO nodes VALUES(?,?,?,?,?,?)',
++                       (key, parent, name, int(directory), ordinal, data))
++            if directory:
++                with os.scandir(path) as entries:
++                    for index, entry in enumerate(entries):
++                        child = entry.name if not key else key + '/' + entry.name
++                        visit(Path(entry.path), child, key, entry.name, index)
++
++        with db:
++            visit(root, '', None, '', 0)
++        assert db.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
++    finally:
++        db.close()
++    counts.update(database_bytes=target.stat().st_size,
++                  import_seconds=time.monotonic() - started,
++                  sqlite_version=sqlite3.sqlite_version)
++    print(json.dumps(counts))
++
++
++if __name__ == '__main__':
++    main()
+diff --git a/support/sqlite-startup-prototype.c b/support/sqlite-startup-prototype.c
+new file mode 100644
+index 000000000..38104b875
+--- /dev/null
++++ b/support/sqlite-startup-prototype.c
+@@ -0,0 +1,105 @@
++/* Isolated read-only startup snapshot experiment; never a production backend.
++ * Writers continue to use the disposable file tree. Rebuild this snapshot before
++ * every process. Missing entries retain ordinary packaged-default fallback. */
++#include <sqlite3.h>
++
++static sqlite3 *startup_db;
++
++static void
++sqlite_startup_check(int rc)
++{
++  if (rc != SQLITE_OK) {
++    fprintf(stderr, "SQLite startup experiment failed: %s\n",
++            startup_db ? sqlite3_errmsg(startup_db) : "open failed");
++    abort();
++  }
++}
++
++static htsmsg_t *
++sqlite_startup_decode(sqlite3_stmt *stmt, int column, const char *name)
++{
++  int size = sqlite3_column_bytes(stmt, column);
++  const void *blob = sqlite3_column_blob(stmt, column);
++  char *mem;
++  htsmsg_t *msg;
++  if (!blob) return NULL;
++  mem = malloc((size_t)size + 1);
++  if (!mem) abort();
++  memcpy(mem, blob, size);
++  mem[size] = 0;
++  msg = hts_settings_decode(name, mem, size);
++  free(mem);
++  return msg;
++}
++
++static htsmsg_t *
++sqlite_startup_load(const char *path, int depth)
++{
++  sqlite3_stmt *stmt = NULL;
++  htsmsg_t *result = NULL, *child;
++  char childpath[PATH_MAX];
++  const char *name;
++  int rc, directory = 0;
++
++  sqlite_startup_check(sqlite3_prepare_v2(startup_db,
++      "SELECT kind,data FROM nodes WHERE path=?", -1, &stmt, NULL));
++  sqlite_startup_check(sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT));
++  rc = sqlite3_step(stmt);
++  if (rc == SQLITE_ROW) {
++    directory = sqlite3_column_int(stmt, 0);
++    if (!directory) result = sqlite_startup_decode(stmt, 1, path);
++  } else if (rc != SQLITE_DONE) {
++    sqlite_startup_check(rc);
++  }
++  sqlite_startup_check(sqlite3_finalize(stmt));
++  if (!directory) return result;
++
++  result = htsmsg_create_map();
++  sqlite_startup_check(sqlite3_prepare_v2(startup_db,
++      "SELECT name,kind,data FROM nodes WHERE parent=? ORDER BY ordinal",
++      -1, &stmt, NULL));
++  sqlite_startup_check(sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT));
++  while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
++    name = (const char *)sqlite3_column_text(stmt, 0);
++    if (!name || !*name || *name == '.' || name[strlen(name)-1] == '~')
++      continue;
++    if (sqlite3_column_int(stmt, 1)) {
++      if (depth <= 0) continue;
++      snprintf(childpath, sizeof(childpath), "%s%s%s", path, *path ? "/" : "", name);
++      child = sqlite_startup_load(childpath, depth - 1);
++    } else {
++      child = sqlite_startup_decode(stmt, 2, name);
++    }
++    if (child) htsmsg_add_msg(result, name, child);
++  }
++  if (rc != SQLITE_DONE) sqlite_startup_check(rc);
++  sqlite_startup_check(sqlite3_finalize(stmt));
++  return result;
++}
++
++static int
++sqlite_settings_load_path(const char *fullpath, int depth, htsmsg_t **result)
++{
++  const char *database = getenv("TVH_STARTUP_SQLITE");
++  size_t length;
++  if (!database || !*database || !settingspath) return 0;
++  length = strlen(settingspath);
++  if (strncmp(fullpath, settingspath, length) ||
++      (fullpath[length] && fullpath[length] != '/')) return 0;
++  if (!startup_db)
++    sqlite_startup_check(sqlite3_open_v2(database, &startup_db,
++                         SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, NULL));
++  fullpath += length;
++  if (*fullpath == '/') fullpath++;
++  *result = sqlite_startup_load(fullpath, depth);
++  return 1;
++}
++
++static void
++sqlite_settings_done(void)
++{
++  if (startup_db) {
++    sqlite_startup_check(sqlite3_close(startup_db));
++    startup_db = NULL;
++  }
++}
+diff --git a/support/sqlite-startup-prototype.md b/support/sqlite-startup-prototype.md
+new file mode 100644
+index 000000000..c8da990da
+--- /dev/null
++++ b/support/sqlite-startup-prototype.md
+@@ -0,0 +1,44 @@
++# Read-only SQLite startup experiment
++
++This branch is an isolated benchmark, not a production storage backend. It is
++based on the descriptor-relative file loader at `47207c800`. No application or
++release packaging enables it.
++
++`sqlite-startup-import.py` imports a disposable configuration tree into SQLite.
++Rows retain relative paths, directory membership/enumeration order, and the exact
++file bytes. The default schema uses a rowid table with indexes on path and on
++parent/order. A WITHOUT ROWID version was also measured: it was substantially
++larger, and its single full-startup observation was slower. Timing variability
++prevents attributing that entire difference to the schema alone.
++
++`src/settings.c` shares its existing JSON/gzip/binary decoding between both read
++paths. The included `sqlite-startup-prototype.c` selects SQLite only when
++`TVH_STARTUP_SQLITE` names a database, and only for paths inside the configured
++settings root. Packaged fallback still uses filebundle. EPG file loading and all
++object creation, scan preparation, linkage and registration are unchanged.
++
++Build with the normal native flags plus SQLite development headers/library:
++
++```sh
++CFLAGS="$(pkg-config --cflags sqlite3)" \
++LDFLAGS="$(pkg-config --libs sqlite3)" ./configure <normal-configure-options>
++make -j4 CFLAGS_NO_WERROR=yes
++python3 support/test-settings-load.py build.linux/tvheadend
++TVH_STARTUP_SQLITE=1 python3 support/test-settings-load.py build.linux/tvheadend
++python3 support/sqlite-startup-import.py /disposable/fixture /disposable/settings.sqlite
++TVH_STARTUP_SQLITE=/disposable/settings.sqlite \
++  ./build.linux/tvheadend -c /disposable/run-copy <normal-test-options>
++```
++
++Keep the imported fixture immutable. Create a fresh run copy for every process.
++Unset the environment variable to exercise the file backend in the same binary.
++Import time and database creation must be measured separately from startup.
++Cold-file-data trials must flush/evict both the run-copy files and the SQLite file;
++this does not drop inode/directory caches or simulate a cold OS boot.
++
++Writes still go to the disposable **file tree**. SQLite is read-only and is not
++updated after edits, rescans or shutdown. Re-import before testing any changed
++configuration. This limitation deliberately excludes normal-operation write
++correctness, migration, crash recovery and durable restart from the experiment.
++Do not enable this prototype for a live configuration. Production adoption needs
++a transactional write path, migration/recovery design and those regression tests.
+diff --git a/support/test-settings-load.py b/support/test-settings-load.py
+index be64d15ce..f7798ff4a 100644
+--- a/support/test-settings-load.py
++++ b/support/test-settings-load.py
+@@ -6,6 +6,7 @@ Requires a debug-symbol build with file bundles and zlib enabled, and GDB.
+ """
+ import gzip
+ import json
++import os
+ from pathlib import Path
+ import subprocess
+ import sys
+@@ -36,6 +37,12 @@ with tempfile.TemporaryDirectory(prefix='tvh-settings-test-') as directory:
+     payload = bytes([2, 5, 0, 0, 0, 1]) + b'value' + bytes([11])
+     (records / 'compressed').write_bytes(
+         b'\xff\xffGZIP00' + len(payload).to_bytes(4, 'big') + gzip.compress(payload))
++    environment = os.environ.copy()
++    if environment.get('TVH_STARTUP_SQLITE'):
++        database = root / 'snapshot.sqlite'
++        subprocess.run([sys.executable, str(Path(__file__).with_name('sqlite-startup-import.py')),
++                        str(root), str(database)], check=True)
++        environment['TVH_STARTUP_SQLITE'] = str(database)
+     commands = '''set pagination off
+ set confirm off
+ set debuginfod enabled off
+@@ -85,6 +92,7 @@ assert load('profiles') == load('data/conf/profiles', bundled=True)
+ assert load('profiles')
+ assert load('epggrab/eit/scrape') == load('data/conf/epggrab/eit/scrape', bundled=True)
+ assert load('epggrab/eit/scrape')
++gdb.execute('call hts_settings_done()', to_string=True)
+ print('PASS: plain, gzip, recursive, symlinks, exclusions, missing, bundled, long path, renamed directory and CLOEXEC')
+ end
+ kill
+@@ -93,4 +101,4 @@ quit
+     script = root / 'test.gdb'
+     script.write_text(commands)
+     subprocess.run(['gdb', '-q', '-batch', '-x', str(script), '--args',
+-                    str(binary.resolve())], check=True)
++                    str(binary.resolve())], check=True, env=environment)
+
+base-commit: 47207c8001b4e4cfa2ef39b9be3e09e00f175279
+-- 
+2.53.0
+

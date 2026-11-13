@@ -748,5 +748,619 @@
       "sdk_configure_args": "--disable-libav --disable-ffmpeg_static --disable-hdhomerun_static --enable-hdhomerun_client --disable-vue_build --disable-pcloud_cache --disable-avahi --disable-ccache",
       "make": "make -j4 CFLAGS_NO_WERROR=yes"
     }
+  },
+  "sqlite_startup_experiment": {
+    "date": "2026-11-13",
+    "source_base": "47207c8001b4e4cfa2ef39b9be3e09e00f175279",
+    "prototype_source": "79f13bdbf8642944a6fa629f266b651ffc5e788f",
+    "packaged_revision_unchanged": "57610597563a3f49ac1d132c4735cb0bee6d4364",
+    "prototype_checkout": "packaging/tvheadend/work/sqlite-prototype",
+    "source_patch": "startup-optimization/0002-sqlite-startup-prototype.patch",
+    "prototype_binary_sha256": "b64c702b16dd153d4e89a04bc2ea4117a7f0b1f44939cb77dfec65ba3aebdc79",
+    "binary_source_note": "Measured native C sources correspond to the final prototype commit; the importer was subsequently formatted and hardened to create private files exclusively. The benchmark database already has mode 0600. No database contents are committed.",
+    "prototype_limits": [
+      "Read-only settings snapshot; ordinary writes still target disposable files",
+      "No authoritative storage migration, write/delete/rename integration or recovery implementation",
+      "Original serializers and native object restoration preserved",
+      "No live-server test or release packaging integration"
+    ],
+    "fixture": {
+      "copy_manifest": {
+        "files": 127571,
+        "changed_during_copy": 0,
+        "copied_at": 1794573731.6269128
+      },
+      "description": "new disposable copy of current built-in configuration, not the deleted original fixture",
+      "path": "packaging/tvheadend/work/sqlite-investigation/fixture",
+      "filesystem": "ext4",
+      "live_configuration_modified": false,
+      "api_snapshot_method": "Existing sorted complete API rows/hashes; runtime DVR/now-next fields excluded; fixed future EPG cutoff 1794577619"
+    },
+    "import": {
+      "without_rowid": {
+        "files": 127571,
+        "directories": 48,
+        "payload_bytes": 117792497,
+        "database_bytes": 372015104,
+        "import_seconds": 45.33069397301006,
+        "sqlite_version": "3.46.1"
+      },
+      "rowid": {
+        "files": 127571,
+        "directories": 48,
+        "payload_bytes": 117792497,
+        "database_bytes": 174292992,
+        "import_seconds": 52.32688287500059,
+        "sqlite_version": "3.46.1"
+      },
+      "selected_database": "packaging/tvheadend/work/sqlite-investigation/settings-rowid.sqlite",
+      "private_database_not_committed": true,
+      "import_time_excluded_from_startup": true
+    },
+    "benchmark_method": {
+      "startup": "process launch to START notice, existing --trace main stage messages",
+      "warm": "fresh config copies and processes; file-data caches left populated",
+      "cold": "sync -f and per-file POSIX_FADV_DONTNEED on run copy; additionally sync/evict SQLite database for SQLite trial; warm inode/directory caches; not cold boot",
+      "process_order": [
+        "files-warm-1",
+        "sqlite-warm-1",
+        "sqlite-rowid-warm-1",
+        "files-warm-2",
+        "cold-files",
+        "cold-sqlite-rowid",
+        "pinned-warm"
+      ],
+      "early_exit_code_note": "First two trials predate explicit exit-code recording; later trials record clean exit 0",
+      "database_library": "SQLite 3.46.1",
+      "native_configure_args": "--disable-tvhcsa --disable-uriparser --disable-avahi --disable-libav --enable-bundle --disable-ffmpeg_static --disable-hdhomerun_static --disable-vue_build --disable-pcloud_cache --disable-ccache; prototype additionally links libsqlite3.so.0",
+      "snapshot_validation": "All seven API hashes, HTSP channel hashes and metadata counts identical across all listed cases",
+      "interpretation": "Useful read/startup benefit, most pronounced in one cold-file-data pair; small sequential sample and differing stage timings prevent a stable percentage guarantee or a production migration decision."
+    },
+    "runs": {
+      "files-warm-1": {
+        "memory_at_start": [
+          "VmHWM:\t  712152 kB",
+          "VmRSS:\t  586404 kB"
+        ],
+        "cpu_seconds_at_start": 17.34,
+        "epg_cutoff": 1794577619,
+        "snapshots": {
+          "epg/events/grid": {
+            "rows": 191044,
+            "sha256": "1e3b9daecba6c0b046977ace9237e85b81acfa52bc809abb23b7daf0a1023d4b"
+          },
+          "channel/grid": {
+            "rows": 58868,
+            "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+          },
+          "channeltag/grid": {
+            "rows": 1034,
+            "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+          },
+          "mpegts/network/grid": {
+            "rows": 11,
+            "sha256": "b8817aa5f88116bca75bca351a8bfe35ee363ae182f17e54367afefc455d1825"
+          },
+          "mpegts/mux/grid": {
+            "rows": 58865,
+            "sha256": "8ba7db095f63d603906e077cd44c85bbba3598a588119abe123d6cffc94704a0"
+          },
+          "mpegts/service/grid": {
+            "rows": 58868,
+            "sha256": "5e9bad3631180c160358ebac4542e804e63623cbd4703834250c1d65a6dda568"
+          },
+          "bouquet/grid": {
+            "rows": 21,
+            "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+          }
+        },
+        "startup_seconds": 19.23020238499157,
+        "htsp_sync_seconds": 4.927295599001809,
+        "first_channel_seconds": 0.01697058099671267,
+        "metadata_counts": {
+          "tagAdd": 1034,
+          "channelAdd": 58868,
+          "tagUpdate": 1034,
+          "dvrEntryAdd": 1,
+          "initialSyncCompleted": 1
+        },
+        "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+        "timings": [
+          "2026-11-13 16:18:20.675 [  TRACE] main: startup iptv_network_init: 8369 ms",
+          "2026-11-13 16:18:20.676 [  TRACE] main: startup iptv threads: 0 ms (2 thread(s))",
+          "2026-11-13 16:18:20.676 [  TRACE] main: startup mpegts_init: 8379 ms",
+          "2026-11-13 16:18:24.613 [  TRACE] main: startup channel_init: 3937 ms",
+          "2026-11-13 16:18:26.322 [  TRACE] main: startup bouquet_service_resolve: 1709 ms",
+          "2026-11-13 16:18:28.617 [  TRACE] main: startup epggrab_init: 2294 ms",
+          "2026-11-13 16:18:29.374 [  TRACE] main: startup epg inflate: 756 ms",
+          "2026-11-13 16:18:29.374 [   INFO] epgdb: parsing 95181786 bytes",
+          "2026-11-13 16:18:31.211 [  TRACE] main: startup epg parse: 1836 ms",
+          "2026-11-13 16:18:31.211 [  TRACE] main: startup epg decode/restore/destroy: 116/1660/43 ms",
+          "2026-11-13 16:18:31.211 [   INFO] epgdb:   broadcasts 196810",
+          "2026-11-13 16:18:31.217 [  TRACE] main: startup epg_init: 2599 ms",
+          "2026-11-13 16:18:31.217 [  TRACE] main: startup htsp_register: 0 ms",
+          "2026-11-13 16:18:31.889 [  TRACE] main: startup initial metadata enqueue: 515 ms, 58868 channels"
+        ]
+      },
+      "sqlite-warm-1": {
+        "memory_at_start": [
+          "VmHWM:\t  716396 kB",
+          "VmRSS:\t  591256 kB"
+        ],
+        "cpu_seconds_at_start": 23.12,
+        "epg_cutoff": 1794577619,
+        "snapshots": {
+          "epg/events/grid": {
+            "rows": 191044,
+            "sha256": "1e3b9daecba6c0b046977ace9237e85b81acfa52bc809abb23b7daf0a1023d4b"
+          },
+          "channel/grid": {
+            "rows": 58868,
+            "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+          },
+          "channeltag/grid": {
+            "rows": 1034,
+            "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+          },
+          "mpegts/network/grid": {
+            "rows": 11,
+            "sha256": "b8817aa5f88116bca75bca351a8bfe35ee363ae182f17e54367afefc455d1825"
+          },
+          "mpegts/mux/grid": {
+            "rows": 58865,
+            "sha256": "8ba7db095f63d603906e077cd44c85bbba3598a588119abe123d6cffc94704a0"
+          },
+          "mpegts/service/grid": {
+            "rows": 58868,
+            "sha256": "5e9bad3631180c160358ebac4542e804e63623cbd4703834250c1d65a6dda568"
+          },
+          "bouquet/grid": {
+            "rows": 21,
+            "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+          }
+        },
+        "startup_seconds": 30.312266316002933,
+        "htsp_sync_seconds": 4.903161310998257,
+        "first_channel_seconds": 0.017340685008093715,
+        "metadata_counts": {
+          "tagAdd": 1034,
+          "channelAdd": 58868,
+          "tagUpdate": 1034,
+          "dvrEntryAdd": 1,
+          "initialSyncCompleted": 1
+        },
+        "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+        "timings": [
+          "2026-11-13 16:20:16.949 [  TRACE] main: startup iptv_network_init: 13073 ms",
+          "2026-11-13 16:20:16.949 [  TRACE] main: startup iptv threads: 0 ms (2 thread(s))",
+          "2026-11-13 16:20:16.950 [  TRACE] main: startup mpegts_init: 13110 ms",
+          "2026-11-13 16:20:21.745 [  TRACE] main: startup channel_init: 4795 ms",
+          "2026-11-13 16:20:23.698 [  TRACE] main: startup bouquet_service_resolve: 1953 ms",
+          "2026-11-13 16:20:29.118 [  TRACE] main: startup epggrab_init: 5307 ms",
+          "2026-11-13 16:20:29.812 [  TRACE] main: startup epg inflate: 694 ms",
+          "2026-11-13 16:20:29.812 [   INFO] epgdb: parsing 95181786 bytes",
+          "2026-11-13 16:20:33.409 [  TRACE] main: startup epg parse: 3596 ms",
+          "2026-11-13 16:20:33.409 [  TRACE] main: startup epg decode/restore/destroy: 203/3271/90 ms",
+          "2026-11-13 16:20:33.409 [   INFO] epgdb:   broadcasts 196594",
+          "2026-11-13 16:20:33.421 [  TRACE] main: startup epg_init: 4303 ms",
+          "2026-11-13 16:20:33.633 [  TRACE] main: startup htsp_register: 0 ms",
+          "2026-11-13 16:20:34.390 [  TRACE] main: startup initial metadata enqueue: 599 ms, 58868 channels"
+        ]
+      },
+      "sqlite-rowid-warm-1": {
+        "memory_at_start": [
+          "VmHWM:\t  717016 kB",
+          "VmRSS:\t  591260 kB"
+        ],
+        "cpu_seconds_at_start": 14.06,
+        "epg_cutoff": 1794577619,
+        "snapshots": {
+          "epg/events/grid": {
+            "rows": 191044,
+            "sha256": "1e3b9daecba6c0b046977ace9237e85b81acfa52bc809abb23b7daf0a1023d4b"
+          },
+          "channel/grid": {
+            "rows": 58868,
+            "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+          },
+          "channeltag/grid": {
+            "rows": 1034,
+            "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+          },
+          "mpegts/network/grid": {
+            "rows": 11,
+            "sha256": "b8817aa5f88116bca75bca351a8bfe35ee363ae182f17e54367afefc455d1825"
+          },
+          "mpegts/mux/grid": {
+            "rows": 58865,
+            "sha256": "8ba7db095f63d603906e077cd44c85bbba3598a588119abe123d6cffc94704a0"
+          },
+          "mpegts/service/grid": {
+            "rows": 58868,
+            "sha256": "5e9bad3631180c160358ebac4542e804e63623cbd4703834250c1d65a6dda568"
+          },
+          "bouquet/grid": {
+            "rows": 21,
+            "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+          }
+        },
+        "startup_seconds": 15.779232643995783,
+        "htsp_sync_seconds": 5.118446248990949,
+        "first_channel_seconds": 0.01993897499050945,
+        "metadata_counts": {
+          "tagAdd": 1034,
+          "channelAdd": 58868,
+          "tagUpdate": 1034,
+          "dvrEntryAdd": 1,
+          "initialSyncCompleted": 1
+        },
+        "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+        "timings": [
+          "2026-11-13 16:25:54.458 [  TRACE] main: startup iptv_network_init: 5761 ms",
+          "2026-11-13 16:25:54.459 [  TRACE] main: startup iptv threads: 0 ms (2 thread(s))",
+          "2026-11-13 16:25:54.459 [  TRACE] main: startup mpegts_init: 5767 ms",
+          "2026-11-13 16:25:56.282 [  TRACE] main: startup channel_init: 1823 ms",
+          "2026-11-13 16:25:58.158 [  TRACE] main: startup bouquet_service_resolve: 1876 ms",
+          "2026-11-13 16:26:00.136 [  TRACE] main: startup epggrab_init: 1977 ms",
+          "2026-11-13 16:26:00.825 [  TRACE] main: startup epg inflate: 688 ms",
+          "2026-11-13 16:26:00.825 [   INFO] epgdb: parsing 95181786 bytes",
+          "2026-11-13 16:26:04.141 [  TRACE] main: startup epg parse: 3316 ms",
+          "2026-11-13 16:26:04.141 [  TRACE] main: startup epg decode/restore/destroy: 191/3015/79 ms",
+          "2026-11-13 16:26:04.141 [   INFO] epgdb:   broadcasts 196337",
+          "2026-11-13 16:26:04.154 [  TRACE] main: startup epg_init: 4018 ms",
+          "2026-11-13 16:26:04.155 [  TRACE] main: startup htsp_register: 0 ms",
+          "2026-11-13 16:26:05.114 [  TRACE] main: startup initial metadata enqueue: 745 ms, 58868 channels"
+        ],
+        "process_exit_code": 0
+      },
+      "files-warm-2": {
+        "memory_at_start": [
+          "VmHWM:\t  712292 kB",
+          "VmRSS:\t  586688 kB"
+        ],
+        "cpu_seconds_at_start": 17.49,
+        "epg_cutoff": 1794577619,
+        "snapshots": {
+          "epg/events/grid": {
+            "rows": 191044,
+            "sha256": "1e3b9daecba6c0b046977ace9237e85b81acfa52bc809abb23b7daf0a1023d4b"
+          },
+          "channel/grid": {
+            "rows": 58868,
+            "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+          },
+          "channeltag/grid": {
+            "rows": 1034,
+            "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+          },
+          "mpegts/network/grid": {
+            "rows": 11,
+            "sha256": "b8817aa5f88116bca75bca351a8bfe35ee363ae182f17e54367afefc455d1825"
+          },
+          "mpegts/mux/grid": {
+            "rows": 58865,
+            "sha256": "8ba7db095f63d603906e077cd44c85bbba3598a588119abe123d6cffc94704a0"
+          },
+          "mpegts/service/grid": {
+            "rows": 58868,
+            "sha256": "5e9bad3631180c160358ebac4542e804e63623cbd4703834250c1d65a6dda568"
+          },
+          "bouquet/grid": {
+            "rows": 21,
+            "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+          }
+        },
+        "startup_seconds": 19.260591757993097,
+        "htsp_sync_seconds": 4.920413069005008,
+        "first_channel_seconds": 0.019740570001886226,
+        "metadata_counts": {
+          "tagAdd": 1034,
+          "channelAdd": 58868,
+          "tagUpdate": 1034,
+          "dvrEntryAdd": 1,
+          "initialSyncCompleted": 1
+        },
+        "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+        "timings": [
+          "2026-11-13 16:27:32.938 [  TRACE] main: startup iptv_network_init: 7401 ms",
+          "2026-11-13 16:27:32.939 [  TRACE] main: startup iptv threads: 0 ms (2 thread(s))",
+          "2026-11-13 16:27:32.939 [  TRACE] main: startup mpegts_init: 7411 ms",
+          "2026-11-13 16:27:36.808 [  TRACE] main: startup channel_init: 3868 ms",
+          "2026-11-13 16:27:38.787 [  TRACE] main: startup bouquet_service_resolve: 1979 ms",
+          "2026-11-13 16:27:40.846 [  TRACE] main: startup epggrab_init: 2057 ms",
+          "2026-11-13 16:27:41.575 [  TRACE] main: startup epg inflate: 728 ms",
+          "2026-11-13 16:27:41.575 [   INFO] epgdb: parsing 95181786 bytes",
+          "2026-11-13 16:27:44.481 [  TRACE] main: startup epg parse: 2905 ms",
+          "2026-11-13 16:27:44.481 [  TRACE] main: startup epg decode/restore/destroy: 170/2638/71 ms",
+          "2026-11-13 16:27:44.481 [   INFO] epgdb:   broadcasts 196285",
+          "2026-11-13 16:27:44.492 [  TRACE] main: startup epg_init: 3646 ms",
+          "2026-11-13 16:27:44.492 [  TRACE] main: startup htsp_register: 0 ms",
+          "2026-11-13 16:27:45.188 [  TRACE] main: startup initial metadata enqueue: 506 ms, 58868 channels"
+        ],
+        "process_exit_code": 0
+      },
+      "cold-files": {
+        "memory_at_start": [
+          "VmHWM:\t  711636 kB",
+          "VmRSS:\t  586424 kB"
+        ],
+        "cpu_seconds_at_start": 17.33,
+        "epg_cutoff": 1794577619,
+        "snapshots": {
+          "epg/events/grid": {
+            "rows": 191044,
+            "sha256": "1e3b9daecba6c0b046977ace9237e85b81acfa52bc809abb23b7daf0a1023d4b"
+          },
+          "channel/grid": {
+            "rows": 58868,
+            "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+          },
+          "channeltag/grid": {
+            "rows": 1034,
+            "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+          },
+          "mpegts/network/grid": {
+            "rows": 11,
+            "sha256": "b8817aa5f88116bca75bca351a8bfe35ee363ae182f17e54367afefc455d1825"
+          },
+          "mpegts/mux/grid": {
+            "rows": 58865,
+            "sha256": "8ba7db095f63d603906e077cd44c85bbba3598a588119abe123d6cffc94704a0"
+          },
+          "mpegts/service/grid": {
+            "rows": 58868,
+            "sha256": "5e9bad3631180c160358ebac4542e804e63623cbd4703834250c1d65a6dda568"
+          },
+          "bouquet/grid": {
+            "rows": 21,
+            "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+          }
+        },
+        "startup_seconds": 24.511494331003632,
+        "htsp_sync_seconds": 3.779583455005195,
+        "first_channel_seconds": 0.016498368000611663,
+        "metadata_counts": {
+          "tagAdd": 1034,
+          "channelAdd": 58868,
+          "tagUpdate": 1034,
+          "dvrEntryAdd": 1,
+          "initialSyncCompleted": 1
+        },
+        "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+        "timings": [
+          "2026-11-13 16:29:50.832 [  TRACE] main: startup iptv_network_init: 10275 ms",
+          "2026-11-13 16:29:50.832 [  TRACE] main: startup iptv threads: 0 ms (2 thread(s))",
+          "2026-11-13 16:29:50.832 [  TRACE] main: startup mpegts_init: 10308 ms",
+          "2026-11-13 16:29:57.808 [  TRACE] main: startup channel_init: 6975 ms",
+          "2026-11-13 16:29:59.389 [  TRACE] main: startup bouquet_service_resolve: 1581 ms",
+          "2026-11-13 16:30:02.116 [  TRACE] main: startup epggrab_init: 2725 ms",
+          "2026-11-13 16:30:02.796 [  TRACE] main: startup epg inflate: 678 ms",
+          "2026-11-13 16:30:02.796 [   INFO] epgdb: parsing 95181786 bytes",
+          "2026-11-13 16:30:04.739 [  TRACE] main: startup epg parse: 1942 ms",
+          "2026-11-13 16:30:04.739 [  TRACE] main: startup epg decode/restore/destroy: 112/1770/44 ms",
+          "2026-11-13 16:30:04.739 [   INFO] epgdb:   broadcasts 196252",
+          "2026-11-13 16:30:04.747 [  TRACE] main: startup epg_init: 2630 ms",
+          "2026-11-13 16:30:04.748 [  TRACE] main: startup htsp_register: 0 ms",
+          "2026-11-13 16:30:05.825 [  TRACE] main: startup initial metadata enqueue: 534 ms, 58868 channels"
+        ],
+        "process_exit_code": 0
+      },
+      "cold-sqlite-rowid": {
+        "memory_at_start": [
+          "VmHWM:\t  716892 kB",
+          "VmRSS:\t  591284 kB"
+        ],
+        "cpu_seconds_at_start": 14.17,
+        "epg_cutoff": 1794577619,
+        "snapshots": {
+          "epg/events/grid": {
+            "rows": 191044,
+            "sha256": "1e3b9daecba6c0b046977ace9237e85b81acfa52bc809abb23b7daf0a1023d4b"
+          },
+          "channel/grid": {
+            "rows": 58868,
+            "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+          },
+          "channeltag/grid": {
+            "rows": 1034,
+            "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+          },
+          "mpegts/network/grid": {
+            "rows": 11,
+            "sha256": "b8817aa5f88116bca75bca351a8bfe35ee363ae182f17e54367afefc455d1825"
+          },
+          "mpegts/mux/grid": {
+            "rows": 58865,
+            "sha256": "8ba7db095f63d603906e077cd44c85bbba3598a588119abe123d6cffc94704a0"
+          },
+          "mpegts/service/grid": {
+            "rows": 58868,
+            "sha256": "5e9bad3631180c160358ebac4542e804e63623cbd4703834250c1d65a6dda568"
+          },
+          "bouquet/grid": {
+            "rows": 21,
+            "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+          }
+        },
+        "startup_seconds": 16.149647054000525,
+        "htsp_sync_seconds": 4.4808436059975065,
+        "first_channel_seconds": 0.016733174998080358,
+        "metadata_counts": {
+          "tagAdd": 1034,
+          "channelAdd": 58868,
+          "tagUpdate": 1034,
+          "dvrEntryAdd": 1,
+          "initialSyncCompleted": 1
+        },
+        "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+        "timings": [
+          "2026-11-13 16:31:18.244 [  TRACE] main: startup iptv_network_init: 5438 ms",
+          "2026-11-13 16:31:18.244 [  TRACE] main: startup iptv threads: 0 ms (2 thread(s))",
+          "2026-11-13 16:31:18.245 [  TRACE] main: startup mpegts_init: 5455 ms",
+          "2026-11-13 16:31:20.064 [  TRACE] main: startup channel_init: 1819 ms",
+          "2026-11-13 16:31:22.052 [  TRACE] main: startup bouquet_service_resolve: 1987 ms",
+          "2026-11-13 16:31:24.151 [  TRACE] main: startup epggrab_init: 2092 ms",
+          "2026-11-13 16:31:24.945 [  TRACE] main: startup epg inflate: 791 ms",
+          "2026-11-13 16:31:24.945 [   INFO] epgdb: parsing 95181786 bytes",
+          "2026-11-13 16:31:28.556 [  TRACE] main: startup epg parse: 3610 ms",
+          "2026-11-13 16:31:28.556 [  TRACE] main: startup epg decode/restore/destroy: 209/3280/90 ms",
+          "2026-11-13 16:31:28.556 [   INFO] epgdb:   broadcasts 194012",
+          "2026-11-13 16:31:28.567 [  TRACE] main: startup epg_init: 4416 ms",
+          "2026-11-13 16:31:28.568 [  TRACE] main: startup htsp_register: 0 ms",
+          "2026-11-13 16:31:29.333 [  TRACE] main: startup initial metadata enqueue: 545 ms, 58868 channels"
+        ],
+        "process_exit_code": 0
+      },
+      "pinned-warm": {
+        "memory_at_start": [
+          "VmHWM:\t  711996 kB",
+          "VmRSS:\t  586236 kB"
+        ],
+        "cpu_seconds_at_start": 15.32,
+        "epg_cutoff": 1794577619,
+        "snapshots": {
+          "epg/events/grid": {
+            "rows": 191044,
+            "sha256": "1e3b9daecba6c0b046977ace9237e85b81acfa52bc809abb23b7daf0a1023d4b"
+          },
+          "channel/grid": {
+            "rows": 58868,
+            "sha256": "98b354651cd3c22fd7bbb9243bab9e54ac580acc68c54a8a172a8e9e8aca4fe9"
+          },
+          "channeltag/grid": {
+            "rows": 1034,
+            "sha256": "8abb6f357e822c8b624eb46e3bd9e7445ff75a70c370371a47e447089aba95fc"
+          },
+          "mpegts/network/grid": {
+            "rows": 11,
+            "sha256": "b8817aa5f88116bca75bca351a8bfe35ee363ae182f17e54367afefc455d1825"
+          },
+          "mpegts/mux/grid": {
+            "rows": 58865,
+            "sha256": "8ba7db095f63d603906e077cd44c85bbba3598a588119abe123d6cffc94704a0"
+          },
+          "mpegts/service/grid": {
+            "rows": 58868,
+            "sha256": "5e9bad3631180c160358ebac4542e804e63623cbd4703834250c1d65a6dda568"
+          },
+          "bouquet/grid": {
+            "rows": 21,
+            "sha256": "1f7c0fc1a3e929d1b023b0f39b974c0b4314889678f5c09f5d6fb6f0fffa59ca"
+          }
+        },
+        "startup_seconds": 16.792275583997252,
+        "htsp_sync_seconds": 3.8694322669907706,
+        "first_channel_seconds": 0.021051977993920445,
+        "metadata_counts": {
+          "tagAdd": 1034,
+          "channelAdd": 58868,
+          "tagUpdate": 1034,
+          "dvrEntryAdd": 1,
+          "initialSyncCompleted": 1
+        },
+        "channels_hash": "52c939ae37c4b92d191caf2f95f985c3de1c69f58cb86a7ec3a2f8ca2cec5293",
+        "timings": [
+          "2026-11-13 16:36:28.734 [  TRACE] main: startup iptv_network_init: 5429 ms",
+          "2026-11-13 16:36:28.735 [  TRACE] main: startup iptv threads: 0 ms (2 thread(s))",
+          "2026-11-13 16:36:28.735 [  TRACE] main: startup mpegts_init: 5440 ms",
+          "2026-11-13 16:36:32.411 [  TRACE] main: startup channel_init: 3676 ms",
+          "2026-11-13 16:36:33.633 [  TRACE] main: startup bouquet_service_resolve: 1221 ms",
+          "2026-11-13 16:36:35.518 [  TRACE] main: startup epggrab_init: 1884 ms",
+          "2026-11-13 16:36:36.253 [  TRACE] main: startup epg inflate: 735 ms",
+          "2026-11-13 16:36:36.253 [   INFO] epgdb: parsing 95181786 bytes",
+          "2026-11-13 16:36:39.727 [  TRACE] main: startup epg parse: 3474 ms",
+          "2026-11-13 16:36:39.727 [  TRACE] main: startup epg decode/restore/destroy: 199/3149/91 ms",
+          "2026-11-13 16:36:39.727 [   INFO] epgdb:   broadcasts 193736",
+          "2026-11-13 16:36:39.739 [  TRACE] main: startup epg_init: 4221 ms",
+          "2026-11-13 16:36:39.739 [  TRACE] main: startup htsp_register: 0 ms",
+          "2026-11-13 16:36:40.451 [  TRACE] main: startup initial metadata enqueue: 495 ms, 58868 channels"
+        ],
+        "process_exit_code": 0
+      }
+    },
+    "isolated_real_loader": {
+      "method": "GDB calls real hts_settings_load_r for network/mux paths and hts_settings_load for channel/tag paths; one prototype binary, files/SQLite/SQLite/files order; database closed between turns; excludes native object creation and message destruction",
+      "runs": [
+        {
+          "mode": "files",
+          "group": "iptv",
+          "wall_seconds": 3.377632541989442,
+          "cpu_seconds": 3.3600000000000003
+        },
+        {
+          "mode": "files",
+          "group": "channels",
+          "wall_seconds": 1.079729777004104,
+          "cpu_seconds": 1.0699999999999998
+        },
+        {
+          "mode": "sqlite",
+          "group": "iptv",
+          "wall_seconds": 1.633220160001656,
+          "cpu_seconds": 1.6399999999999997
+        },
+        {
+          "mode": "sqlite",
+          "group": "channels",
+          "wall_seconds": 0.3255848710105056,
+          "cpu_seconds": 0.3100000000000005
+        },
+        {
+          "mode": "sqlite",
+          "group": "iptv",
+          "wall_seconds": 1.6286863110290142,
+          "cpu_seconds": 1.6199999999999992
+        },
+        {
+          "mode": "sqlite",
+          "group": "channels",
+          "wall_seconds": 0.18295250699156895,
+          "cpu_seconds": 0.1999999999999993
+        },
+        {
+          "mode": "files",
+          "group": "iptv",
+          "wall_seconds": 2.085847358001047,
+          "cpu_seconds": 2.0799999999999983
+        },
+        {
+          "mode": "files",
+          "group": "channels",
+          "wall_seconds": 0.299369899003068,
+          "cpu_seconds": 0.2900000000000009
+        }
+      ]
+    },
+    "configured_stream_attempts": {
+      "channel_selection": "same enabled configured IPTV channel, selected from API linkage; identity and provider details intentionally not included",
+      "files": {
+        "start_notice_seconds": 27.45878432999598,
+        "stream_request_seconds": 27.45878787599213,
+        "decode_finished_seconds": 58.49035130300035,
+        "ffmpeg_returncode": 187,
+        "decoded_frames": 0,
+        "success": false,
+        "process_exit_code": 0
+      },
+      "sqlite": {
+        "start_notice_seconds": 15.42356648700661,
+        "stream_request_seconds": 15.423570737999398,
+        "decode_finished_seconds": 47.1028150080092,
+        "ffmpeg_returncode": 187,
+        "decoded_frames": 0,
+        "success": false,
+        "process_exit_code": 0
+      },
+      "conclusion": "No decoded frames in either backend. Known-working channel needed; no successful-playback speedup established."
+    },
+    "regressions": {
+      "native_build": "pass",
+      "file_backend_real_loader_tests": "pass",
+      "sqlite_backend_real_loader_tests": "pass, including importer integrity check and read-only connection shutdown",
+      "real_profile_seven_api_snapshots": "identical across all cases",
+      "sqlite_flatpak_or_wsl_integration": "not performed; no packaging changes",
+      "normal_writes_migration_recovery": "not implemented; production use excluded"
+    },
+    "decision": "Retain isolated read-only experiment as evidence for further backend design; production replacement is not yet complete or approved."
   }
 }

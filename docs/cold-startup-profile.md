@@ -292,3 +292,123 @@ The three production packaging pins remain at `576105975`; nothing was pushed,
 published or approved for packaging. Exact binary hashes, individual samples,
 superseded prototype results and stream-smoke observations are appended under
 `descriptor_relative_continuation` in [the measurements JSON](cold-startup-measurements.json).
+
+## SQLite experiment after recovering a real fixture
+
+The previous missing-fixture limitation was resolved by copying the current
+built-in configuration into ignored, disposable benchmark work. A before/after
+size/mtime manifest found **zero changes during copying** across 127,571 files.
+No test server used the live configuration. This is a new current fixture, not a
+claim that the earlier deleted fixture was recovered byte-for-byte.
+
+An actual SQLite database and native C reader were implemented in local fork
+commit `79f13bdbf8642944a6fa629f266b651ffc5e788f`, based on `47207c800`.
+[Experimental source patch](startup-optimization/0002-sqlite-startup-prototype.patch).
+The database is retained locally at
+`packaging/tvheadend/work/sqlite-investigation/settings-rowid.sqlite`. It contains
+private configuration bytes and is deliberately excluded from Git.
+
+### What the prototype measures
+
+The importer retains relative paths, directory enumeration order and original file
+bytes. A rowid table indexes paths and parent/order. `hts_settings_load_path` can
+read those rows when `TVH_STARTUP_SQLITE` names the database. Both backends share
+the existing JSON/gzip/binary decoder; no serialization format was replaced.
+Native object allocation, property loading, registration, service/tag linkage,
+scan queues, EPG restoration and HTSP synchronization still run normally.
+Bundled defaults retain the existing filebundle fallback.
+
+**This is a read-only startup experiment, not a completed production backend.**
+Writes still go to the disposable file tree and do not update SQLite. Database
+creation was separate from startup and took 52.327 s for the compact layout.
+Normal-operation edits, transactional writes, migration, recovery and persistence
+after those edits require further implementation and testing. No production
+startup cache, packaging dependency or release pin was introduced.
+
+The source payload totals 117,792,497 bytes. The compact database occupies
+174,292,992 bytes including indexes. An initial WITHOUT ROWID layout occupied
+372,015,104 bytes and produced one slower 30.312 s warm startup. It was retained
+as an unsuccessful experiment, not selected. Other stages also varied in that
+run, so the entire slowdown cannot be attributed to the table layout alone.
+
+### Real-profile results
+
+These are tracing-enabled, fresh-process measurements through the START notice,
+using the existing benchmark and API verification method. Copy/import time is
+excluded. Warm trials leave file-data caches populated. Each trial uses a fresh
+copy, isolated loopback ports, the existing built-in server options, and clean
+SIGTERM shutdown. No scan, grabber, EPG restoration or bouquet feature was disabled.
+
+| Case | Native startup | CPU through START | RSS at START |
+| --- | ---: | ---: | ---: |
+| Packaged source `576105975`, warm control | 16.792 s | 15.32 s | 586,236 KiB |
+| Descriptor-relative source `47207c800`, warm | 19.230 s | 17.34 s | 586,404 KiB |
+| Prototype binary, file backend, warm | 19.261 s | 17.49 s | 586,688 KiB |
+| Same prototype binary, compact SQLite, warm | 15.779 s | 14.06 s | 591,260 KiB |
+| Prototype binary, file backend, cold file data | 24.511 s | 17.33 s | 586,424 KiB |
+| Same prototype binary, compact SQLite, cold file data | 16.150 s | 14.17 s | 591,284 KiB |
+
+The compact SQLite reader shows a useful startup benefit in these observations,
+particularly the cold-file-data pair. The later packaged-source warm control is
+closer to SQLite than the other file runs: the warm gain is not a stable 3.5-second
+guarantee. These are a small number of sequential observations, not a statistical
+performance guarantee. Resident memory increases by about 4.5–4.7 MiB.
+
+Cold trials use `sync -f` followed by per-file `POSIX_FADV_DONTNEED` on the run
+copy. The SQLite trial additionally flushes and evicts the SQLite file. Inode and
+directory caches remain warm; **this is not cold OS boot**, and `/tmp` tmpfs was
+not used for the data. The initial WITHOUT ROWID result is not mixed with the
+compact-layout comparisons.
+
+The cold input stage fell from 10.275 to 5.438 s and channel initialization from
+6.975 to 1.819 s. Warm file/prototype input was 7.401 s versus 5.761 s for SQLite,
+but the separate pinned warm control was already 5.429 s. Warm input improvement
+alone is therefore not established consistently. Channel loading was 3.676–3.937 s
+with files versus 1.823 s in the SQLite warm run. EPG and XMLTV were not optimized
+and varied between processes; their timings remain in the raw records.
+
+A same-process GDB check isolated the real settings loader from native object
+construction. In files/SQLite/SQLite/files order, loading network/mux settings
+took 3.378/1.633/1.629/2.086 s, and channel/tag settings took
+1.080/0.326/0.183/0.299 s. It reused one binary and closed the database between
+turns. This supports a read-path saving while also showing allocator/cache
+variation. It does not explain the entire native input stage or remove the
+remaining object/property/registration work.
+
+All seven sorted API snapshots match across the pinned control, both file
+variants, both database layouts and the cold trials: **58,868 channels, 1,034 tags,
+11 networks, 58,865 muxes, 58,868 services, 21 bouquets and 191,044 future EPG
+events**. EPG uses the same fixed future cutoff (`1794577619`) for all comparisons;
+the total number of restored broadcasts declines naturally while tests run.
+HTSP channel hashes and metadata counts also match. Full metadata synchronization
+still takes roughly 3.8–5.1 s after connection; first channel metadata arrives
+within roughly 16–21 ms of enabling metadata. Neither means successful playback.
+
+### Tests, playback limitation and decision
+
+The native executable builds against SQLite 3.46.1. The real-loader regression
+passes with SQLite disabled and enabled, including compressed settings, symlinks,
+recursion, exclusions, bundled fallback, empty/missing paths and long paths. The
+importer checks database integrity, refuses replacement and creates private files
+with mode 0600. Successful benchmark processes exit cleanly. SQLite-specific
+Flatpak/Windows/WSL packaging and runtime compatibility were not tested; the
+earlier descriptor-relative candidate's SDK checks remain historical results.
+
+Playback was attempted on the same configured IPTV channel with both backends.
+Neither produced a decodable video frame (FFmpeg exit 187 in both cases), although
+both servers started and exited normally. The file-backend control therefore did
+not supply a known-working playback case. **No launch-to-successful-stream gain is
+claimed.** A currently working channel is still needed for that validation.
+
+There is now measured evidence that SQLite can reduce the configuration-reading
+portion of real large-profile startup. There is not yet evidence that a complete
+authoritative migration, including its write/recovery complexity, is ready to ship.
+Retain this experiment for designing that decision. Next work is transactional
+write/delete/rename support, migration and recovery design, recording/EPG update
+regressions, and a working-channel playback comparison. Native IPTV object work
+and EPG restoration remain significant costs that changing storage does not remove.
+The live configuration, published fork and all release pins remain unchanged.
+
+Raw observations, import costs, API hashes, playback failures and the isolated
+loader check are preserved under `sqlite_startup_experiment` in the measurements
+JSON. Prototype build/use instructions are included in its source patch.
