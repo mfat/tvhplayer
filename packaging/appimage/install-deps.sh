@@ -6,7 +6,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
     ca-certificates curl file patchelf \
-    python3.12 python3-pip \
+    python3.12 python3.12-dev python3-pip \
     build-essential pkgconf gettext bzip2 cmake \
     libssl-dev zlib1g-dev libpcre2-dev libdbus-1-dev \
     libmpv2 ffmpeg \

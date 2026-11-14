@@ -44,3 +44,7 @@ windows/backend/release-bundle/
 /video/out/
 /video/build/
 /video/node_modules/
+
+# The C decoder built by packaging/build-native.py
+/tvhplayer/core/_htsmsg*.so
+/tvhplayer/core/_htsmsg*.pyd

@@ -19,6 +19,8 @@ override_dh_auto_configure:
 
 override_dh_auto_build:
 	packaging/tvheadend/build-tvheadend.sh build $(TVH_SOURCES) $(TVH_WORK)
+	# The C decoder for HTSP messages, next to the code copied below.
+	python3 packaging/build-native.py
 
 override_dh_auto_test:
 	# The test suite runs in CI before packaging.

@@ -98,3 +98,62 @@ def test_field_names_decode_the_same_however_often_they_repeat():
         assert deserialize(serialize(msg)[4:]) == msg
     # A server sending ever-new names cannot grow the name cache without bound.
     assert len(htsmsg._NAMES) <= htsmsg._NAMES_MAX
+
+
+def test_c_decoder_matches_the_python_one_including_errors():
+    import random
+    import struct
+
+    import pytest
+    from tvhplayer.core import htsmsg
+    if htsmsg._native is None:
+        pytest.skip('C decoder not built (python3 packaging/build-native.py)')
+    native = htsmsg._native
+
+    def outcome(fn, *args):
+        try:
+            return 'ok', repr(fn(*args))  # repr: NaN equals itself, and types show
+        except Exception as exc:
+            return type(exc).__name__, str(exc)
+
+    def same(body, is_list=False):
+        assert outcome(native.deserialize, body, is_list) == \
+            outcome(htsmsg.python_deserialize, body, htsmsg.HMF_LIST if is_list else htsmsg.HMF_MAP)
+
+    rng = random.Random(1)
+
+    def value(depth=0):
+        kind = rng.randrange(8 if depth < 3 else 5)
+        if kind == 0:
+            return rng.choice(['', 'plain', 'ünïcödé ✓', 'x' * 300])
+        if kind == 1:
+            return rng.choice([0, 1, -1, 2**63 - 1, -2**63, rng.randrange(-2**40, 2**40)])
+        if kind == 2:
+            return rng.choice([True, False])
+        if kind == 3:
+            return rng.uniform(-1e9, 1e9)
+        if kind == 4:
+            return Binary(bytes(rng.randrange(256) for _ in range(rng.randrange(9))))
+        if kind in (5, 6):
+            return {rng.choice(['a', 'é', '', 'name']): value(depth + 1) for _ in range(rng.randrange(4))}
+        return [value(depth + 1) for _ in range(rng.randrange(4))]
+
+    for _ in range(3000):
+        body = serialize({f'k{i}': value() for i in range(rng.randrange(5))})[4:]
+        same(body)
+        if body:
+            same(body[:rng.randrange(len(body))])
+            flipped = bytearray(body)
+            flipped[rng.randrange(len(flipped))] = rng.randrange(256)
+            same(bytes(flipped))
+        same(bytes(rng.randrange(256) for _ in range(rng.randrange(30))), rng.random() < 0.5)
+    for body in (
+        struct.pack('>BBI', 8, 1, 16) + b'u' + bytes(range(16)),   # UUID
+        struct.pack('>BBI', 3, 1, 2) + b's' + b'\xff\x41',           # invalid UTF-8
+        struct.pack('>BBI', 2, 1, 9) + b'n' + b'\xff' * 9,           # wider than 8 bytes
+        struct.pack('>BBI', 6, 1, 4) + b'd' + b'\0' * 4,             # bad double
+        struct.pack('>BBI', 9, 1, 0) + b'x',                         # unknown type
+        b'\x01\x00\x00',                                             # trailing bytes
+    ):
+        same(body)
+        same(body, True)

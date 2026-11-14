@@ -136,6 +136,8 @@ install -m755 /usr/bin/ffmpeg "$APPDIR/usr/bin/ffmpeg"
 install -m755 /usr/bin/ffprobe "$APPDIR/usr/bin/ffprobe"
 
 echo "==> TVHplayer"
+# The C decoder for HTSP messages, for the Python the AppImage ships.
+"$python" "$ROOT/packaging/build-native.py"
 app=$APPDIR/usr/share/tvhplayer
 mkdir -p "$app"
 cp -a "$ROOT/tvhplayer/." "$app/"

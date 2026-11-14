@@ -74,6 +74,12 @@ python3 -m pip install -r requirements.txt
 python3 tvhplayer/tvhplayer.py
 ```
 
+For large channel lists, also build the C decoder for server messages (it needs a C compiler and the Python headers, such as `python3-dev`); without it the app reads them in Python, several times slower:
+
+```bash
+python3 packaging/build-native.py
+```
+
 To use the built-in server from a checkout, build Tvheadend in a checkout next to this one, so the binary is at `../tvheadend/build.linux/tvheadend`, or copy it to `build/tvheadend`. See [docs/tvheadend-source.md](docs/tvheadend-source.md) for the Tvheadend version the packages use.
 
 Run the tests with `python3 -m pytest tests`.

@@ -74,6 +74,9 @@ echo "==> Icon"
 icon="$WORK/tvhplayer.ico"
 "$PYTHON" "$ROOT/packaging/render_icon.py" "$icon"
 
+echo "==> C decoder"
+"$PYTHON" "$ROOT/packaging/build-native.py"
+
 echo "==> PyInstaller"
 "$PYTHON" -m PyInstaller \
   --noconfirm --clean --onedir --windowed \

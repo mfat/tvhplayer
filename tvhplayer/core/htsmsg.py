@@ -7,6 +7,7 @@ length with no sign-extension; -1 must occupy 8 bytes.
 
 from __future__ import annotations
 
+import os
 import struct
 from typing import Any, Dict, List, Union
 
@@ -98,6 +99,13 @@ def serialize(msg: dict) -> bytes:
 
 def deserialize(body: bytes, type_id: int = HMF_MAP) -> Message:
     """Deserialize a body (no 4-byte length prefix)."""
+    if _native is not None:
+        return _native.deserialize(body, type_id == HMF_LIST)
+    return python_deserialize(body, type_id)
+
+
+def python_deserialize(body: bytes, type_id: int = HMF_MAP) -> Message:
+    """The same as deserialize, in Python: used when the C decoder is not built."""
     body = bytes(body)
     return _decode_body(body, 0, len(body), type_id == HMF_LIST)
 
@@ -185,3 +193,16 @@ def read_message(recv_exact):
     if len(body) != size:
         raise ConnectionError('Connection closed while reading HTSMSG body')
     return deserialize(body, HMF_MAP)
+
+
+# The C decoder (_htsmsg.c), built into the packages by setup.py build_ext.
+# Decoding a large channel list in Python took seconds during which the
+# window had to wait for the interpreter lock. TVHPLAYER_PYTHON_HTSMSG=1
+# keeps the Python decoder, for comparing the two.
+try:
+    if os.environ.get('TVHPLAYER_PYTHON_HTSMSG'):
+        raise ImportError
+    from . import _htsmsg as _native
+    _native.set_binary_type(Binary)
+except ImportError:
+    _native = None

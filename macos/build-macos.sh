@@ -56,6 +56,9 @@ mkdir -p "$MACOS_DIR/build"
 ICON="$MACOS_DIR/build/tvhplayer-1024.png"
 "$PYTHON" "$ROOT/packaging/render_icon.py" "$ICON"
 
+# The C decoder for HTSP messages; PyInstaller collects it with core.
+"$PYTHON" "$ROOT/packaging/build-native.py"
+
 # PyInstaller collects the libraries libmpv links and rewrites their paths.
 "$PYTHON" -m PyInstaller \
   --noconfirm --clean --onedir --windowed \

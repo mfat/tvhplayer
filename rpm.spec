@@ -76,6 +76,8 @@ cp -p %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} tvheadend-sources/
 
 %build
 packaging/tvheadend/build-tvheadend.sh build tvheadend-sources tvheadend-build --bundle-dvbcsa
+# The C decoder for HTSP messages, next to the code copied below.
+%{python3} packaging/build-native.py
 
 %install
 packaging/tvheadend/build-tvheadend.sh install tvheadend-build %{buildroot}

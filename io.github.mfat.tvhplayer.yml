@@ -189,6 +189,8 @@ modules:
   - name: tvhplayer
     buildsystem: simple
     build-commands:
+      # The C decoder for HTSP messages, next to the code copied below.
+      - python3 packaging/build-native.py
       - mkdir -p /app/share/tvhplayer/icons
       - cp -r tvhplayer/* /app/share/tvhplayer/
       - cp -r icons/* /app/share/tvhplayer/icons/
