@@ -311,16 +311,21 @@ def guest_ffmpeg_changes(rows) -> List[dict]:
 _HEADER_OPTIONS = ('-user_agent', '-user-agent', '-headers', '-referer')
 
 
-def provider_changes(rows, old_headers, new_headers, old_location: str = '', new_location: str = '') -> List[dict]:
+def provider_changes(
+    rows, old_headers, new_headers, old_location: str = '', new_location: str = '', xtream: bool = False,
+) -> List[dict]:
     """Mux changes that give saved channels new provider headers or a new Xtream password.
 
     The stream commands are rewritten in place, so the playlist is not read
     again. A header a channel got from the playlist itself, rather than from
-    the provider's defaults, is kept.
+    the provider's defaults, is kept. With ``xtream`` every stream of the
+    account goes to ``new_location``'s server and password, which also
+    finishes a move to a new server that stopped part way.
     """
     old_headers = dict(old_headers or {})
     new_headers = dict(new_headers or {})
     swap = _password_swap(old_location, new_location)
+    account = _xtream_streams(new_location) if xtream else None
     changes = []
     for row in rows:
         url = row.get('iptv_url') or ''
@@ -330,7 +335,9 @@ def provider_changes(rows, old_headers, new_headers, old_location: str = '', new
         address, headers = wrapped
         args = tvh_split(url[7:])
         at = args.index('-i')
-        if swap:
+        if account:
+            args[at + 1] = address = _move_stream(address, *account)
+        elif swap:
             args[at + 1] = address = address.replace(*swap)
         if address.split(':', 1)[0].lower() in ('http', 'https'):
             own = {key: value for key, value in headers.items() if old_headers.get(key) != value}
@@ -361,10 +368,32 @@ def update_provider(admin, source: PlaylistSource, old_headers, old_location: st
         row for row in admin.list_muxes(source.network_uuid, fields=('uuid', 'iptv_url'))
         if row.get('uuid') in ours
     ]
-    changes = provider_changes(rows, old_headers, source.request_headers, old_location, source.location)
+    changes = provider_changes(
+        rows, old_headers, source.request_headers, old_location, source.location,
+        xtream=source.source_type == 'xc',
+    )
     if changes:
         admin.save(changes)
     return len(changes)
+
+
+_XTREAM_STREAM = re.compile(r'^(?P<base>https?://.+?)/(?P<kind>live|movie|series)/(?P<user>[^/]+)/[^/]+/(?P<rest>[^/]+)$')
+
+
+def _xtream_streams(location: str):
+    """``(server base, quoted username, quoted password)`` streams of this Xtream account use, or None."""
+    base, user, password = xtream_account(location)
+    if not base or not user or not password:
+        return None
+    return base, quote(user, safe=''), quote(password, safe='')
+
+
+def _move_stream(address: str, base: str, user: str, password: str) -> str:
+    """``address`` on the account's current server and password, when it is this account's stream."""
+    match = _XTREAM_STREAM.match(address)
+    if match is None or match['user'] != user:
+        return address
+    return f"{base}/{match['kind']}/{user}/{password}/{match['rest']}"
 
 
 def _password_swap(old_location: str, new_location: str):

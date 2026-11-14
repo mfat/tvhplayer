@@ -37,6 +37,7 @@ from tvhplayer.core.playlist_sync import (
     show_all_channels,
     sync_playlist,
     unique_name,
+    update_provider,
     wait_for_checks,
     BUSY_SERVER_SECONDS,
 )
@@ -987,6 +988,39 @@ def test_provider_changes_swap_headers_and_password_in_place():
     assert changes['a'] == ffmpeg_command(
         '/usr/bin/ffmpeg', 'http://xc.example/live/u%40x/new/1.ts', new, 'One', 'XC',
     )
+
+
+def test_provider_changes_move_xtream_channels_left_on_an_old_server():
+    # A move to a new server stopped after a few channels. The playlist already
+    # has the new address, so saving it again is what moves the rest.
+    location = 'http://new.example/get.php?username=u%40x&password=pw'
+    rows = [
+        {'uuid': 'a', 'iptv_url': ffmpeg_command('/usr/bin/ffmpeg', 'http://old.example/live/u%40x/pw/1.ts', {}, 'One')},
+        {'uuid': 'b', 'iptv_url': ffmpeg_command('/usr/bin/ffmpeg', 'http://new.example/live/u%40x/pw/2.ts', {}, 'Two')},
+        # Another account's stream is not this playlist's to move.
+        {'uuid': 'c', 'iptv_url': ffmpeg_command('/usr/bin/ffmpeg', 'http://old.example/live/them/pw/3.ts', {}, 'Three')},
+    ]
+    changes = {row['uuid']: row['iptv_url'] for row in provider_changes(
+        rows, {}, {}, location, location, xtream=True,
+    )}
+    assert set(changes) == {'a'}
+    assert ffmpeg_input(changes['a'][7:])[0] == 'http://new.example/live/u%40x/pw/1.ts'
+    # An M3U playlist names its own stream addresses; they are not moved.
+    assert provider_changes(rows, {}, {}, location, location) == []
+
+
+def test_update_provider_moves_xtream_channels_to_the_saved_server():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://new.example/get.php?username=u&password=pw', 'builtin')
+    source.source_type = 'xc'
+    source.network_uuid = admin.create_network({})
+    uuid = admin.create_mux(source.network_uuid, {
+        'iptv_url': ffmpeg_command('/usr/bin/ffmpeg', 'http://old.example/live/u/pw/1.ts', {}, 'One'),
+        'iptv_sname': 'One',
+    })
+    source.muxes = {'one': uuid}
+    assert update_provider(admin, source, {}, source.location) == 1
+    assert ffmpeg_input(admin.muxes[uuid]['iptv_url'][7:])[0] == 'http://new.example/live/u/pw/1.ts'
 
 
 def test_provider_changes_leave_unchanged_channels_alone():
