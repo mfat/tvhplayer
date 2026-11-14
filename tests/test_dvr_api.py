@@ -450,3 +450,28 @@ def test_htsp_native_and_proxied_dvr_calls():
     assert backend.list_dvr_configs()[0].storage == '/tv'
     assert conn.calls[-1][1]['path'] == 'dvr/config/grid'
     assert conn.calls[-1][1]['args']['limit'] == 10000
+
+
+def test_epg_grid_pages_when_server_reports_total_count(monkeypatch):
+    """epg/events/grid returns totalCount, unlike many idnode grids."""
+    from tvhplayer.core import dvr
+
+    monkeypatch.setattr(dvr, 'GRID_LIMIT', 2)
+    batches = [
+        {'totalCount': 5, 'entries': [{'id': 1}, {'id': 2}]},
+        {'totalCount': 5, 'entries': [{'id': 3}, {'id': 4}]},
+        {'totalCount': 5, 'entries': [{'id': 5}]},
+    ]
+    calls = []
+
+    def fetch(params):
+        calls.append(dict(params))
+        return batches.pop(0)
+
+    entries = dvr.grid_rows(fetch, {'mode': 'now'})
+    assert [row['id'] for row in entries] == [1, 2, 3, 4, 5]
+    assert calls == [
+        {'mode': 'now', 'start': 0, 'limit': 2},
+        {'mode': 'now', 'start': 2, 'limit': 2},
+        {'mode': 'now', 'start': 4, 'limit': 2},
+    ]

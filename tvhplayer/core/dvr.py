@@ -31,7 +31,8 @@ def grid_rows(fetch, params=None) -> list:
     """Every row of a grid call, GRID_LIMIT rows a request.
 
     ``fetch(params)`` returns the call's reply. A caller's own ``limit`` asks
-    once. Otherwise pages follow while the reply's ``total`` says more remain.
+    once. Otherwise pages follow while the reply's ``total`` or
+    ``totalCount`` (EPG grid) says more remain.
     """
     params = dict(params or {})
     if 'limit' in params:
@@ -43,7 +44,10 @@ def grid_rows(fetch, params=None) -> list:
         batch = _grid_entries(data)
         rows.extend(batch)
         start += len(batch)
-        total = data.get('total') if isinstance(data, dict) else None
+        # Tvheadend's epg/events/grid reports totalCount; many idnode grids
+        # instead report total. Accept both to avoid truncating EPG pages.
+        total = (data.get('total', data.get('totalCount'))
+                 if isinstance(data, dict) else None)
         if len(batch) < GRID_LIMIT or not isinstance(total, int) or start >= total:
             return rows
 

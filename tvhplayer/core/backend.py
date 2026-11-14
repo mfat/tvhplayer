@@ -109,7 +109,9 @@ class TvhBackend(ABC):
         redundant full channel/grid request. The next programme is retrieved
         using the current event's nextEventId.
         """
-        events = self.query_epg(EpgQuery(mode='now', limit=10000))
+        # No explicit limit: grid_rows() must page through all current
+        # events, including installations with over 10,000 channels.
+        events = self.query_epg(EpgQuery(mode='now'))
         following = next_event_ids(events)
         if following:
             events = events + self.load_events(following)
