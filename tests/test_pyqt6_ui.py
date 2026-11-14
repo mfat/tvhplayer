@@ -3722,7 +3722,13 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
     def prepare(ui):
         monkeypatch.setattr(ui, 'CastManager', FakeCastManager)
         monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
+        monkeypatch.setattr(ui, 'platform_supports_builtin', lambda: False)
 
+    # A server of its own: without one only a computer with Tvheadend
+    # installed had a server (the built-in one) to cast from.
+    (tmp_path / 'tvhplayer.conf').write_text(json.dumps({
+        'servers': [{'name': 'Home', 'url': 'http://192.0.2.1:9981'}],
+    }), encoding='utf-8')
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path, prepare)
     try:
         manager = window.cast_manager
