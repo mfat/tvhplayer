@@ -65,14 +65,14 @@ def test_real_read_only_directory(tmp_path):
 
 def test_portal_display_uses_host_path_only_for_presentation(monkeypatch):
     folder = '/run/user/1000/doc/abc/RECORDINGS'
-    monkeypatch.setattr(os, 'getxattr', lambda *_: b'/media/Storage/RECORDINGS\0')
+    monkeypatch.setattr(os, 'getxattr', lambda *_: b'/media/Storage/RECORDINGS\0', raising=False)
     assert recording_folder.recording_folder_display(folder) == '/media/Storage/RECORDINGS'
 
 
 def test_disconnected_drive_keeps_saved_display(monkeypatch):
     def missing(*_):
         raise FileNotFoundError()
-    monkeypatch.setattr(os, 'getxattr', missing)
+    monkeypatch.setattr(os, 'getxattr', missing, raising=False)
     folder = '/run/user/1000/doc/abc/RECORDINGS'
     assert recording_folder.recording_folder_display(folder, '/media/Storage/RECORDINGS') == '/media/Storage/RECORDINGS'
     assert recording_folder.recording_folder_display(folder) == 'RECORDINGS'
@@ -100,7 +100,7 @@ def test_disk_full_is_not_reported_as_lost_access():
 def test_gethostpaths_recovers_display_when_drive_is_missing(monkeypatch, suffix, expected):
     def missing(*_):
         raise FileNotFoundError()
-    monkeypatch.setattr(os, 'getxattr', missing)
+    monkeypatch.setattr(os, 'getxattr', missing, raising=False)
     requested = []
     def lookup(doc_id):
         requested.append(doc_id)
@@ -113,6 +113,6 @@ def test_gethostpaths_recovers_display_when_drive_is_missing(monkeypatch, suffix
 def test_older_portal_keeps_saved_display(monkeypatch):
     def missing(*_):
         raise FileNotFoundError()
-    monkeypatch.setattr(os, 'getxattr', missing)
+    monkeypatch.setattr(os, 'getxattr', missing, raising=False)
     assert recording_folder.recording_folder_display(
         '/run/user/1000/doc/abc/Recordings', '/media/Recordings', lambda _: '') == '/media/Recordings'
