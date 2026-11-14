@@ -708,3 +708,55 @@ def test_frames_of_dialogs_qt_makes_itself_are_kept_alive(qapp):
         framer.deleteLater()
         parent.deleteLater()
         qapp.processEvents()
+
+
+QUIT_SCRIPT = r'''
+import atexit
+import sys
+calls = []
+# Registered before PyQt is imported, so it runs after PyQt's own exit cleanup.
+atexit.register(lambda: print('FILTER CALLS AFTER EXIT', len(calls), flush=True))
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow, QMenu, QSplitter, QVBoxLayout, QWidget
+from tvhplayer import window_frame
+
+app = QApplication(sys.argv)
+filter_events = window_frame.DialogFramer.eventFilter
+def counted(self, obj, event):
+    calls.append(event.type())
+    return filter_events(self, obj, event)
+window_frame.DialogFramer.eventFilter = counted
+window = QMainWindow()
+window._framer = window_frame.DialogFramer(app, 'icon:minimize,maximize,close')
+split = QSplitter(window)
+for _ in range(5):
+    page = QWidget()
+    QVBoxLayout(page).addWidget(QLabel('channel'))
+    split.addWidget(page)
+window.setCentralWidget(split)
+menu = window.menuBar().addMenu('File')
+for name in ('Open', 'Save', 'Quit'):
+    menu.addAction(name)
+window.show()
+QTimer.singleShot(50, window.close)
+code = app.exec()
+calls.clear()
+# PyQt tears the window down at exit; the framer's Python filter must not run
+# then, or new wrappers are made while PyQt walks them (a crash on Wayland).
+sys.exit(code)
+'''
+
+
+def test_dialog_framer_stops_watching_once_the_app_quits(tmp_path):
+    # Closing TVHplayer crashed on GNOME Wayland: the framer still filtered
+    # every event while PyQt deleted the window at exit.
+    import os
+    import subprocess
+    import sys
+
+    script = tmp_path / 'quit.py'
+    script.write_text(QUIT_SCRIPT, encoding='utf-8')
+    env = dict(os.environ, QT_QPA_PLATFORM='offscreen', PYTHONPATH=str(Path(__file__).resolve().parents[1]))
+    result = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert 'FILTER CALLS AFTER EXIT 0' in result.stdout, result.stdout + result.stderr
