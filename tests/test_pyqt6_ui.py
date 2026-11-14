@@ -3736,6 +3736,9 @@ def test_player_bar_casts_the_selected_channel_and_routes_audio(monkeypatch, tmp
         monkeypatch.setattr(ui, 'CastManager', FakeCastManager)
         monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
         monkeypatch.setattr(ui, 'platform_supports_builtin', lambda: False)
+        # Not the server's log: reading it from the made-up address waits
+        # 30 seconds, keeping this window and its shortcuts alive into later tests.
+        monkeypatch.setattr(ui.ServerLogWatch, 'start', lambda self: None)
 
     # A server of its own: without one only a computer with Tvheadend
     # installed had a server (the built-in one) to cast from.
