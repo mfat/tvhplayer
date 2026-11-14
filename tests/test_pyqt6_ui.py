@@ -1552,6 +1552,73 @@ def test_tasks_panel_reads_the_server_without_blocking(monkeypatch, tmp_path):
         app.processEvents()
 
 
+def test_tasks_panel_reuses_the_window_htsp_connection_instead_of_a_second_sync(monkeypatch, tmp_path):
+    import time
+
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+    server = {'name': 'big', 'url': 'http://127.0.0.1:9981', 'protocol': 'htsp', 'htsp_port': 9982}
+    window.current_server = lambda: server
+    window._server_requests_ready = lambda: True
+    panel = window.tasks_pane
+    opened = []
+    panel.open_backend = lambda srv: opened.append(srv)
+    entry = DvrEntry(
+        uuid='rec', title='Match', channel_name='Sport', start=int(time.time()) + 600,
+        duration=60, status='Scheduled', sched_status='scheduled',
+    )
+
+    class SyncedBackend:
+        synced = None
+
+        def synced_dvr_entries(self):
+            return self.synced
+
+        def close(self):
+            pass
+
+    class LoadingFetch:
+        def __init__(self, srv):
+            self.server = srv
+
+    try:
+        # While the channel list is still coming, the pane waits for that connection.
+        window._channel_fetch = LoadingFetch(server)
+        panel.refresh()
+        assert opened == [] and not panel._fetching
+
+        window._channel_fetch = None
+        backend = SyncedBackend()
+        backend.synced = [entry]
+        window._backend = backend
+        window._backend_key = window._backend_key_for(server)
+        panel.refresh()
+        assert opened == []
+        assert any('Match' in text for text in _task_texts(panel))
+
+        # A connection not in sync (dropped) leaves the pane to read on its own.
+        backend.synced = None
+        panel.open_backend = lambda srv: opened.append(srv) or SimpleBackend()
+        panel.refresh()
+        _wait_for_tasks(app, panel)
+        assert len(opened) == 1
+    finally:
+        window._channel_fetch = None
+        window._backend = None
+        window.close()
+        app.processEvents()
+
+
+class SimpleBackend:
+    def list_dvr_entries(self):
+        return []
+
+    def close(self):
+        pass
+
+
 def test_tasks_panel_opens_when_a_task_is_added(monkeypatch, tmp_path):
     import time
 

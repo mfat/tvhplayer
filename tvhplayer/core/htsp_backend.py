@@ -432,6 +432,17 @@ class HtspBackend(TvhBackend):
         if not reply.get('success'):
             raise TvhError(reply.get('error') or 'addDvrEntry failed')
 
+    def synced_dvr_entries(self) -> Optional[List[DvrEntry]]:
+        """Recordings this connection already holds, or None when it is not in sync.
+
+        Never connects: another connection's full sync would read every
+        channel again just to list the recordings.
+        """
+        if not self._metadata or self.metadata_disconnected:
+            return None
+        with self._metadata_lock:
+            return list(self._dvr.values())
+
     def list_dvr_entries(self) -> List[DvrEntry]:
         self._ensure()
         # Apply dvrEntryUpdate messages queued since the last RPC so a

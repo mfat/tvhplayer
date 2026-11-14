@@ -1066,6 +1066,18 @@ class TasksPanel(QFrame):
             # Ask again once the running fetch is done, so a change just made shows.
             self._fetch_again = True
             return
+        # Over HTSP, listing recordings means the server first sends every
+        # channel. The window's connection already holds them; with a huge
+        # playlist, a second connection doubled the work of loading the list.
+        synced = getattr(host, 'synced_recordings', None)
+        state, entries = synced(server) if synced is not None else ('unknown', None)
+        if state == 'loading':
+            # The window will refresh this pane once its channels are in.
+            return
+        if state == 'synced':
+            self._close_backend()
+            self._on_server_fetched(self._generation, entries, None)
+            return
         self._fetching = True
         self._fetch_again = False
         thread = threading.Thread(
@@ -4625,6 +4637,25 @@ class TVHeadendClient(QMainWindow):
             self._backend_key = key
         return self._backend
 
+    def synced_recordings(self, server):
+        """``(state, entries)`` for the Tasks pane, from this window's HTSP connection.
+
+        'synced' with the recordings the connection holds; 'loading' while the
+        channel list is still coming over HTSP; otherwise 'unknown'.
+        """
+        key = self._backend_key_for(server)
+        if key[1] != PROTOCOL_HTSP:
+            return 'unknown', None
+        fetch = self._channel_fetch
+        if fetch is not None and self._backend_key_for(fetch.server) == key:
+            return 'loading', None
+        backend = self._backend
+        if backend is not None and self._backend_key == key:
+            entries = getattr(backend, 'synced_dvr_entries', lambda: None)()
+            if entries is not None:
+                return 'synced', entries
+        return 'unknown', None
+
     @staticmethod
     def _backend_key_for(server):
         return (
@@ -5574,6 +5605,8 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage("Channels loaded successfully")
         self._guide_channels_changed()
         self._channel_list_settled()
+        # It waited for this connection instead of opening its own.
+        self.tasks_pane.refresh()
         if self._show_playing_on_load:
             self._show_playing_on_load = False
             if fetch.key == self._playback_server:

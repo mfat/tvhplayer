@@ -220,3 +220,19 @@ def test_channel_batches_are_bounded_and_keep_latest_pending_changes():
     assert len(second) == 2000 and len(third) == 1000
     assert third[4000].name == 'Latest'
     assert backend.pending_channel_count == 0
+
+
+def test_synced_dvr_entries_never_connects():
+    from tvhplayer.core.htsp_backend import HtspBackend
+    from tvhplayer.core.models import ServerConfig
+
+    backend = HtspBackend(ServerConfig.from_dict({'url': 'http://127.0.0.1:1', 'protocol': 'htsp', 'htsp_port': 1}))
+    backend._conn.connect = lambda: (_ for _ in ()).throw(AssertionError('must not connect'))
+    assert backend.synced_dvr_entries() is None
+    backend._metadata = True
+    backend._metadata_requested = True
+    backend._conn._sock = object()
+    backend._dvr = {7: 'entry'}
+    assert backend.synced_dvr_entries() == ['entry']
+    backend._conn._sock = None
+    assert backend.synced_dvr_entries() is None
