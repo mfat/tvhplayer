@@ -120,6 +120,7 @@ def fake_ffmpeg(tmp_path):
     return path
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='The stand-in serves the Linux built-in server')
 def test_the_installed_stand_in_runs_ffmpeg_on_the_best_quality(tmp_path, web, fake_ffmpeg):
     starter = install_starter(str(fake_ffmpeg), tmp_path / 'bin' / 'ffmpeg')
     args = ['-nostdin', '-i', f'{web}/index.m3u8', '-c', 'copy', '-f', 'mpegts', 'pipe:1']
@@ -127,6 +128,7 @@ def test_the_installed_stand_in_runs_ffmpeg_on_the_best_quality(tmp_path, web, f
     assert output.stdout.split('\n')[:-1] == ['-nostdin', '-i', f'{web}/01.m3u8', '-c', 'copy', '-f', 'mpegts', 'pipe:1']
 
 
+@pytest.mark.skipif(sys.platform == 'win32', reason='The stand-in serves the Linux built-in server')
 def test_the_stand_in_passes_the_command_on_when_the_list_cannot_be_read(tmp_path, web, fake_ffmpeg):
     starter = install_starter(str(fake_ffmpeg), tmp_path / 'bin' / 'ffmpeg')
     for url in (f'{web}/stream.ts', 'http://127.0.0.1:1/index.m3u8'):
@@ -148,8 +150,12 @@ def test_the_stand_in_is_written_once_and_only_where_python_can_run_it(tmp_path,
     assert install_starter('/usr/bin/ffmpeg', path) is None
 
 
-def test_the_built_in_server_gets_the_stand_in_and_others_get_ffmpeg():
+def test_the_built_in_server_gets_the_stand_in_and_others_get_ffmpeg(monkeypatch):
     builtin = {'builtin': True}
+    # On Windows the built-in server runs in its container, with the container's ffmpeg.
+    monkeypatch.setattr('tvhplayer.core.playlist_sync.sys.platform', 'win32')
+    assert ffmpeg_for_server(builtin, which=lambda _name: None) == '/usr/bin/ffmpeg'
+    monkeypatch.setattr('tvhplayer.core.playlist_sync.sys.platform', 'linux')
     assert ffmpeg_for_server(builtin, which=lambda _name: '/usr/bin/ffmpeg', starter=lambda _path: '/data/bin/ffmpeg') == '/data/bin/ffmpeg'
     assert ffmpeg_for_server(builtin, which=lambda _name: '/usr/bin/ffmpeg', starter=lambda _path: None) == '/usr/bin/ffmpeg'
     assert ffmpeg_for_server({'url': 'http://tv.lan:9981'}, starter=lambda _path: '/data/bin/ffmpeg') == '/usr/bin/ffmpeg'

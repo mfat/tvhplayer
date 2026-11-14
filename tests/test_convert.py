@@ -35,8 +35,9 @@ def test_edit_path_never_overwrites(tmp_path):
     assert convert.edit_path(source) == str(tmp_path / 'show_edit.mp4')
     (tmp_path / 'show_edit.mp4').write_bytes(b'')
     assert convert.edit_path(source) == str(tmp_path / 'show_edit_2.mp4')
-    assert convert.edit_path(source, '/out') == '/out/show_edit.mp4'
-    assert convert.edit_path(source, '/out', {'/out/show_edit.mp4'}) == '/out/show_edit_2.mp4'
+    out = os.path.join('/out', 'show_edit.mp4')
+    assert convert.edit_path(source, '/out') == out
+    assert convert.edit_path(source, '/out', {out}) == os.path.join('/out', 'show_edit_2.mp4')
 
 
 def test_requested_encoder():
@@ -56,8 +57,14 @@ def test_missing_encoder_is_named(monkeypatch):
 
 
 def _script(path, body):
+    """A stand-in program written in Python, runnable on every system."""
     path.write_text(f'#!{sys.executable}\n{body}')
     path.chmod(0o755)
+    if sys.platform == 'win32':
+        # Windows does not run a script by its first line; a batch file runs it instead.
+        wrapper = path.with_suffix('.cmd')
+        wrapper.write_text(f'@"{sys.executable}" "{path}" %*\r\n')
+        return str(wrapper)
     return str(path)
 
 
