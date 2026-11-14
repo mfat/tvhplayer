@@ -64,6 +64,10 @@ FAST_START_HELP = (
     'Sets mpv --demuxer-lavf-analyzeduration=0.5. Turn off if sound or a sound track is missing. '
     'Applies the next time a channel starts.'
 )
+HARDWARE_DECODING_HELP = (
+    'Auto uses the graphics processor when available. Copy-back uses a more compatible path. '
+    'Try Disabled if video has artifacts; it uses more CPU. Applies the next time a stream starts.'
+)
 TIMESHIFT_HELP = (
     'Sets mpv --cache-on-disk, so you can pause and go back much further. '
     'Without it, mpv keeps about a minute of HD in memory. Applies the next time a channel starts.'
@@ -197,6 +201,8 @@ class SettingsDialog(QDialog):
 
         self.play_check.toggled.connect(host.set_plays_on_start)
         self.fast_start_check.toggled.connect(host.set_starts_channels_fast)
+        self.hardware_decoding_combo.currentIndexChanged.connect(
+            lambda: host.set_hardware_decoding(self.hardware_decoding_combo.currentData()))
         self.timeshift_check.toggled.connect(self._timeshift_toggled)
         self.timeshift_spin.editingFinished.connect(self._timeshift_size_edited)
         self.live_resize_check.toggled.connect(host.set_uses_live_resize)
@@ -239,6 +245,14 @@ class SettingsDialog(QDialog):
         self.fast_start_check.setChecked(host.starts_channels_fast())
         describe(self.fast_start_check, description=FAST_START_HELP)
         channels.add_row(SettingRow('Start channels &faster', FAST_START_HELP, self.fast_start_check))
+        video = page.add(SettingsGroup('Video'))
+        self.hardware_decoding_combo = QComboBox()
+        for label, mode in (('Auto', 'auto-safe'), ('Copy-back', 'auto-copy'), ('Disabled', 'no')):
+            self.hardware_decoding_combo.addItem(label, mode)
+        self.hardware_decoding_combo.setCurrentIndex(
+            self.hardware_decoding_combo.findData(host.hardware_decoding()))
+        describe(self.hardware_decoding_combo, 'Hardware decoding', HARDWARE_DECODING_HELP)
+        video.add_row(SettingRow('&Hardware decoding', HARDWARE_DECODING_HELP, self.hardware_decoding_combo))
         timeshift = page.add(SettingsGroup('Timeshift'))
         self.timeshift_check = ToggleSwitch('Keep the timeshift buffer on disk')
         self.timeshift_check.setChecked(host.timeshift_on_disk())

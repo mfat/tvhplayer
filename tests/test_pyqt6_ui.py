@@ -204,6 +204,9 @@ class _FakePlayer:
         self._deinterlace = mode
         return True
 
+    def set_hardware_decoding(self, mode):
+        self.hardware_decoding = mode
+
     def set_fast_start(self, on):
         self.fast_start = on
 
@@ -3054,6 +3057,12 @@ def test_last_channel_plays_at_start_when_asked(monkeypatch, tmp_path):
 
         window.set_plays_on_start(True)
         assert window.plays_on_start()
+
+        assert window.hardware_decoding() == 'auto-safe'
+        assert window.player.hardware_decoding == 'auto-safe'
+        window.set_hardware_decoding('no')
+        assert window.config['hardware_decoding'] == 'no'
+        assert window.player.hardware_decoding == 'no'
 
         assert not window.starts_channels_fast()
         assert window.player.fast_start is False

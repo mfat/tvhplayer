@@ -4054,6 +4054,7 @@ class TVHeadendClient(QMainWindow):
             self.player = self._new_player()
             self.player.set_deinterlace(self.config['deinterlace'])
             self.player.set_fast_start(self.config['fast_channel_start'])
+            self.player.set_hardware_decoding(self.config['hardware_decoding'])
             self._apply_timeshift_store()
             print("Debug: Media player created successfully")
         except Exception as e:
@@ -8374,6 +8375,14 @@ class TVHeadendClient(QMainWindow):
 
     def set_plays_on_start(self, on):
         self.config['play_on_start'] = bool(on)
+        self.save_config()
+
+    def hardware_decoding(self):
+        return self.config['hardware_decoding']
+
+    def set_hardware_decoding(self, mode):
+        self.player.set_hardware_decoding(mode)
+        self.config['hardware_decoding'] = mode
         self.save_config()
 
     def starts_channels_fast(self):

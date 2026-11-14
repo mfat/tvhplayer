@@ -175,6 +175,8 @@ While a channel plays, the bar's seek bar, pause, and ±10 s buttons move within
 
 **Settings → Playback → Start channels faster** sets mpv's `--demuxer-lavf-analyzeduration=0.5`, for a slightly quicker picture. Turn it off if sound or a sound track goes missing. Applies the next time a channel starts.
 
+**Settings → Playback → Hardware decoding** offers Auto (the default), Copy-back, and Disabled. If video has artifacts, try Disabled, then reopen the channel. If that helps, try Copy-back to use hardware decoding through a more compatible path. Disabled uses the CPU and may increase power use. Changes apply when the next stream starts; Playback Statistics shows the decoder actually in use.
+
 ## Keyboard shortcuts
 
 Press F1 (**Help → Keyboard Shortcuts**) for the full list. The most used ones:

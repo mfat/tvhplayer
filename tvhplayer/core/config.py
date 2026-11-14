@@ -17,7 +17,7 @@ from .channel_info import channel_list_options
 from .guide_feeds import GuideSource
 from .guide_match import Choice
 from .models import ServerConfig
-from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES
+from .player import DEINTERLACE_AUTO, DEINTERLACE_MODES, HARDWARE_DECODING_MODES
 from .playlist_sync import PlaylistSource, valid_state_id
 from .recorder import DEFAULT_FORMAT, RECORDING_FORMATS
 from .urls import pin_http_port
@@ -110,6 +110,7 @@ def default_config():
         'deinterlace': DEINTERLACE_AUTO,
         # Probe a new stream for less time, so a channel's picture comes sooner.
         'fast_channel_start': False,
+        'hardware_decoding': 'auto-safe',
         # Timeshift buffer on disk, up to this many GB, instead of mpv's buffer in memory.
         'timeshift_on_disk': False,
         'timeshift_gb': 4,
@@ -214,6 +215,8 @@ def _normalize(data):
             cfg[key] = ''
     if cfg.get('deinterlace') not in DEINTERLACE_MODES:
         cfg['deinterlace'] = DEINTERLACE_AUTO
+    if cfg.get('hardware_decoding') not in HARDWARE_DECODING_MODES:
+        cfg['hardware_decoding'] = 'auto-safe'
     # Legacy Settings choice (auto/mpv/vlc); playback is always libmpv now.
     cfg.pop('player_engine', None)
     if not isinstance(cfg.get('ui_theme'), str) or not cfg['ui_theme'].strip():

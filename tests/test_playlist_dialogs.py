@@ -639,6 +639,14 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
         def set_plays_on_start(self, on):
             self.play = on
 
+        decoder = 'auto-safe'
+
+        def hardware_decoding(self):
+            return self.decoder
+
+        def set_hardware_decoding(self, mode):
+            self.decoder = mode
+
         def starts_channels_fast(self):
             return False
 
@@ -874,6 +882,10 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert not dialog.play_check.isChecked()
     dialog.play_check.click()
     assert host.play is True
+    assert dialog.hardware_decoding_combo.currentData() == 'auto-safe'
+    for mode in ('no', 'auto-copy', 'auto-safe'):
+        dialog.hardware_decoding_combo.setCurrentIndex(dialog.hardware_decoding_combo.findData(mode))
+        assert host.decoder == mode
     assert not dialog.fast_start_check.isChecked()
     dialog.fast_start_check.click()
     assert host.fast_start is True

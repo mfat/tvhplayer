@@ -13,6 +13,7 @@ DEINTERLACE_AUTO = 'auto'
 DEINTERLACE_ON = 'on'
 DEINTERLACE_OFF = 'off'
 DEINTERLACE_MODES = (DEINTERLACE_AUTO, DEINTERLACE_ON, DEINTERLACE_OFF)
+HARDWARE_DECODING_MODES = ('auto-safe', 'auto-copy', 'no')
 # The track id that turns subtitles off.
 NO_TRACK = -1
 
@@ -117,6 +118,9 @@ class Player(ABC):
         effect the next time a stream starts.
         """
         return False
+
+    def set_hardware_decoding(self, mode: str):
+        """Choose hardware decoding for the next stream. The default does nothing."""
 
     def set_fast_start(self, on: bool):
         """Probe new streams briefly, for a quicker first picture. Applies from the next stream.

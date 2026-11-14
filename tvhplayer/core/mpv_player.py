@@ -12,7 +12,8 @@ from time import monotonic
 
 from .buffer_recorder import BufferRecorder
 from .player import (
-    BufferRecordingPoint, DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON, NO_TRACK, Player, Timeshift,
+    BufferRecordingPoint, DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON,
+    HARDWARE_DECODING_MODES, NO_TRACK, Player, Timeshift,
 )
 from .proxy import hide_http_proxy, stream_proxy
 
@@ -59,6 +60,7 @@ class MpvPlayer(Player):
 
         self._mpv_module = mpv
         self._surface = None
+        self._hardware_decoding = MPV_OPTIONS['hwdec']
         self._deinterlace = DEINTERLACE_AUTO
         self._last_buffered = None
         self._live_clock = None
@@ -129,6 +131,7 @@ class MpvPlayer(Player):
         self._last_buffered = None
         self._live_clock = None
         self._timeshift_active = False
+        self._mpv['hwdec'] = self._hardware_decoding
         self._mpv.loadfile(url)
 
     def stop(self):
@@ -205,6 +208,12 @@ class MpvPlayer(Player):
         except Exception:
             return True
         return 'auto' in choices
+
+    def set_hardware_decoding(self, mode):
+        if mode not in HARDWARE_DECODING_MODES:
+            raise ValueError(f'Unknown hardware decoding mode: {mode}')
+        # Defer changing the decoder: a runtime change can seek a live stream.
+        self._hardware_decoding = mode
 
     def set_fast_start(self, on):
         self._mpv['demuxer-lavf-analyzeduration'] = FAST_START_ANALYZE_SECONDS if on else 0

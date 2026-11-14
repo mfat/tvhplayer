@@ -366,3 +366,20 @@ def test_background_saves_are_read_back_in_order(tmp_path):
     data = ConfigStore(path).data
     assert data['volume'] == 19
     assert len(data['playlists'][0]['muxes']) == 20
+
+
+@pytest.mark.parametrize('mode', ['auto-safe', 'auto-copy', 'no'])
+def test_hardware_decoding_roundtrip(tmp_path, mode):
+    path = tmp_path / 'tvhplayer.conf'
+    store = ConfigStore(path)
+    assert store.data['hardware_decoding'] == 'auto-safe'
+    store.data['hardware_decoding'] = mode
+    store.save()
+    assert ConfigStore(path).data['hardware_decoding'] == mode
+
+
+@pytest.mark.parametrize('value', [None, [], {}, 1, 'invalid'])
+def test_invalid_hardware_decoding_uses_default(tmp_path, value):
+    path = tmp_path / 'tvhplayer.conf'
+    path.write_text(json.dumps({'hardware_decoding': value}), encoding='utf-8')
+    assert ConfigStore(path).data['hardware_decoding'] == 'auto-safe'

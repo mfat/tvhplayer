@@ -614,3 +614,25 @@ def test_real_buffer_recording_contains_rewound_and_new_footage(tmp_path, disk):
         assert recorded == original[first:last + 1]
     finally:
         player.close()
+
+
+@pytest.mark.parametrize('mode', ['auto-safe', 'auto-copy', 'no'])
+def test_hardware_decoding_changes_only_on_next_stream(engine, mode):
+    player, mpv, _ = engine
+    player.play('http://example.test/first')
+    assert mpv.props['hwdec'] == 'auto-safe'
+    player.set_hardware_decoding(mode)
+    assert mpv.props['hwdec'] == 'auto-safe'
+    player.play('http://example.test/second')
+    assert mpv.props['hwdec'] == mode
+    player.play('http://example.test/third')
+    assert mpv.props['hwdec'] == mode
+
+
+def test_invalid_hardware_decoding_keeps_previous_choice(engine):
+    player, mpv, _ = engine
+    player.set_hardware_decoding('no')
+    with pytest.raises(ValueError):
+        player.set_hardware_decoding('invalid')
+    player.play('http://example.test/stream')
+    assert mpv.props['hwdec'] == 'no'
