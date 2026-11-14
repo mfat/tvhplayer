@@ -276,6 +276,82 @@ def test_unchanged_refresh_writes_nothing():
     assert admin.saved == []
 
 
+def test_large_url_edit_saves_batches_before_reporting_progress():
+    from tvhplayer.core.tvh_admin import SAVE_BATCH
+
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://old.example/list.m3u', 'builtin')
+    count = SAVE_BATCH * 2 + 3
+    text = '#EXTM3U\n' + ''.join(
+        f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://old.example/{i}.ts\n' for i in range(count)
+    )
+    sync_playlist(admin, source, _plans(text), check=False)
+    original = dict(source.muxes)
+    admin.saved.clear()
+    progress = []
+
+    def saved_progress(done, total):
+        progress.append((done, total))
+        assert len(admin.saved) == done
+        assert all('new.example' in admin.muxes[node['uuid']]['iptv_url'] for node in admin.saved)
+
+    source.location = source.location.replace('old.example', 'new.example')
+    result = sync_playlist(
+        admin, source, _plans(text.replace('old.example', 'new.example')),
+        check=False, progress=saved_progress,
+    )
+    assert (result.added, result.updated, result.removed) == (0, count, 0)
+    assert source.muxes == original
+    assert progress == [(SAVE_BATCH, count), (SAVE_BATCH * 2, count), (count, count)]
+
+
+def test_a_slow_small_import_shows_progress_while_it_adds_channels():
+    # Each channel is a request of its own; on a slow server a list shorter
+    # than one save batch must not sit at nothing until the end.
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    text = '#EXTM3U\n' + ''.join(f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://x/{i}.ts\n' for i in range(20))
+    now = [0.0]
+
+    def clock():
+        now[0] += 0.2
+        return now[0]
+
+    progress = []
+    sync_playlist(admin, source, _plans(text), check=False, clock=clock,
+                  progress=lambda done, total: progress.append(done))
+    assert len([done for done in progress if done < 20]) >= 5
+    assert progress[-1] == 20
+
+
+def test_a_refresh_that_fails_part_way_retests_the_addresses_it_saved():
+    # The saved streams match the playlist afterwards, so the next refresh
+    # would not test them; they must not keep the old address's verdict.
+    from tvhplayer.core.tvh_admin import SAVE_BATCH
+
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    count = SAVE_BATCH * 2
+    text = '#EXTM3U\n' + ''.join(f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://x/{i}.ts\n' for i in range(count))
+    sync_playlist(admin, source, _plans(text), check=False)
+    admin.scanned.clear()
+    saves = [0]
+    save = admin.save
+
+    def failing_save(nodes):
+        saves[0] += 1
+        if saves[0] == 2:
+            raise TvhConnectionError('gone')
+        save(nodes)
+
+    admin.save = failing_save
+    with pytest.raises(TvhConnectionError):
+        sync_playlist(admin, source, _plans(text.replace('http://x/', 'http://y/')))
+    moved = [uuid for uuid, mux in admin.muxes.items() if 'http://y/' in mux['iptv_url']]
+    assert len(moved) == SAVE_BATCH
+    assert sorted(admin.scanned) == sorted(moved)
+
+
 def test_channels_that_fail_the_scan_are_hidden():
     admin = FakeAdmin(dead={'B'})
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')

@@ -27,6 +27,7 @@ from typing import Callable, Dict, List, Optional
 
 from .errors import PlaylistError, TvhAuthError, TvhConnectionError
 from .ffmpeg_starter import install_starter
+from .tvh_admin import SAVE_BATCH
 from urllib.parse import quote
 
 from .playlist import NO_CHANNELS, ChannelPlan, SkippedEntry, _header_args, _quote, ffmpeg_input, xtream_identity
@@ -45,6 +46,8 @@ MAX_STREAMS = 6
 # map lost in a crash is found again on the next refresh, by stream address;
 # saving it more often made the window stutter on big playlists.
 CHECKPOINT_SECONDS = 5
+# How often a playlist import reports progress while it adds channels.
+PROGRESS_SECONDS = 0.25
 CHECK_POLL_SECONDS = 2
 # Each poll reads every mux and service of the server. A big playlist is read
 # less often: a second between polls for every thousand muxes.
@@ -652,7 +655,21 @@ def sync_playlist(
     # A new address may work where the old one failed, or fail where it worked.
     retest = []
     created_since_checkpoint = 0
-    last_checkpoint = clock()
+    reported = 0
+    last_checkpoint = last_progress = clock()
+
+    def save_changes():
+        # A saved address is tested at once: afterwards it matches the
+        # playlist, so a later refresh would not test it, even when this
+        # one stops or fails before the end.
+        if changes:
+            admin.save(changes)
+            result.updated += len(changes)
+            changes.clear()
+        if check and retest:
+            admin.scan_muxes(retest)
+            retest.clear()
+
     for plan in plans:
         if cancelled():
             result.cancelled = True
@@ -668,18 +685,26 @@ def sync_playlist(
             source.muxes[plan.key] = admin.create_mux(source.network_uuid, conf)
             result.added += 1
             created_since_checkpoint += 1
-            if clock() - last_checkpoint >= CHECKPOINT_SECONDS:
-                checkpoint()
-                created_since_checkpoint = 0
-                last_checkpoint = clock()
         done += 1
-        progress(done, total)
+        now = clock()
+        if created_since_checkpoint and now - last_checkpoint >= CHECKPOINT_SECONDS:
+            checkpoint()
+            created_since_checkpoint = 0
+            last_checkpoint = now
+        # Changes reach the server in batches during the walk, and progress
+        # counts only what is there. Progress goes out once a batch or every
+        # PROGRESS_SECONDS, so a slow walk moves and a fast one does not
+        # flood the window with updates.
+        if done % SAVE_BATCH == 0 or now - last_progress >= PROGRESS_SECONDS:
+            save_changes()
+            progress(done, total)
+            last_progress, reported = now, done
     if created_since_checkpoint:
         checkpoint()
 
-    if changes:
-        admin.save(changes)
-        result.updated = len(changes)
+    save_changes()
+    if reported != done:
+        progress(done, total)
 
     if not result.cancelled and stale:
         if not bouquets:
@@ -699,8 +724,6 @@ def sync_playlist(
     if not check:
         _reconcile_health_totals(source)
     checkpoint()
-    if check and retest and not result.cancelled:
-        admin.scan_muxes(retest)
     if check:
         # Hide channels already known not to work before the bouquet maps them.
         apply_checks(admin, source, hide_failed=hide)
