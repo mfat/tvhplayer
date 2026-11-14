@@ -4421,7 +4421,7 @@ def test_reading_the_builtin_servers_recordings_does_not_sync_every_channel(monk
         app.processEvents()
 
 
-def test_htsp_batches_render_before_sync_and_ignore_old_server(monkeypatch, tmp_path):
+def test_htsp_list_appears_whole_then_takes_live_changes_and_ignores_old_server(monkeypatch, tmp_path):
     from tvhplayer.core.htsp_backend import HtspBackend
     from tvhplayer.core.models import ServerConfig
 
@@ -4440,24 +4440,30 @@ def test_htsp_batches_render_before_sync_and_ignore_old_server(monkeypatch, tmp_
         window._channel_fetch = fetch
         backend._on_async({'method': 'channelAdd', 'channelId': 1, 'channelName': 'First', 'channelNumber': 1})
         window._poll_channel_metadata()
-        assert not backend._synced
+        # Still arriving: counted, not listed.
+        assert window.channel_model.rowCount() == 0
+        assert '1 received' in window.status_label.text()
+        backend._on_async({'method': 'initialSyncCompleted'})
+        window._on_channels_loaded(fetch, {'channels': [], 'tags': [], 'services': [], 'now_next': None})
         assert window.channel_model.rowCount() == 1
         assert window.channel_from_row(0).name == 'First'
-        assert '1 received' in window.status_label.text()
         assert window.channel_stack.currentWidget() is window.channel_list
+
+        # Afterwards, changes apply in place, each in its sorted row.
         resets = []
         window.channel_model.modelReset.connect(lambda: resets.append(True))
         backend._on_async({'method': 'channelUpdate', 'channelId': 1, 'channelName': 'New name'})
-        backend._on_async({'method': 'channelAdd', 'channelId': 2, 'channelName': 'Second', 'channelNumber': 2})
+        backend._on_async({'method': 'channelAdd', 'channelId': 2, 'channelName': 'Before', 'channelNumber': 0})
+        backend._on_async({'method': 'channelAdd', 'channelId': 3, 'channelName': 'Zero', 'channelNumber': 0})
         window._poll_channel_metadata()
-        assert window.channel_model.rowCount() == 2
-        assert window.channel_from_row(0).name == 'New name'
+        assert window.channel_model.rowCount() == 3
+        assert [window.channel_from_row(r).name for r in range(3)] == ['New name', 'Before', 'Zero']
         assert resets == []
         # Credential changes at the same address are also a different session.
         server['username'] = 'different-user'
         backend._on_async({'method': 'channelDelete', 'channelId': 1})
         window._poll_channel_metadata()
-        assert window.channel_model.rowCount() == 2
+        assert window.channel_model.rowCount() == 3
         assert 1 in backend._channel_changes  # The stale batch wasn't consumed.
     finally:
         window._channel_fetch = None
@@ -4526,7 +4532,7 @@ def test_disconnected_metadata_retries_are_throttled(monkeypatch, tmp_path):
         app.processEvents()
 
 
-def test_initial_channel_poll_yields_before_all_rows_and_skips_extras(monkeypatch, tmp_path):
+def test_channels_still_arriving_are_counted_not_added_row_by_row(monkeypatch, tmp_path):
     from tvhplayer.core.htsp_backend import HtspBackend
     from tvhplayer.core.models import ServerConfig
     app, ui, window, _ = _make_player(monkeypatch, tmp_path)
@@ -4541,11 +4547,15 @@ def test_initial_channel_poll_yields_before_all_rows_and_skips_extras(monkeypatc
         window._channel_fetch = types.SimpleNamespace(server=server, backend=backend)
         monkeypatch.setattr(window, '_refresh_tag_combo', lambda: pytest.fail('recounted tags while loading'))
         monkeypatch.setattr(window, 'channel_logo_reference', lambda channel: pytest.fail('prepared logos while loading'))
+        shown = []
+        monkeypatch.setattr(window.statusbar, 'showMessage', lambda text, *a: shown.append(text))
         for i in range(5000):
             backend._on_async({'method': 'channelAdd', 'channelId': i, 'channelName': str(i)})
         window._poll_channel_metadata()
-        assert window.channel_model.rowCount() == 2000
-        assert backend.pending_channel_count == 3000
+        # Nothing is added while the list arrives; it appears whole when loaded.
+        assert window.channel_model.rowCount() == 0
+        assert backend.pending_channel_count == 5000
+        assert shown == ['Loading channels… 5,000 received']
     finally:
         window._channel_fetch = None
         backend.close()
@@ -4573,12 +4583,10 @@ def test_finished_load_shows_every_channel_without_working_through_queued_rows(m
             backend._on_async({'method': 'channelAdd', 'channelId': i, 'channelName': f'Channel {i:04d}'})
         backend._on_async({'method': 'initialSyncCompleted'})
         window._poll_channel_metadata()
-        assert window.channel_model.rowCount() == 2000
-        assert backend.pending_channel_count == 3000
+        assert window.channel_model.rowCount() == 0
         channels = list(backend._channels.values())
         window._on_channels_loaded(fetch, {'channels': channels, 'tags': [], 'services': [], 'now_next': None})
-        # The snapshot already holds every channel: shown at once, not after
-        # rounds of 2,000 queued rows.
+        # The snapshot holds every channel: all shown at once.
         assert window.channel_model.rowCount() == 5000
         assert backend.pending_channel_count == 0
         assert window._channel_fetch is None

@@ -41,6 +41,7 @@ try:
         channel_key,
         progress,
     )
+    from .core.backend import channel_sort_key
     from .core.config import default_cache_dir
     from .core.proxy import configure_session
     from .core.urls import http_auth
@@ -60,6 +61,7 @@ except ImportError:
         channel_key,
         progress,
     )
+    from core.backend import channel_sort_key
     from core.config import default_cache_dir
     from core.proxy import configure_session
     from core.urls import http_auth
@@ -264,10 +266,15 @@ class ChannelTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._channels = list(channels)
         self._keys = [channel_key(channel) for channel in self._channels]
+        # The order without a sorted column: by number, then name, as the
+        # backends list channels. Rows added later go in their place.
+        self._natural = [channel_sort_key(channel) for channel in self._channels]
         self._position_by_key = {key: i for i, key in enumerate(self._keys)}
         self._free_positions = []
         self._logo_refs = list(logo_refs) if logo_refs is not None else [''] * len(self._channels)
-        self._order = self._sorted(range(len(self._channels)))
+        # Without a sorted column, the list keeps the order it is given.
+        self._order = (list(range(len(self._channels))) if self._sort_column < 0
+                       else self._sorted(range(len(self._channels))))
         self._rows = self._filtered(self._order)
         self.endResetModel()
 
@@ -282,9 +289,15 @@ class ChannelTableModel(QAbstractTableModel):
         if not hasattr(self, '_position_by_key'):
             self._position_by_key = {}
             self._free_positions = []
+        if not hasattr(self, '_natural'):
+            self._natural = [channel_sort_key(channel) if channel is not None else (0, '')
+                             for channel in self._channels]
         self.layoutAboutToBeChanged.emit()
         old = self.persistentIndexList()
         old_keys = [self._keys[self._rows[index.row()]] for index in old]
+        # Positions already in the order whose channel changed or went away.
+        moved = set()
+        added = []
         for key, channel in changes.items():
             position = self._position_by_key.get(key)
             if channel is None:
@@ -292,25 +305,42 @@ class ChannelTableModel(QAbstractTableModel):
                     del self._position_by_key[key]
                     self._channels[position] = None
                     self._free_positions.append(position)
+                    moved.add(position)
                 continue
             if position is None:
                 if self._free_positions:
                     position = self._free_positions.pop()
+                    moved.add(position)
                 else:
                     position = len(self._channels)
                     self._channels.append(None)
                     self._keys.append('')
                     self._logo_refs.append('')
+                    self._natural.append(None)
                 self._position_by_key[key] = position
+            else:
+                moved.add(position)
             self._channels[position] = channel
             self._keys[position] = key
             self._logo_refs[position] = (logo_refs or {}).get(key, '')
-        self._order = self._sorted(self._position_by_key.values())
+            self._natural[position] = channel_sort_key(channel)
+            added.append(position)
+        if self._sort_column < 0:
+            # The order is kept sorted: merge the batch in instead of sorting
+            # every channel again. A list that is still arriving keeps its
+            # rows in their final places.
+            natural = self._natural.__getitem__
+            kept = [p for p in self._order if p not in moved] if moved else self._order
+            added = sorted(dict.fromkeys(added), key=natural)
+            self._order = sorted(kept + added, key=natural)
+        else:
+            self._order = self._sorted(self._position_by_key.values())
         self._rows = self._filtered(self._order)
-        row_of = {self._keys[position]: row for row, position in enumerate(self._rows)}
-        new = [self.index(row_of[key], index.column()) if key in row_of else QModelIndex()
-               for index, key in zip(old, old_keys)]
-        self.changePersistentIndexList(old, new)
+        if old:
+            row_of = {self._keys[position]: row for row, position in enumerate(self._rows)}
+            new = [self.index(row_of[key], index.column()) if key in row_of else QModelIndex()
+                   for index, key in zip(old, old_keys)]
+            self.changePersistentIndexList(old, new)
         self.layoutChanged.emit()
         self._changed(range(len(COLUMN_TITLES)))
 
@@ -523,9 +553,22 @@ class ChannelTableModel(QAbstractTableModel):
         value = self._display(position, column)
         return str(value or '').casefold()
 
+    def row_of_key(self, key):
+        """Row showing the channel with ``key``, or -1."""
+        position = getattr(self, '_position_by_key', {}).get(key)
+        if position is None:
+            return -1
+        try:
+            return self._rows.index(position)
+        except ValueError:
+            return -1
+
     def _sorted(self, positions):
         positions = list(positions)
         if self._sort_column < 0:
+            natural = getattr(self, '_natural', None)
+            if natural is not None and len(natural) == len(self._channels):
+                return sorted(positions, key=natural.__getitem__)
             return positions
         return sorted(
             positions,

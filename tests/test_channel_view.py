@@ -295,3 +295,37 @@ def test_no_epg_is_displayed_only_after_successful_now_next_fetch():
     model.set_programmes({}, True, fetched=False)
     assert now.data() == ''
     view.close()
+
+
+def test_rows_arriving_in_any_order_take_their_final_places():
+    import random
+
+    from tvhplayer.channel_view import COL_NAME
+    from tvhplayer.core.backend import channel_sort_key
+    from tvhplayer.core.channel_info import channel_key
+    from tvhplayer.core.models import Channel
+
+    rng = random.Random(3)
+    channels = [Channel(uuid=f'u{i}', name=f'Ch {rng.randrange(50)}', number=rng.choice([0, rng.randrange(1, 300)]))
+                for i in range(2000)]
+    arrival = channels[:]
+    rng.shuffle(arrival)
+    app, model, view = _model([])
+    for start in range(0, len(arrival), 300):
+        model.update_channels({channel_key(c): c for c in arrival[start:start + 300]})
+        shown = [model.channel_at(row) for row in range(model.rowCount())]
+        # Every batch shows the channels so far in the order the finished list has.
+        assert [channel_sort_key(c) for c in shown] == sorted(channel_sort_key(c) for c in shown)
+    # As the backend's finished list: arrival order, sorted (ties keep arrival order).
+    final = sorted(arrival, key=channel_sort_key)
+    assert [model.channel_at(row).uuid for row in range(model.rowCount())] == [c.uuid for c in final]
+
+    # A renumbered channel moves to its new place; a removed one leaves.
+    moved = Channel(uuid=final[0].uuid, name=final[0].name, number=10_000)
+    model.update_channels({channel_key(final[0]): moved, channel_key(final[1]): None})
+    assert model.rowCount() == len(channels) - 1
+    assert model.channel_at(model.rowCount() - 1).uuid == moved.uuid or \
+        channel_sort_key(model.channel_at(model.rowCount() - 1)) >= channel_sort_key(moved)
+    assert model.row_of_key(channel_key(final[1])) == -1
+    assert model.channel_at(model.row_of_key(channel_key(moved))).number == 10_000
+    view.close()

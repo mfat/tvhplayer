@@ -5533,8 +5533,8 @@ class TVHeadendClient(QMainWindow):
 
     def _on_channels_loaded(self, fetch, result):
         if fetch is self._channel_fetch and hasattr(fetch.backend, 'channel_snapshot'):
-            # Extras may have taken time; do not overwrite newer batches with
-            # the snapshot taken before those RPCs.
+            # Everything the connection holds now, including what arrived
+            # while tags and programmes were read.
             snapshot = fetch.backend.channel_snapshot()
             if snapshot is not None:
                 result['channels'], result['tags'] = snapshot
@@ -5571,7 +5571,7 @@ class TVHeadendClient(QMainWindow):
         self._now_next_fetched = time.monotonic()
         self._recording_keys = recording_channel_keys(self._channels, getattr(self, '_dvr_entries', []))
         self._refresh_tag_combo()
-        if reload and (fetch.keep_place or getattr(fetch, 'progressive', False)):
+        if reload and fetch.keep_place:
             self._reload_channel_rows()
         else:
             self._fill_channel_rows()
@@ -5668,6 +5668,18 @@ class TVHeadendClient(QMainWindow):
         take = getattr(backend, 'take_channel_changes', None)
         if take is None:
             return
+        if fetch is not None:
+            # A list being loaded appears whole when it is in. Showing it in
+            # pieces meant a list that was incomplete for searching and
+            # scrolling, while the work of adding the pieces made the window
+            # pause twice as long. Only the count is shown meanwhile.
+            now = time.monotonic()
+            if now - getattr(fetch, 'counted_at', 0.0) >= 0.5:
+                fetch.counted_at = now
+                received = getattr(backend, 'pending_channel_count', 0)
+                if received:
+                    self.statusbar.showMessage(f'Loading channels… {received:,} received')
+            return
         changes, tags, reset = take(limit=2000)
         if not changes and tags is None and not reset:
             return
@@ -5691,26 +5703,32 @@ class TVHeadendClient(QMainWindow):
         self._channels = list(self._live_channels.values())
         if tags is not None:
             self._channel_tags = [tag for tag in tags if tag.enabled]
-        if fetch is None and (tags is not None or (changes and self._channel_tags)):
+        if tags is not None or (changes and self._channel_tags):
             self._refresh_tag_combo()
         changed_channels = [channel for channel in changes.values() if channel is not None]
-        if fetch is None:
-            self._channel_kinds.update(channel_kinds(changed_channels, (), self._channel_tags))
-            self.channel_model.set_kinds(self._channel_kinds)
+        self._channel_kinds.update(channel_kinds(changed_channels, (), self._channel_tags))
+        self.channel_model.set_kinds(self._channel_kinds)
         references = {key: self.channel_logo_reference(channel) for key, channel in updates.items()
-                      if channel is not None} if fetch is None and self.channel_options['logos'] else {}
+                      if channel is not None} if self.channel_options['logos'] else {}
         if any(references.values()):
             self.channel_model.set_logos(True, self._logo_pixmaps, self._logo_placeholder())
+        # Rows go in their sorted places, many of them above the ones on
+        # screen: keep the channel at the top of the list where it is.
+        table = self.channel_list
+        anchor = ''
+        if table.verticalScrollBar().value() > 0:
+            top = table.rowAt(0)
+            anchor = self.channel_model.key_at(top) if top >= 0 else ''
         self.channel_model.update_channels(updates, references)
         self._apply_channel_filter()
+        if anchor:
+            row = self.channel_model.row_of_key(anchor)
+            if row >= 0:
+                table.scrollTo(self.channel_model.index(row, COL_NAME),
+                               QAbstractItemView.ScrollHint.PositionAtTop)
         if self._channels:
             self._show_channel_list()
-        if fetch is not None:
-            fetch.progressive = True
-            self.channel_busy.show()
-            self.statusbar.showMessage(f'Loading channels… {len(self._channels):,} received')
-        else:
-            self._guide_channels_changed()
+        self._guide_channels_changed()
         self._visible_logo_timer.start()
 
     def _show_channel_state(self, text, busy=False, retry=False):
