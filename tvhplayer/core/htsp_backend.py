@@ -175,8 +175,14 @@ class HtspBackend(TvhBackend):
         if channel_id is None:
             return
         existing = None if replace else self._channels.get(channel_id)
-        raw = dict(existing.raw) if existing else {}
-        raw.update(msg)
+        if existing:
+            raw = dict(existing.raw)
+            raw.update(msg)
+        else:
+            # A message just decoded and used for nothing else: keep it as the
+            # channel's data instead of copying it, once per channel of a
+            # list of tens of thousands.
+            raw = msg
         raw['htsp_id'] = int(channel_id)
         if msg.get('channelNumber') in (None, 0) and existing and existing.number:
             raw['channelNumber'] = existing.number

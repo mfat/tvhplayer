@@ -236,3 +236,24 @@ def test_synced_dvr_entries_never_connects():
     assert backend.synced_dvr_entries() == ['entry']
     backend._conn._sock = None
     assert backend.synced_dvr_entries() is None
+
+
+def test_reader_decodes_every_message_buffered_and_keeps_partial_ones():
+    from tvhplayer.core.htsmsg import serialize
+    from tvhplayer.core.htsp_connection import HtspConnection
+
+    conn = HtspConnection('127.0.0.1', 1)
+    frames = [serialize({'method': 'channelAdd', 'channelId': i, 'channelName': f'C{i}'}) for i in range(5)]
+    data = b''.join(frames)
+    cut = len(frames[0]) + len(frames[1]) + 3      # inside the third message
+    conn._rx.extend(data[:cut])
+    assert [m['channelId'] for m in conn._take_ready_messages()] == [0, 1]
+    assert bytes(conn._rx) == data[len(frames[0]) + len(frames[1]):cut]
+    conn._rx.extend(data[cut:])
+    assert [m['channelId'] for m in conn._take_ready_messages()] == [2, 3, 4]
+    assert conn._rx == bytearray()
+    conn._rx.extend(b'\x02\x00\x00\x00')            # 32 MiB announced
+    import pytest
+    from tvhplayer.core.errors import TvhError
+    with pytest.raises(TvhError, match='too large'):
+        conn._take_ready_messages()

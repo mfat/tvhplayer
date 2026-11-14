@@ -18,7 +18,7 @@ import time
 from typing import Callable, Optional
 
 from .errors import TvhAuthError, TvhConnectionError, TvhError
-from .htsmsg import Binary, read_message, serialize
+from .htsmsg import Binary, deserialize, read_message, serialize
 
 log = logging.getLogger(__name__)
 
@@ -116,17 +116,16 @@ class HtspConnection:
                         raise TvhConnectionError('HTSP connection closed')
                     self._rx.extend(chunk)
                     continue
-                msg = self._recv()
-                if 'seq' in msg:
-                    with self._condition:
-                        pending = self._pending.get(msg['seq'])
-                        if pending is not None:
-                            pending.append(msg)
-                        self._condition.notify_all()
-                else:
-                    on_async(msg)
-                    with self._condition:
-                        self._condition.notify_all()
+                for msg in self._take_ready_messages():
+                    if 'seq' in msg:
+                        with self._condition:
+                            pending = self._pending.get(msg['seq'])
+                            if pending is not None:
+                                pending.append(msg)
+                    else:
+                        on_async(msg)
+                with self._condition:
+                    self._condition.notify_all()
         except Exception as exc:
             with self._condition:
                 self._reader_error = TvhConnectionError(f'HTSP reader stopped: {exc}')
@@ -161,6 +160,35 @@ class HtspConnection:
         data = bytes(self._rx[:size])
         del self._rx[:size]
         return data
+
+    def _take_ready_messages(self) -> list:
+        """Decode every complete message in the receive buffer, then drop them from it.
+
+        A large channel list arrives as tens of thousands of messages; copying
+        each one out of the buffer and trimming the buffer after each cost
+        about as much as decoding them.
+        """
+        rx = self._rx
+        messages = []
+        pos = 0
+        end = len(rx)
+        with memoryview(rx) as view:
+            while end - pos >= 4:
+                size = int.from_bytes(view[pos:pos + 4], 'big')
+                if size > 16 * 1024 * 1024:
+                    raise TvhError(f'HTSMSG too large ({size} bytes)')
+                if end - pos - 4 < size:
+                    break
+                try:
+                    msg = deserialize(view[pos + 4:pos + 4 + size]) if size else {}
+                except (ValueError, OSError) as exc:
+                    raise TvhConnectionError(f'HTSP decode failed: {exc}') from exc
+                if not isinstance(msg, dict):
+                    raise TvhConnectionError('HTSP root message was not a map')
+                messages.append(msg)
+                pos += 4 + size
+        del rx[:pos]
+        return messages
 
     def _message_ready(self) -> bool:
         if len(self._rx) < 4:
