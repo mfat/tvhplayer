@@ -1021,6 +1021,37 @@ def test_removing_a_playlist_being_updated_stops_the_update_first(app, tmp_path,
     assert dialog.status_label.text() == 'Removed the channels from news.'
 
 
+def test_removing_a_playlist_shows_no_check_text(app, tmp_path, monkeypatch):
+    # A playlist half way through its check: removing it must not read as checking.
+    import threading
+    release = threading.Event()
+    monkeypatch.setattr(dialogs, 'remove_playlist', lambda _admin, _source: release.wait(10))
+    monkeypatch.setattr(
+        dialogs.QMessageBox, 'question', lambda *_args, **_kwargs: dialogs.QMessageBox.StandardButton.Yes
+    )
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
+    source.health_totals = {'working': 10, 'checking': 500}
+    host.stored = [source.to_dict()]
+    dialog = dialogs.PlaylistsDialog(host)
+    dialog.show()
+    assert 'checking' in dialog.health_label.text()
+    dialog._show_check_hint()
+    try:
+        dialog.remove_btn.click()
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and dialog.status_label.text() != 'Removing channels…':
+            app.processEvents()
+            time.sleep(0.02)
+        assert dialog.status_label.text() == 'Removing channels…'
+        visible = [label.text() for label in (dialog.health_label, dialog.hint_label) if label.isVisible()]
+        assert not [text for text in visible if 'check' in text.lower()]
+    finally:
+        release.set()
+        _wait_job(app, dialog)
+    assert dialog.status_label.text() == 'Removed the channels from news.'
+
+
 def test_playlists_dialog_lists_servers_and_their_playlists(app, tmp_path):
     other = {'name': 'Living Room', 'url': 'http://10.0.0.2:9981'}
     host = FakeHost([BUILTIN, other], current=other)

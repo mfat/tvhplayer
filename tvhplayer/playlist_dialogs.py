@@ -1417,8 +1417,12 @@ class PlaylistsDialog(QDialog):
         self.playlist_list.setEnabled(not running)
         self.server_list.setEnabled(not running)
         self.import_btn.setEnabled(not running and self._selected_server() is not None)
+        # A removal is not a check: the health of channels on their way out would read as one.
+        removing = self._stopping is not None or (
+            running and self._job is not None and self._job.action == PlaylistJob.REMOVE
+        )
         self.health_label.setText(f'Stream health: {health_text(source)}' if source is not None else '')
-        self.health_label.setVisible(source is not None)
+        self.health_label.setVisible(source is not None and not removing)
 
     def _show_health(self):
         source = self._selected()
@@ -1481,6 +1485,7 @@ class PlaylistsDialog(QDialog):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
+        self.hint_label.hide()
         if not busy:
             self._run(remove=True)
             return
