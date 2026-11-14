@@ -2,6 +2,7 @@
 
 import errno
 import os
+import posixpath
 import re
 import tempfile
 
@@ -48,11 +49,12 @@ def recording_folder_display(folder, saved_display='', host_lookup=None):
             if host:
                 tail = (match[2] or '').split('/')
                 # The first component names the exported entry, not a child.
-                if tail[0] == os.path.basename(host.rstrip('/')):
-                    return os.path.join(host, *tail[1:])
+                # Portal paths are Linux paths on every system.
+                if tail[0] == posixpath.basename(host.rstrip('/')):
+                    return posixpath.join(host, *tail[1:])
                 if not match[2]:
                     return host
-    return saved_display or os.path.basename(folder.rstrip('/'))
+    return saved_display or posixpath.basename(folder.rstrip('/'))
 
 
 def recording_folder_error(folder, error):
