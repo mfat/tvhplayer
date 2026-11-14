@@ -59,6 +59,9 @@ _VLC_HEADERS = {
     'http-cookie': 'Cookie',
 }
 _SPAWN_ESCAPES = {'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t'}
+# Read ordinary text in spans instead of visiting every character in Python.
+# Only a literal space separates spawn arguments; tabs and newlines are text.
+_SPAWN_PART = re.compile(r'''\\[\s\S]?|[^ \\"']+|[ "']''')
 _QUOTE_ESCAPES = {'\\': '\\\\', '"': '\\"', '\b': '\\b', '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t'}
 # A big playlist quotes a few hundred thousand arguments; these do it in C.
 _NEEDS_QUOTE = re.compile('[ "\'\\\\\b\f\n\r\t]')
@@ -459,43 +462,31 @@ def ffmpeg_input(command: str) -> Optional[Tuple[str, Dict[str, str]]]:
 
 def tvh_split(command: str) -> List[str]:
     """Split a pipe command the way Tvheadend's ``spawn_parse_args`` does."""
-    chars = list(command or '')
     args = []
-    pos = 0
-    while pos < len(chars) and len(args) < MAX_PIPE_ARGS:
-        while pos < len(chars) and chars[pos] == ' ':
-            pos += 1
-        start = pos
-        quote = None
-        while pos < len(chars):
-            char = chars[pos]
-            if char == '\\':
-                escaped = _SPAWN_ESCAPES.get(chars[pos + 1] if pos + 1 < len(chars) else '')
-                if escaped:
-                    chars[pos] = escaped
-                    del chars[pos + 1]
-                    pos += 1
-                else:
-                    del chars[pos]
-                    if pos < len(chars):
-                        pos += 1
-            elif quote:
-                if char == quote:
-                    del chars[pos]
-                    quote = None
-                else:
-                    pos += 1
-            elif char in ('"', "'"):
-                quote = char
-                del chars[pos]
-            elif char == ' ':
-                break
+    parts = []
+    quote = None
+    for match in _SPAWN_PART.finditer(command or ''):
+        part = match.group()
+        if part.startswith('\\'):
+            if len(part) > 1:
+                parts.append(_SPAWN_ESCAPES.get(part[1], part[1]))
+        elif part in ('"', "'"):
+            if quote is None:
+                quote = part
+            elif quote == part:
+                quote = None
             else:
-                pos += 1
-        if start != pos:
-            args.append(''.join(chars[start:pos]))
-            if pos < len(chars):
-                pos += 1
+                parts.append(part)
+        elif part == ' ' and quote is None:
+            if parts:
+                args.append(''.join(parts))
+                if len(args) == MAX_PIPE_ARGS:
+                    return args
+                parts.clear()
+        else:
+            parts.append(part)
+    if parts:
+        args.append(''.join(parts))
     return args
 
 

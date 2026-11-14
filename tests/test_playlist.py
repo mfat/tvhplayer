@@ -155,6 +155,20 @@ def test_tvh_split_matches_spawn_parse_args():
     assert len(tvh_split(' '.join(['a'] * 100))) == MAX_PIPE_ARGS
 
 
+@pytest.mark.parametrize(('command', 'expected'), [
+    ('ab"cd ef"gh', ['abcd efgh']),
+    ('"a\'b" \'c"d\'', ["a'b", 'c"d']),
+    (r'a\ b c\\d \q', ['a b', 'c\\d', 'q']),
+    (r'''"a\"b" 'c\'d' ''', ['a"b', "c'd"]),
+    ('a\tb\nc', ['a\tb\nc']),
+    ('a "unterminated b', ['a', 'unterminated b']),
+    ('"" \'\' \\', []),
+    (r'\b\f\n\r\t', ['\b\f\n\r\t']),
+])
+def test_tvh_split_preserves_quotes_escapes_and_literal_whitespace(command, expected):
+    assert tvh_split(command) == expected
+
+
 def _plans(text, **kwargs):
     return plan_channels(parse_playlist(text), '/usr/bin/ffmpeg', 'List', **kwargs)
 
