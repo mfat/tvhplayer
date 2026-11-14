@@ -24,7 +24,8 @@ def test_application_only_changes_do_not_invalidate_backend(tmp_path):
     import shutil
     repo = tmp_path / 'repo'
     shutil.copytree(ROOT / 'windows' / 'backend', repo / 'windows' / 'backend')
-    shutil.copytree(ROOT / 'packaging' / 'tvheadend', repo / 'packaging' / 'tvheadend')
+    shutil.copytree(ROOT / 'packaging' / 'tvheadend', repo / 'packaging' / 'tvheadend',
+                    ignore=shutil.ignore_patterns('work'))
     (repo / 'tvhplayer').mkdir()
     (repo / 'tvhplayer' / 'tvhplayer.py').write_text('print("ui")\n', encoding='utf-8')
     before = fingerprint.compute_fingerprint(repo)
@@ -37,7 +38,8 @@ def test_backend_input_change_invalidates_fingerprint(tmp_path):
     import shutil
     repo = tmp_path / 'repo'
     shutil.copytree(ROOT / 'windows' / 'backend', repo / 'windows' / 'backend')
-    shutil.copytree(ROOT / 'packaging' / 'tvheadend', repo / 'packaging' / 'tvheadend')
+    shutil.copytree(ROOT / 'packaging' / 'tvheadend', repo / 'packaging' / 'tvheadend',
+                    ignore=shutil.ignore_patterns('work'))
     before = fingerprint.compute_fingerprint(repo)
     sources = repo / 'windows' / 'backend' / 'debian.sources'
     sources.write_text(sources.read_text(encoding='utf-8').replace('20261104T000000Z', '20261105T000000Z'), encoding='utf-8')
@@ -182,7 +184,8 @@ def test_line_ending_normalization_keeps_fingerprint_stable(tmp_path):
     import shutil
     repo = tmp_path / 'repo'
     shutil.copytree(ROOT / 'windows' / 'backend', repo / 'windows' / 'backend')
-    shutil.copytree(ROOT / 'packaging' / 'tvheadend', repo / 'packaging' / 'tvheadend')
+    shutil.copytree(ROOT / 'packaging' / 'tvheadend', repo / 'packaging' / 'tvheadend',
+                    ignore=shutil.ignore_patterns('work'))
     before = fingerprint.compute_fingerprint(repo)
     path = repo / 'windows' / 'backend' / 'entrypoint.sh'
     path.write_bytes(path.read_text(encoding='utf-8').replace('\n', '\r\n').encode('utf-8'))
