@@ -260,6 +260,24 @@ def test_load_playlist_reads_files(tmp_path):
     assert str(info.value) == FILE_FAILED
 
 
+def test_file_addresses_become_windows_paths(monkeypatch):
+    # file:///C:/... was opened as "/C:/...", which Windows cannot open.
+    import warnings
+    from tvhplayer.core import playlist
+
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', DeprecationWarning)
+        nturl2path = pytest.importorskip('nturl2path')
+    monkeypatch.setattr(playlist, 'url2pathname', nturl2path.url2pathname)
+    assert playlist._file_path('file:///C:/My%20Lists/tv.m3u') == 'C:\\My Lists\\tv.m3u'
+    assert playlist._file_path('file://localhost/C:/tv.m3u') == 'C:\\tv.m3u'
+    assert playlist._file_path('file://nas/share/tv.m3u') == '\\\\nas\\share\\tv.m3u'
+
+
+def test_a_file_address_is_named_without_its_escapes():
+    assert playlist_name('file:///home/me/My%20Lists/Sports%20TV.m3u') == 'Sports TV'
+
+
 def test_provider_headers_apply_to_download_and_streams():
     seen = []
 

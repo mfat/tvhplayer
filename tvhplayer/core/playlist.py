@@ -14,6 +14,7 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit, urlunsplit
+from urllib.request import url2pathname
 
 import requests
 
@@ -121,6 +122,19 @@ def is_web_address(location: str) -> bool:
     return (location or '').strip().lower().startswith(('http://', 'https://'))
 
 
+def _file_path(location: str) -> str:
+    """The local path of a ``file://`` address.
+
+    On Windows ``file:///C:/list.m3u`` is ``C:\\list.m3u``, and a host
+    names a network share.
+    """
+    parts = urlsplit(location)
+    path = parts.path
+    if parts.netloc and parts.netloc.lower() != 'localhost':
+        path = '//' + parts.netloc + path
+    return url2pathname(path)
+
+
 def load_playlist(
     location: str,
     cancelled: Optional[Callable[[], bool]] = None,
@@ -135,7 +149,7 @@ def load_playlist(
     if is_web_address(location):
         data = _download(location, cancelled or (lambda: False), headers)
     else:
-        path = unquote(location[7:]) if location.startswith('file://') else location
+        path = _file_path(location) if location.lower().startswith('file://') else location
         try:
             with open(path, 'rb') as handle:
                 data = handle.read(MAX_PLAYLIST_BYTES + 1)
@@ -292,7 +306,7 @@ def playlist_name(location: str) -> str:
         if host.startswith('www.'):
             host = host[4:]
         return stem if stem.lower() not in _GENERIC_STEMS else (host or 'Playlist')
-    path = location[7:] if location.startswith('file://') else location
+    path = _file_path(location) if location.lower().startswith('file://') else location
     stem = posixpath.splitext(posixpath.basename(path.replace('\\', '/').rstrip('/')))[0]
     return stem or 'Playlist'
 
