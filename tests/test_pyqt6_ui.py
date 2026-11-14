@@ -826,6 +826,8 @@ def test_channel_fetch_hands_its_connection_to_the_window(monkeypatch, tmp_path)
         window.server_combo.setCurrentIndex(0)
         window.server_combo.blockSignals(False)
         monkeypatch.undo()
+        # Only the channel connections are counted; now and next reads on one of its own.
+        window._start_now_next_fetch = lambda: None
 
         # The finished fetch's connection becomes the window's, still open.
         gate.set()
@@ -3366,6 +3368,111 @@ def test_channel_list_columns_can_be_resized(monkeypatch, tmp_path):
         window._reset_channel_list_layout()
         assert window.config_store.load()['channel_list']['widths'] == {}
     finally:
+        window.close()
+        app.processEvents()
+
+
+class _GuidePointerBackend:
+    """HTSP channels whose event pointers can be days old, as Tvheadend sends them
+    when no newer programme arrived, and a live grid of what is really on now."""
+
+    from tvhplayer.core.backend import TvhBackend as _Base
+
+    get_now_next = _Base.get_now_next
+    get_now_next_live = _Base.get_now_next_live
+
+    def __init__(self, now, gate=None):
+        from tvhplayer.core.models import Channel, EpgEvent
+
+        days = 2 * 24 * 3600
+        self.gate = gate
+        self.news = Channel(uuid='news', name='News', number=1, raw={'eventId': 1, 'nextEventId': 2})
+        self.sport = Channel(uuid='sport', name='Sport', number=2, raw={'eventId': 3, 'nextEventId': 4})
+        self.events = {
+            # Ended two days ago; the server has nothing newer for News.
+            1: EpgEvent(start=now - days - 600, stop=now - days, title='Old news', channel_uuid='news',
+                        event_id=1, next_event_id=2),
+            2: EpgEvent(start=now - days, stop=now - days + 600, title='Old weather', channel_uuid='news',
+                        event_id=2),
+            3: EpgEvent(start=now - 60, stop=now + 3600, title='Match', channel_uuid='sport',
+                        event_id=3, next_event_id=4),
+            4: EpgEvent(start=now + 3600, stop=now + 7200, title='Highlights', channel_uuid='sport',
+                        event_id=4),
+        }
+        self.live_reads = 0
+
+    def get_channels(self):
+        return [self.news, self.sport]
+
+    def list_channel_tags(self):
+        return []
+
+    def query_epg(self, query):
+        assert query.mode == 'now'
+        self.live_reads += 1
+        if self.gate is not None:
+            assert self.gate.wait(5), 'the test never let the guide answer'
+        return [self.events[3]]
+
+    def load_events(self, ids):
+        return [self.events[i] for i in ids if i in self.events]
+
+    def close(self):
+        pass
+
+
+def _guide_pointer_window(monkeypatch, tmp_path, backend):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path, prepare=lambda _ui: None)
+    window._open_channel_backend = lambda _server: backend
+    window.servers = [{'name': 'TVH', 'url': 'http://127.0.0.1:9981', 'protocol': 'http'}]
+    window.server_combo.blockSignals(True)
+    window.server_combo.addItem('TVH')
+    window.server_combo.setCurrentIndex(0)
+    window.server_combo.blockSignals(False)
+    window.logo_loader.request = lambda *args: None
+    return app, ui, window
+
+
+def test_first_channel_load_does_not_show_programmes_that_ended_days_ago(monkeypatch, tmp_path):
+    backend = _GuidePointerBackend(int(time.time()))
+    app, ui, window = _guide_pointer_window(monkeypatch, tmp_path, backend)
+    try:
+        window.fetch_channels()
+        _wait_for_channels(app, window)
+        _wait_for_now_next(app, window)
+        table = window.channel_list
+        news = _channel_row(table, 'News')
+        sport = _channel_row(table, 'Sport')
+        # Nothing is on News now; a programme from two days ago is not "next".
+        assert _cell(table, news, ui.COL_NOW).text() == 'No EPG'
+        assert _cell(table, news, ui.COL_NEXT).text() == ''
+        assert _cell(table, sport, ui.COL_NOW).text() == 'Match'
+        assert _cell(table, sport, ui.COL_NEXT).text().endswith('Highlights')
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_channels_show_before_now_and_next_arrive(monkeypatch, tmp_path):
+    import threading
+
+    gate = threading.Event()
+    backend = _GuidePointerBackend(int(time.time()), gate)
+    app, ui, window = _guide_pointer_window(monkeypatch, tmp_path, backend)
+    try:
+        window.fetch_channels()
+        _wait_for_channels(app, window)
+        # The guide has not answered, and the list is already there.
+        assert window.channel_stack.currentWidget() is window.channel_list
+        table = window.channel_list
+        assert _channel_row(table, 'Sport') >= 0
+        assert _cell(table, _channel_row(table, 'Sport'), ui.COL_NOW).text() == ''
+        gate.set()
+        _wait_for_now_next(app, window)
+        assert _cell(table, _channel_row(table, 'Sport'), ui.COL_NOW).text() == 'Match'
+        assert backend.live_reads == 1
+    finally:
+        gate.set()
         window.close()
         app.processEvents()
 

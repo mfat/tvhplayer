@@ -3281,15 +3281,11 @@ class ChannelFetch(QObject):
                     result['services'] = backend.list_channel_services()
                 except Exception as e:
                     print(f"Debug: Could not load channel services: {e}")
-            if self._cancelled.is_set():
-                raise TvhError('Channel fetch cancelled')
             if self._now_next and channels:
-                try:
-                    result['now_next'] = backend.get_now_next(channels)
-                except Exception as e:
-                    # None keeps what was shown before.
-                    result['now_next'] = None
-                    print(f"Debug: Could not load now and next: {e}")
+                # Read after the list shows, from what is on now. The event
+                # each HTSP channel points at can be days old when no newer
+                # programme came in. None keeps what a reload showed before.
+                result['now_next'] = None
         except Exception as e:
             print(f"Debug: Could not fetch channels: {e}")
             if backend is not None:
@@ -5014,17 +5010,13 @@ class TVHeadendClient(QMainWindow):
                 print(f"Debug: Could not load channel services: {e}")
         self._channel_kinds = channel_kinds(self._channels, services, self._channel_tags)
 
-    def _fetch_now_next(self, backend):
+    def _fetch_now_next(self):
+        """Read now and next in the background, from what the server has on now."""
         if not self._wants_now_next() or not self._channels:
             self._now_next = {}
             self._now_next_loaded = False
             return
-        try:
-            self._now_next = backend.get_now_next(self._channels)
-            self._now_next_loaded = True
-        except Exception as e:
-            print(f"Debug: Could not load now and next: {e}")
-        self._now_next_fetched = time.monotonic()
+        self._start_now_next_fetch()
 
     def _tick_now_next(self):
         """Move the progress bars on, and fetch now/next again when a programme ends."""
@@ -5542,13 +5534,13 @@ class TVHeadendClient(QMainWindow):
         self._apply_channel_columns()
         if not visible or not self._channels:
             return
+        if key in ('now', 'next') and not had_now_next:
+            self._fetch_now_next()
         backend = self._logo_backend()
         if backend is None:
             return
         if key == 'type':
             self._load_channel_kinds(backend)
-        elif key in ('now', 'next') and not had_now_next:
-            self._fetch_now_next(backend)
         self._update_channel_extras()
         self._mark_playing_channel()
 
@@ -5621,12 +5613,12 @@ class TVHeadendClient(QMainWindow):
         self._channel_density_actions[self.channel_options['density']].setChecked(True)
         self._save_channel_options()
         self._apply_channel_columns()
+        if self._channels and self._wants_now_next() and not had_now_next:
+            self._fetch_now_next()
         backend = self._logo_backend() if self._channels else None
         if backend is not None:
             if self._visible_channel_column('type') and not had_type:
                 self._load_channel_kinds(backend)
-            if self._wants_now_next() and not had_now_next:
-                self._fetch_now_next(backend)
         self._refresh_tag_combo()
         self._reload_channel_rows()
 
@@ -5739,6 +5731,8 @@ class TVHeadendClient(QMainWindow):
         else:
             self._fill_channel_rows()
             self._mark_playing_channel(scroll=True)
+        if fetch._now_next and self._channels:
+            self._start_now_next_fetch()
         if self._channels:
             if is_builtin_server(fetch.server) and not self.config.get('setup_completed'):
                 self.config['setup_completed'] = True
