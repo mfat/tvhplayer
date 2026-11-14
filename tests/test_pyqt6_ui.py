@@ -427,7 +427,8 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
         menu = window._video_context_menu()
         from tvhplayer.a11y import keys_text  # macOS shows Ctrl+. as ⌘.
         assert [action.text().split('\t')[1:] for action in menu.actions()[:8]] == [
-            [], [keys_text('Ctrl+.')], [keys_text('Ctrl+PgUp')], [keys_text('Ctrl+PgDown')], [], ['M'], ['F11'], [],
+            [], [keys_text('Ctrl+.')], [keys_text('Ctrl+PgUp')], [keys_text('Ctrl+PgDown')], [], ['M'],
+            [keys_text(ui.FULLSCREEN_KEY)], [],
         ]
         labels = [action.text().split('\t')[0] for action in menu.actions() if not action.isSeparator()]
         assert labels == [
@@ -1191,7 +1192,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert not window.stop_record_btn.isVisible()
         assert window.mute_btn.toolTip() == "Mute (M)"
         assert window.volume_slider.toolTip() == "Volume"
-        assert window.fullscreen_btn.toolTip() == "Fullscreen (F11)"
+        # macOS uses its own full screen key, Control+Command+F.
+        assert window.fullscreen_btn.toolTip() == keys_text(f"Fullscreen ({ui.FULLSCREEN_KEY})")
         assert window.fullscreen_btn.statusTip() == ""
         assert window.video_frame.toolTip() == ""
         assert window.video_frame.statusTip() == ""
@@ -1263,7 +1265,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert search_at < status_at < list_at < action_at < reveal_at < close_at
         assert window.tasks_pane.close_btn.accessibleName() == "Close Tasks"
         assert "focus" in window.play_btn.styleSheet()
-        assert window.fullscreen_action.shortcut().toString() == "F11"
+        assert window.fullscreen_action.shortcut().toString() == ui.QKeySequence(ui.FULLSCREEN_KEY).toString()
         assert any(label.buddy() is window.search_box for label in window.findChildren(ui.QLabel))
         assert any(label.buddy() is window.server_combo for label in window.findChildren(ui.QLabel))
         assert window.search_box.accessibleDescription()
