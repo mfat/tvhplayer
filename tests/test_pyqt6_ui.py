@@ -4553,6 +4553,42 @@ def test_initial_channel_poll_yields_before_all_rows_and_skips_extras(monkeypatc
         app.processEvents()
 
 
+def test_finished_load_shows_every_channel_without_working_through_queued_rows(monkeypatch, tmp_path):
+    from tvhplayer.core.htsp_backend import HtspBackend
+    from tvhplayer.core.models import ServerConfig
+    app, ui, window, _ = _make_player(monkeypatch, tmp_path)
+    server = {'name': 'HTSP', 'url': 'http://127.0.0.1:9981', 'protocol': 'htsp'}
+    backend = HtspBackend(ServerConfig(name='HTSP', url=server['url'], protocol='htsp'))
+    try:
+        window.servers = [server]
+        window.server_combo.blockSignals(True)
+        window.server_combo.addItem('HTSP')
+        window.server_combo.setCurrentIndex(0)
+        window.server_combo.blockSignals(False)
+        fetch = ui.ChannelFetch(server, kinds=False, now_next=False, parent=window)
+        fetch.backend = backend
+        fetch.keep_place = False
+        window._channel_fetch = fetch
+        for i in range(5000):
+            backend._on_async({'method': 'channelAdd', 'channelId': i, 'channelName': f'Channel {i:04d}'})
+        backend._on_async({'method': 'initialSyncCompleted'})
+        window._poll_channel_metadata()
+        assert window.channel_model.rowCount() == 2000
+        assert backend.pending_channel_count == 3000
+        channels = list(backend._channels.values())
+        window._on_channels_loaded(fetch, {'channels': channels, 'tags': [], 'services': [], 'now_next': None})
+        # The snapshot already holds every channel: shown at once, not after
+        # rounds of 2,000 queued rows.
+        assert window.channel_model.rowCount() == 5000
+        assert backend.pending_channel_count == 0
+        assert window._channel_fetch is None
+    finally:
+        window._channel_fetch = None
+        backend.close()
+        window.close()
+        app.processEvents()
+
+
 def test_builtin_playback_does_not_wait_for_htsp_metadata(monkeypatch, tmp_path):
     app, ui, window, player = _make_player(monkeypatch, tmp_path)
     server = {'name': 'Built-in', 'builtin': True, 'url': 'http://127.0.0.1:24111',

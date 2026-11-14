@@ -5532,11 +5532,6 @@ class TVHeadendClient(QMainWindow):
         return create_backend(server)
 
     def _on_channels_loaded(self, fetch, result):
-        if (fetch is self._channel_fetch
-                and getattr(fetch.backend, 'pending_channel_count', 0) > 2000):
-            # Finish queued rows in bounded UI turns before applying extras.
-            QTimer.singleShot(50, lambda: self._on_channels_loaded(fetch, result))
-            return
         if fetch is self._channel_fetch and hasattr(fetch.backend, 'channel_snapshot'):
             # Extras may have taken time; do not overwrite newer batches with
             # the snapshot taken before those RPCs.
