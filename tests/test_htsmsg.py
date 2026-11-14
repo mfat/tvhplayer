@@ -88,3 +88,13 @@ def test_trailing_bytes_are_refused():
     body = serialize({'n': 1})[4:]
     with pytest.raises(ValueError, match='Trailing'):
         deserialize(body + b'\x00')
+
+
+def test_field_names_decode_the_same_however_often_they_repeat():
+    from tvhplayer.core import htsmsg
+    messages = [{'channelName': f'Channel {i}', 'services': [{'name': 'svc', 'type': 'SDTV'}],
+                 f'unique{i}': -i, 'ü-name': i} for i in range(htsmsg._NAMES_MAX + 50)]
+    for msg in messages:
+        assert deserialize(serialize(msg)[4:]) == msg
+    # A server sending ever-new names cannot grow the name cache without bound.
+    assert len(htsmsg._NAMES) <= htsmsg._NAMES_MAX
