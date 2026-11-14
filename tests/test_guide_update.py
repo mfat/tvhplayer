@@ -1,6 +1,7 @@
 import os
 import re
 import socket
+import sys
 import tempfile
 import threading
 
@@ -15,6 +16,9 @@ NOW = 1_800_000_000
 
 @pytest.fixture
 def xmltv_socket():
+    if sys.platform == 'win32':
+        # The built-in server runs in a Linux container there; the guide goes by address.
+        pytest.skip("Tvheadend's XMLTV socket is a Unix socket")
     folder = tempfile.mkdtemp(prefix='tvhg', dir='/tmp')
     path = os.path.join(folder, 'xmltv.sock')
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

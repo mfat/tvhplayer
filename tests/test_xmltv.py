@@ -3,6 +3,7 @@ import gzip
 import http.server
 import os
 import socket
+import sys
 import tempfile
 import threading
 
@@ -28,6 +29,9 @@ def web(tmp_path):
 @pytest.fixture
 def xmltv_socket():
     """A Unix socket that records each connection's bytes, like Tvheadend's."""
+    if sys.platform == 'win32':
+        # The built-in server runs in a Linux container there; the guide goes by address.
+        pytest.skip("Tvheadend's XMLTV socket is a Unix socket")
     folder = tempfile.mkdtemp(prefix='tvhx', dir='/tmp')
     path = os.path.join(folder, 'xmltv.sock')
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
