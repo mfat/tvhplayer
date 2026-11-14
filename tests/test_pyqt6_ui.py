@@ -425,8 +425,9 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
         )
 
         menu = window._video_context_menu()
+        from tvhplayer.a11y import keys_text  # macOS shows Ctrl+. as ⌘.
         assert [action.text().split('\t')[1:] for action in menu.actions()[:8]] == [
-            [], ['Ctrl+.'], ['Ctrl+PgUp'], ['Ctrl+PgDown'], [], ['M'], ['F11'], [],
+            [], [keys_text('Ctrl+.')], [keys_text('Ctrl+PgUp')], [keys_text('Ctrl+PgDown')], [], ['M'], ['F11'], [],
         ]
         labels = [action.text().split('\t')[0] for action in menu.actions() if not action.isSeparator()]
         assert labels == [
@@ -1183,7 +1184,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.play_btn.accessibleName() == "Play"
         assert window.play_btn.toolTip() == "Play / Stop (P)"
         assert window.play_btn.statusTip() == ""
-        assert window.record_btn.toolTip() == "Record (Ctrl+R / Ctrl+Shift+R)"
+        from tvhplayer.a11y import keys_text  # macOS shows Ctrl+R as ⌘R.
+        assert window.record_btn.toolTip() == keys_text("Record (Ctrl+R / Ctrl+Shift+R)")
         assert window.record_btn.statusTip() == ""
         assert window.record_btn.isVisible()
         assert not window.stop_record_btn.isVisible()
@@ -3366,10 +3368,12 @@ def test_channel_list_columns_can_be_resized(monkeypatch, tmp_path):
         assert window.channel_options['widths'][ui.COLUMN_KEYS[last]] == last_width
         # A wider pane and back again: the extra follows the pane and does not pile up.
         widths = [header.sectionSize(c) for c in shown]
-        window.splitter.moveSplitter(window.splitter.sizes()[0] + 80, 1)
+        start = window.splitter.sizes()[0]
+        window.splitter.moveSplitter(start + 80, 1)
         app.processEvents()
         assert sum(header.sectionSize(c) for c in shown) == table.viewport().width()
-        window.splitter.moveSplitter(window.splitter.sizes()[0] - 80, 1)
+        # Back to where it was: a small screen can stop the move short of 80.
+        window.splitter.moveSplitter(start, 1)
         app.processEvents()
         assert [header.sectionSize(c) for c in shown] == widths
 

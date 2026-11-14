@@ -143,7 +143,10 @@ def test_delegate_marks_the_playing_row_at_its_first_shown_column():
     option = QStyleOptionViewItem()
     option.widget = view
     playing_width = delegate.sizeHint(option, model.index(0, COL_NUMBER)).width()
-    assert playing_width == delegate.sizeHint(option, model.index(1, COL_NUMBER)).width() + width
+    # The same row unmarked: digits can differ in width (they do on macOS).
+    model.set_marks(None, set())
+    assert playing_width == delegate.sizeHint(option, model.index(0, COL_NUMBER)).width() + width
+    model.set_marks(news, set())
 
     delegate.mark_playing = False
     view.viewport().update()

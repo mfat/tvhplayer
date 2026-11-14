@@ -1,3 +1,5 @@
+import sys
+
 from PyQt6.QtWidgets import QLabel
 
 
@@ -26,9 +28,10 @@ def test_key_text_is_written_as_the_platform_shows_it(monkeypatch):
     from tvhplayer import a11y
 
     # Off macOS, the native text is the text written.
-    assert a11y.keys_text('Keyboard: Ctrl+E. P or Ctrl+., then Shift+F10, Ctrl+Up') == (
-        'Keyboard: Ctrl+E. P or Ctrl+., then Shift+F10, Ctrl+Up'
-    )
+    if sys.platform != 'darwin':
+        assert a11y.keys_text('Keyboard: Ctrl+E. P or Ctrl+., then Shift+F10, Ctrl+Up') == (
+            'Keyboard: Ctrl+E. P or Ctrl+., then Shift+F10, Ctrl+Up'
+        )
     assert a11y.keys_text('Shift times by 60') == 'Shift times by 60'
     assert a11y.shortcut_help(mac=False) == a11y.SHORTCUT_HELP
 
