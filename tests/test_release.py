@@ -36,12 +36,12 @@ def test_a_new_version_must_be_higher(tree):
 def test_bump_writes_the_version_and_notes_everywhere(tree):
     release.bump(tree, '99.1', '2027-01-02', ['Faster guide', 'Fixes for <tags> & such'])
     assert release.current_version(tree) == '99.1'
-    assert 'APP_VERSION = "99.1"' in (tree / 'tvhplayer/tvhplayer.py').read_text()
-    assert 'version="99.1",' in (tree / 'setup.py').read_text()
-    spec = (tree / 'rpm.spec').read_text()
+    assert 'APP_VERSION = "99.1"' in (tree / 'tvhplayer/tvhplayer.py').read_text(encoding='utf-8')
+    assert 'version="99.1",' in (tree / 'setup.py').read_text(encoding='utf-8')
+    spec = (tree / 'rpm.spec').read_text(encoding='utf-8')
     assert 'Version:        99.1\n' in spec
     assert '%changelog\n* Sat Jan 02 2027 mFat <newmfat@gmail.com> - 99.1-1\n- Faster guide\n' in spec
-    metainfo = (tree / 'io.github.mfat.tvhplayer.metainfo.xml').read_text()
+    metainfo = (tree / 'io.github.mfat.tvhplayer.metainfo.xml').read_text(encoding='utf-8')
     newest = metainfo.index('<release version="99.1" date="2027-01-02">')
     assert newest < metainfo.index('<release version="4.0"')
     assert '<li>Fixes for &lt;tags&gt; &amp; such</li>' in metainfo
@@ -53,7 +53,7 @@ def test_bump_needs_notes(tree):
 
 
 def test_flathub_pin_points_the_app_source_at_the_tag(tree):
-    manifest = (tree / 'io.github.mfat.tvhplayer.yml').read_text()
+    manifest = (tree / 'io.github.mfat.tvhplayer.yml').read_text(encoding='utf-8')
     sha = 'a' * 40
     pinned = release.flathub_pin(manifest, 'v99.1', sha)
     source = pinned[pinned.index('url: "https://github.com/mfat/tvhplayer.git"'):]

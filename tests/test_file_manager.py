@@ -27,6 +27,7 @@ def _session_bus(monkeypatch, *answers):
     return calls
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='Opens a Unix path through the Linux desktop portal')
 def test_linux_asks_the_portal_to_show_the_file(monkeypatch, recording):
     calls = _session_bus(monkeypatch, True)
     monkeypatch.setattr(file_manager.QDesktopServices, "openUrl", lambda url: False)
@@ -40,6 +41,7 @@ def test_linux_asks_the_portal_to_show_the_file(monkeypatch, recording):
     assert arguments[2] == {}
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='Opens a Unix path through the Linux desktop portal')
 def test_linux_falls_back_to_the_file_manager_then_the_folder(monkeypatch, recording):
     calls = _session_bus(monkeypatch, False, True)
     opened = []
