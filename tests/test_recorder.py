@@ -117,6 +117,8 @@ def test_start_drains_stderr_past_the_kernel_pipe(monkeypatch, tmp_path):
 
     monkeypatch.setattr('tvhplayer.core.recorder.subprocess.Popen', fake_popen)
     recorder = LocalRecorder()
+    # The signal path; Windows asks ffmpeg to quit with 'q' (tested below).
+    recorder.stops_with_q = False
     payload = b'START' + (b'x' * (256 * 1024)) + b'END'
     errors = []
 
@@ -170,6 +172,8 @@ def test_stop_sends_sigterm_without_reading_the_pipe_itself(monkeypatch, tmp_pat
         lambda cmd, **kwargs: process,
     )
     recorder = LocalRecorder()
+    # The signal path; Windows asks ffmpeg to quit with 'q' (tested below).
+    recorder.stops_with_q = False
     try:
         recorder.start('http://127.0.0.1:9981/stream/channel/abc', tmp_path / 'a.ts')
         os.write(write_fd, b'warning\n')
