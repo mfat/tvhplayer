@@ -272,3 +272,27 @@ def test_fast_reading_finds_what_full_parsing_finds(tmp_path, monkeypatch):
     latin.write_bytes(text.replace('UTF-8', 'ISO-8859-1').replace('<title>&nbsp;</title>', '').encode('latin-1'))
     found = list(feeds.wanted_programmes(str(latin), {'A&B.uk'}))
     assert [el.findtext('title') for el in found][:2] == ['Ä 0 <1>', 'Ä 1 <1>']
+
+
+@pytest.mark.parametrize('pack', ['plain', 'gzip', 'xz'])
+def test_a_read_guide_file_is_closed(tmp_path, pack):
+    # The file under an unpacked guide stayed open, so Windows could not
+    # replace the cached copy and a compressed guide never refreshed.
+    import gc
+    import gzip
+    import lzma
+
+    import psutil
+
+    from tvhplayer.core.guide_feeds import open_guide
+
+    data = b'<tv></tv>'
+    path = tmp_path / 'guide.xml'
+    path.write_bytes({'plain': data, 'gzip': gzip.compress(data), 'xz': lzma.compress(data)}[pack])
+    gc.disable()
+    try:
+        with open_guide(str(path)) as handle:
+            assert handle.read() == data
+        assert str(path) not in [item.path for item in psutil.Process().open_files()]
+    finally:
+        gc.enable()

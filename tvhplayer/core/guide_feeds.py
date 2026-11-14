@@ -140,15 +140,18 @@ def guide_name(location: str) -> str:
 
 
 def open_guide(path: str) -> IO[bytes]:
-    """Open a guide file, unpacking gzip and xz."""
-    handle = open(path, 'rb')
-    magic = handle.read(6)
-    handle.seek(0)
+    """Open a guide file, unpacking gzip and xz.
+
+    The unpacking file opens the file itself, so closing it closes the file:
+    one left open stops Windows from replacing the cached copy.
+    """
+    with open(path, 'rb') as probe:
+        magic = probe.read(6)
     if magic[:2] == b'\x1f\x8b':
-        return gzip.GzipFile(fileobj=handle, mode='rb')
+        return gzip.open(path, 'rb')
     if magic == b'\xfd7zXZ\x00':
-        return lzma.LZMAFile(handle, mode='rb')
-    return handle
+        return lzma.open(path, 'rb')
+    return open(path, 'rb')
 
 
 def parse_time(value: str) -> Tuple[Optional[int], bool]:
