@@ -93,9 +93,10 @@ def engine(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, 'mpv', fake)
     monkeypatch.setattr(proxy, '_saved_http_proxy', proxy._HIDDEN)
-    monkeypatch.setenv('http_proxy', 'http://proxy.example:3128')
+    # Cleared before http_proxy is set: on Windows HTTP_PROXY is the same variable.
     for name in ('no_proxy', 'NO_PROXY', 'HTTP_PROXY'):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('http_proxy', 'http://proxy.example:3128')
     from tvhplayer.core.mpv_player import MpvPlayer
 
     player = MpvPlayer()

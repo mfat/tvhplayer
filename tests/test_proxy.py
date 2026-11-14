@@ -17,10 +17,10 @@ DEAD_PROXY = 'http://127.0.0.1:9'
 def proxied_env(monkeypatch):
     """An http_proxy that goes nowhere, before the player hides it."""
     monkeypatch.setattr(proxy, '_saved_http_proxy', proxy._HIDDEN)
-    monkeypatch.setenv('http_proxy', DEAD_PROXY)
-    monkeypatch.delenv('HTTP_PROXY', raising=False)
-    for name in ('no_proxy', 'NO_PROXY'):
+    # Cleared before http_proxy is set: on Windows HTTP_PROXY is the same variable.
+    for name in ('HTTP_PROXY', 'no_proxy', 'NO_PROXY'):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('http_proxy', DEAD_PROXY)
 
 
 class _ServerInfo(http.server.BaseHTTPRequestHandler):
