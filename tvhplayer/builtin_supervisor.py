@@ -22,6 +22,7 @@ try:
         initial_ports,
         launch_command,
         pick_port_pair,
+        prefetch_config,
         serverinfo_ok,
         set_padding,
         set_recordings_dir,
@@ -45,6 +46,7 @@ except ImportError:
         initial_ports,
         launch_command,
         pick_port_pair,
+        prefetch_config,
         serverinfo_ok,
         set_padding,
         set_recordings_dir,
@@ -187,6 +189,12 @@ class BuiltinSupervisor(QObject):
         self.process.setProcessEnvironment(environment)
         self.process.start(program, args)
         self._poll.start()
+        if self._attempts == 1:
+            # Alongside the server, not before it: the hints only queue reads.
+            threading.Thread(
+                target=prefetch_config, args=(self.config_dir,),
+                name='builtin-prefetch', daemon=True,
+            ).start()
 
     def _on_output(self) -> None:
         data = bytes(self.process.readAllStandardOutput()).decode('utf-8', errors='replace')

@@ -178,6 +178,77 @@ def command_args(binary, config_dir, http_port: int, htsp_port: int) -> list[str
     ]
 
 
+# Folders in the order Tvheadend loads them at startup; the rest follow.
+PREFETCH_ORDER = ('input', 'channel', 'bouquet', 'epggrab')
+
+
+def _config_files(folder: Path) -> list[tuple[int, str]]:
+    """``(inode, path)`` of every file below ``folder``, without a stat per file."""
+    found = []
+    pending = [str(folder)]
+    while pending:
+        try:
+            entries = os.scandir(pending.pop())
+        except OSError:
+            continue
+        with entries:
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(entry.path)
+                    elif entry.is_file(follow_symlinks=False):
+                        found.append((entry.inode(), entry.path))
+                except OSError:
+                    continue
+    return found
+
+
+def prefetch_config(config_dir, advise=None) -> int:
+    """Ask the kernel to read the server's settings into memory ahead of Tvheadend.
+
+    Tvheadend reads one small file per channel, service and stream, one at a
+    time, in name order. A big playlist makes that over 100,000 files scattered
+    across the disk, and from cold the server then spends most of its startup
+    waiting on single reads. Read-ahead hints in inode order let the disk work
+    on many of them at once. Nothing is changed; returns how many files were hinted.
+    """
+    if advise is None:
+        if not hasattr(os, 'posix_fadvise'):
+            return 0
+        advise = _willneed
+    root = Path(config_dir)
+    try:
+        with os.scandir(root) as entries:
+            top_files = sorted(
+                (entry.inode(), entry.path) for entry in entries
+                if entry.is_file(follow_symlinks=False)
+            )
+    except OSError:
+        return 0
+    others = sorted(
+        entry.name for entry in os.scandir(root)
+        if entry.is_dir(follow_symlinks=False) and entry.name not in PREFETCH_ORDER
+    )
+    groups = [_config_files(root / name) for name in (*PREFETCH_ORDER, *others)]
+    hinted = 0
+    for files in [*groups, top_files]:
+        for _inode, path in sorted(files):
+            try:
+                advise(path)
+            except OSError:
+                continue
+            hinted += 1
+    return hinted
+
+
+def _willneed(path: str) -> None:
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_CLOEXEC', 0))
+    try:
+        os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_WILLNEED)
+    finally:
+        os.close(fd)
+
+
 # Run by the app's Python before Tvheadend: ask Linux to kill Tvheadend the
 # moment TVHplayer's process ends, even when it crashes or is force quit, then
 # become Tvheadend. SIGKILL, not SIGTERM: a hung Tvheadend ignores SIGTERM and,
