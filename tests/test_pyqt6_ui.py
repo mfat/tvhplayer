@@ -1552,6 +1552,220 @@ def test_tasks_panel_reads_the_server_without_blocking(monkeypatch, tmp_path):
         app.processEvents()
 
 
+class _SlowDvrBackend:
+    """A server that takes its time to stop or cancel a recording, like one flushing a big file."""
+
+    def __init__(self, gate, entries):
+        self.gate = gate
+        self.entries = list(entries)
+        self.stopped = []
+        self.cancelled = []
+        self.closed = 0
+
+    def list_dvr_entries(self):
+        return list(self.entries)
+
+    def _drop(self, entry):
+        self.entries = [item for item in self.entries if item.uuid != entry.uuid]
+
+    def stop_dvr_entry(self, entry):
+        self.gate.wait(5)
+        self.stopped.append(entry.uuid)
+        self._drop(entry)
+
+    def cancel_dvr_entry(self, entry):
+        self.gate.wait(5)
+        self.cancelled.append(entry.uuid)
+        self._drop(entry)
+
+    def close(self):
+        self.closed += 1
+
+
+def _slow_dvr_window(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+    now = int(time.time())
+    gate = threading.Event()
+    backend = _SlowDvrBackend(gate, [
+        DvrEntry(
+            uuid='run', title='News', channel_name='IRINN', start=now - 60, duration=3600,
+            status='Running', sched_status='recording', htsp_id=7,
+        ),
+        DvrEntry(
+            uuid='soon', title='Later', channel_name='BBC', start=now + 600, duration=60,
+            status='Scheduled', sched_status='scheduled', htsp_id=8,
+        ),
+    ])
+    server = {'name': 'tv', 'url': 'http://tv'}
+    window.current_server = lambda: server
+    window._server_requests_ready = lambda: True
+    window.get_backend = lambda: backend
+    window.open_backend = lambda srv: backend
+    window.tasks_pane.open_backend = lambda srv: backend
+    return app, ui, window, backend, gate
+
+
+def _wait_until(app, predicate, what, timeout=5.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, f"{what} did not happen"
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+
+def test_stopping_a_server_recording_from_tasks_does_not_freeze_the_window(monkeypatch, tmp_path):
+    import time
+
+    app, ui, window, backend, gate = _slow_dvr_window(monkeypatch, tmp_path)
+    try:
+        window.show()
+        panel = window.tasks_pane
+        panel.refresh()
+        _wait_for_tasks(app, panel)
+        _select_task(panel, 'News')
+        started = time.monotonic()
+        panel.run_action()
+        # The window answers while the server is still stopping the recording.
+        assert time.monotonic() - started < 1
+        assert backend.stopped == []
+        # One change at a time: the Stop button waits for the server's answer.
+        assert panel.action_btn.isEnabled() is False
+        panel.run_action()
+        # A local recording does not wait for the server.
+        panel._server_tasks = []
+        panel._tasks = [{'kind': 'Local', 'bucket': 'recording', 'key': 'l'}]
+        assert panel._waiting_for_server(panel._tasks[0]) is False
+        assert panel._waiting_for_server({'kind': 'Server', 'bucket': 'scheduled'}) is True
+        gate.set()
+        _wait_until(app, lambda: backend.stopped == ['run'], 'the stop')
+        _wait_until(app, lambda: all('News' not in text for text in _task_texts(panel)), 'the refresh')
+        _wait_for_tasks(app, panel)
+        assert 'Stopped News on IRINN' in window.status_label.text()
+    finally:
+        gate.set()
+        window.close()
+        app.processEvents()
+
+
+def test_cancelling_a_scheduled_recording_from_tasks_does_not_freeze_the_window(monkeypatch, tmp_path):
+    import time
+
+    app, ui, window, backend, gate = _slow_dvr_window(monkeypatch, tmp_path)
+    try:
+        window.show()
+        panel = window.tasks_pane
+        panel.refresh()
+        _wait_for_tasks(app, panel)
+        _select_task(panel, 'Later')
+        started = time.monotonic()
+        panel.run_action()
+        assert time.monotonic() - started < 1
+        assert backend.cancelled == []
+        gate.set()
+        _wait_until(app, lambda: backend.cancelled == ['soon'], 'the cancel')
+        _wait_until(app, lambda: all('Later' not in text for text in _task_texts(panel)), 'the refresh')
+        assert 'Cancelled Later on BBC' in window.status_label.text()
+    finally:
+        gate.set()
+        window.close()
+        app.processEvents()
+
+
+def test_stop_server_recording_command_does_not_freeze_the_window(monkeypatch, tmp_path):
+    import time
+
+    app, ui, window, backend, gate = _slow_dvr_window(monkeypatch, tmp_path)
+    try:
+        window.show()
+        window.start_recording_indicator()
+        started = time.monotonic()
+        window.stop_recording()
+        assert time.monotonic() - started < 1
+        assert backend.stopped == []
+        # Pressing it again while the server works sends no second stop.
+        window.stop_recording()
+        assert len(window._dvr_changes) == 1
+        gate.set()
+        _wait_until(app, lambda: backend.stopped == ['run'], 'the stop')
+        _wait_until(app, lambda: window.is_recording is False, 'REC turning off')
+        assert window.status_label.text() == 'Stopped recording for IRINN'
+        assert backend.stopped == ['run']
+        assert not window._dvr_changes
+
+        # The built-in server not running yet is said at once, without asking it.
+        builtin = {'name': 'Built-in', 'builtin': True, 'protocol': 'htsp', 'url': ''}
+        window.current_server = lambda: builtin
+        try:
+            window.run_dvr_change(lambda b: None, lambda r, e: None)
+        except ui.TvhError as exc:
+            assert 'not running yet' in str(exc)
+        else:
+            raise AssertionError('a stopped built-in server was asked')
+    finally:
+        gate.set()
+        window.close()
+        app.processEvents()
+
+
+def test_dvr_status_stop_does_not_freeze_the_window(monkeypatch, tmp_path):
+    import time
+
+    app, ui, window, backend, gate = _slow_dvr_window(monkeypatch, tmp_path)
+    dialog = ui.DVRStatusDialog(backend, window)
+    dialog.update_timer.stop()
+    try:
+        dialog.show()
+        dialog.upcoming_table.selectRow(0)
+        app.processEvents()
+        assert dialog.stop_btn.isEnabled() is True
+        opened = []
+        window.open_backend = lambda srv: opened.append(srv['name']) or backend
+        # The window switched server since the dialog opened; the stop goes to the dialog's own.
+        window.current_server = lambda: {'name': 'other', 'url': 'http://other'}
+        started = time.monotonic()
+        dialog.stop_selected()
+        assert time.monotonic() - started < 1
+        assert backend.stopped == []
+        assert dialog.stop_btn.isEnabled() is False
+        assert dialog.update_timer.isActive() is False
+        gate.set()
+        _wait_until(app, lambda: backend.stopped == ['run'], 'the stop')
+        _wait_until(app, lambda: 'Stopped News' in dialog.action_label.text(), 'the result')
+        assert dialog.upcoming_table.rowCount() == 1
+        assert dialog.update_timer.isActive() is True
+        assert opened == ['tv']
+
+        # Closed before the server answers: the dialog does not poll again.
+        backend.entries.append(backend.entries[0].__class__(
+            uuid='again', title='Again', channel_name='IRINN', start=int(time.time()) - 60,
+            duration=3600, status='Running', sched_status='recording', htsp_id=9,
+        ))
+        dialog.update_status()
+        gate.clear()
+        dialog.upcoming_table.selectRow(0)
+        app.processEvents()
+        dialog.stop_selected()
+        dialog.close()
+        gate.set()
+        _wait_until(app, lambda: 'again' in backend.stopped, 'the second stop')
+        _wait_until(app, lambda: not window._dvr_changes, 'the answer')
+        assert dialog.update_timer.isActive() is False
+    finally:
+        gate.set()
+        dialog.close()
+        window.close()
+        app.processEvents()
+
+
 def test_tasks_panel_reuses_the_window_htsp_connection_instead_of_a_second_sync(monkeypatch, tmp_path):
     import time
 
@@ -1777,6 +1991,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
     backend = FakeBackend()
     recorder = FakeRecorder()
     window.get_backend = lambda: backend
+    window.open_backend = lambda server: backend
     window.tasks_pane.open_backend = lambda server: backend
     window.current_server = lambda: {'name': 'tv', 'url': 'http://tv'}
     window.local_jobs = [ui.LocalJob(recorder, Channel(uuid='c', name='IRINN'))]
@@ -1886,6 +2101,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.action_btn.isEnabled() is True
         assert panel.reveal_btn.isEnabled() is False
         panel.run_action()
+        _wait_until(app, lambda: not window._dvr_changes, 'the stop')
         _wait_for_tasks(app, panel)
         assert backend.stopped == ['run']
         assert recorder.running is True
@@ -1969,6 +2185,8 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.action_btn.accessibleName() == 'Cancel'
         assert panel.action_btn.text() == 'Cancel'
         panel.run_action()
+        _wait_until(app, lambda: not window._dvr_changes, 'the cancel')
+        _wait_for_tasks(app, panel)
         assert backend.cancelled == ['soon']
         # The refresh after cancelling finds nothing recording, so the
         # indicator follows the real count and turns off (#52).

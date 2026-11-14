@@ -349,9 +349,14 @@ def fit_table_columns(table, stretch_columns):
 
 
 class DVRStatusDialog(QDialog):
-    def __init__(self, backend, parent=None):
+    def __init__(self, backend, parent=None, server=None):
         super().__init__(parent)
         self.backend = backend
+        # The server this dialog shows, so a stop goes there even after the window switches server.
+        if server is None and parent is not None and hasattr(parent, 'current_server'):
+            server = parent.current_server()
+        self.server = dict(server) if server else None
+        self._stop_pending = False
         self.setWindowTitle("DVR Status")
         self.resize(800, 600)
         self.setup_ui()
@@ -456,29 +461,65 @@ class DVRStatusDialog(QDialog):
 
     def _update_controls(self):
         entry = self._selected_entry()
-        can_stop = entry is not None and entry.category() == 'recording'
+        can_stop = entry is not None and entry.category() == 'recording' and not self._stop_pending
         self.stop_btn.setEnabled(can_stop)
 
     def stop_selected(self):
         """Stop the selected in-progress recording via the backend."""
         entry = self._selected_entry()
-        if entry is None or entry.category() != 'recording':
+        if entry is None or entry.category() != 'recording' or self._stop_pending:
             return
         title = entry.title or 'recording'
         channel = entry.channel_name or 'channel'
+        print(f"Debug: Stopping DVR entry: {title} ({entry.uuid}) on {channel}")
+        host = self.parent()
+        if self.server is None or not hasattr(host, 'run_dvr_change'):
+            try:
+                self.backend.stop_dvr_entry(entry)
+            except Exception as e:
+                self._stop_failed(e)
+                return
+            self._stopped(title, channel)
+            return
+
+        def done(_result, error):
+            self._stop_pending = False
+            # Closing the dialog stops its polling; only an open one polls again.
+            if self.isVisible():
+                self.update_timer.start(5000)
+            if error is not None:
+                self._update_controls()
+                self._stop_failed(error)
+                return
+            self._stopped(title, channel)
+
+        # The server can take seconds to write the file out. Polling waits,
+        # so it does not queue behind the stop on the same connection.
+        self.update_timer.stop()
+        self._stop_pending = True
+        self._update_controls()
         try:
-            print(f"Debug: Stopping DVR entry: {title} ({entry.uuid}) on {channel}")
-            self.backend.stop_dvr_entry(entry)
-            announce_label(
-                self.action_label,
-                f"Stopped {title} on {channel}. The recorded file is kept.",
-            )
-            self.update_status()
-            self._sync_parent_indicator()
+            host.run_dvr_change(lambda backend: backend.stop_dvr_entry(entry), done, server=self.server)
         except Exception as e:
-            print(f"Debug: Error stopping DVR entry: {str(e)}")
-            print(f"Debug: Traceback: {traceback.format_exc()}")
-            QMessageBox.critical(self, "Error", f"Failed to stop recording: {str(e)}")
+            self._stop_pending = False
+            if self.isVisible():
+                self.update_timer.start(5000)
+            self._update_controls()
+            self._stop_failed(e)
+            return
+        announce_label(self.action_label, f"Stopping {title} on {channel}")
+
+    def _stopped(self, title, channel):
+        announce_label(
+            self.action_label,
+            f"Stopped {title} on {channel}. The recorded file is kept.",
+        )
+        self.update_status()
+        self._sync_parent_indicator()
+
+    def _stop_failed(self, error):
+        print(f"Debug: Error stopping DVR entry: {error}")
+        QMessageBox.critical(self, "Error", f"Failed to stop recording: {error}")
 
     def _sync_parent_indicator(self):
         """Clear the main-window pulse when no server recording is still running."""
@@ -785,6 +826,8 @@ class TasksPanel(QFrame):
         self._backend_key = None
         self._fetching = False
         self._fetch_again = False
+        # A stop or cancel sent to the server and not answered yet; one at a time.
+        self._server_change_pending = False
         # Bumped when the server changes, so an answer from the old one is dropped.
         self._generation = 0
         self._server_fetched.connect(self._on_server_fetched)
@@ -966,27 +1009,63 @@ class TasksPanel(QFrame):
         host = self._host
         if task is None or host is None:
             return
-        title = task.get('title') or 'recording'
-        channel = task.get('channel') or 'channel'
         try:
             if task['kind'] == 'Convert':
                 host.cancel_conversion(task['conversion'])
             elif task['kind'] == 'Local':
                 host.stop_local_recording(task['job'])
-            elif task['bucket'] == 'recording':
-                host.get_backend().stop_dvr_entry(task['entry'])
+            else:
+                self._change_server_task(task)
+                return
+        except Exception as exc:
+            self._task_failed(exc)
+            return
+        self.refresh()
+
+    def _change_server_task(self, task):
+        """Stop or cancel a server recording; the server's answer comes back later."""
+        if self._server_change_pending:
+            return
+        host = self._host
+        title = task.get('title') or 'recording'
+        channel = task.get('channel') or 'channel'
+        entry = task['entry']
+        stopping = task['bucket'] == 'recording'
+
+        def change(backend):
+            if stopping:
+                backend.stop_dvr_entry(entry)
+            else:
+                backend.cancel_dvr_entry(entry)
+
+        def done(_result, error):
+            self._server_change_pending = False
+            self._update_action()
+            if error is not None:
+                self._task_failed(error)
+                self.refresh()
+                return
+            if stopping:
                 self._tell(host, f"Stopped {title} on {channel}. The recorded file is kept.")
                 if hasattr(host, 'sync_recording_indicator'):
                     host.sync_recording_indicator()
             else:
-                host.get_backend().cancel_dvr_entry(task['entry'])
                 self._tell(host, f"Cancelled {title} on {channel}.")
-        except Exception as exc:
-            print(f"Debug: Error updating task: {exc}")
-            print(f"Debug: Traceback: {traceback.format_exc()}")
-            QMessageBox.critical(self, "Error", f"Failed to update the task: {exc}")
-            return
-        self.refresh()
+            self.refresh()
+
+        self._server_change_pending = True
+        self._update_action()
+        try:
+            host.run_dvr_change(change, done)
+        except Exception:
+            self._server_change_pending = False
+            self._update_action()
+            raise
+        self._tell(host, f"Stopping {title} on {channel}" if stopping else f"Cancelling {title} on {channel}")
+
+    def _task_failed(self, exc):
+        print(f"Debug: Error updating task: {exc}")
+        QMessageBox.critical(self, "Error", f"Failed to update the task: {exc}")
 
     def reveal_selected(self):
         """Show the selected local recording in the file manager."""
@@ -1021,7 +1100,7 @@ class TasksPanel(QFrame):
             label = "Stop Recording"
         # The same as the Stop or Cancel button under the list.
         stop = menu.addAction(label)
-        stop.setEnabled(bucket in ('recording', 'converting', 'scheduled'))
+        stop.setEnabled(bucket in ('recording', 'converting', 'scheduled') and not self._waiting_for_server(task))
         stop.triggered.connect(self.run_action)
         menu.addSeparator()
         action = menu.addAction("Reveal in File Manager")
@@ -1406,6 +1485,13 @@ class TasksPanel(QFrame):
                 False,
             )
             return
+        if self._waiting_for_server(task):
+            self._set_action(
+                "Cancel" if task['bucket'] == 'scheduled' else "Stop",
+                "Waiting for the server to answer the last stop or cancel.",
+                False,
+            )
+            return
         if task['bucket'] == 'scheduled':
             self._set_action(
                 "Cancel",
@@ -1432,6 +1518,13 @@ class TasksPanel(QFrame):
             "Stop the selected recording. The recorded file is kept.",
             True,
         )
+
+    def _waiting_for_server(self, task):
+        """A server task while the server has not answered the last stop or cancel.
+
+        Local recordings and conversions do not wait for the server.
+        """
+        return bool(self._server_change_pending and task and task.get('kind') == 'Server')
 
     def _set_action(self, name, description, enabled):
         self.action_btn.setText(name)
@@ -3350,6 +3443,45 @@ class TunerUseFetch(QObject):
             pass
 
 
+class DvrChange(QObject):
+    """Stop or cancel recordings on a server, off the UI thread, over a connection of its own."""
+
+    # Result of the change or None, error or None.
+    done = pyqtSignal(object, object)
+
+    def __init__(self, server, change, open_backend=create_backend, parent=None):
+        super().__init__(parent)
+        self._server = server
+        self._change = change
+        self._open_backend = open_backend
+        self._thread = threading.Thread(target=self._run, name='dvr-change', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _run(self):
+        result = error = None
+        backend = None
+        try:
+            backend = self._open_backend(self._server)
+            result = self._change(backend)
+        except Exception as exc:
+            error = exc
+            print(f"Debug: Recording change failed: {exc}")
+            print(f"Debug: Traceback: {traceback.format_exc()}")
+        finally:
+            if backend is not None:
+                try:
+                    backend.close()
+                except Exception:
+                    pass
+        try:
+            self.done.emit(result, error)
+        except RuntimeError:
+            # The window closed while the server was answering.
+            pass
+
+
 # Tvheadend's highest recording priority.
 PRIORITY_IMPORTANT = 0
 
@@ -3782,6 +3914,10 @@ class TVHeadendClient(QMainWindow):
         )
         self._backend = None
         self._backend_key = None
+        # Stops and cancels go over a connection of their own, off the UI thread.
+        self.open_backend = create_backend
+        self._dvr_changes = set()
+        self._stopping_recording = False
         self._busy_playlists = set()
         # Background playlist jobs until they end; those not started yet wait their turn.
         self._playlist_jobs = []
@@ -4636,6 +4772,33 @@ class TVHeadendClient(QMainWindow):
             self._backend = create_backend(server)
             self._backend_key = key
         return self._backend
+
+    def run_dvr_change(self, change, on_done, server=None):
+        """Run ``change(backend)`` against the server off the UI thread.
+
+        A server can take seconds to stop a recording while it writes the
+        file out. The change runs over a connection of its own, so the
+        window's connection stays free; ``on_done(result, error)`` runs on
+        the UI thread. Raises ``TvhError`` at once when no server can be asked.
+        """
+        if server is None:
+            server = self.current_server()
+        if not server:
+            raise TvhError('No server selected')
+        supervisor = getattr(self, 'builtin', None)
+        running = supervisor is not None and supervisor.is_running()
+        if is_builtin_server(server) and not builtin_requests_ready(server, running):
+            raise TvhError('Built-in server is not running yet')
+        job = DvrChange(dict(server), change, self.open_backend, self)
+        self._dvr_changes.add(job)
+
+        def finished(result, error):
+            self._dvr_changes.discard(job)
+            on_done(result, error)
+
+        job.done.connect(finished)
+        job.start()
+        return job
 
     def synced_recordings(self, server):
         """``(state, entries)`` for the Tasks pane, from this window's HTSP connection.
@@ -7344,6 +7507,9 @@ class TVHeadendClient(QMainWindow):
         When several jobs are running, only the active channel is stopped.
         """
         print("Debug: Attempting to stop recordings")
+        if self._stopping_recording:
+            self.statusbar.showMessage("Still waiting for the server to stop the recording")
+            return
         running = []
         try:
             backend = self.get_backend()
@@ -7360,29 +7526,43 @@ class TVHeadendClient(QMainWindow):
                     print("Debug: No active recordings found")
                     self.statusbar.showMessage("No active recordings to stop")
                     self.sync_recording_indicator()
+                self._refresh_tasks()
                 return
-            for entry in targets:
-                print(f"Debug: Stopping recording: {entry.title} ({entry.uuid}) on {entry.channel_name}")
-                backend.stop_dvr_entry(entry)
-            self.channel_recordings_changed([entry for entry in entries if entry not in targets])
-            if len(targets) >= len(running):
-                self.sync_recording_indicator()
-            channel_name = targets[0].channel_name or (channel.name if channel else 'channel')
-            if len(targets) == 1:
-                self.statusbar.showMessage(f"Stopped recording for {channel_name}")
-            else:
-                self.statusbar.showMessage(f"Stopped {len(targets)} recordings for {channel_name}")
-            self._show_on_picture("Recording stopped")
+
+            def change(stop_backend):
+                for entry in targets:
+                    print(f"Debug: Stopping recording: {entry.title} ({entry.uuid}) on {entry.channel_name}")
+                    stop_backend.stop_dvr_entry(entry)
+
+            def done(_result, error):
+                self._stopping_recording = False
+                if error is not None:
+                    self._stop_recording_failed(error, running)
+                    return
+                self.channel_recordings_changed([entry for entry in entries if entry not in targets])
+                if len(targets) >= len(running):
+                    self.sync_recording_indicator()
+                channel_name = targets[0].channel_name or (channel.name if channel else 'channel')
+                if len(targets) == 1:
+                    self.statusbar.showMessage(f"Stopped recording for {channel_name}")
+                else:
+                    self.statusbar.showMessage(f"Stopped {len(targets)} recordings for {channel_name}")
+                self._show_on_picture("Recording stopped")
+                self._refresh_tasks()
+
+            # The server can take seconds to write the file out; the window stays usable.
+            self.run_dvr_change(change, done)
+            self._stopping_recording = True
+            self.statusbar.showMessage("Stopping recording")
         except Exception as e:
-            print(f"Debug: Error stopping recordings: {str(e)}")
-            print(f"Debug: Error type: {type(e)}")
-            import traceback
-            print(f"Debug: Traceback: {traceback.format_exc()}")
-            self.statusbar.showMessage(f"Error stopping recordings: {str(e)}")
-            if len(running) <= 1:
-                self.sync_recording_indicator()
-        finally:
-            self._refresh_tasks()
+            self._stop_recording_failed(e, running)
+
+    def _stop_recording_failed(self, error, running):
+        print(f"Debug: Error stopping recordings: {error}")
+        self.statusbar.showMessage(f"Error stopping recordings: {error}")
+        if len(running) <= 1:
+            self.sync_recording_indicator()
+        self._refresh_tasks()
 
     def _recording_count_changed(self, count):
         """Keep the indicator in sync with the unfiltered server and local tasks."""
@@ -7417,7 +7597,7 @@ class TVHeadendClient(QMainWindow):
         """Show DVR status dialog"""
         try:
             print("\nDebug: Opening DVR Status Dialog")
-            dialog = DVRStatusDialog(self.get_backend(), self)
+            dialog = DVRStatusDialog(self.get_backend(), self, server=self.current_server())
             dialog.show()
         except Exception as e:
             print(f"Debug: Error showing DVR status: {str(e)}")
