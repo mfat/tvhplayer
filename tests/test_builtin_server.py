@@ -44,6 +44,7 @@ def test_source_checkout_looks_beside_the_repo():
     assert repo / 'build' / 'tvheadend' in bundled_binary_candidates()
 
 
+@pytest.mark.skipif(not sys.platform.startswith('linux'), reason='System and AppImage paths are Linux paths')
 def test_a_system_python_does_not_pick_the_hosts_tvheadend(monkeypatch):
     # Run from a source checkout with /usr/bin/python3, the app took the
     # distribution's /usr/bin/tvheadend over the fork build beside the repo.
@@ -732,4 +733,5 @@ def test_prefetch_config_skips_files_it_cannot_open(tmp_path):
 
     assert builtin_server.prefetch_config(tmp_path, advise=advise) == 1
     assert builtin_server.prefetch_config(tmp_path / 'missing') == 0
-    assert builtin_server.prefetch_config(tmp_path) == 2
+    # Read-ahead hints exist only where the system has posix_fadvise (Linux).
+    assert builtin_server.prefetch_config(tmp_path) == (2 if hasattr(os, 'posix_fadvise') else 0)

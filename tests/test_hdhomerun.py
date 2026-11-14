@@ -309,6 +309,12 @@ def test_wizard_uses_host_fallback_only_for_windows_builtin(monkeypatch):
 def test_directed_search_finds_a_device_a_firewall_hides_from_broadcasts(monkeypatch):
     """Each address of the network is asked on its own; this one answers."""
     import ipaddress
+    # The search sends from 127.0.0.2, which macOS does not give its loopback.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.bind(('127.0.0.2', 0))
+    except OSError:
+        pytest.skip('127.0.0.2 is not a local address here')
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as device:
         device.bind(('127.0.0.1', 0))
         device.settimeout(3)
