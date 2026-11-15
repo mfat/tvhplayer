@@ -78,6 +78,7 @@ try:
     from .builtin_supervisor import BuiltinSupervisor
     from .core.builtin_runtime import create_supervisor, windows_backend_enabled
     from . import cursor_debug
+    from . import spinner_debug
     from . import window_frame
     from .file_manager import show_in_file_manager
     from .ui_theme import (
@@ -181,6 +182,7 @@ except ImportError:
     from builtin_supervisor import BuiltinSupervisor
     from core.builtin_runtime import create_supervisor, windows_backend_enabled
     import cursor_debug
+    import spinner_debug
     import window_frame
     from file_manager import show_in_file_manager
     from ui_theme import (
@@ -3228,6 +3230,7 @@ class PlaybackSpinner(QWidget):
         """Show why the channel did not start or stopped, until the next start or stop."""
         self._problem = text
         self._timer.stop()
+        spinner_debug.stopped()
         self.setAccessibleName(text)
         self.show()
         self.raise_()
@@ -3247,17 +3250,25 @@ class PlaybackSpinner(QWidget):
         if running:
             if not self._timer.isActive():
                 self._timer.start()
+                spinner_debug.started()
             self.show()
             self.raise_()
         else:
             self._timer.stop()
+            spinner_debug.stopped()
             self.hide()
 
     def _advance(self):
+        spinner_debug.tick()
         self._angle = (self._angle + 8) % 360
         self.update()
 
     def paintEvent(self, _event):
+        started = time.perf_counter()
+        self._paint()
+        spinner_debug.painted(time.perf_counter() - started)
+
+    def _paint(self):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.fillRect(self.rect(), QColor(0, 0, 0))
@@ -9812,6 +9823,7 @@ def main():
         app = QApplication(sys.argv)
         print(f"Debug: Qt platform: {app.platformName()}")
         cursor_debug.install(app)
+        spinner_debug.install()
         app.setApplicationName("TVHplayer")
         app.setApplicationDisplayName("TVHplayer")
         app.setDesktopFileName("io.github.mfat.tvhplayer")

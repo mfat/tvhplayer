@@ -84,6 +84,16 @@ To use the built-in server from a checkout, build Tvheadend in a checkout next t
 
 Run the tests with `python3 -m pytest tests`.
 
+### Debug switches
+Set these when starting the app; their output goes to the terminal and `app.log`. They are off by default.
+
+- `TVHPLAYER_DEBUG_SPINNER=1` reports what holds up the spinner shown while a channel starts. Each tick that comes over 50 ms late is printed with how late it was and what every thread was doing meanwhile: the main thread's stack in full, and the other threads marked RUNNING (running Python, so holding the GIL) or waiting. A Python-level dump of all threads, which `faulthandler` takes without the GIL, follows when a tick is over 60 ms late. Each start ends with a line such as `spinner stopped after 8.2 s: 412 ticks, 9 late, worst 180 ms`.
+- `TVHPLAYER_DEBUG_CURSOR=1` reports cursor and window changes, programs the app starts, and event loop stalls over 250 ms, with the main thread's stack when one lasts over a second. `2` adds Qt's Wayland logging.
+
+```bash
+TVHPLAYER_DEBUG_SPINNER=1 python3 tvhplayer/tvhplayer.py
+```
+
 ## Technical information
 - Talks to Tvheadend over HTSP or its HTTP JSON API
 - Plays with libmpv (OpenGL into the window on Wayland and X11)
