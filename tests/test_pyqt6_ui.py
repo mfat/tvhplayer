@@ -3196,7 +3196,9 @@ def test_channel_list_columns_and_options_are_user_settings(monkeypatch, tmp_pat
     backend = _ExtrasBackend(now)
     requested = []
     app, ui, window = _channel_list_window(monkeypatch, tmp_path, backend)
-    window.logo_loader.request = lambda server, reference, url: requested.append((reference, url))
+    # The loader finds the address itself, in the background; here at once.
+    window.logo_loader.request = lambda server, reference, url: requested.append(
+        (reference, url() if callable(url) else url))
     try:
         table = window.channel_list
         header = table.horizontalHeader()

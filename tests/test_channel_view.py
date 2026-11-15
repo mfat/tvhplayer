@@ -86,6 +86,31 @@ def test_logo_loader_fetches_once_caches_on_disk_and_skips_failures(tmp_path):
         assert [reference for reference, _image in got] == ['imagecache/1']
         assert len(hits) == 3
 
+        # An address given as a function is found only for a logo not cached,
+        # on the loader's thread: over HTSP finding it can mean logging in.
+        asked = []
+
+        def address(path):
+            def find():
+                asked.append((path, threading.current_thread() is threading.main_thread()))
+                return f'{base}/{path}'
+            return find
+
+        got.clear()
+        loader.forget()
+        loader.request(box, 'imagecache/1', address('imagecache/1'))
+        loader.request(box, 'imagecache/3', address('imagecache/3'))
+        loader.request(box, 'imagecache/4', lambda: 'imagecache/4')
+        loader.request(box, 'imagecache/5', lambda: (_ for _ in ()).throw(OSError('no server')))
+        deadline = time.monotonic() + 5
+        while (not got or len(hits) < 4 or len(asked) < 1) and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert [reference for reference, _image in got] == ['imagecache/1']
+        assert asked == [('imagecache/3', False)]
+        # Not an http address, or none at all: nothing is fetched.
+        assert [path for path, _auth in hits][3:] == ['/imagecache/3']
+
         pixmap = logo_pixmap(png)
         assert pixmap.size() == LOGO_SIZE
         assert logo_pixmap(b'not an image') is None

@@ -8,6 +8,7 @@ and cached on disk, so a long list fills in without holding up the window.
 from __future__ import annotations
 
 import hashlib
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +26,8 @@ from PyQt6.QtWidgets import (
     QStyleOptionViewItem,
     QTableView,
 )
+
+log = logging.getLogger(__name__)
 
 try:
     from .core.channel_info import (
@@ -955,7 +958,9 @@ class LogoLoader(QObject):
         """Load ``reference`` from the disk cache, or fetch ``url`` when it is not there.
 
         Nothing happens while it is queued, or after it failed before. An
-        empty ``url`` only reads the cache.
+        empty ``url`` only reads the cache. ``url`` may be a function giving
+        the address: it is called only when the logo is not in the cache, in
+        the background, since finding it can mean logging in to the server.
         """
         key = (server.get('url') or '', reference)
         with self._lock:
@@ -1009,6 +1014,14 @@ class LogoLoader(QObject):
         if image is not None:
             self._finish((server_url, reference), reference, image, generation)
             return
+        if callable(url):
+            try:
+                url = url() or ''
+            except Exception as exc:
+                log.debug('No address for logo %s: %s', reference, exc)
+                url = ''
+            if not url.startswith(('http://', 'https://')):
+                url = ''
         if not url:
             with self._lock:
                 if generation == self._generation:

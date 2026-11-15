@@ -3951,6 +3951,8 @@ class TVHeadendClient(QMainWindow):
         # a channel no longer wanted is dropped.
         self._play_generation = 0
         self._stopping_recording = False
+        # A server recording being set up: the server is asked, or the length chosen.
+        self._asking_to_record = False
         self._busy_playlists = set()
         # Background playlist jobs until they end; those not started yet wait their turn.
         self._playlist_jobs = []
@@ -5206,14 +5208,9 @@ class TVHeadendClient(QMainWindow):
         if reference.startswith(PICON_PREFIX):
             self.logo_loader.request_file(reference, reference[len(PICON_PREFIX):])
             return None
-        url = ''
-        if backend is not None:
-            try:
-                url = backend.image_url(reference)
-            except Exception as e:
-                print(f"Debug: No URL for logo {reference}: {e}")
-            if not url.startswith(('http://', 'https://')):
-                url = ''
+        # The address is found by the loader, in the background, and only for
+        # a logo not cached: over HTSP it can mean logging in to the server.
+        url = (lambda: backend.image_url(reference)) if backend is not None else ''
         self.logo_loader.request(self.current_server() or {}, reference, url)
         return None
 
@@ -5974,14 +5971,40 @@ class TVHeadendClient(QMainWindow):
             except Exception as e:
                 print(f"Debug: No programme information for {channel.name}: {e}")
                 return None
+        return self._event_on_now(now_next)
+
+    @staticmethod
+    def _event_on_now(now_next):
+        """The programme on now in ``now_next``, if it can be recorded by its event."""
         event = now_next.now if now_next is not None else None
         now = time.time()
         if event is None or not event.event_id or not event.start <= now < event.stop:
             return None
         return event
 
+    def _with_programme_on_now(self, channel, then):
+        """Call ``then(event)`` with the channel's programme on now.
+
+        It comes from the list's guide data, or else from the server, asked
+        in the background so a slow server does not hold up the window.
+        """
+        key = channel_key(channel)
+        if key in self._now_next:
+            then(self._event_on_now(self._now_next.get(key)))
+            return
+
+        def answered(result, error):
+            if error is not None:
+                print(f"Debug: No programme information for {channel.name}: {error}")
+            then(self._event_on_now(result))
+
+        self.call_server(lambda backend: backend.get_now_next([channel]).get(key), answered)
+
     def start_recording(self):
         print("Debug: Starting recording")
+        if self._asking_to_record:
+            self.statusbar.showMessage("Still waiting for the server")
+            return
         try:
             channel = self.selected_channel()
             if not channel:
@@ -5991,45 +6014,65 @@ class TVHeadendClient(QMainWindow):
 
             if not self.server_recordings_ready():
                 return
-            duration_dialog = RecordingDurationDialog(self, channel, self._programme_on_now(channel))
+            self._asking_to_record = True
+            self.statusbar.showMessage(f"Asking the server about {channel.name}…")
+            self._with_programme_on_now(channel, lambda event: self._record_on_server(channel, event))
+        except Exception as e:
+            self._recording_failed(e)
+
+    def _record_on_server(self, channel, programme):
+        """Ask how long to record, then have the server record it."""
+        try:
+            duration_dialog = RecordingDurationDialog(self, channel, programme)
             if duration_dialog.exec() != QDialog.DialogCode.Accepted:
                 print("Debug: Recording cancelled by user")
+                self._asking_to_record = False
+                self.statusbar.clearMessage()
                 return
-            
+
             event = duration_dialog.programme_event()
             if event is not None:
                 # The server records the programme and stops when it ends.
-                self.get_backend().create_dvr_entry_by_event(event.event_id)
                 until = datetime.fromtimestamp(event.stop).strftime('%H:%M')
-                self.statusbar.showMessage(
-                    f"Recording started for: {channel.name} ({event.title}, until {until})"
-                )
-                self._show_on_picture(f"Recording {event.title} (until {until})")
+                request = lambda backend: backend.create_dvr_entry_by_event(event.event_id)
+                status = f"Recording started for: {channel.name} ({event.title}, until {until})"
+                picture = f"Recording {event.title} (until {until})"
             else:
                 duration = duration_dialog.get_duration()
                 now = int(datetime.now().timestamp())
-                self.get_backend().create_dvr_entry(
+                title = instant_recording_title(channel.name, datetime.fromtimestamp(now))
+                request = lambda backend: backend.create_dvr_entry(
                     channel,
                     now,
                     now + duration,
-                    title=instant_recording_title(channel.name, datetime.fromtimestamp(now)),
+                    title=title,
                     description='Recorded via TVHplayer',
                     comment='Instant recording via TVHplayer',
                 )
                 duration_minutes = duration // 60
-                self.statusbar.showMessage(
-                    f"Recording started for: {channel.name} ({duration_minutes} minutes)"
-                )
-                self._show_on_picture(f"Recording {channel.name} ({duration_minutes} min)")
-            self.start_recording_indicator()
-            self._refresh_tasks()
+                status = f"Recording started for: {channel.name} ({duration_minutes} minutes)"
+                picture = f"Recording {channel.name} ({duration_minutes} min)"
+
+            def created(_result, error):
+                self._asking_to_record = False
+                if error is not None:
+                    self._recording_failed(error)
+                    return
+                self.statusbar.showMessage(status)
+                self._show_on_picture(picture)
+                self.start_recording_indicator()
+                self._refresh_tasks()
+
+            self.statusbar.showMessage(f"Asking the server to record {channel.name}…")
+            self.call_server(request, created)
         except Exception as e:
-            print(f"Debug: Recording error: {str(e)}")
-            print(f"Debug: Error type: {type(e)}")
-            import traceback
-            print(f"Debug: Traceback: {traceback.format_exc()}")
-            self.statusbar.showMessage(f"Recording error: {str(e)}")
-            
+            self._recording_failed(e)
+
+    def _recording_failed(self, error):
+        self._asking_to_record = False
+        print(f"Debug: Recording error: {error}")
+        self.statusbar.showMessage(f"Recording error: {error}")
+
     def toggle_playback(self):
         """The Play/Stop button and P: stop what plays, or play the selected channel."""
         if self._playback_active or self._awaiting_playback:
@@ -6833,25 +6876,37 @@ class TVHeadendClient(QMainWindow):
         if pane is not None:
             pane.refresh(server=server)
 
-    def _recording_in_progress(self):
-        """True while a server recording or the local job is running."""
+    def sync_recording_indicator(self, entries=None):
+        """Show REC while a server recording or a local job is running.
+
+        ``entries`` are the server's recordings when already known; otherwise
+        the server is asked in the background.
+        """
         if self.local_recording_running():
-            return True
+            self._show_recording_indicator(True)
+            return
+        if entries is not None:
+            self._show_recording_indicator(any(entry.category() == 'recording' for entry in entries))
+            return
         try:
             if not self.current_server() or not self._server_requests_ready():
-                return False
-            entries = self.get_backend().list_dvr_entries()
-        except Exception:
-            return bool(getattr(self, 'is_recording', False))
-        return any(entry.category() == 'recording' for entry in entries)
+                self._show_recording_indicator(False)
+                return
 
-    def sync_recording_indicator(self):
-        """Show REC while a server recording or the local job is running."""
-        if self._recording_in_progress():
-            if not self.is_recording:
-                self.start_recording_indicator()
-            return
-        if self.is_recording:
+            def answered(entries, error):
+                if error is not None or self.local_recording_running():
+                    # Unknown: leave REC as it is.
+                    return
+                self._show_recording_indicator(any(entry.category() == 'recording' for entry in entries))
+
+            self.call_server(lambda backend: backend.list_dvr_entries(), answered)
+        except Exception as e:
+            print(f"Debug: Could not read the server's recordings: {e}")
+
+    def _show_recording_indicator(self, on):
+        if on and not self.is_recording:
+            self.start_recording_indicator()
+        elif not on and self.is_recording:
             self.stop_recording_indicator()
 
     def _enter_fullscreen(self):
@@ -7561,38 +7616,42 @@ class TVHeadendClient(QMainWindow):
         if self._stopping_recording:
             self.statusbar.showMessage("Still waiting for the server to stop the recording")
             return
+        channel = self.active_channel()
+        # Filled in by the job: what the server was recording when asked.
         running = []
         try:
-            backend = self.get_backend()
-            entries = backend.list_dvr_entries()
-            running = [entry for entry in entries if entry.category() == 'recording']
-            channel = self.active_channel()
-            targets = recordings_to_stop(entries, channel)
-            if not targets:
-                if len(running) > 1 and channel is not None:
-                    self.statusbar.showMessage(f"No recording in progress for {channel.name}")
-                elif len(running) > 1:
-                    self.statusbar.showMessage("Select a channel to stop its recording")
-                else:
-                    print("Debug: No active recordings found")
-                    self.statusbar.showMessage("No active recordings to stop")
-                    self.sync_recording_indicator()
-                self._refresh_tasks()
-                return
-
             def change(stop_backend):
+                # Which recordings to stop is read on the job's own connection
+                # too: a slow server kept the window from answering meanwhile.
+                entries = stop_backend.list_dvr_entries()
+                running[:] = [entry for entry in entries if entry.category() == 'recording']
+                targets = recordings_to_stop(entries, channel)
                 for entry in targets:
                     print(f"Debug: Stopping recording: {entry.title} ({entry.uuid}) on {entry.channel_name}")
                     stop_backend.stop_dvr_entry(entry)
+                return entries, targets
 
-            def done(_result, error):
+            def done(result, error):
                 self._stopping_recording = False
                 if error is not None:
                     self._stop_recording_failed(error, running)
                     return
-                self.channel_recordings_changed([entry for entry in entries if entry not in targets])
+                entries, targets = result
+                if not targets:
+                    if len(running) > 1 and channel is not None:
+                        self.statusbar.showMessage(f"No recording in progress for {channel.name}")
+                    elif len(running) > 1:
+                        self.statusbar.showMessage("Select a channel to stop its recording")
+                    else:
+                        print("Debug: No active recordings found")
+                        self.statusbar.showMessage("No active recordings to stop")
+                        self.sync_recording_indicator(entries)
+                    self._refresh_tasks()
+                    return
+                left = [entry for entry in entries if entry not in targets]
+                self.channel_recordings_changed(left)
                 if len(targets) >= len(running):
-                    self.sync_recording_indicator()
+                    self.sync_recording_indicator(left)
                 channel_name = targets[0].channel_name or (channel.name if channel else 'channel')
                 if len(targets) == 1:
                     self.statusbar.showMessage(f"Stopped recording for {channel_name}")
@@ -9163,12 +9222,25 @@ class TVHeadendClient(QMainWindow):
                 self.statusbar.showMessage("Channel not found")
                 return
             print(f"Debug: Fetching EPG for channel: {channel.name}")
-            events = self.get_backend().get_epg(channel, limit=24)
-            if events:
-                dialog = EPGDialog(channel, events, self.get_backend(), self)
-                dialog.show()
-            else:
-                self.statusbar.showMessage("No EPG data available")
+            self.statusbar.showMessage(f"Reading the guide for {channel.name}…")
+
+            def answered(events, error):
+                if error is not None:
+                    print(f"Debug: Error fetching EPG: {error}")
+                    self.statusbar.showMessage(f"Error fetching EPG: {error}")
+                    return
+                if not events:
+                    self.statusbar.showMessage("No EPG data available")
+                    return
+                try:
+                    self.statusbar.clearMessage()
+                    dialog = EPGDialog(channel, events, self.get_backend(), self)
+                    dialog.show()
+                except Exception as e:
+                    print(f"Debug: Error showing EPG: {e}")
+                    self.statusbar.showMessage(f"Error fetching EPG: {e}")
+
+            self.call_server(lambda backend: backend.get_epg(channel, limit=24), answered)
         except Exception as e:
             print(f"Debug: Error fetching EPG: {str(e)}")
             self.statusbar.showMessage(f"Error fetching EPG: {str(e)}")

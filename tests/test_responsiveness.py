@@ -38,10 +38,6 @@ LIST_BUSY_BUDGET = 0.2
 SEARCH_BUDGET = 0.2
 BIG_LIST = 60_000
 
-BLOCKS_ON_SERVER = pytest.mark.xfail(
-    strict=True,
-    reason='Asks the server on the window thread (to be fixed); remove this mark when it passes',
-)
 BLOCKS_ON_LIST = pytest.mark.xfail(
     strict=True,
     reason='Reworks the whole channel list on the window thread (to be fixed); remove this mark when it passes',
@@ -282,7 +278,6 @@ def test_a_server_that_cannot_give_a_stream_address_is_reported(monkeypatch, tmp
         _close(app, window)
 
 
-@BLOCKS_ON_SERVER
 def test_starting_a_recording_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
     app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
 
@@ -312,7 +307,6 @@ def test_starting_a_recording_on_a_slow_server_keeps_the_window_answering(monkey
         _close(app, window)
 
 
-@BLOCKS_ON_SERVER
 def test_stopping_a_recording_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
     app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
     try:
@@ -327,7 +321,71 @@ def test_stopping_a_recording_on_a_slow_server_keeps_the_window_answering(monkey
         _close(app, window)
 
 
-@BLOCKS_ON_SERVER
+def test_a_server_that_cannot_record_is_reported(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+
+    class Dialog:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def exec(self):
+            return ui.QDialog.DialogCode.Accepted
+
+        def get_duration(self):
+            return 1800
+
+        def programme_event(self):
+            return None
+
+    def refuse(*_args, **_kwargs):
+        raise ui.TvhError('No free tuner')
+
+    monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
+    backend.delay = 0.05
+    backend.create_dvr_entry = refuse
+    try:
+        window.start_recording()
+        _wait_until(app, lambda: not window._asking_to_record, 'the answer')
+        assert window.status_label.text() == 'Recording error: No free tuner'
+        assert not window.is_recording
+        # The next try is not refused as still waiting.
+        window.start_recording()
+        assert window._asking_to_record
+        _wait_until(app, lambda: not window._asking_to_record, 'the second answer')
+    finally:
+        _close(app, window)
+
+
+def test_stopping_when_nothing_records_says_so(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    backend.delay = 0.05
+    backend.entries = []
+    try:
+        window.stop_recording()
+        assert window.status_label.text() == 'Stopping recording'
+        _wait_until(app, lambda: not window._stopping_recording, 'the answer')
+        assert window.status_label.text() == 'No active recordings to stop'
+        assert backend.calls == ['list_dvr_entries']
+    finally:
+        _close(app, window)
+
+
+def test_a_guide_the_server_cannot_give_is_reported(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+
+    def refuse(*_args, **_kwargs):
+        raise ui.TvhError('Server not reachable')
+
+    backend.get_epg = refuse
+    monkeypatch.setattr(ui, 'EPGDialog', lambda *a, **k: pytest.fail('showed a guide'))
+    try:
+        window.show_channel_epg(channel)
+        _wait_until(app, lambda: 'Error' in window.status_label.text(), 'the failure')
+        assert window.status_label.text() == 'Error fetching EPG: Server not reachable'
+    finally:
+        _close(app, window)
+
+
 def test_opening_a_channel_guide_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
     app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
     shown = []
@@ -351,17 +409,17 @@ def test_opening_a_channel_guide_on_a_slow_server_keeps_the_window_answering(mon
         _close(app, window)
 
 
-@BLOCKS_ON_SERVER
 def test_finding_a_logo_address_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
     app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
     requested = []
-    window.logo_loader.request = lambda server, reference, url: requested.append((reference, url))
+    window.logo_loader = ui.LogoLoader(window, cache_dir=tmp_path / 'cache')
+    window.logo_loader._fetch = lambda server, url: requested.append(url)
     try:
         meter = StallMeter()
         _later(lambda: window._logo_for('imagecache/1', backend))
         meter.run(SERVER_DELAY * 3, until=lambda: bool(requested))
         meter.report('Logo address, server answers in 1 s')
-        assert requested == [('imagecache/1', 'http://tv.example/imagecache/1')]
+        assert requested == ['http://tv.example/imagecache/1']
         assert meter.worst() < SERVER_BUDGET
     finally:
         _close(app, window)
@@ -462,3 +520,4 @@ def test_typing_a_search_on_a_big_list_keeps_the_window_answering(monkeypatch, t
         window._channel_fetch = None
         backend.close()
         _close(app, window)
+
