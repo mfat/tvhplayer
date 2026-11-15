@@ -3478,6 +3478,39 @@ class DvrChange(QObject):
             pass
 
 
+class ServerCall(QObject):
+    """One request to the window's server connection, off the UI thread.
+
+    A server that is slow or gone kept the whole window from answering for
+    as long as the request took, up to the network timeout.
+    """
+
+    # Result of the request or None, error or None.
+    done = pyqtSignal(object, object)
+
+    def __init__(self, backend, request, parent=None):
+        super().__init__(parent)
+        self._backend = backend
+        self._request = request
+        self._thread = threading.Thread(target=self._run, name='server-call', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def _run(self):
+        result = error = None
+        try:
+            result = self._request(self._backend)
+        except Exception as exc:
+            error = exc
+            print(f"Debug: Server request failed: {exc}")
+        try:
+            self.done.emit(result, error)
+        except RuntimeError:
+            # The window closed while the server was answering.
+            pass
+
+
 # Tvheadend's highest recording priority.
 PRIORITY_IMPORTANT = 0
 
@@ -3913,6 +3946,10 @@ class TVHeadendClient(QMainWindow):
         # Stops and cancels go over a connection of their own, off the UI thread.
         self.open_backend = create_backend
         self._dvr_changes = set()
+        self._server_calls = set()
+        # Counts channel changes, so a stream address that arrives late for
+        # a channel no longer wanted is dropped.
+        self._play_generation = 0
         self._stopping_recording = False
         self._busy_playlists = set()
         # Background playlist jobs until they end; those not started yet wait their turn.
@@ -4791,6 +4828,25 @@ class TVHeadendClient(QMainWindow):
 
         def finished(result, error):
             self._dvr_changes.discard(job)
+            on_done(result, error)
+
+        job.done.connect(finished)
+        job.start()
+        return job
+
+    def call_server(self, request, on_done):
+        """Run ``request(backend)`` on the window's connection off the UI thread.
+
+        ``on_done(result, error)`` runs on the UI thread. Raises ``TvhError``
+        at once when no server can be asked.
+        """
+        job = ServerCall(self.get_backend(), request, self)
+        self._server_calls.add(job)
+
+        def finished(result, error):
+            self._server_calls.discard(job)
+            if getattr(self, '_closing', False):
+                return
             on_done(result, error)
 
         job.done.connect(finished)
@@ -9155,6 +9211,8 @@ class TVHeadendClient(QMainWindow):
                 channel = channel_data
             else:
                 channel = Channel.from_raw(channel_data)
+            self._play_generation += 1
+            generation = self._play_generation
             self._playback_channel = channel
             self._playback_server = self._channels_server
             self._remember_channel(channel)
@@ -9164,45 +9222,76 @@ class TVHeadendClient(QMainWindow):
             profile = profiles.get(server_key(server), AUTO_PROFILE if casting else '') if server else ''
             if casting:
                 self._stream = None
-            else:
-                if is_builtin_server(server) and channel.htsp_id is not None:
-                    # The owned server's HTTP endpoint and Basic login are
-                    # configured by readiness. Do not wait for an HTSP ticket
-                    # on the GUI thread while its metadata is still arriving.
-                    base = http_base_url(server['url']).rstrip('/')
-                    stream_url = append_profile(insert_basic_auth(
-                        f'{base}/stream/channelid/{int(channel.htsp_id)}',
-                        server.get('username') or '', server.get('password') or '',
-                    ), profile or None)
-                else:
-                    stream_url = self.get_backend().stream_url(channel, profile=profile or None)
-                self._watch_stream_log()
-                self._stream = {'path': stream_path(stream_url), 'name': channel.name, 'started': False,
-                                'scrambled': '', 'failed_at': None}
-            self._show_playback_wait()
-            if self.cast_manager.is_connected:
+                self._show_playback_wait()
                 self._stop_start_watch()
-            self._mark_playing_channel(scroll=True)
-            if self.cast_manager.is_connected:
+                self._mark_playing_channel(scroll=True)
                 self.player.stop()
                 if not self.cast_manager.play_channel(server, channel, profile):
                     return
                 self.statusbar.showMessage(
                     f"Starting {channel.name} on {self.cast_manager.connected_name}"
                 )
-            else:
-                self.player.play(stream_url)
-                self.statusbar.showMessage(f"Starting: {channel.name}")
+                return
+            if is_builtin_server(server) and channel.htsp_id is not None:
+                # The owned server's HTTP endpoint and Basic login are
+                # configured by readiness. Do not wait for an HTSP ticket
+                # while its metadata is still arriving.
+                base = http_base_url(server['url']).rstrip('/')
+                stream_url = append_profile(insert_basic_auth(
+                    f'{base}/stream/channelid/{int(channel.htsp_id)}',
+                    server.get('username') or '', server.get('password') or '',
+                ), profile or None)
+                self._play_stream(channel, stream_url)
+                return
+            # Another server gives the stream address, with a ticket for its
+            # login, when asked. The window shows the channel starting and
+            # stays usable while it answers.
+            self._stream = None
+            self._show_playback_wait()
+            self._mark_playing_channel(scroll=True)
+            self.player.stop()
+            self.statusbar.showMessage(f"Starting: {channel.name}")
+
+            def address_ready(stream_url, error):
+                if generation != self._play_generation or self._playback_channel is not channel:
+                    # Another channel was chosen, or playback stopped, meanwhile.
+                    return
+                if error is not None:
+                    self._playback_start_failed(error)
+                    return
+                try:
+                    # The row was scrolled to already; the user may have scrolled since.
+                    self._play_stream(channel, stream_url, scroll=False)
+                except Exception as e:
+                    self._playback_start_failed(e)
+
+            self.call_server(lambda backend: backend.stream_url(channel, profile=profile or None),
+                             address_ready)
         except Exception as e:
-            print(f"Debug: Error in play_channel: {str(e)}")
-            if self._awaiting_playback:
-                self._awaiting_playback = False
-                self._playback_active = False
-                self._set_playback_spinner(False)
-                self._protect_video_surface(False)
-            self._playback_channel = None
-            self._mark_playing_channel()
-            self.statusbar.showMessage(f"Playback error: {str(e)}")
+            self._playback_start_failed(e)
+
+    def _play_stream(self, channel, stream_url, scroll=True):
+        """Hand the channel's stream address to the player."""
+        self._watch_stream_log()
+        self._stream = {'path': stream_path(stream_url), 'name': channel.name, 'started': False,
+                        'scrambled': '', 'failed_at': None}
+        self._show_playback_wait()
+        self._mark_playing_channel(scroll=scroll)
+        self.player.play(stream_url)
+        self.statusbar.showMessage(f"Starting: {channel.name}")
+
+    def _playback_start_failed(self, error):
+        print(f"Debug: Error in play_channel: {error}")
+        if self._awaiting_playback:
+            self._awaiting_playback = False
+            self._playback_active = False
+            self._set_playback_spinner(False)
+            self._protect_video_surface(False)
+            self._stop_start_watch()
+            self._sync_play_button()
+        self._playback_channel = None
+        self._mark_playing_channel()
+        self.statusbar.showMessage(f"Playback error: {error}")
 
     def show_server_status(self):
         """Show server status dialog"""

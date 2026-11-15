@@ -616,6 +616,8 @@ def test_the_servers_reason_shows_over_the_player(monkeypatch, tmp_path):
         window.get_backend = lambda: Backend()
         window.servers = []
         window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        # The server is asked for the stream address in the background.
+        _wait_until(app, lambda: window._stream is not None, 'the stream address')
         fake_player._events.handlers['playing'](None)
         app.processEvents()
         log = object()
@@ -631,6 +633,7 @@ def test_the_servers_reason_shows_over_the_player(monkeypatch, tmp_path):
 
         window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
         app.processEvents()
+        # Starting again shows the spinner at once, before the server answers.
         assert window.playback_spinner._timer.isActive()
         assert not window.playback_spinner.showing_problem()
     finally:

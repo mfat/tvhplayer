@@ -21,7 +21,7 @@ import types
 
 import pytest
 
-from test_pyqt6_ui import _make_player
+from test_pyqt6_ui import _make_player, _wait_until
 
 # How long the fake server takes to answer.
 SERVER_DELAY = 1.0
@@ -209,7 +209,6 @@ def _close(app, window):
 # --- Waiting for the server -------------------------------------------------
 
 
-@BLOCKS_ON_SERVER
 def test_playing_a_channel_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
     app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
     try:
@@ -219,6 +218,66 @@ def test_playing_a_channel_on_a_slow_server_keeps_the_window_answering(monkeypat
         meter.report('Play a channel, server answers in 1 s')
         assert played == ['http://tv.example/stream/news?ticket=t']
         assert meter.worst() < SERVER_BUDGET
+    finally:
+        _close(app, window)
+
+
+def test_a_late_stream_address_for_an_earlier_channel_is_dropped(monkeypatch, tmp_path):
+    # Zapping on a slow server: the first channel's address comes in after
+    # the second was chosen, and must not start the first channel.
+    from tvhplayer.core.models import Channel
+
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    sport = Channel(uuid='sport', name='Sport', number=2, htsp_id=8)
+    delays = {'news': SERVER_DELAY, 'sport': 0.1}
+
+    def stream_url(channel, profile=None):
+        time.sleep(delays[channel.uuid])
+        return f'http://tv.example/stream/{channel.uuid}'
+
+    backend.stream_url = stream_url
+    try:
+        window.play_channel_by_data(channel)
+        window.play_channel_by_data(sport)
+        _wait_until(app, lambda: bool(played), 'the second channel starting')
+        assert played == ['http://tv.example/stream/sport']
+        meter = StallMeter()
+        meter.run(SERVER_DELAY + 0.3)
+        assert played == ['http://tv.example/stream/sport']
+        assert window._playback_channel is sport
+    finally:
+        _close(app, window)
+
+
+def test_stopping_while_the_stream_address_is_on_its_way_plays_nothing(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    backend.delay = 0.3
+    try:
+        window.play_channel_by_data(channel)
+        assert window._awaiting_playback
+        window.stop_playback()
+        StallMeter().run(0.6)
+        assert played == []
+        assert not window._awaiting_playback
+        assert window._playback_channel is None
+    finally:
+        _close(app, window)
+
+
+def test_a_server_that_cannot_give_a_stream_address_is_reported(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+
+    def stream_url(channel, profile=None):
+        raise ui.TvhError('Server not reachable')
+
+    backend.stream_url = stream_url
+    try:
+        window.play_channel_by_data(channel)
+        _wait_until(app, lambda: not window._awaiting_playback, 'the failure')
+        assert played == []
+        assert window._playback_channel is None
+        assert window.status_label.text() == 'Playback error: Server not reachable'
+        assert not window.playback_spinner.isVisible()
     finally:
         _close(app, window)
 

@@ -97,6 +97,8 @@ class HtspBackend(TvhBackend):
         self._metadata = False
         self._metadata_requested = False
         self._metadata_lock = threading.RLock()
+        # Requests come from the window and from background jobs: one login at a time.
+        self._connect_lock = threading.RLock()
         self._channel_changes = {}
         self._tags_changed = False
         self._channels_reset = False
@@ -284,6 +286,10 @@ class HtspBackend(TvhBackend):
         enableAsyncMetadata, and for tens of thousands of channels reading it
         took seconds of Python work that slowed the window.
         """
+        with self._connect_lock:
+            self._connect_locked()
+
+    def _connect_locked(self):
         if self._ready and self._conn._sock is not None:
             return
         self._conn.connect()
