@@ -5,3 +5,6 @@ addFilter("zero-length /usr/share/tvhplayer/tvheadend/")
 addFilter("incorrect-fsf-address /usr/share/tvhplayer/")
 # python-mpv loads libmpv with ctypes, so rpm cannot find that dependency itself.
 addFilter("explicit-lib-dependency mpv-libs")
+# The C decoder for HTSP messages is imported from beside the Python code it
+# speeds up, as in the deb, AppImage and Flatpak; the package is per architecture.
+addFilter("arch-dependent-file-in-usr-share /usr/share/tvhplayer/core/_htsmsg")
