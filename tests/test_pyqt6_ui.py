@@ -262,6 +262,8 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
     # Not the picon pack on this computer: each window read its tens of thousands of logos.
     monkeypatch.setattr(ui, 'default_picon_dir', lambda: tmp_path / 'picons')
     monkeypatch.setattr(ui.TVHeadendClient, '_new_player', lambda self: fake_player)
+    # Not GitHub: once a newer release is out, its Update Available box waits for a click.
+    monkeypatch.setattr(ui.TVHeadendClient, '_start_update_check', lambda self, quiet: None)
     if prepare is None:
         monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
     else:
