@@ -5141,7 +5141,8 @@ def test_task_cards_fit_the_narrow_tasks_pane(monkeypatch, tmp_path):
         def list_dvr_entries(self):
             return [DvrEntry(
                 uuid='long', title='A very long programme title that cannot fit in the pane at all',
-                channel_name='A channel with a long name', start=now - 600, duration=1800,
+                # 20 min 10 s left: whole minutes round down, and the pane reads the clock later.
+                channel_name='A channel with a long name', start=now - 590, duration=1800,
                 status='Running', sched_status='recording', raw={'dataSize': 5 * 1024 * 1024},
             )]
 
