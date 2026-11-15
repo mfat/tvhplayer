@@ -76,8 +76,9 @@ with tempfile.TemporaryDirectory() as config_dir:
         http_port = outcome[0][1]
         if not serverinfo_ok(http_port, username=supervisor.username, password=supervisor.password):
             sys.exit('Built-in server did not accept its generated login')
-        if serverinfo_ok(http_port):
-            sys.exit('Built-in server answered without a login')
+        # It runs with --noacl on 127.0.0.1 only, so it answers without a login too.
+        if not serverinfo_ok(http_port):
+            sys.exit('Built-in server asked for a login; it should run without access control')
     finally:
         supervisor.stop()
 
