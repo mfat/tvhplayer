@@ -1284,7 +1284,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         shortcuts = ui.ShortcutHelpDialog()
         help_body = shortcuts.help_text.toPlainText()
         assert "Enter" in help_body
-        assert "Ctrl+F" in help_body
+        assert keys_text("Ctrl+F") in help_body  # ⌘F on macOS
         assert shortcuts.help_text.accessibleName() == "Keyboard shortcuts"
         shortcuts.close()
 

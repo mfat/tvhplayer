@@ -1,9 +1,9 @@
-import functools
 import gzip
 import http.server
 import lzma
 import threading
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import pytest
 
@@ -103,8 +103,26 @@ def test_names():
 def web(tmp_path):
     folder = tmp_path / 'web'
     folder.mkdir()
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(folder))
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+
+    class Files(http.server.BaseHTTPRequestHandler):
+        # Each file is read whole and closed before the answer: the stock
+        # handler could still hold it open when a test changed it, which
+        # Windows does not allow.
+        def do_GET(self):
+            try:
+                data = (folder / self.path.lstrip('/')).read_bytes()
+            except OSError:
+                self.send_error(404)
+                return
+            self.send_response(200)
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *_args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Files)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield folder, f'http://127.0.0.1:{server.server_address[1]}'
     server.shutdown()
@@ -116,7 +134,7 @@ def test_cache_keeps_the_last_good_copy(web, tmp_path):
     url = f'{base}/guide.xml.gz'
     (folder / 'guide.xml.gz').write_bytes(gzip.compress(_xmltv(_day(hours=48))))
     assert cache.refresh(url).programmes == 48
-    good = open(cache.file(url), 'rb').read()
+    good = Path(cache.file(url)).read_bytes()
 
     (folder / 'guide.xml.gz').write_bytes(gzip.compress(_xmltv(_day(hours=10))))
     with pytest.raises(GuideError) as info:
