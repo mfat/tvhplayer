@@ -1231,20 +1231,11 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
             window.tasks_pane.status_combo.itemText(index)
             for index in range(window.tasks_pane.status_combo.count())
         ] == ["Active", "All", "Recording", "Scheduled", "Completed"]
-        assert window.tasks_pane.task_table.accessibleName() == "Tasks"
+        assert window.tasks_pane.task_list.accessibleName() == "Tasks"
         assert not window.tasks_pane.isVisible()
-        assert window.tasks_pane.task_table.isVisibleTo(window.tasks_pane)
-        assert window.tasks_pane.task_table.rowCount() == 0
-        assert window.tasks_pane.task_table.columnCount() == 7
-        assert window.tasks_pane.task_table.horizontalHeaderItem(0).text() == ""
-        assert window.tasks_pane.task_table.horizontalHeaderItem(0).data(
-            Qt.ItemDataRole.AccessibleTextRole
-        ) == "Status icon"
-        assert window.tasks_pane.task_table.horizontalHeaderItem(1).text() == "Kind"
-        assert window.tasks_pane.task_table.horizontalHeaderItem(4).text() == "Status"
-        assert window.tasks_pane.task_table.horizontalHeaderItem(5).text() == "Size"
-        assert window.tasks_pane.task_table.horizontalHeaderItem(6).text() == "Detail"
-        assert window.tasks_pane.task_table.accessibleDescription() == "No tasks"
+        assert window.tasks_pane.task_list.isVisibleTo(window.tasks_pane)
+        assert window.tasks_pane.task_list.count() == 0
+        assert window.tasks_pane.task_list.accessibleDescription() == "No tasks"
         assert window.tasks_pane.action_btn.accessibleName() == "Stop"
         assert window.tasks_pane.action_btn.isEnabled() is False
         assert window.tasks_pane.reveal_btn.accessibleName() == "Reveal in File Manager"
@@ -1261,7 +1252,7 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
             focus_chain.append(focus_widget)
         search_at = focus_chain.index(window.tasks_pane.search_box)
         status_at = focus_chain.index(window.tasks_pane.status_combo)
-        list_at = focus_chain.index(window.tasks_pane.task_table)
+        list_at = focus_chain.index(window.tasks_pane.task_list)
         action_at = focus_chain.index(window.tasks_pane.action_btn)
         reveal_at = focus_chain.index(window.tasks_pane.reveal_btn)
         close_at = focus_chain.index(window.tasks_pane.close_btn)
@@ -1460,43 +1451,19 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
 
 
 def _task_texts(panel):
-    rows = []
-    for row in range(panel.task_table.rowCount()):
-        rows.append(" ".join(
-            panel.task_table.item(row, column).text()
-            for column in range(panel.task_table.columnCount())
-        ))
-    return rows
+    return [panel.task_list.item(row).text() for row in range(panel.task_list.count())]
 
 
-def _status_icon_center_offset(table, row):
-    """How far the painted status glyph sits from the middle of its cell."""
-    rect = table.visualItemRect(table.item(row, 0))
-    image = table.viewport().grab(rect).toImage()
-    background = image.pixelColor(1, 1)
-    xs = []
-    ys = []
-    for y in range(1, image.height() - 1):
-        for x in range(1, image.width() - 1):
-            color = image.pixelColor(x, y)
-            if (
-                abs(color.red() - background.red())
-                + abs(color.green() - background.green())
-                + abs(color.blue() - background.blue())
-            ) > 80:
-                xs.append(x)
-                ys.append(y)
-    assert xs, "status icon was not painted"
-    return (
-        sum(xs) / len(xs) - image.width() / 2,
-        sum(ys) / len(ys) - image.height() / 2,
-    )
+def _task_at(panel, row):
+    from PyQt6.QtCore import Qt
+
+    return panel.task_list.item(row).data(Qt.ItemDataRole.UserRole)
 
 
 def _select_task(panel, needle):
     for row, text in enumerate(_task_texts(panel)):
         if needle in text:
-            panel.task_table.selectRow(row)
+            panel.task_list.setCurrentRow(row)
             return
     raise AssertionError(needle)
 
@@ -1546,7 +1513,7 @@ def test_tasks_panel_reads_the_server_without_blocking(monkeypatch, tmp_path):
         panel.refresh()
         assert time.monotonic() - started < 1
         assert panel._fetching
-        assert panel.task_table.rowCount() == 0
+        assert panel.task_list.count() == 0
 
         # The server changes while the old one is still answering.
         servers = {'name': 'new', 'url': 'http://new'}
@@ -2018,18 +1985,16 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert panel.status_combo.currentText() == 'Active'
         assert len(texts) == 3
         assert 'Local' in texts[0] and 'recording_irinn.ts' in texts[0] and 'stalled' in texts[0]
-        assert panel.task_table.item(0, 0).text() == ''
-        assert panel.task_table.item(0, 0).icon().isNull() is False
-        assert panel.task_table.item(0, 0).toolTip() == 'Recording'
-        assert panel.task_table.item(1, 0).toolTip() == 'Recording'
-        assert panel.task_table.item(0, 0).icon().cacheKey() == panel.task_table.item(1, 0).icon().cacheKey()
-        assert panel.task_table.item(2, 0).toolTip() == 'Scheduled'
-        assert panel.task_table.item(0, 0).icon().cacheKey() != panel.task_table.item(2, 0).icon().cacheKey()
-        app.processEvents()
-        icon_dx, icon_dy = _status_icon_center_offset(panel.task_table, 2)
-        assert abs(icon_dx) <= 2
-        assert abs(icon_dy) <= 2
-        assert panel.task_table.item(0, 5).text().endswith('B')
+        items = [panel.task_list.item(row) for row in range(3)]
+        assert items[0].icon().isNull() is False
+        assert items[0].icon().cacheKey() == items[1].icon().cacheKey()
+        assert items[0].icon().cacheKey() != items[2].icon().cacheKey()
+        # The card's second line is short; the hover text has the full path.
+        assert _task_at(panel, 0)['line'].startswith('Recording, ')
+        assert _task_at(panel, 0)['line'].endswith(', stalled · Local · IRINN')
+        assert '/tmp/recording_irinn.ts' in items[0].toolTip()
+        assert '/tmp/' not in _task_at(panel, 0)['line']
+        assert _task_at(panel, 0)['size'].endswith('B')
         assert 'News' in texts[1] and 'Recording' in texts[1]
         from tvhplayer.tvhplayer import _entry_filesize
         assert _entry_filesize(DvrEntry(
@@ -2040,12 +2005,15 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
             uuid='both', title='Both', channel_name='IRINN', start=1, duration=1,
             status='Running', raw={'dataSize': 0, 'filesize': 4096},
         )) == 4096
-        assert panel.task_table.item(1, 5).text() == '12.0 MB'
-        assert panel.task_table.item(1, 5).toolTip() == '12.0 MB'
-        assert panel.task_table.item(1, 3).toolTip() == panel.task_table.item(1, 3).text()
-        assert panel.task_table.item(1, 6).toolTip() == panel.task_table.item(1, 6).text()
-        assert 'Started' in panel.task_table.item(1, 6).toolTip()
-        assert panel.task_table.item(2, 5).text() == ''
+        assert _task_at(panel, 1)['size'] == '12.0 MB'
+        assert '12.0 MB' in items[1].toolTip()
+        assert _task_at(panel, 1)['title'] in items[1].toolTip()
+        assert 'Started' in items[1].toolTip()
+        assert ' left' in _task_at(panel, 1)['line'] and 'Started' not in _task_at(panel, 1)['line']
+        assert 0 <= _task_at(panel, 1)['progress'] <= 1
+        assert _task_at(panel, 2)['size'] == ''
+        assert _task_at(panel, 2)['line'].startswith('Scheduled ')
+        assert _task_at(panel, 2)['progress'] is None
         assert 'Later' in texts[2] and 'Scheduled' in texts[2]
         assert all('Old' not in text and 'Archive' not in text for text in texts)
         assert panel.action_btn.isEnabled() is False
@@ -2062,14 +2030,14 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         shown = _task_texts(panel)
         assert len(shown) == 1 and 'News' in shown[0]
         panel.status_combo.setCurrentText('Scheduled')
-        assert panel.task_table.rowCount() == 0
-        assert panel.task_table.isVisible()
-        assert panel.task_table.accessibleDescription() == 'No matching tasks'
+        assert panel.task_list.count() == 0
+        assert panel.task_list.isVisible()
+        assert panel.task_list.accessibleDescription() == 'No matching tasks'
         panel.search_box.clear()
         assert len(_task_texts(panel)) == 1 and 'Later' in _task_texts(panel)[0]
         panel.status_combo.setCurrentText('All')
         panel.search_box.setText('Old')
-        assert panel.task_table.rowCount() == 1
+        assert panel.task_list.count() == 1
         assert 'Old' in _task_texts(panel)[0]
         _select_task(panel, 'Old')
         assert panel.reveal_btn.isEnabled() is False
@@ -2081,16 +2049,16 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         assert 'Archive' in shown[1]
         assert 'Completed' in shown[0] and 'Finished' in shown[0]
         from tvhplayer.tvhplayer import _task_status_icon
-        assert panel.task_table.item(0, 0).toolTip() == 'Completed'
-        assert panel.task_table.item(0, 0).icon().cacheKey() == _task_status_icon('Completed').cacheKey()
-        assert panel.task_table.item(0, 5).text() == '4.0 KB'
+        assert _task_at(panel, 0)['line'].startswith('Completed ')
+        assert panel.task_list.item(0).icon().cacheKey() == _task_status_icon('Completed').cacheKey()
+        assert _task_at(panel, 0)['size'] == '4.0 KB'
         _select_task(panel, 'Old')
         assert panel.action_btn.isEnabled() is False
         assert panel.reveal_btn.isEnabled() is False
         _select_task(panel, 'Archive')
         assert panel.reveal_btn.isEnabled() is False
         panel.status_combo.setCurrentText('All')
-        assert panel.task_table.rowCount() == 5
+        assert panel.task_list.count() == 5
 
         opened = []
         panel.open_backend = lambda server: opened.append(server) or backend
@@ -2098,7 +2066,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         panel.refresh()
         _wait_for_tasks(app, panel)
         assert panel.error_label.text() == "Couldn't refresh server recordings"
-        assert panel.task_table.rowCount() == 5
+        assert panel.task_list.count() == 5
         assert any('Old' in text for text in _task_texts(panel))
         backend.offline = False
         panel.refresh()
@@ -2106,7 +2074,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         # A failed read drops the connection, and the next one connects again.
         assert len(opened) == 1
         assert panel.error_label.text() == ''
-        assert panel.task_table.rowCount() == 5
+        assert panel.task_list.count() == 5
 
         _select_task(panel, 'News')
         assert panel.action_btn.accessibleName() == 'Stop'
@@ -2166,7 +2134,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
             return None
 
         monkeypatch.setattr(ui.QMenu, 'exec', capture_menu)
-        panel._show_task_menu(panel.task_table.visualItemRect(panel.task_table.item(0, 0)).center())
+        panel._show_task_menu(panel.task_list.visualItemRect(panel.task_list.item(0)).center())
         # A recording still going cannot be converted yet.
         assert labels == [
             ('Stop Recording', True), ('Reveal in File Manager', True), ('Convert for Editing', False),
@@ -2174,8 +2142,8 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         ]
         labels.clear()
         _select_task(panel, 'Scheduled')
-        row = panel.task_table.currentRow()
-        panel._show_task_menu(panel.task_table.visualItemRect(panel.task_table.item(row, 0)).center())
+        row = panel.task_list.currentRow()
+        panel._show_task_menu(panel.task_list.visualItemRect(panel.task_list.item(row)).center())
         assert labels[0] == ('Cancel Scheduled Recording', True)
         recorder.file_path = str(recording)
         panel.refresh()
@@ -2204,7 +2172,7 @@ def test_tasks_panel_lists_filters_and_controls_jobs(monkeypatch, tmp_path):
         # indicator follows the real count and turns off (#52).
         assert window.is_recording is False
         assert any('Old' in text for text in _task_texts(panel))
-        assert panel.task_table.isVisible()
+        assert panel.task_list.isVisible()
         _select_task(panel, 'Old')
         assert panel.reveal_btn.isEnabled() is False
         _select_task(panel, 'Local')
@@ -2672,13 +2640,15 @@ def test_conversions_show_in_tasks_and_follow_a_recording(monkeypatch, tmp_path)
         panel = window.tasks_pane
         panel.status_combo.setCurrentText('Active')
         panel.refresh(server=False)
-        rows = {panel.task_table.item(r, 4).text(): r for r in range(panel.task_table.rowCount())}
+        rows = {_task_at(panel, r)['status']: r for r in range(panel.task_list.count())}
         assert 'Converting' in rows and 'Waiting' in rows
         job.progress = 0.42
         panel.refresh(server=False)
-        row = next(r for r in range(panel.task_table.rowCount()) if panel.task_table.item(r, 4).text() == 'Converting')
-        assert panel.task_table.item(row, 6).text().endswith('42%')
-        panel.task_table.selectRow(row)
+        row = next(r for r in range(panel.task_list.count()) if _task_at(panel, r)['status'] == 'Converting')
+        assert _task_at(panel, row)['detail'].endswith('42%')
+        assert _task_at(panel, row)['line'] == 'Converting, 42% · For editing'
+        assert _task_at(panel, row)['progress'] == 0.42
+        panel.task_list.setCurrentRow(row)
         assert panel.action_btn.text() == 'Cancel' and panel.action_btn.isEnabled()
 
         # The first is done: the next one starts and the finish is told.
@@ -2689,11 +2659,11 @@ def test_conversions_show_in_tasks_and_follow_a_recording(monkeypatch, tmp_path)
 
         # Cancel from Tasks.
         panel.refresh(server=False)
-        row = next(r for r in range(panel.task_table.rowCount()) if panel.task_table.item(r, 4).text() == 'Converting')
-        panel.task_table.selectRow(row)
+        row = next(r for r in range(panel.task_list.count()) if _task_at(panel, r)['status'] == 'Converting')
+        panel.task_list.setCurrentRow(row)
         menus = []
         monkeypatch.setattr(ui.QMenu, 'exec', lambda menu, *_a: menus.append(menu.actions()))
-        panel._show_task_menu(panel.task_table.visualItemRect(panel.task_table.item(row, 0)).center())
+        panel._show_task_menu(panel.task_list.visualItemRect(panel.task_list.item(row)).center())
         assert menus[0][0].text() == 'Cancel Conversion' and menus[0][0].isEnabled()
         menus[0][0].trigger()
         assert manual._cancelled
@@ -4976,6 +4946,70 @@ def test_builtin_playback_does_not_wait_for_htsp_metadata(monkeypatch, tmp_path)
         monkeypatch.setattr(player, 'play', urls.append)
         window.play_channel_by_data(ui.Channel(uuid='', name='First', htsp_id=7))
         assert urls and '/stream/channelid/7' in urls[0]
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_task_cards_fit_the_narrow_tasks_pane(monkeypatch, tmp_path):
+    import time
+
+    from tvhplayer.core.models import DvrEntry
+    from tvhplayer.tvhplayer import _short_duration, _short_when
+
+    assert _short_duration(40) == '40 s'
+    assert _short_duration(18 * 60 + 5) == '18 min'
+    assert _short_duration(3600 + 5 * 60) == '1 h 05 min'
+    noon = time.mktime((2026, 11, 15, 12, 0, 0, 0, 0, -1))
+    assert _short_when(noon + 8 * 3600, noon) == 'today 20:00'
+    assert _short_when(noon + 26 * 3600, noon) == 'tomorrow 14:00'
+    assert _short_when(noon - 24 * 3600, noon) == 'yesterday 12:00'
+    assert _short_when(noon + 30 * 86400, noon) == '15 Dec 12:00'
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    window.tasks_pane.update_timer.stop()
+    now = int(time.time())
+
+    class Backend:
+        def list_dvr_entries(self):
+            return [DvrEntry(
+                uuid='long', title='A very long programme title that cannot fit in the pane at all',
+                channel_name='A channel with a long name', start=now - 600, duration=1800,
+                status='Running', sched_status='recording', raw={'dataSize': 5 * 1024 * 1024},
+            )]
+
+        def close(self):
+            pass
+
+    window.current_server = lambda: {'name': 'tv', 'url': 'http://tv'}
+    window._server_requests_ready = lambda: True
+    window.synced_recordings = lambda server: ('unknown', None)
+    panel = window.tasks_pane
+    panel.open_backend = lambda server: Backend()
+    try:
+        window.show()
+        panel.show()
+        window.splitter.setSizes([300, 640, 260])
+        app.processEvents()
+        panel.refresh()
+        _wait_for_tasks(app, panel)
+        assert panel.task_list.count() == 1
+        task = _task_at(panel, 0)
+        assert task['line'] == 'Recording, 20 min left · A channel with a long name'
+        assert abs(task['progress'] - 1 / 3) < 0.01
+        # Two lines and the bar fit in the row; nothing scrolls sideways.
+        rect = panel.task_list.visualItemRect(panel.task_list.item(0))
+        assert rect.height() >= 2 * panel.task_list.fontMetrics().height() + 10
+        assert rect.width() <= panel.task_list.viewport().width()
+        assert panel.task_list.horizontalScrollBar().maximum() == 0
+        assert 'A very long programme title that cannot fit in the pane at all' in panel.task_list.item(0).toolTip()
+        image = panel.task_list.viewport().grab(rect).toImage()
+        # The red part of the bar is painted on the bottom line of the card.
+        reds = sum(
+            1 for y in range(image.height() // 2, image.height()) for x in range(image.width())
+            if image.pixelColor(x, y).red() > 180 and image.pixelColor(x, y).green() < 80
+        )
+        assert reds > 10
     finally:
         window.close()
         app.processEvents()

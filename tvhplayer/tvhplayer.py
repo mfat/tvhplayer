@@ -658,6 +658,35 @@ def _clock(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
+def _short_duration(seconds):
+    """A duration in words short enough for a narrow panel: 1 h 05 min, 18 min, 40 s."""
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours} h {minutes:02d} min"
+    if minutes:
+        return f"{minutes} min"
+    return f"{secs} s"
+
+
+def _short_when(timestamp, now=None):
+    """A time near now in few words: today 20:00, tomorrow 06:30, Sun 20:00, 3 Dec 20:00."""
+    moment = datetime.fromtimestamp(timestamp)
+    today = datetime.fromtimestamp(now if now is not None else time.time()).date()
+    days = (moment.date() - today).days
+    clock = moment.strftime('%H:%M')
+    if days == 0:
+        return f"today {clock}"
+    if days == 1:
+        return f"tomorrow {clock}"
+    if days == -1:
+        return f"yesterday {clock}"
+    if 1 < days < 7:
+        return f"{moment.strftime('%a')} {clock}"
+    return f"{moment.day} {moment.strftime('%b')} {clock}"
+
+
 def _format_size(num_bytes):
     """Format a byte count. ``None`` means the file does not exist yet."""
     if num_bytes is None:
@@ -715,7 +744,7 @@ def _entry_filesize(entry):
 
 _TASK_TABLE_DESCRIPTION = (
     "Ongoing, scheduled, and completed recordings, and conversions for editing. "
-    "The first column is a status icon. Recording rows are listed first."
+    "Recordings in progress are listed first."
 )
 _TASK_STATUS_ICONS = {}
 
@@ -771,36 +800,153 @@ def _task_status_icon(status):
     return icon
 
 
-class _StatusIconDelegate(QStyledItemDelegate):
-    """Draw the status glyph in the middle of the first column.
+def _fraction(done, total):
+    """How far along, from 0 to 1; None without a length. Overruns stay full."""
+    if not total or total <= 0:
+        return None
+    return min(max(done / total, 0.0), 1.0)
 
-    An item view keeps the decoration on the leading edge. Aligning the
-    item text does not move that glyph.
+
+def _task_line(kind, channel, brief):
+    """The card's second line: its state in few words, then where it runs and the channel.
+
+    The state and time come first: a narrow pane cuts the end of the line.
+    """
+    where = {'Local': 'Local', 'Convert': 'For editing'}.get(kind, '')
+    return " · ".join(part for part in (brief, where, channel) if part)
+
+
+def _conversion_brief(status, progress):
+    if status == 'Converting' and progress is not None:
+        return f"Converting, {progress * 100:.0f}%"
+    if status == 'Waiting':
+        return "Waiting for the one before it"
+    if status == 'Cancelled':
+        return "Cancelled, original kept"
+    return status
+
+
+class _TaskCardDelegate(QStyledItemDelegate):
+    """Draw a task as a two-line card for the narrow Tasks pane.
+
+    Line one: status icon, title, and size on the right. Line two: kind,
+    channel, and a short status with the time. A thin bar under them shows
+    how far a running recording or conversion has got. Text too long for
+    the pane ends in an ellipsis; the hover text has all of it.
     """
 
+    PAD = 6
+    ICON = 16
+    GAP = 8
+    BAR = 3
+
+    def _fonts(self, option):
+        title_font = QFont(option.font)
+        title_font.setBold(True)
+        return title_font, QFont(option.font)
+
+    def sizeHint(self, option, index):
+        title_font, body_font = self._fonts(option)
+        height = (
+            self.PAD + QFontMetrics(title_font).height() + 2
+            + QFontMetrics(body_font).height() + 4 + self.BAR + self.PAD
+        )
+        return QSize(max(option.rect.width(), 120), height)
+
     def paint(self, painter, option, index):
+        task = index.data(Qt.ItemDataRole.UserRole)
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
-        icon = QIcon(opt.icon)
-        opt.icon = QIcon()
         opt.text = ""
+        opt.icon = QIcon()
         opt.features = opt.features & ~QStyleOptionViewItem.ViewItemFeature.HasDecoration
         widget = opt.widget
         style = widget.style() if widget is not None else QApplication.style()
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
-        if icon.isNull():
+        if not task:
             return
-        size = opt.decorationSize
-        if size.isEmpty():
-            size = QSize(16, 16)
-        cell = opt.rect
-        target = QRect(
-            cell.x() + (cell.width() - size.width()) // 2,
-            cell.y() + (cell.height() - size.height()) // 2,
-            size.width(),
-            size.height(),
+        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        palette = opt.palette
+        text_color = palette.color(
+            QPalette.ColorRole.HighlightedText if selected else QPalette.ColorRole.Text
         )
-        icon.paint(painter, target, Qt.AlignmentFlag.AlignCenter)
+        background = palette.color(
+            QPalette.ColorRole.Highlight if selected else QPalette.ColorRole.Base
+        )
+        # Secondary text: the text color moved a third of the way to the
+        # background, which keeps it readable in light, dark and high contrast.
+        muted = QColor(
+            round(text_color.red() * 0.7 + background.red() * 0.3),
+            round(text_color.green() * 0.7 + background.green() * 0.3),
+            round(text_color.blue() * 0.7 + background.blue() * 0.3),
+        )
+        title_font, body_font = self._fonts(opt)
+        title_metrics = QFontMetrics(title_font)
+        body_metrics = QFontMetrics(body_font)
+        rect = opt.rect.adjusted(self.PAD, self.PAD, -self.PAD, -self.PAD)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        line_one = QRect(rect.x(), rect.y(), rect.width(), title_metrics.height())
+        icon_rect = QRect(
+            rect.x(),
+            line_one.y() + (line_one.height() - self.ICON) // 2,
+            self.ICON,
+            self.ICON,
+        )
+        _task_status_icon(task['status']).paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
+        text_left = rect.x() + self.ICON + self.GAP
+        text_width = rect.right() - text_left + 1
+
+        size = task.get('size') or ''
+        size_width = body_metrics.horizontalAdvance(size) if size else 0
+        painter.setFont(body_font)
+        painter.setPen(muted)
+        if size:
+            painter.drawText(
+                QRect(rect.right() - size_width + 1, line_one.y(), size_width, line_one.height()),
+                int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
+                size,
+            )
+        title_width = max(0, text_width - (size_width + self.GAP if size else 0))
+        painter.setFont(title_font)
+        painter.setPen(text_color)
+        painter.drawText(
+            QRect(text_left, line_one.y(), title_width, line_one.height()),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            title_metrics.elidedText(task.get('title') or '', Qt.TextElideMode.ElideRight, title_width),
+        )
+
+        line_two = QRect(text_left, line_one.bottom() + 3, text_width, body_metrics.height())
+        painter.setFont(body_font)
+        painter.setPen(muted)
+        painter.drawText(
+            line_two,
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            body_metrics.elidedText(task.get('line', ''), Qt.TextElideMode.ElideRight, text_width),
+        )
+
+        progress = task.get('progress')
+        if progress is not None:
+            bar = QRectF(text_left, line_two.bottom() + 4, text_width, self.BAR)
+            track = QColor(muted)
+            track.setAlpha(70)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(track)
+            painter.drawRoundedRect(bar, 1.5, 1.5)
+            fill = QColor(text_color) if selected else QColor(
+                '#dc2626' if task['bucket'] == 'recording' else '#1d4ed8'
+            )
+            painter.setBrush(fill)
+            filled = QRectF(bar)
+            filled.setWidth(bar.width() * min(max(progress, 0.0), 1.0))
+            painter.drawRoundedRect(filled, 1.5, 1.5)
+
+        separator = QColor(muted)
+        separator.setAlpha(50)
+        painter.setPen(separator)
+        painter.drawLine(opt.rect.left() + self.PAD, opt.rect.bottom(), opt.rect.right() - self.PAD, opt.rect.bottom())
+        painter.restore()
 
 
 class TasksPanel(QFrame):
@@ -913,37 +1059,24 @@ class TasksPanel(QFrame):
         self.error_label.hide()
         layout.addWidget(self.error_label)
 
-        self.task_table = QTableWidget(0, 7)
-        self.task_table.setTabKeyNavigation(False)
-        self.task_table.setHorizontalHeaderLabels(
-            ["", "Kind", "Channel", "Title", "Status", "Size", "Detail"]
-        )
-        status_header = self.task_table.horizontalHeaderItem(0)
-        set_item_access(
-            status_header,
-            "Status icon",
-            "Recording, scheduled, or completed.",
-        )
-        status_header.setToolTip("Status")
-        self.task_table.setIconSize(QSize(16, 16))
-        self.task_table.setItemDelegateForColumn(0, _StatusIconDelegate(self.task_table))
-        fit_table_columns(self.task_table, (3, 6))
-        self.task_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.task_table.setColumnWidth(0, 36)
-        self.task_table.verticalHeader().setVisible(False)
-        self.task_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.task_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.task_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.task_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.task_list = QListWidget()
+        self.task_list.setItemDelegate(_TaskCardDelegate(self.task_list))
+        self.task_list.setUniformItemSizes(True)
+        self.task_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.task_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.task_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.task_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.task_list.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.task_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         describe(
-            self.task_table,
+            self.task_list,
             "Tasks",
             _TASK_TABLE_DESCRIPTION,
         )
-        self.task_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.task_table.customContextMenuRequested.connect(self._show_task_menu)
-        self.task_table.itemSelectionChanged.connect(self._update_action)
-        layout.addWidget(self.task_table, 1)
+        self.task_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.task_list.customContextMenuRequested.connect(self._show_task_menu)
+        self.task_list.itemSelectionChanged.connect(self._update_action)
+        layout.addWidget(self.task_list, 1)
 
         self.action_btn = QPushButton("Stop")
         self.action_btn.setEnabled(False)
@@ -995,10 +1128,10 @@ class TasksPanel(QFrame):
             self.task_added.emit()
 
     def selected_task(self):
-        row = self.task_table.currentRow()
+        row = self.task_list.currentRow()
         if row < 0:
             return None
-        item = self.task_table.item(row, 0)
+        item = self.task_list.item(row)
         if item is None or not item.isSelected():
             return None
         return item.data(Qt.ItemDataRole.UserRole)
@@ -1084,10 +1217,10 @@ class TasksPanel(QFrame):
         self._tell(host, "Couldn't show the recording in the file manager")
 
     def _show_task_menu(self, position):
-        index = self.task_table.indexAt(position)
+        index = self.task_list.indexAt(position)
         if not index.isValid():
             return
-        self.task_table.selectRow(index.row())
+        self.task_list.setCurrentRow(index.row())
         menu = QMenu(self)
         menu.setAccessibleName("Task actions")
         task = self.selected_task()
@@ -1113,7 +1246,7 @@ class TasksPanel(QFrame):
         go_action = menu.addAction("Go to Channel")
         go_action.setEnabled(bool(task and task.get('channel') and task['kind'] != 'Convert'))
         go_action.triggered.connect(self.show_selected_channel)
-        menu.exec(self.task_table.viewport().mapToGlobal(position))
+        menu.exec(self.task_list.viewport().mapToGlobal(position))
 
     def show_selected_channel(self):
         """Select the selected task's channel in the channel list."""
@@ -1241,17 +1374,23 @@ class TasksPanel(QFrame):
                     f"Started {start_text}, elapsed {_clock(now - entry.start)}, "
                     f"{_clock(entry.start + entry.duration - now)} left"
                 )
+                brief = f"Recording, {_short_duration(entry.start + entry.duration - now)} left"
+                progress = _fraction(now - entry.start, entry.duration)
             elif category == 'upcoming':
                 bucket = 'scheduled'
                 status = 'Scheduled'
                 start_text = datetime.fromtimestamp(entry.start).strftime('%Y-%m-%d %H:%M')
                 detail = f"Starts {start_text}, duration {_clock(entry.duration)}"
+                brief = f"Scheduled {_short_when(entry.start, now)}, {_short_duration(entry.duration)}"
+                progress = None
             elif category == 'finished':
                 bucket = 'completed'
                 status = 'Completed'
                 finished_at = (entry.start or 0) + (entry.duration or 0)
                 finished_text = datetime.fromtimestamp(finished_at).strftime('%Y-%m-%d %H:%M')
                 detail = f"Finished {finished_text}, duration {_clock(entry.duration)}"
+                brief = f"Completed {_short_when(finished_at, now)}"
+                progress = None
             else:
                 continue
             size_bytes = _entry_filesize(entry)
@@ -1273,6 +1412,8 @@ class TasksPanel(QFrame):
                 'status': status,
                 'size': size_text,
                 'detail': detail,
+                'line': _task_line('Server', entry.channel_name or '', brief),
+                'progress': progress,
                 'start': entry.start or 0,
                 'path': '',
             })
@@ -1299,16 +1440,25 @@ class TasksPanel(QFrame):
         title = Path(path).name or 'Local recording'
         started = getattr(recorder, 'started_at', None) or 0
         elapsed = time.time() - started if started else 0
+        progress = None
         if running:
             detail = f"{path}, {_clock(elapsed)}"
             if job.end:
-                detail += f", {_clock(max(job.end - time.time(), 0))} left"
+                left = max(job.end - time.time(), 0)
+                detail += f", {_clock(left)} left"
+                brief = f"Recording, {_short_duration(left)} left"
+                if started and job.end > started:
+                    progress = _fraction(elapsed, job.end - started)
+            else:
+                brief = f"Recording, {_short_duration(elapsed)} so far"
             if getattr(recorder, 'stall_count', 0) > STALL_LIMIT:
                 detail += ", stalled"
+                brief += ", stalled"
             bucket = 'recording'
             status = 'Recording'
         else:
             detail = path
+            brief = 'Completed'
             bucket = 'completed'
             status = 'Completed'
         return {
@@ -1322,6 +1472,8 @@ class TasksPanel(QFrame):
             'status': status,
             'size': _format_size(size),
             'detail': detail,
+            'line': _task_line('Local', channel_name, brief),
+            'progress': progress,
             'start': int(started),
             'path': path,
         }
@@ -1332,12 +1484,14 @@ class TasksPanel(QFrame):
         for conversion in getattr(host, 'conversions', None) or []:
             source = Path(conversion.source).name
             target = conversion.target
+            progress = None
             if conversion.status == convert.WAITING:
                 status, bucket, detail = 'Waiting', 'converting', f"From {source}, waiting for the conversion before it"
             elif conversion.status == convert.CONVERTING:
                 status, bucket = 'Converting', 'converting'
                 done = conversion.progress
                 detail = f"From {source}, {done * 100:.0f}%" if done is not None else f"From {source}"
+                progress = done
             elif conversion.status == convert.DONE:
                 status, bucket, detail = 'Converted', 'completed', target
             elif conversion.status == convert.FAILED:
@@ -1359,6 +1513,8 @@ class TasksPanel(QFrame):
                 'status': status,
                 'size': size,
                 'detail': detail,
+                'line': _task_line('Convert', '', _conversion_brief(status, progress)),
+                'progress': progress,
                 'start': int(getattr(conversion, 'queued_at', 0)),
                 'path': target if conversion.status == convert.DONE else '',
             })
@@ -1410,16 +1566,16 @@ class TasksPanel(QFrame):
             task for task in self._tasks
             if self._matches(task, query, status_filter)
         ]
-        self.task_table.blockSignals(True)
-        self.task_table.setRowCount(0)
+        self.task_list.blockSignals(True)
+        self.task_list.clear()
         for task in visible:
             self._add_row(task)
-        self.task_table.blockSignals(False)
+        self.task_list.blockSignals(False)
         if visible:
             self._set_empty("")
             self._restore_selection(selected)
         else:
-            self.task_table.clearSelection()
+            self.task_list.clearSelection()
             if self._tasks:
                 self._set_empty("No matching tasks")
             else:
@@ -1427,46 +1583,37 @@ class TasksPanel(QFrame):
         self._update_action()
 
     def _add_row(self, task):
-        row = self.task_table.rowCount()
-        self.task_table.insertRow(row)
-        values = [
-            task['kind'],
-            task['channel'],
-            task['title'],
-            task['status'],
-            task.get('size') or '',
-            task['detail'],
-        ]
-        summary = (
-            f"{task['kind']}, {task['channel']}, {task['title']}, "
-            f"{task['status']}, {task.get('size') or 'no file yet'}. {task['detail']}"
-        )
-        icon_item = QTableWidgetItem()
-        icon_item.setIcon(_task_status_icon(task['status']))
-        icon_item.setData(Qt.ItemDataRole.UserRole, task)
-        set_item_access(icon_item, summary, task['detail'])
-        icon_item.setToolTip(task['status'])
-        self.task_table.setItem(row, 0, icon_item)
-        for offset, value in enumerate(values):
-            col = offset + 1
-            item = QTableWidgetItem(value)
-            # ElideRight hides the tail of Title and Detail. The cell tooltip
-            # has to be that full text; the row description would replace it.
-            if value:
-                item.setToolTip(value)
-            self.task_table.setItem(row, col, item)
+        summary = ", ".join(
+            part for part in (
+                task['kind'], task['channel'], task['title'], task['status'],
+                task.get('size') or 'no file yet',
+            ) if part
+        ) + f". {task['detail']}"
+        item = QListWidgetItem(summary)
+        item.setIcon(_task_status_icon(task['status']))
+        item.setData(Qt.ItemDataRole.UserRole, task)
+        set_item_access(item, summary, task['detail'])
+        # The card cuts long titles and paths short; hovering shows all of it.
+        tip = [task['title']]
+        if task['channel']:
+            tip.append(task['channel'])
+        tip.append(f"{task['status']}: {task['detail']}" if task['detail'] else task['status'])
+        if task.get('size'):
+            tip.append(task['size'])
+        item.setToolTip("\n".join(tip))
+        self.task_list.addItem(item)
 
     def _restore_selection(self, key):
         if key is None:
-            self.task_table.clearSelection()
+            self.task_list.clearSelection()
             return
-        for row in range(self.task_table.rowCount()):
-            item = self.task_table.item(row, 0)
+        for row in range(self.task_list.count()):
+            item = self.task_list.item(row)
             task = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             if task is not None and task.get('key') == key:
-                self.task_table.selectRow(row)
+                self.task_list.setCurrentRow(row)
                 return
-        self.task_table.clearSelection()
+        self.task_list.clearSelection()
 
     def _update_action(self):
         task = self.selected_task()
@@ -1548,7 +1695,7 @@ class TasksPanel(QFrame):
         self.error_label.setAccessibleName("")
 
     def _set_empty(self, message):
-        """Keep the column table visible. Speak the empty state without a filler label."""
+        """Keep the list visible. Speak the empty state without a filler label."""
         if message:
             description = message
         else:
@@ -1556,7 +1703,7 @@ class TasksPanel(QFrame):
         if description == self._table_description:
             return
         self._table_description = description
-        self.task_table.setAccessibleDescription(description)
+        self.task_list.setAccessibleDescription(description)
 
 
 def format_minutes(minutes):
@@ -4725,7 +4872,7 @@ class TVHeadendClient(QMainWindow):
             self.fullscreen_btn,
             self.tasks_pane.search_box,
             self.tasks_pane.status_combo,
-            self.tasks_pane.task_table,
+            self.tasks_pane.task_list,
             self.tasks_pane.action_btn,
             self.tasks_pane.reveal_btn,
             self.tasks_pane.close_btn,
@@ -7692,7 +7839,7 @@ class TVHeadendClient(QMainWindow):
         """The Recording pill opens Tasks with the list focused."""
         self._open_tasks_pane()
         if self.tasks_pane.isVisible():
-            self.tasks_pane.task_table.setFocus(Qt.FocusReason.OtherFocusReason)
+            self.tasks_pane.task_list.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def show_dvr_status(self):
         """Show DVR status dialog"""
