@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.6.5
+Version:        4.6.6
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -119,6 +119,25 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Sun Nov 15 2026 mFat <newmfat@gmail.com> - 4.6.6-1
+- Performance improvements, and better handling of large playlists.
+- The Tasks panel shows each task as a two-line card with the time left and a progress bar.
+- The window no longer freezes while the server answers when you choose a channel, record, stop a recording, open a guide or load logos.
+- Big channel lists and playlists load, import and update much faster, and the built-in server starts faster.
+- The channel list no longer goes empty when you press Play after starting a recording on another server.
+- Choose hardware decoding in the playback settings.
+- Channels that fail the server's stream test are marked Not working and can be tested again; the marks can be turned off.
+- A channel scan shows each frequency, signal strength and quality bars, and says what went wrong.
+- TVHplayer says when a firewall hides an HDHomeRun from the built-in server.
+- A playlist's address, username, password, headers and User-agent can be edited; VLC and Chrome User-agents are offered.
+- Playlists and Xtream accounts load from providers that block Python's default User-Agent.
+- Dialogs get TVHplayer's own title bar too; on GNOME on Wayland it is on unless switched off.
+- The built-in server runs without access control, and stops when TVHplayer closes, crashes or is force quit.
+- Long programme descriptions in the TV Guide can be scrolled; Record Series from the guide works again.
+- The channel list no longer shows old programmes as next.
+- TVHplayer no longer crashes as it closes on GNOME Wayland.
+- On Windows: playlists given as file:// addresses open, compressed guides refresh, and NVIDIA hardware decoding is fixed.
+
 * Sat Nov 07 2026 mFat <newmfat@gmail.com> - 4.6.5-1
 - Make the Organic theme the default for new installs.
 - Fix gaps at the rounded corners of menus and other popups in the Organic theme.
