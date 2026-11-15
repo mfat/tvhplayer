@@ -148,8 +148,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $currentTag = '${{ steps.version.outputs.label }}'
-          $previous = gh release list --repo $env:GITHUB_REPOSITORY --limit 20 --json tagName,isPrerelease,isDraft | ConvertFrom-Json | Where-Object { -not $_.isPrerelease -and -not $_.isDraft -and $_.tagName -ne $currentTag } | Select-Object -First 1
+          $releases = gh release list --repo $env:GITHUB_REPOSITORY --limit 20 --json tagName,isPrerelease,isDraft | ConvertFrom-Json | Where-Object { -not $_.isPrerelease -and -not $_.isDraft -and $_.tagName -ne $currentTag }
           if ($LASTEXITCODE -ne 0) { throw 'Could not list previous releases for upgrade acceptance' }
+          # The newest release that has a Windows installer: a release whose
+          # Windows build failed has none, and the upgrade starts from a real one.
+          $previous = $null
+          foreach ($release in $releases) {
+            $assets = gh release view $release.tagName --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw "Could not read release $($release.tagName)" }
+            if ($assets.assets | Where-Object { $_.name -like '*-setup.exe' }) { $previous = $release; break }
+          }
           $baseline = Join-Path $env:RUNNER_TEMP 'tvhplayer-upgrade-baseline'
           New-Item -ItemType Directory -Path $baseline -Force | Out-Null
           $testArgs = @('windows/test-packages.py', '--portable', (Get-ChildItem windows/dist/*-windows-x86_64.zip | Select-Object -First 1).FullName, '--installer', (Get-ChildItem windows/dist/*-setup.exe | Select-Object -First 1).FullName)
