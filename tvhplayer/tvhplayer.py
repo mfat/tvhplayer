@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox, QMessageBox, QApplication,
     QPushButton, QLabel, QSlider, QStatusBar, QSpinBox, QFileDialog,
     QMenu, QMenuBar, QListWidgetItem, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget, QTextEdit, QPlainTextEdit, QSizePolicy, QToolButton,
-    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup,
+    QAbstractItemView, QStyledItemDelegate, QStyle, QStyleOptionViewItem, QCheckBox, QStackedWidget, QProgressBar, QButtonGroup, QRadioButton,
     QInputDialog, QSpacerItem,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QSize, QStandardPaths, QTimer, QEvent, QPoint, QPointF, QRect, QRectF, QUrl
@@ -1744,17 +1744,24 @@ class RecordingDurationDialog(QDialog):
 
     With the programme on now known, "This programme" records until it ends.
     ``save_dir`` makes it the local version, which names the folder it saves to.
+    ``builtin`` is the one Record window of the built-in server, which saves in
+    that folder too: the server records live, the player from the timeshift.
     """
 
     PRESETS = [('30', "30 min", 30), ('60', "1 h", 60), ('120', "2 h", 120), ('240', "4 h", 240)]
     CUSTOM_STEP = 15
 
-    def __init__(self, parent=None, channel=None, event=None, save_dir=None):
+    def __init__(self, parent=None, channel=None, event=None, save_dir=None, builtin=False):
         super().__init__(parent)
         self._buffer_start = None
         self.buffer_check = None
+        self.live_choice = None
         self._save_dir = save_dir
-        self._title = "Record to This Computer" if save_dir else "Record on Server"
+        self._builtin = builtin
+        if builtin:
+            self._title = "Record"
+        else:
+            self._title = "Record to This Computer" if save_dir else "Record on Server"
         self.setWindowTitle(self._title)
         self.setModal(True)
         self._channel = channel
@@ -1774,8 +1781,11 @@ class RecordingDurationDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 12)
         layout.setSpacing(14)
         self.setAccessibleName(self._title)
-        where = "on this computer" if self._save_dir else "on the server"
-        self.setAccessibleDescription(f"Choose how long to record the selected channel {where}.")
+        if self._builtin:
+            self.setAccessibleDescription("Choose how long to record the selected channel.")
+        else:
+            where = "on this computer" if self._save_dir else "on the server"
+            self.setAccessibleDescription(f"Choose how long to record the selected channel {where}.")
 
         if self._channel is not None:
             heading = QVBoxLayout()
@@ -1926,21 +1936,45 @@ class RecordingDurationDialog(QDialog):
         return 0
 
     def set_timeshift_start(self, behind):
-        """Offer the position captured when Record was opened, rather than live."""
+        """Offer the position captured when Record was opened, or live.
+
+        The two behave differently, so each choice says how: the timeshift
+        recording ends with the playback of this channel; the live one does not.
+        """
         self._buffer_start = datetime.now() - timedelta(seconds=behind)
         group = QWidget()
         layout = QVBoxLayout(group)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.buffer_check = QCheckBox('Record from the position I was watching')
-        self.buffer_check.setChecked(True)
-        layout.addWidget(self.buffer_check)
-        note = QLabel(
-            'Saves from this point as a .ts file. Keep this channel playing; '
-            'stopping or changing channels ends the recording.'
+        layout.setSpacing(2)
+        start_label = QLabel("Start")
+        layout.addWidget(start_label)
+        live_note = (
+            "The server records it on its own, even if you change channel or stop playback."
+            if self._builtin else
+            "Records on its own, even if you change channel or stop playback."
         )
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        describe(self.buffer_check, description=note.text())
+        choices = (
+            ('buffer', f"From {self._buffer_start.strftime('%H:%M')}, where I'm watching",
+             "Saved as a .ts file. Keep this channel playing; stopping or changing channel ends the recording."),
+            ('live', "From now (live)", live_note),
+        )
+        self.start_group = QButtonGroup(self)
+        for key, text, note_text in choices:
+            button = QRadioButton(text)
+            describe(button, text, note_text)
+            note = QLabel(note_text)
+            note.setWordWrap(True)
+            note.setContentsMargins(24, 0, 0, 4)
+            _text_color(note, 'palette(placeholder-text)')
+            self.start_group.addButton(button)
+            layout.addWidget(button)
+            layout.addWidget(note)
+            if key == 'buffer':
+                self.buffer_check = button
+            else:
+                self.live_choice = button
+        start_label.setBuddy(self.buffer_check)
+        self.buffer_check.setChecked(True)
         self.layout().insertWidget(1, group)
         self.buffer_check.toggled.connect(self._update_summary)
         self._update_summary()
@@ -5837,6 +5871,8 @@ class TVHeadendClient(QMainWindow):
         if previous is not None and hasattr(previous, 'cancel'):
             previous.cancel()
         self.channel_busy.hide()
+        # The built-in server has one Record button; others a menu of two kinds.
+        self._sync_record_controls()
         server = self.current_server()
         if not server:
             self._clear_channels()
@@ -6138,13 +6174,23 @@ class TVHeadendClient(QMainWindow):
 
         self.call_server(lambda backend: backend.get_now_next([channel]).get(key), answered)
 
-    def start_recording(self):
+    def start_recording(self, channel=None):
+        """Record on the server: the selected channel, or ``channel``.
+
+        The built-in server saves on this computer, so its Record window also
+        offers to start where the player is behind live, as recording to this
+        computer does.
+        """
         print("Debug: Starting recording")
         if self._asking_to_record:
             self.statusbar.showMessage("Still waiting for the server")
             return
         try:
-            channel = self.selected_channel()
+            # Actions pass their checked state.
+            if isinstance(channel, dict):
+                channel = Channel.from_raw(channel)
+            if not isinstance(channel, Channel):
+                channel = self.selected_channel()
             if not channel:
                 print("Debug: No channel selected for recording")
                 self.statusbar.showMessage("Please select a channel to record")
@@ -6152,20 +6198,36 @@ class TVHeadendClient(QMainWindow):
 
             if not self.server_recordings_ready():
                 return
+            point = None
+            if is_builtin_server(self.current_server()) and not self._local_jobs_for(channel):
+                point = self._timeshift_point(channel)
             self._asking_to_record = True
             self.statusbar.showMessage(f"Asking the server about {channel.name}…")
-            self._with_programme_on_now(channel, lambda event: self._record_on_server(channel, event))
+            self._with_programme_on_now(channel, lambda event: self._record_on_server(channel, event, point))
         except Exception as e:
             self._recording_failed(e)
 
-    def _record_on_server(self, channel, programme):
-        """Ask how long to record, then have the server record it."""
+    def _record_on_server(self, channel, programme, point=None):
+        """Ask how long to record, then have the server record it.
+
+        With ``point``, the built-in server's window can record from the
+        timeshift instead, as recording to this computer does.
+        """
         try:
-            duration_dialog = RecordingDurationDialog(self, channel, programme)
+            builtin = is_builtin_server(self.current_server())
+            folder = self.local_recording_dir() if builtin else None
+            duration_dialog = RecordingDurationDialog(self, channel, programme, save_dir=folder, builtin=builtin)
+            if point is not None:
+                duration_dialog.set_timeshift_start(point.behind)
             if duration_dialog.exec() != QDialog.DialogCode.Accepted:
                 print("Debug: Recording cancelled by user")
                 self._asking_to_record = False
                 self.statusbar.clearMessage()
+                return
+            if point is not None and duration_dialog.records_from_buffer():
+                self._asking_to_record = False
+                self._record_from_buffer(
+                    channel, folder, point, duration_dialog.get_duration(), duration_dialog.programme_event())
                 return
 
             event = duration_dialog.programme_event()
@@ -6313,6 +6375,7 @@ class TVHeadendClient(QMainWindow):
         bar = getattr(self, 'controls_bar', None)
         if bar is None:
             return
+        bar.set_single_record(is_builtin_server(self.current_server()))
         channel = self.active_channel()
         local = bool(self._local_jobs_for(channel))
         bar.set_recording(
@@ -7220,12 +7283,13 @@ class TVHeadendClient(QMainWindow):
         record_action.setEnabled(channel is not None)
         record_action.triggered.connect(self.start_recording)
 
-        local_action = menu.addAction(
-            tinted('download.svg'),
-            with_keys("Record Locally", "Ctrl+Shift+R"),
-        )
-        local_action.setEnabled(channel is not None)
-        local_action.triggered.connect(lambda: self.start_local_recording(channel))
+        if not is_builtin_server(self.current_server()):
+            local_action = menu.addAction(
+                tinted('download.svg'),
+                with_keys("Record Locally", "Ctrl+Shift+R"),
+            )
+            local_action.setEnabled(channel is not None)
+            local_action.triggered.connect(lambda: self.start_local_recording(channel))
 
         epg_action = menu.addAction(tinted('event_note.svg'), "Show EPG")
         epg_action.setEnabled(channel is not None)
@@ -7289,6 +7353,7 @@ class TVHeadendClient(QMainWindow):
             action("Stop &Local Recording", lambda: self.stop_local_recording(), "Ctrl+Shift+E"),
             None,
         ]
+        self._record_items = self.playback_actions[-5:-1]
 
     def _fill_playback_menu(self, menu):
         """Playback commands, then Stream Profile, Audio Track, Subtitles, and Deinterlace for the stream playing now."""
@@ -7297,10 +7362,20 @@ class TVHeadendClient(QMainWindow):
             for item in self.timeshift_actions:
                 item.setEnabled(state is not None)
             menu.clear()
+            # The built-in server's one Record window covers both kinds. The
+            # actions stay on the window, so Ctrl+Shift+R still opens it.
+            builtin = is_builtin_server(self.current_server())
+            record, stop, record_local, stop_local = self._record_items
+            record.setText("&Record" if builtin else "&Record on Server")
+            stop.setText("Stop R&ecording" if builtin else "Stop Server R&ecording")
+            stop_local.setText("Stop &Timeshift Recording" if builtin else "Stop &Local Recording")
+            hidden = {record_local} if builtin else set()
+            if builtin and not self.local_recording_running():
+                hidden.add(stop_local)
             for item in self.playback_actions:
                 if item is None:
                     menu.addSeparator()
-                else:
+                elif item not in hidden:
                     menu.addAction(item)
         casting = self.cast_manager.is_connected
         self._add_stream_profile_menu(menu, cast=casting)
@@ -7881,6 +7956,10 @@ class TVHeadendClient(QMainWindow):
                 self.statusbar.showMessage("Please select a channel to record")
                 return
 
+            if is_builtin_server(self.current_server()):
+                # The built-in server saves on this computer too: one Record window.
+                self.start_recording(channel)
+                return
             channel_name = channel.name
             if self._local_jobs_for(channel):
                 self.statusbar.showMessage(f"{channel_name} is already recording to this computer")
@@ -7892,12 +7971,7 @@ class TVHeadendClient(QMainWindow):
                 folder = self._ask_recording_dir(folder)
                 if not folder:
                     return
-            point = None
-            playing = getattr(self, '_playback_channel', None)
-            if playing is not None and channel_key(playing) == channel_key(channel):
-                state = self._timeshift_state()
-                if state is not None and (state.behind > 0 or state.paused):
-                    point = self.player.buffer_recording_point()
+            point = self._timeshift_point(channel)
             key = channel_key(channel)
             if key in self._starting_local:
                 self.statusbar.showMessage("Still waiting for the server")
@@ -7907,6 +7981,33 @@ class TVHeadendClient(QMainWindow):
                 channel, lambda event: self._record_locally(channel, folder, point, event))
         except Exception as e:
             self._local_recording_failed(channel, e)
+
+    def _timeshift_point(self, channel):
+        """Where the player is when it plays ``channel`` behind live or paused, else None."""
+        playing = getattr(self, '_playback_channel', None)
+        if playing is None or channel_key(playing) != channel_key(channel):
+            return None
+        state = self._timeshift_state()
+        if state is None or not (state.behind > 0 or state.paused):
+            return None
+        return self.player.buffer_recording_point()
+
+    def _running_local_paths(self):
+        return {job.recorder.file_path for job in self.local_jobs if job.is_running}
+
+    def _record_from_buffer(self, channel, folder, point, duration, event):
+        """Save the timeshift buffer from ``point`` on, then live, as a .ts file in ``folder``."""
+        file_path = free_path(
+            os.path.join(folder, local_recording_name(channel.name, datetime.now(), 'ts')),
+            self._running_local_paths(),
+        )
+        try:
+            recorder = self.player.record_buffer(file_path, point)
+        except (RuntimeError, ValueError) as e:
+            self._starting_local.discard(channel_key(channel))
+            QMessageBox.warning(self, "Record from Timeshift", str(e))
+            return
+        self._begin_local_job(LocalJob(recorder, channel), duration, event, file_path)
 
     def _record_locally(self, channel, folder, point, programme):
         """Ask how long to record, then start recording to this computer."""
@@ -7933,21 +8034,13 @@ class TVHeadendClient(QMainWindow):
                         f"The extra ffmpeg options in Settings cannot be read: {e}.",
                     )
                     return
-            file_path = free_path(
-                os.path.join(folder, local_recording_name(
-                    channel_name, datetime.now(), 'ts' if from_buffer else self.recording_format())),
-                {job.recorder.file_path for job in self.local_jobs if job.is_running},
-            )
-
             if from_buffer:
-                try:
-                    recorder = self.player.record_buffer(file_path, point)
-                except (RuntimeError, ValueError) as e:
-                    self._starting_local.discard(channel_key(channel))
-                    QMessageBox.warning(self, "Record from Timeshift", str(e))
-                    return
-                self._begin_local_job(LocalJob(recorder, channel), duration, event, file_path)
+                self._record_from_buffer(channel, folder, point, duration, event)
                 return
+            file_path = free_path(
+                os.path.join(folder, local_recording_name(channel_name, datetime.now(), self.recording_format())),
+                self._running_local_paths(),
+            )
 
             server = self.current_server() or {}
 
@@ -7990,8 +8083,12 @@ class TVHeadendClient(QMainWindow):
             until = f"{event.title}, until {datetime.fromtimestamp(event.stop).strftime('%H:%M')}"
         else:
             until = f"{duration // 60} minutes"
-        self.statusbar.showMessage(f"Local recording started ({until}): {file_path}")
-        self._show_on_picture("Recording to this computer")
+        if is_builtin_server(self.current_server()):
+            self.statusbar.showMessage(f"Recording started ({until}): {file_path}")
+            self._show_on_picture("Recording from where you were watching")
+        else:
+            self.statusbar.showMessage(f"Local recording started ({until}): {file_path}")
+            self._show_on_picture("Recording to this computer")
         self.start_recording_indicator()
         self._refresh_tasks(server=False)
 
@@ -9244,9 +9341,10 @@ class TVHeadendClient(QMainWindow):
             play_action.triggered.connect(lambda: self.play_channel_by_data(channel_data))
             record_action = menu.addAction(with_keys("Record", "Ctrl+R"))
             record_action.triggered.connect(lambda: self.start_recording())
-            local_record_action = menu.addAction(with_keys("Record Locally", "Ctrl+Shift+R"))
-            local_record_action.triggered.connect(
-                lambda: self.start_local_recording(channel_data))
+            if not is_builtin_server(self.current_server()):
+                local_record_action = menu.addAction(with_keys("Record Locally", "Ctrl+Shift+R"))
+                local_record_action.triggered.connect(
+                    lambda: self.start_local_recording(channel_data))
             
             # Add EPG action
             epg_action = menu.addAction("Show EPG")

@@ -277,6 +277,15 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
     return app, ui, window, fake_player
 
 
+def _use_remote_server(window):
+    """Record on a remote server: the menu of two kinds of recording.
+
+    A new config has the built-in server, which has one Record window.
+    """
+    window.current_server = lambda: {'name': 'Remote', 'url': 'http://192.0.2.1:9981'}
+    window._sync_record_controls()
+
+
 def test_window_starts_on_the_last_server_only(monkeypatch, tmp_path):
     # The built-in server comes first; the remote one was used last and
     # autostart is off. Starting loads the remote server and nothing else.
@@ -415,6 +424,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
     from PyQt6.QtGui import QMouseEvent
 
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    _use_remote_server(window)
     try:
         window.show()
         app.processEvents()
@@ -1189,7 +1199,8 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.play_btn.toolTip() == "Play / Stop (P)"
         assert window.play_btn.statusTip() == ""
         from tvhplayer.a11y import keys_text  # macOS shows Ctrl+R as ⌘R.
-        assert window.record_btn.toolTip() == keys_text("Record (Ctrl+R / Ctrl+Shift+R)")
+        # The built-in server has one Record window, so one key.
+        assert window.record_btn.toolTip() == keys_text("Record (Ctrl+R)")
         assert window.record_btn.statusTip() == ""
         assert window.record_btn.isVisible()
         assert not window.stop_record_btn.isVisible()
@@ -2247,6 +2258,7 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
     from tvhplayer.core.models import Channel
 
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    _use_remote_server(window)
     started, options = [], []
 
     class Recorder:
@@ -2318,6 +2330,7 @@ def test_several_channels_record_to_this_computer_at_once(monkeypatch, tmp_path)
     from tvhplayer.core.models import Channel
 
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    _use_remote_server(window)
     started = []
 
     class Recorder:
@@ -2530,6 +2543,7 @@ def test_flatpak_asks_for_the_recordings_folder_once(monkeypatch, tmp_path):
     from tvhplayer.core.models import Channel
 
     app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    _use_remote_server(window)
     videos = tmp_path / 'Videos'
     monkeypatch.setattr(ui.QStandardPaths, 'writableLocation', lambda _kind: str(videos))
     monkeypatch.setattr(ui, 'in_flatpak', lambda: True)
@@ -3567,6 +3581,7 @@ def test_player_bar_play_stop_and_record_controls(monkeypatch, tmp_path):
     from tvhplayer.core.models import Channel, DvrEntry
 
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    _use_remote_server(window)
 
     class FakeRecorder:
         is_running = False
@@ -4048,6 +4063,7 @@ def test_tv_guide_opens_from_the_view_menu_at_the_selected_channel(monkeypatch, 
 
 def test_playback_menu_lists_tracks_and_deinterlace(monkeypatch, tmp_path):
     app, ui, window, fake_player = _make_player(monkeypatch, tmp_path)
+    _use_remote_server(window)
     try:
         fake_player.audio = [(-1, b'Disable'), (1, b'Track 1 - [English]'), (2, b'Track 2 - [Deutsch]')]
         fake_player.audio_id = 1
@@ -4383,6 +4399,7 @@ def test_recording_from_timeshift_uses_the_captured_position(monkeypatch, tmp_pa
     from tvhplayer.core.player import BufferRecordingPoint, Timeshift
 
     app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    _use_remote_server(window)
     channel = Channel(uuid='one', name='One')
     point = BufferRecordingPoint(1, 10.0, 20.0)
     player.timeshift_state = Timeshift(True, 20.0, 30.0)
@@ -4428,7 +4445,7 @@ def test_recording_from_timeshift_uses_the_captured_position(monkeypatch, tmp_pa
         if choice != 'other_channel':
             assert 'plus buffered footage' in dialog.summary_label.text()
         if choice == 'live':
-            dialog.buffer_check.setChecked(False)
+            dialog.live_choice.setChecked(True)
             assert 'plus buffered footage' not in dialog.summary_label.text()
         # Opening the dialog captures the point, even if playback moves meanwhile.
         player.timeshift_state = Timeshift(False, 10.0, 30.0)
@@ -4453,6 +4470,92 @@ def test_recording_from_timeshift_uses_the_captured_position(monkeypatch, tmp_pa
             assert not job.is_running and job.timer is None
     finally:
         window._confirm_quit = lambda: True
+        window.close()
+        app.processEvents()
+
+
+@pytest.mark.parametrize('entry', ['button', 'local_shortcut'])
+@pytest.mark.parametrize('choice', ['buffer', 'live'])
+def test_builtin_server_records_through_one_window(monkeypatch, tmp_path, choice, entry):
+    # The built-in server saves its recordings in the same folder on this
+    # computer, so there is one Record window. When the player is behind live
+    # it offers to start where you were watching; otherwise the server records.
+    from concurrent.futures import Future
+    from tvhplayer.core.buffer_recorder import BufferRecorder
+    from tvhplayer.core.models import Channel
+    from tvhplayer.core.player import BufferRecordingPoint, Timeshift
+
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    channel = Channel(uuid='one', name='One')
+    point = BufferRecordingPoint(1, 10.0, 20.0)
+    player.timeshift_state = Timeshift(True, 20.0, 30.0)
+    player.buffer_recording_point = lambda: point
+    window._playback_channel = channel
+    window._playback_active = True
+    window.selected_channel = lambda: channel
+    window.active_channel = lambda: channel
+    window._with_programme_on_now = lambda _c, then: then(None)
+    window.current_server = lambda: {'name': 'Built-in', 'builtin': True, 'url': 'http://127.0.0.1:9981'}
+    window.builtin = types.SimpleNamespace(set_recordings_dir=lambda _folder: True)
+    window.set_local_recording_dir(str(tmp_path))
+    window._refresh_tasks = lambda **_k: None
+    buffered, created, titles = [], [], []
+    future = Future()
+
+    def record_buffer(path, start):
+        assert start is point
+        buffered.append(path)
+        Path(path).write_bytes(b'recorded packets')
+        return BufferRecorder(path, future, lambda: future.set_result(None))
+
+    player.record_buffer = record_buffer
+    window.new_local_recorder = lambda: pytest.fail('the built-in server records without ffmpeg')
+    window.get_backend = lambda: types.SimpleNamespace(
+        create_dvr_entry=lambda *args, **kwargs: created.append(args))
+
+    def confirm(dialog):
+        titles.append(dialog.windowTitle())
+        assert dialog.records_from_buffer()
+        assert str(tmp_path) in dialog.folder_label.text()
+        if choice == 'live':
+            dialog.live_choice.setChecked(True)
+            assert not dialog.records_from_buffer()
+        return ui.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(ui.RecordingDurationDialog, 'exec', confirm)
+    try:
+        window.show()
+        window._sync_record_controls()
+        bar = window.controls_bar
+        assert bar.record_more_btn.isHidden()
+        window._fill_playback_menu(window.playback_menu)
+        texts = [a.text() for a in window.playback_menu.actions()]
+        assert not any('This &Computer' in t for t in texts)
+        if entry == 'button':
+            window.record_btn.click()
+        else:
+            shortcut = next(a for a in window.playback_actions
+                            if a is not None and a.shortcut().toString() == 'Ctrl+Shift+R')
+            shortcut.trigger()
+        app.processEvents()
+        assert not bar.record_menu.isVisible()
+        assert titles == ['Record']
+        if choice == 'buffer':
+            _wait_until(app, lambda: bool(window.local_jobs), 'the timeshift recording')
+            assert Path(buffered[0]).suffix == '.ts' and not created
+            # It can still be stopped from the Playback menu.
+            window._fill_playback_menu(window.playback_menu)
+            texts = [a.text() for a in window.playback_menu.actions()]
+            assert 'Stop &Timeshift Recording' in texts
+            # Stopped here: left running, its status check would open a dialog later.
+            window.local_jobs[0].timer.timeout.emit()
+            assert not window.local_jobs[0].is_running
+        else:
+            _wait_until(app, lambda: bool(created), 'the server recording')
+            assert not buffered and not window.local_jobs
+    finally:
+        window._confirm_quit = lambda: True
+        window.builtin = None
         window.close()
         app.processEvents()
 
