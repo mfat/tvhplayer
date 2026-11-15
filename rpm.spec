@@ -1,8 +1,8 @@
 # The built-in server. These pins match packaging/tvheadend/pins.env;
 # tests/test_packaging_pins.py fails when they disagree.
 %global tvh_repo https://github.com/mfat/tvheadend
-%global tvh_commit 57610597563a3f49ac1d132c4735cb0bee6d4364
-%global tvh_version 4.3^2908.g576105975
+%global tvh_commit 4b587717299b542defc1b0114a96ad6633dcbc4d
+%global tvh_version 4.3^2916.g4b5877172
 %global scan_commit 31d6fb8f8b86e204518ada99bfb8cf6807c717e5
 %global dvbcsa_version 1.1.0
 %global hdhomerun_version 20250815
@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.6.9
+Version:        4.7.0
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -119,6 +119,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Mon Nov 16 2026 mFat <newmfat@gmail.com> - 4.7.0-1
+- Bug fixes
+
 * Sun Nov 15 2026 mFat <newmfat@gmail.com> - 4.6.9-1
 - Fix EPG grabber locking builtin server
 

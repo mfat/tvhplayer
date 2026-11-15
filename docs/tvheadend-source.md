@@ -4,13 +4,14 @@ The deb, rpm, and Flatpak packages build the built-in server from the `tvhplayer
 
 ## Pins
 
-Three files name the commit, and `tests/test_packaging_pins.py` fails when they disagree:
+Four files name the commit. `tests/test_packaging_pins.py` fails when the first three disagree, and `tests/test_backend_bundle.py` fails when the Windows check disagrees with `pins.env`:
 
 | File | Used by | Fields |
 |---|---|---|
-| `packaging/tvheadend/pins.env` | deb (`build-tvheadend.sh`) | `TVHEADEND_REPO`, `TVHEADEND_COMMIT`, `TVHEADEND_SHA256`, `TVHEADEND_VERSION` |
+| `packaging/tvheadend/pins.env` | deb, AppImage, Windows image (`build-tvheadend.sh`) | `TVHEADEND_REPO`, `TVHEADEND_COMMIT`, `TVHEADEND_SHA256`, `TVHEADEND_VERSION` |
 | `rpm.spec` | rpm | `tvh_repo`, `tvh_commit`, `tvh_version` |
 | `io.github.mfat.tvhplayer.yml` | Flatpak | the `tvheadend` module's `git` source: `url`, `commit` |
+| `tvhplayer/core/backend_bundle.py` | Windows bundle check | `TVHEADEND_COMMIT` |
 
 The deb and rpm builds download `<repo>/archive/<commit>.tar.gz`, and the deb build checks it against `TVHEADEND_SHA256`. The Flatpak clones the repository, so `git describe` needs the upstream `v4.3` tag on the fork. An archive has no `.git`, so `TVHEADEND_VERSION` is what `git describe --tags --long --match 'v*'` prints for the commit, with `~g` in place of `-g`. rpm writes it as `4.3^N.gHASH`.
 
@@ -27,8 +28,15 @@ The deb and rpm builds download `<repo>/archive/<commit>.tar.gz`, and the deb bu
 | `f02aee227` | startup: development-only monotonic stage and EPG/HTSP timing | not yet |
 | `cab97c72d` | idnode: faster sorted-set insertion with binary search and memmove | not yet |
 | `576105975` | settings: reuse directories during configuration loading | not yet |
+| `52fcbccc4` | bouquet: add a bouquet's saved services to its set in one pass | not yet |
+| `366386ea2` | settings: load the files of a large settings directory on several threads | not yet |
+| `3826db2f9` | notify: do not queue change notifications before clients can connect | not yet |
+| `27012c084` | xmltv: find the installed grabbers while the configuration loads | not yet |
+| `9a2195c05` | epgdb: read and unpack the EPG database while the configuration loads | not yet |
+| `fd5952d15` | bouquet: fill a bouquet's active services in one pass at startup | not yet |
+| `d25bc4d11` | epggrab: resolve TVHplayer guide destinations directly by UUID | not yet |
 
-Base: upstream `51ec612fa`.
+Base: upstream `51ec612fa`. Packages pin `4b5877172`, the `tvhplayer` branch tip, which includes these fixes.
 
 For startup investigation, enable the existing stderr/main trace with `-d --trace main`
 on a disposable, disk-backed copy of the configuration. Stage timing is emitted
@@ -41,11 +49,11 @@ and the larger loading changes that still need design.
 
 1. In a Tvheadend checkout with the fork as a remote, commit the fix on top of the `tvhplayer` branch. To move to a newer upstream, rebase the branch onto it. Drop the fixes upstream has merged.
 2. Push the branch and a tag for the new commit, `tvhplayer-YYYY-MM-DD`. Never delete a tag or force-push over a commit that a released package pins. GitHub can stop serving the archive of a commit that no branch or tag points to.
-3. Update the three files. Get the version from `git describe --tags --long --match 'v*' <commit>` (without `--match`, the `tvhplayer-` tags win) and the checksum from `curl -sL <repo>/archive/<commit>.tar.gz | sha256sum`.
+3. Update the four files. Get the version from `git describe --tags --long --match 'v*' <commit>` (without `--match`, the `tvhplayer-` tags win) and the checksum from `curl -sL <repo>/archive/<commit>.tar.gz | sha256sum`.
 4. Run `tests/test_packaging_pins.py`, then `packaging/tvheadend/build-tvheadend.sh fetch` and `build` to confirm the archive downloads, verifies, and compiles.
 5. Update the table above.
 
-When the branch has no fixes left on top of upstream, point all three files back to `https://github.com/tvheadend/tvheadend` at that upstream commit.
+When the branch has no fixes left on top of upstream, point all four files back to `https://github.com/tvheadend/tvheadend` at that upstream commit.
 
 The earlier local sorted-set and settings-directory optimizations are now published
 and pinned as well. The normal source checkout should track the fork’s `tvhplayer`

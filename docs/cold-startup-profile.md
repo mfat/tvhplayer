@@ -125,8 +125,7 @@ startup. Source tests and source builds are performed from ordinary source trees
 no packaged binary is patched.
 
 [Machine-readable measurements](cold-startup-measurements.json) retain the selected
-valid runs and snapshot hashes. Packaged sources now pin `576105975`, retained by tag
-`tvhplayer-2026-11-13-2`, including the previously local idnode/settings changes. The published GitHub archive was verified file-for-file
+valid runs and snapshot hashes. Packaged sources now pin `4b5877172`, the `tvhplayer` branch tip, including the guide-destination fix and the startup loading changes. The published GitHub archive was verified file-for-file
 against the clean archive used for the successful build.
 
 ## Continuation: descriptor-relative configuration loading
