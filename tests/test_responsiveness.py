@@ -38,10 +38,6 @@ LIST_BUSY_BUDGET = 0.2
 SEARCH_BUDGET = 0.2
 BIG_LIST = 60_000
 
-BLOCKS_ON_LIST = pytest.mark.xfail(
-    strict=True,
-    reason='Reworks the whole channel list on the window thread (to be fixed); remove this mark when it passes',
-)
 
 
 class StallMeter:
@@ -609,7 +605,6 @@ def _big_htsp_window(monkeypatch, tmp_path, count=BIG_LIST):
     return app, ui, window, backend
 
 
-@BLOCKS_ON_LIST
 def test_programme_changes_on_a_big_list_keep_the_window_answering(monkeypatch, tmp_path):
     # Tvheadend sends a channelUpdate whenever a channel's programme changes.
     # With tens of thousands of channels that is a steady stream; none of

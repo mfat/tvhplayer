@@ -295,6 +295,8 @@ class ChannelTableModel(QAbstractTableModel):
         if not hasattr(self, '_natural'):
             self._natural = [channel_sort_key(channel) if channel is not None else (0, '')
                              for channel in self._channels]
+        if self._update_in_place(changes, logo_refs):
+            return
         self.layoutAboutToBeChanged.emit()
         old = self.persistentIndexList()
         old_keys = [self._keys[self._rows[index.row()]] for index in old]
@@ -346,6 +348,51 @@ class ChannelTableModel(QAbstractTableModel):
             self.changePersistentIndexList(old, new)
         self.layoutChanged.emit()
         self._changed(range(len(COLUMN_TITLES)))
+
+    def _update_in_place(self, changes, logo_refs):
+        """Apply changes that move no row, redrawing only their rows. False when one would move.
+
+        Tvheadend sends a channel update whenever a channel's programme
+        changes. With tens of thousands of channels that is a steady stream,
+        and sorting and filtering every channel again for each kept the
+        window busy almost half the time.
+        """
+        updates = []
+        for key, channel in changes.items():
+            position = self._position_by_key.get(key)
+            if channel is None or position is None:
+                return False
+            old = self._channels[position]
+            if old is None or channel_sort_key(channel) != self._natural[position]:
+                return False
+            if self._search and (channel.name != old.name or channel.number != old.number):
+                return False
+            updates.append((position, channel, old))
+        if self._sort_column >= 0:
+            # Sorted by a column: the channel keeps its row if its value there stays.
+            for position, channel, old in updates:
+                before = self._sort_value(position)
+                self._channels[position] = channel
+                try:
+                    after = self._sort_value(position)
+                finally:
+                    self._channels[position] = old
+                if before != after:
+                    return False
+        refs = logo_refs or {}
+        rows = []
+        for position, channel, _old in updates:
+            self._channels[position] = channel
+            self._logo_refs[position] = refs.get(self._keys[position], '')
+            try:
+                rows.append(self._rows.index(position))
+            except ValueError:
+                # Not shown: the search or group leaves it out.
+                pass
+        last = len(COLUMN_TITLES) - 1
+        for row in rows:
+            self.dataChanged.emit(self.index(row, 0), self.index(row, last), [])
+        return True
 
     def set_filter(self, search, members=None):
         """Keep the channels whose name or number holds ``search``, and in ``members`` when given."""

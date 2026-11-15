@@ -354,3 +354,57 @@ def test_rows_arriving_in_any_order_take_their_final_places():
     assert model.row_of_key(channel_key(final[1])) == -1
     assert model.channel_at(model.row_of_key(channel_key(moved))).number == 10_000
     view.close()
+
+
+def test_a_programme_change_redraws_its_row_without_moving_any():
+    # Tvheadend sends a channel update whenever a channel's programme
+    # changes; with many channels that is a steady stream. It must not sort
+    # and filter the whole list again.
+    from PyQt6.QtCore import Qt
+
+    from tvhplayer.channel_view import COL_NAME, COL_NUMBER
+    from tvhplayer.core.channel_info import channel_key
+    from tvhplayer.core.models import Channel
+
+    channels = [Channel(uuid=f'u{i}', name=f'Ch {i}', number=i, htsp_id=i, raw={'eventId': i})
+                for i in range(1, 6)]
+    app, model, view = _model(channels)
+    layouts, changed = [], []
+    model.layoutChanged.connect(lambda *a: layouts.append(1))
+    model.dataChanged.connect(lambda first, last, roles: changed.append((first.row(), last.row())))
+    view.setCurrentIndex(model.index(3, COL_NAME))
+
+    update = Channel(uuid='u2', name='Ch 2', number=2, htsp_id=2, raw={'eventId': 99})
+    model.update_channels({channel_key(update): update})
+    assert layouts == []
+    assert changed == [(1, 1)]
+    assert model.channel_at(1) is update
+    assert view.currentIndex().row() == 3
+
+    # Sorted by a column: a change that keeps the channel's value there stays in place too.
+    model.sort(COL_NUMBER, Qt.SortOrder.DescendingOrder)
+    layouts.clear()
+    changed.clear()
+    update = Channel(uuid='u2', name='Ch 2', number=2, htsp_id=2, raw={'eventId': 100})
+    model.update_channels({channel_key(update): update})
+    assert layouts == [] and changed == [(3, 3)]
+
+    # A rename still moves the row.
+    model.sort(-1)
+    layouts.clear()
+    renamed = Channel(uuid='u2', name='Ch 2', number=9, htsp_id=2)
+    model.update_channels({channel_key(renamed): renamed})
+    assert layouts == [1]
+    assert [model.channel_at(row).number for row in range(5)] == [1, 3, 4, 5, 9]
+
+    # A channel the search leaves out changes without a row to redraw.
+    model.set_filter('ch 1')
+    layouts.clear()
+    changed.clear()
+    update = Channel(uuid='u3', name='Ch 3', number=3, htsp_id=3, raw={'eventId': 7})
+    model.update_channels({channel_key(update): update})
+    assert layouts == [] and changed == []
+    assert model.rowCount() == 1
+    model.set_filter('')
+    assert model.channel_at(model.row_of_key('u3')) is update
+    view.close()
