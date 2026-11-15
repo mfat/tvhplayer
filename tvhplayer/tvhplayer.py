@@ -807,13 +807,19 @@ def _fraction(done, total):
     return min(max(done / total, 0.0), 1.0)
 
 
-def _task_line(kind, channel, brief):
+def _task_line(kind, channel, brief, builtin=False):
     """The card's second line: its state in few words, then where it runs and the channel.
 
     The state and time come first: a narrow pane cuts the end of the line.
+    The built-in server records on this computer too, so ``builtin`` drops Local.
     """
-    where = {'Local': 'Local', 'Convert': 'For editing'}.get(kind, '')
+    where = {'Local': '' if builtin else 'Local', 'Convert': 'For editing'}.get(kind, '')
     return " · ".join(part for part in (brief, where, channel) if part)
+
+
+def _task_where(kind, builtin):
+    """The kind as screen readers hear it first; none for recordings of the built-in server."""
+    return '' if builtin and kind in ('Local', 'Server') else kind
 
 
 def _conversion_brief(status, progress):
@@ -1363,6 +1369,7 @@ class TasksPanel(QFrame):
 
     def _tasks_from_entries(self, entries):
         tasks = []
+        builtin = self._builtin_server()
         now = int(datetime.now().timestamp())
         for entry in entries:
             category = entry.category()
@@ -1413,6 +1420,7 @@ class TasksPanel(QFrame):
                 'size': size_text,
                 'detail': detail,
                 'line': _task_line('Server', entry.channel_name or '', brief),
+                'where': _task_where('Server', builtin),
                 'progress': progress,
                 'start': entry.start or 0,
                 'path': '',
@@ -1424,7 +1432,13 @@ class TasksPanel(QFrame):
         jobs = getattr(host, 'local_jobs', None) if host is not None else None
         return [task for task in map(self._local_task, jobs or []) if task is not None]
 
+    def _builtin_server(self):
+        host = self._host
+        current = getattr(host, 'current_server', None)
+        return bool(current is not None and is_builtin_server(current()))
+
     def _local_task(self, job):
+        builtin = self._builtin_server()
         recorder = job.recorder
         running = job.is_running
         # Read the file here. LocalRecorder.status() is what counts stalls,
@@ -1472,7 +1486,8 @@ class TasksPanel(QFrame):
             'status': status,
             'size': _format_size(size),
             'detail': detail,
-            'line': _task_line('Local', channel_name, brief),
+            'line': _task_line('Local', channel_name, brief, builtin),
+            'where': _task_where('Local', builtin),
             'progress': progress,
             'start': int(started),
             'path': path,
@@ -1585,7 +1600,7 @@ class TasksPanel(QFrame):
     def _add_row(self, task):
         summary = ", ".join(
             part for part in (
-                task['kind'], task['channel'], task['title'], task['status'],
+                task.get('where', task['kind']), task['channel'], task['title'], task['status'],
                 task.get('size') or 'no file yet',
             ) if part
         ) + f". {task['detail']}"

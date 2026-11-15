@@ -4562,6 +4562,41 @@ def test_builtin_server_records_through_one_window(monkeypatch, tmp_path, choice
         app.processEvents()
 
 
+def test_builtin_server_tasks_do_not_say_where_they_record(monkeypatch, tmp_path):
+    # Every recording of the built-in server is on this computer, so Tasks
+    # does not call some of them Local; remote servers keep the word.
+    from tvhplayer.core.models import Channel, DvrEntry
+
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    recorder = types.SimpleNamespace(
+        is_running=True, file_path=str(tmp_path / 'One.ts'), started_at=time.time() - 60, stall_count=0)
+    job = ui.LocalJob(recorder, Channel(uuid='one', name='One'))
+    job.end = time.time() + 600
+    entry = DvrEntry(
+        uuid='r', title='News', channel_name='Two', raw={'channel': 'two'},
+        start=int(time.time()) - 60, duration=600, status='Running', sched_status='recording',
+    )
+    panel = window.tasks_pane
+    try:
+        for builtin in (True, False):
+            window.current_server = lambda: {'name': 'tv', 'url': 'http://tv', 'builtin': builtin}
+            local = panel._local_task(job)
+            server = next(t for t in panel._tasks_from_entries([entry]) if t['entry'] is entry)
+            panel.task_list.clear()
+            panel._add_row(local)
+            panel._add_row(server)
+            texts = _task_texts(panel)
+            if builtin:
+                assert ' · Local' not in local['line'] and not texts[0].startswith('Local')
+                assert not texts[1].startswith('Server')
+            else:
+                assert local['line'].endswith(' · Local · One') and texts[0].startswith('Local, ')
+                assert texts[1].startswith('Server, ')
+    finally:
+        window.close()
+        app.processEvents()
+
+
 @pytest.mark.parametrize('failed', [False, True])
 def test_finished_buffer_recording_is_finalized_by_monitor(monkeypatch, tmp_path, failed):
     from concurrent.futures import Future
