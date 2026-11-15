@@ -28,8 +28,8 @@ MPV_OPTIONS = {
     'idle': True,
     'keep_open': False,
     'audio_client_name': 'TVHplayer',
-    # mpv hands a frame over this long before its display time, and the widget's
-    # paint then waits out the rest. Every repaint of a resize waited up to a frame.
+    # Deliver frames at their display time: the Qt widget explicitly disables
+    # the render API's blocking timing wait to keep the UI responsive.
     'video_timing_offset': 0,
 }
 # mpv's built-in Lua scripts, which load_scripts does not cover. A libmpv built

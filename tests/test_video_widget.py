@@ -3,6 +3,30 @@ from types import SimpleNamespace
 from tvhplayer.video_widget import MpvVideoWidget, live_splitter_keeps_up, use_live_resize
 
 
+def test_paint_does_not_wait_for_mpv_presentation():
+    rendered = []
+
+    class DelayedPresentation:
+        def render(self, **params):
+            # A delayed VO must not hold Qt's paint call until presentation.
+            assert params.get('block_for_target_time') is False
+            rendered.append(params)
+
+    widget = SimpleNamespace(
+        _render_context=DelayedPresentation(),
+        devicePixelRatioF=lambda: 2.0,
+        width=lambda: 640,
+        height=lambda: 360,
+        defaultFramebufferObject=lambda: 7,
+    )
+    # Cover both the first frame and repaints caused by the spinner/resize.
+    for _ in range(3):
+        MpvVideoWidget.paintGL(widget)
+    assert len(rendered) == 3
+    assert rendered[0]['opengl_fbo'] == {'w': 1280, 'h': 720, 'fbo': 7}
+    assert rendered[0]['flip_y'] is True
+
+
 def test_live_splitter_keeps_up_from_qt_6_11():
     assert not live_splitter_keeps_up('6.10.2')
     assert not live_splitter_keeps_up('6.10.0')

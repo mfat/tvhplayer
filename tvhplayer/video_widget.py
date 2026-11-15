@@ -98,6 +98,10 @@ class MpvVideoWidget(QOpenGLWidget):
         ratio = self.devicePixelRatioF()
         self._render_context.render(
             flip_y=True,
+            # Painting shares the UI thread with the startup spinner. Even with
+            # video-timing-offset=0, mpv's default waits for its VO thread to
+            # present the frame. Never make Qt wait for that handshake.
+            block_for_target_time=False,
             opengl_fbo={
                 'w': round(self.width() * ratio),
                 'h': round(self.height() * ratio),
