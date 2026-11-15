@@ -164,6 +164,17 @@ class _SlowServer:
         self._wait('image_url')
         return f'http://tv.example/{reference}'
 
+    def cancel_dvr_entry(self, entry):
+        self._wait('cancel_dvr_entry')
+
+    def create_autorec_by_series(self, event_id, config_uuid=''):
+        self._wait('create_autorec_by_series')
+        return 'rule'
+
+    def query_epg(self, query):
+        # The guide reads its programmes on a thread of its own already.
+        return []
+
     def close(self):
         pass
 
@@ -424,6 +435,148 @@ def test_finding_a_logo_address_on_a_slow_server_keeps_the_window_answering(monk
     finally:
         _close(app, window)
 
+
+
+class _LocalRecorder:
+    """Stand-in for ffmpeg recording a stream to a file."""
+
+    def __init__(self):
+        self.started = []
+        self.is_running = False
+        self.file_path = None
+
+    def start(self, url, path, username, password, options):
+        self.started.append(url)
+        self.file_path = path
+        self.is_running = True
+
+    def stop(self):
+        self.is_running = False
+
+
+def test_recording_to_this_computer_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+
+    class Dialog:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def exec(self):
+            return ui.QDialog.DialogCode.Accepted
+
+        def get_duration(self):
+            return 1800
+
+        def programme_event(self):
+            return None
+
+        def records_from_buffer(self):
+            return False
+
+    monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
+    recorder = _LocalRecorder()
+    window.new_local_recorder = lambda: recorder
+    window.set_local_recording_dir(str(tmp_path / 'videos'))
+    try:
+        meter = StallMeter()
+        _later(lambda: window.start_local_recording(channel))
+        meter.run(SERVER_DELAY * 4, until=lambda: bool(window.local_jobs))
+        meter.report('Record to this computer, server answers in 1 s')
+        assert backend.calls == ['get_now_next', 'stream_url']
+        assert recorder.started == ['http://tv.example/stream/news?ticket=t']
+        assert meter.worst() < SERVER_BUDGET
+    finally:
+        # Closing with a recording running would ask whether to stop it.
+        for job in list(window.local_jobs):
+            job.timer.stop()
+            job.recorder.stop()
+        window.local_jobs.clear()
+        if window.recording_monitor is not None:
+            window.recording_monitor.stop()
+        _close(app, window)
+
+
+def test_scheduling_from_a_channel_guide_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
+    from tvhplayer.core.models import EpgEvent
+
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    told = []
+    monkeypatch.setattr(ui.QMessageBox, 'information', lambda *args: told.append(args[2]))
+    monkeypatch.setattr(ui.QMessageBox, 'critical', lambda *args: told.append(args[2]))
+    now = int(time.time())
+    later = EpgEvent(start=now + 600, stop=now + 1200, title='Weather', channel_uuid='news', event_id=2)
+    guide = ui.EPGDialog(channel, [later], backend, window)
+    try:
+        meter = StallMeter()
+        _later(lambda: guide.schedule_recording(later))
+        meter.run(SERVER_DELAY * 3, until=lambda: bool(told))
+        meter.report('Record from the channel guide, server answers in 1 s')
+        assert told == ['Recording scheduled successfully for Weather']
+        assert backend.calls == ['create_dvr_entry']
+        assert meter.worst() < SERVER_BUDGET
+    finally:
+        guide.close()
+        _close(app, window)
+
+
+def _tv_guide(monkeypatch, ui, window, backend):
+    import tvhplayer.guide_view as guide_view
+    from tvhplayer.core.models import Channel, DvrEntry, EpgEvent
+
+    monkeypatch.setattr(guide_view, 'create_backend', lambda server: backend)
+    now = int(time.time())
+    channel = Channel(uuid='news', name='News', number=1, htsp_id=7)
+    on_now = EpgEvent(start=now - 600, stop=now + 600, title='Headlines', channel_uuid='news',
+                      event_id=1, dvr_uuid='run', serieslink_uri='crid://news')
+    later = EpgEvent(start=now + 600, stop=now + 1200, title='Weather', channel_uuid='news',
+                     event_id=2, serieslink_uri='crid://weather')
+    window._dvr_entries = [DvrEntry(uuid='run', title='Headlines', channel_name='News', start=now - 600,
+                                    duration=1200, status='Running', sched_status='recording', htsp_id=7)]
+    guide = guide_view.GuideWindow(window)
+    return guide_view, guide, channel, on_now, later
+
+
+@pytest.mark.parametrize('action', ['record', 'stop', 'series'])
+def test_recording_from_the_tv_guide_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path, action):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    guide_view, guide, channel, on_now, later = _tv_guide(monkeypatch, ui, window, backend)
+    try:
+        if action == 'record':
+            run = lambda: guide.toggle_recording(channel, later)
+            wanted, said = 'create_dvr_entry_by_event', 'Scheduled Weather on News'
+        elif action == 'stop':
+            guide._overrides[on_now.event_id] = guide_view.RECORDING
+            run = lambda: guide.toggle_recording(channel, on_now)
+            wanted, said = 'stop_dvr_entry', 'Stopped recording Headlines'
+        else:
+            run = lambda: guide.record_series(later)
+            wanted, said = 'create_autorec_by_series', 'Recording every episode of Weather'
+        meter = StallMeter()
+        _later(run)
+        meter.run(SERVER_DELAY * 3, until=lambda: said in window.status_label.text())
+        meter.report(f'TV guide: {action}, server answers in 1 s')
+        assert wanted in backend.calls
+        assert said in window.status_label.text()
+        assert meter.worst() < SERVER_BUDGET
+    finally:
+        guide.close()
+        _close(app, window)
+
+
+def test_pressing_record_twice_in_the_tv_guide_asks_the_server_once(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    guide_view, guide, channel, on_now, later = _tv_guide(monkeypatch, ui, window, backend)
+    backend.delay = 0.3
+    try:
+        guide.toggle_recording(channel, later)
+        guide.toggle_recording(channel, later)
+        assert window.status_label.text() == 'Still waiting for the server'
+        _wait_until(app, lambda: 'Scheduled Weather' in window.status_label.text(), 'the answer')
+        assert backend.calls.count('create_dvr_entry_by_event') == 1
+        assert guide._state(later) == guide_view.SCHEDULED
+    finally:
+        guide.close()
+        _close(app, window)
 
 # --- A big channel list ------------------------------------------------------
 

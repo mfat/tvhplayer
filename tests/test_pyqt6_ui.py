@@ -2310,12 +2310,13 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
     monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
     monkeypatch.setattr(ui.QFileDialog, 'getSaveFileName', lambda *_a, **_k: pytest.fail('asked for a file'))
     window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c, profile=None: 'http://tv/stream')
-    window._programme_on_now = lambda _c: None
+    window._with_programme_on_now = lambda _c, then: then(None)
     window.new_local_recorder = Recorder
     window.set_local_recording_dir(str(tmp_path / 'videos'))
     try:
         window.start_local_recording(Channel(uuid='c', name='BBC/News'))
-        assert len(started) == 1
+        # The server gives the stream address in the background.
+        _wait_until(app, lambda: len(started) == 1, 'the recording')
         path = Path(started[0])
         assert path.parent == tmp_path / 'videos' and path.parent.is_dir()
         assert path.name.startswith('recording_BBC_News_') and path.suffix == '.ts'
@@ -2329,6 +2330,7 @@ def test_local_recording_saves_to_the_settings_folder_and_stops_on_time(monkeypa
         window.set_recording_format('mp4')
         window.set_recording_ffmpeg_options('-b:a 128k -metadata "title=Evening news"')
         window.start_local_recording(Channel(uuid='c', name='BBC/News'))
+        _wait_until(app, lambda: len(started) == 2, 'the second recording')
         assert Path(started[1]).suffix == '.mp4'
         assert options[1] == ['-b:a', '128k', '-metadata', 'title=Evening news']
         window.stop_local_recording()
@@ -2377,16 +2379,18 @@ def test_several_channels_record_to_this_computer_at_once(monkeypatch, tmp_path)
 
     monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
     window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda c, profile=None: f'http://tv/{c.uuid}')
-    window._programme_on_now = lambda _c: None
+    window._with_programme_on_now = lambda _c, then: then(None)
     window.new_local_recorder = Recorder
     window.set_local_recording_dir(str(tmp_path / 'videos'))
     one, two = Channel(uuid='a', name='One'), Channel(uuid='b', name='Two')
     try:
         window.start_local_recording(one)
+        _wait_until(app, lambda: len(started) == 1, 'the first recording')
         window.active_channel = lambda: two
         window._sync_record_controls()
         assert window.controls_bar.record_local_action.isEnabled() is True
         window.start_local_recording(two)
+        _wait_until(app, lambda: len(started) == 2, 'the second recording')
         assert started == ['http://tv/a', 'http://tv/b']
         assert [job.is_running for job in window.local_jobs] == [True, True]
         assert window.controls_bar.record_local_action.isEnabled() is False
@@ -2605,14 +2609,16 @@ def test_flatpak_asks_for_the_recordings_folder_once(monkeypatch, tmp_path):
     monkeypatch.setattr(ui.QFileDialog, 'getExistingDirectory', lambda *_a: asked.append(1) or str(chosen))
     monkeypatch.setattr(ui, 'RecordingDurationDialog', Dialog)
     window.get_backend = lambda: types.SimpleNamespace(stream_url=lambda _c, profile=None: 'http://tv/stream')
-    window._programme_on_now = lambda _c: None
+    window._with_programme_on_now = lambda _c, then: then(None)
     window.new_local_recorder = Recorder
     window.config.pop('local_recording_dir', None)
     try:
         assert window.local_recording_dir() == ''
         window.start_local_recording(Channel(uuid='c', name='One'))
+        _wait_until(app, lambda: len(started) == 1, 'the first recording')
         window.stop_local_recording()
         window.start_local_recording(Channel(uuid='c', name='One'))
+        _wait_until(app, lambda: len(started) == 2, 'the second recording')
         window.stop_local_recording()
         assert len(asked) == 1 and len(prompts) == 1
         assert 'from now on' in prompts[0]
@@ -4413,7 +4419,7 @@ def test_recording_from_timeshift_uses_the_captured_position(monkeypatch, tmp_pa
     player.buffer_recording_point = lambda: point
     window._playback_channel = channel
     window._playback_active = True
-    window._programme_on_now = lambda _channel: None
+    window._with_programme_on_now = lambda _c, then: then(None)
     window.set_local_recording_dir(str(tmp_path))
     window.set_recording_format('mp4')
     window.set_recording_ffmpeg_options('-b:a 128k')
@@ -4466,6 +4472,8 @@ def test_recording_from_timeshift_uses_the_captured_position(monkeypatch, tmp_pa
             assert not calls and not window.local_jobs
             assert bool(warnings) == (choice == 'expired')
         else:
+            # A live recording starts once the server gives the stream address.
+            _wait_until(app, lambda: bool(window.local_jobs), 'the recording')
             job = window.local_jobs[0]
             buffered = choice == 'buffer'
             assert calls[0][0] == ('buffer' if buffered else 'live')

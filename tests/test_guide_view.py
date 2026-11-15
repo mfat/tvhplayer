@@ -81,6 +81,15 @@ class _Host:
     def get_backend(self):
         return self.backend
 
+    def run_dvr_change(self, change, on_done):
+        # The window runs it in the background; here at once.
+        try:
+            result = change(self.backend)
+        except Exception as e:
+            on_done(None, e)
+        else:
+            on_done(result, None)
+
     def _refresh_tasks(self):
         self.refreshed += 1
 

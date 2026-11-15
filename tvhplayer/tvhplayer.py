@@ -3953,6 +3953,8 @@ class TVHeadendClient(QMainWindow):
         self._stopping_recording = False
         # A server recording being set up: the server is asked, or the length chosen.
         self._asking_to_record = False
+        # Channels whose recording to this computer is being set up.
+        self._starting_local = set()
         self._busy_playlists = set()
         # Background playlist jobs until they end; those not started yet wait their turn.
         self._playlist_jobs = []
@@ -5962,17 +5964,6 @@ class TVHeadendClient(QMainWindow):
         if had_focus:
             self.channel_list.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def _programme_on_now(self, channel):
-        """The channel's programme on now, from the list's guide data or the server."""
-        now_next = self._now_next.get(channel_key(channel))
-        if now_next is None:
-            try:
-                now_next = self.get_backend().get_now_next([channel]).get(channel_key(channel))
-            except Exception as e:
-                print(f"Debug: No programme information for {channel.name}: {e}")
-                return None
-        return self._event_on_now(now_next)
-
     @staticmethod
     def _event_on_now(now_next):
         """The programme on now in ``now_next``, if it can be recorded by its event."""
@@ -7760,11 +7751,26 @@ class TVHeadendClient(QMainWindow):
                 state = self._timeshift_state()
                 if state is not None and (state.behind > 0 or state.paused):
                     point = self.player.buffer_recording_point()
-            dialog = RecordingDurationDialog(self, channel, self._programme_on_now(channel), save_dir=folder)
+            key = channel_key(channel)
+            if key in self._starting_local:
+                self.statusbar.showMessage("Still waiting for the server")
+                return
+            self._starting_local.add(key)
+            self._with_programme_on_now(
+                channel, lambda event: self._record_locally(channel, folder, point, event))
+        except Exception as e:
+            self._local_recording_failed(channel, e)
+
+    def _record_locally(self, channel, folder, point, programme):
+        """Ask how long to record, then start recording to this computer."""
+        try:
+            channel_name = channel.name
+            dialog = RecordingDurationDialog(self, channel, programme, save_dir=folder)
             if point is not None:
                 dialog.set_timeshift_start(point.behind)
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 print("Debug: Recording cancelled by user")
+                self._starting_local.discard(channel_key(channel))
                 return
             duration = dialog.get_duration()
             event = dialog.programme_event()
@@ -7774,6 +7780,7 @@ class TVHeadendClient(QMainWindow):
                 try:
                     extra_options = parse_ffmpeg_options(self.recording_ffmpeg_options())
                 except ValueError as e:
+                    self._starting_local.discard(channel_key(channel))
                     QMessageBox.warning(
                         self, "Record to This Computer",
                         f"The extra ffmpeg options in Settings cannot be read: {e}.",
@@ -7789,45 +7796,67 @@ class TVHeadendClient(QMainWindow):
                 try:
                     recorder = self.player.record_buffer(file_path, point)
                 except (RuntimeError, ValueError) as e:
+                    self._starting_local.discard(channel_key(channel))
                     QMessageBox.warning(self, "Record from Timeshift", str(e))
                     return
-                job = LocalJob(recorder, channel)
-            else:
-                stream_url = self.get_backend().stream_url(channel)
-                server = self.current_server() or {}
-                job = LocalJob(self.new_local_recorder(), channel)
-                job.recorder.start(
-                    stream_url,
-                    file_path,
-                    server.get('username') or '',
-                    server.get('password') or '',
-                    extra_options,
-                )
-            self.local_jobs.append(job)
-            if self.recording_monitor is None:
-                self.recording_monitor = QTimer(self)
-                self.recording_monitor.timeout.connect(self.check_recording_status)
-                self.recording_monitor.start(2000)
-            job.end = time.time() + duration
-            job.timer = QTimer(self)
-            job.timer.setSingleShot(True)
-            job.timer.timeout.connect(lambda: self.stop_local_recording(job))
-            job.timer.start(duration * 1000)
-            if event is not None:
-                until = f"{event.title}, until {datetime.fromtimestamp(event.stop).strftime('%H:%M')}"
-            else:
-                until = f"{duration // 60} minutes"
-            self.statusbar.showMessage(f"Local recording started ({until}): {file_path}")
-            self._show_on_picture("Recording to this computer")
-            self.start_recording_indicator()
-            self._refresh_tasks(server=False)
-            
+                self._begin_local_job(LocalJob(recorder, channel), duration, event, file_path)
+                return
+
+            server = self.current_server() or {}
+
+            def address_ready(stream_url, error):
+                if error is not None:
+                    self._local_recording_failed(channel, error)
+                    return
+                try:
+                    job = LocalJob(self.new_local_recorder(), channel)
+                    job.recorder.start(
+                        stream_url,
+                        file_path,
+                        server.get('username') or '',
+                        server.get('password') or '',
+                        extra_options,
+                    )
+                    self._begin_local_job(job, duration, event, file_path)
+                except Exception as e:
+                    self._local_recording_failed(channel, e)
+
+            # The server gives the stream address in the background.
+            self.statusbar.showMessage(f"Asking the server for {channel_name}…")
+            self.call_server(lambda backend: backend.stream_url(channel), address_ready)
         except Exception as e:
-            print(f"Debug: Local recording error: {str(e)}")
-            print(f"Debug: Error type: {type(e)}")
-            import traceback
-            print(f"Debug: Traceback: {traceback.format_exc()}")
-            self.statusbar.showMessage(f"Local recording error: {str(e)}")
+            self._local_recording_failed(channel, e)
+
+    def _begin_local_job(self, job, duration, event, file_path):
+        self._starting_local.discard(channel_key(job.channel))
+        self.local_jobs.append(job)
+        if self.recording_monitor is None:
+            self.recording_monitor = QTimer(self)
+            self.recording_monitor.timeout.connect(self.check_recording_status)
+            self.recording_monitor.start(2000)
+        job.end = time.time() + duration
+        job.timer = QTimer(self)
+        job.timer.setSingleShot(True)
+        job.timer.timeout.connect(lambda: self.stop_local_recording(job))
+        job.timer.start(duration * 1000)
+        if event is not None:
+            until = f"{event.title}, until {datetime.fromtimestamp(event.stop).strftime('%H:%M')}"
+        else:
+            until = f"{duration // 60} minutes"
+        self.statusbar.showMessage(f"Local recording started ({until}): {file_path}")
+        self._show_on_picture("Recording to this computer")
+        self.start_recording_indicator()
+        self._refresh_tasks(server=False)
+
+    def _local_recording_failed(self, channel, error):
+        if channel is not None and not isinstance(channel, str):
+            try:
+                self._starting_local.discard(channel_key(channel))
+            except Exception:
+                pass
+        print(f"Debug: Local recording error: {error}")
+        print(f"Debug: Traceback: {traceback.format_exc()}")
+        self.statusbar.showMessage(f"Local recording error: {error}")
 
     def check_recording_status(self):
         """Check that each local recording is actually working"""
@@ -9444,13 +9473,15 @@ class EPGDialog(QDialog):
         layout.addWidget(close_btn)
         
     def schedule_recording(self, entry):
-        """Schedule a recording for the selected EPG entry"""
+        """Schedule a recording for the selected EPG entry, without holding up the window."""
         parent = self.parent()
         if parent is not None and hasattr(parent, 'server_recordings_ready') and not parent.server_recordings_ready():
             return
-        try:
-            print(f"Debug: Scheduling recording for: {entry.title}")
-            self.backend.create_dvr_entry(
+        title = entry.title or 'Unknown'
+        print(f"Debug: Scheduling recording for: {entry.title}")
+
+        def request(backend):
+            return backend.create_dvr_entry(
                 self.channel,
                 entry.start,
                 entry.stop,
@@ -9459,21 +9490,29 @@ class EPGDialog(QDialog):
                 comment='Scheduled via TVHplayer',
                 event_id=entry.event_id,
             )
-            QMessageBox.information(
-                self,
-                "Success",
-                f"Recording scheduled successfully for {entry.title or 'Unknown'}"
-            )
-            parent = self.parent()
+
+        def answered(_result, error):
+            if error is not None:
+                print(f"Debug: Error scheduling recording: {error}")
+                QMessageBox.critical(self, "Error", f"Failed to schedule recording: {error}")
+                return
+            QMessageBox.information(self, "Success", f"Recording scheduled successfully for {title}")
             if parent is not None and hasattr(parent, '_refresh_tasks'):
                 parent._refresh_tasks()
+
+        if parent is not None and hasattr(parent, 'call_server'):
+            try:
+                parent.call_server(request, answered)
+            except Exception as e:
+                answered(None, e)
+            return
+        try:
+            result = request(self.backend)
         except Exception as e:
-            print(f"Debug: Error scheduling recording: {str(e)}")
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to schedule recording: {str(e)}"
-            )
+            answered(None, e)
+        else:
+            answered(result, None)
+
 
 class NoDialogButtonIconsStyle(ThemeStyle):
     """The desktop style, without icons on dialog buttons (OK, Cancel, Yes, No...)."""

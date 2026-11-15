@@ -820,6 +820,8 @@ class GuideWindow(QDialog):
         self._error = ''
         self._server_message = ''
         self._overrides = {}
+        # Programmes whose recording is being changed on the server.
+        self._changing = set()
 
         layout = QVBoxLayout(self)
         bar = QHBoxLayout()
@@ -1250,46 +1252,41 @@ class GuideWindow(QDialog):
         return None
 
     def toggle_recording(self, channel, event):
-        """Record the programme, or cancel or stop the recording it already has."""
+        """Record the programme, or cancel or stop the recording it already has.
+
+        The server is asked in the background: stopping can take it seconds
+        while it writes the file out.
+        """
         if channel is None or event is None or event.event_id is None:
             return
         state = self._state(event)
         title = event.title or "the programme"
-        try:
-            backend = self.host.get_backend()
-            if state:
-                entry = self._entry_for(event)
-                if entry is None:
-                    self._status(f"The recording of {title} is not in the list yet. Try again in a moment.")
-                    self.host._refresh_tasks()
-                    return
-                if state == RECORDING:
-                    backend.stop_dvr_entry(entry)
-                    message = f"Stopped recording {title}. The recorded file is kept."
-                else:
-                    backend.cancel_dvr_entry(entry)
-                    message = f"Cancelled the recording of {title}."
-                self._overrides[event.event_id] = ''
+        if state:
+            entry = self._entry_for(event)
+            if entry is None:
+                self._status(f"The recording of {title} is not in the list yet. Try again in a moment.")
+                self.host._refresh_tasks()
+                return
+            if state == RECORDING:
+                change = lambda backend: backend.stop_dvr_entry(entry)
+                message = f"Stopped recording {title}. The recorded file is kept."
             else:
-                if event.stop <= int(time.time()):
-                    return
-                if not self.host.server_recordings_ready():
-                    return
-                backend.create_dvr_entry_by_event(event.event_id)
-                self._overrides[event.event_id] = RECORDING if event.start <= int(time.time()) else SCHEDULED
-                message = f"Recording {title} on {channel.name}." if event.start <= int(time.time()) else (
-                    f"Scheduled {title} on {channel.name}, {clock(event.start)}."
-                )
-        except Exception as e:
-            print(f"Debug: Could not change the recording: {e}")
-            self._status(f"Could not change the recording of {title}: {e}")
-            return
-        self._status(message)
-        self.grid.viewport().update()
-        self._show_details()
-        self.host._refresh_tasks()
-        if hasattr(self.host, 'sync_recording_indicator'):
-            self.host.sync_recording_indicator()
+                change = lambda backend: backend.cancel_dvr_entry(entry)
+                message = f"Cancelled the recording of {title}."
+            after = ''
+        else:
+            if event.stop <= int(time.time()):
+                return
+            if not self.host.server_recordings_ready():
+                return
+            change = lambda backend: backend.create_dvr_entry_by_event(event.event_id)
+            on_now = event.start <= int(time.time())
+            after = RECORDING if on_now else SCHEDULED
+            message = f"Recording {title} on {channel.name}." if on_now else (
+                f"Scheduled {title} on {channel.name}, {clock(event.start)}."
+            )
+        self._change_recording(event, change, after, message, f"Could not change the recording of {title}",
+                               sync_indicator=True)
 
     def record_series(self, event):
         if event is None or event.event_id is None or not event.serieslink_uri:
@@ -1297,17 +1294,36 @@ class GuideWindow(QDialog):
         title = event.title or "this series"
         if not self.host.server_recordings_ready():
             return
-        try:
-            self.host.get_backend().create_autorec_by_series(event.event_id)
-        except Exception as e:
-            print(f"Debug: Could not record the series: {e}")
-            self._status(f"Could not record {title} as a series: {e}")
+        after = RECORDING if event.start <= int(time.time()) else SCHEDULED
+        self._change_recording(event, lambda backend: backend.create_autorec_by_series(event.event_id),
+                               after, f"Recording every episode of {title}.",
+                               f"Could not record {title} as a series")
+
+    def _change_recording(self, event, change, after, message, failure, sync_indicator=False):
+        """Run ``change(backend)`` in the background, then show ``after`` for the programme."""
+        if event.event_id in self._changing:
+            self._status("Still waiting for the server")
             return
-        self._overrides[event.event_id] = RECORDING if event.start <= int(time.time()) else SCHEDULED
-        self._status(f"Recording every episode of {title}.")
-        self.grid.viewport().update()
-        self._show_details()
-        self.host._refresh_tasks()
+
+        def done(_result, error):
+            self._changing.discard(event.event_id)
+            if error is not None:
+                print(f"Debug: Could not change the recording: {error}")
+                self._status(f"{failure}: {error}")
+                return
+            self._overrides[event.event_id] = after
+            self._status(message)
+            self.grid.viewport().update()
+            self._show_details()
+            self.host._refresh_tasks()
+            if sync_indicator and hasattr(self.host, 'sync_recording_indicator'):
+                self.host.sync_recording_indicator()
+
+        self._changing.add(event.event_id)
+        try:
+            self.host.run_dvr_change(change, done)
+        except Exception as e:
+            done(None, e)
 
     def _show_menu(self, channel, event, position):
         menu = QMenu(self)
