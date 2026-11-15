@@ -770,6 +770,9 @@ def _first_bytes(port, channel_uuid, size=188 * 200):
         return response.read(size)
 
 
+# About 30 seconds with a real Tvheadend, and its stream checks can time out
+# when other tests keep the computer busy: run it alone, with --run-slow.
+@pytest.mark.slow
 @pytest.mark.skipif(not (FFMPEG and TVHEADEND), reason='needs ffmpeg and a Tvheadend build')
 def test_import_plays_refreshes_and_removes(tvheadend, media, monkeypatch):
     port = tvheadend
