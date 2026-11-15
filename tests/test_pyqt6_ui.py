@@ -262,8 +262,6 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
     # Not the picon pack on this computer: each window read its tens of thousands of logos.
     monkeypatch.setattr(ui, 'default_picon_dir', lambda: tmp_path / 'picons')
     monkeypatch.setattr(ui.TVHeadendClient, '_new_player', lambda self: fake_player)
-    # Not GitHub: once a newer release is out, its Update Available box waits for a click.
-    monkeypatch.setattr(ui.TVHeadendClient, '_start_update_check', lambda self, quiet: None)
     if prepare is None:
         monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
     else:
@@ -276,7 +274,36 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
     app = QApplication.instance() or QApplication([])
     app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
     window = ui.TVHeadendClient()
+    # Not GitHub: once a newer release is out, its Update Available box waits for a click.
+    # On the window, not the class: its check comes 10 s after it opens, often during a
+    # later test, when a stub on the class would be undone.
+    window._start_update_check = lambda quiet: None
     return app, ui, window, fake_player
+
+
+def test_a_window_does_not_check_for_updates_after_its_test_ends(tmp_path):
+    # Each window checks for updates 10 s after it opens, and that timer keeps
+    # it alive. When it fires during a later test, this test's stubs are gone.
+    with pytest.MonkeyPatch.context() as mp:
+        app, ui, window, _player = _make_player(mp, tmp_path)
+    started = []
+
+    class Check:
+        def __init__(self, *args, **kwargs):
+            started.append(args)
+            self.done = types.SimpleNamespace(connect=lambda slot: None)
+
+        def start(self):
+            pass
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ui, 'UpdateCheck', Check)
+        try:
+            window._check_for_updates_when_due()
+        finally:
+            window.close()
+            app.processEvents()
+    assert started == []
 
 
 def _use_remote_server(window):
