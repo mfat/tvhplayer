@@ -8200,8 +8200,11 @@ class TVHeadendClient(QMainWindow):
         )
         self.config['builtin_http_port'] = http_port
         self.config['builtin_htsp_port'] = htsp_port
-        self.close_backend()
+        # Only the built-in server's connection is out of date. Another server's
+        # holds its channel list: dropped, the next request opened a new one
+        # whose fresh start emptied the list, and nothing loaded it again.
         if is_builtin_server(self.current_server()):
+            self.close_backend()
             self.fetch_channels()
         self._load_guides_after_start(find_builtin_server(self.servers))
         if (self.builtin is not None and hasattr(self.builtin, 'applied_recordings_dir')

@@ -5013,3 +5013,55 @@ def test_task_cards_fit_the_narrow_tasks_pane(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_builtin_server_starting_keeps_the_other_servers_connection(monkeypatch, tmp_path):
+    # The built-in server starts in the background while another server is
+    # shown. When it was ready, the window dropped its connection to the server
+    # being watched. The next request (Play) opened a new one, whose fresh
+    # start emptied the channel list, and nothing loaded the channels again.
+    from tvhplayer.core.models import Channel
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    local = {'name': 'local', 'url': 'http://127.0.0.1:9981', 'protocol': 'htsp', 'htsp_port': 9982}
+    builtin = {'name': 'Built-in Server', 'builtin': True, 'protocol': 'htsp', 'url': 'http://127.0.0.1:1'}
+    window.servers = [local, builtin]
+    window.server_combo.blockSignals(True)
+    window.server_combo.clear()
+    window.server_combo.addItems(['local', 'Built-in Server'])
+    window.server_combo.setCurrentIndex(0)
+    window.server_combo.blockSignals(False)
+    channels = [Channel(uuid=f'u{i}', name=f'IRIB {i}', number=i + 1, htsp_id=i + 1) for i in range(5)]
+    _onboarding_channels(ui, window, local, channels)
+
+    class Backend:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    held = Backend()
+    window._backend = held
+    window._backend_key = window._backend_key_for(local)
+    fetched = []
+    monkeypatch.setattr(window, 'fetch_channels', lambda *a, **k: fetched.append(True))
+    monkeypatch.setattr(window, '_load_guides_after_start', lambda server: None)
+    try:
+        app.processEvents()
+        assert window.channel_model.rowCount() == 5
+        window._on_builtin_ready(23702, 42918)
+        app.processEvents()
+        assert window.get_backend() is held
+        assert held.closed is False
+        assert fetched == []
+        assert window.channel_model.rowCount() == 5
+        # Shown, the built-in server does get a new connection and its channels.
+        window.server_combo.blockSignals(True)
+        window.server_combo.setCurrentIndex(1)
+        window.server_combo.blockSignals(False)
+        window._on_builtin_ready(23703, 42919)
+        assert held.closed is True
+        assert fetched == [True]
+    finally:
+        window.close()
+        app.processEvents()
