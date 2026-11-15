@@ -47,9 +47,22 @@ macOS may request approval via System Settings > Privacy & Security.
 Do not upload application log files that contain private server information.
 INSTRUCTIONS
 
-rm -f "$OUTPUT"
-hdiutil create -volname "$VOLUME" \
-  -srcfolder "$STAGE" -format UDZO -ov "$OUTPUT" >/dev/null
+# hdiutil create sometimes fails with "Resource busy" while macOS (Spotlight,
+# XProtect) still holds the new files; a later try works. It broke the 4.6.7
+# arm64 build once.
+for attempt in 1 2 3 4 5; do
+  rm -f "$OUTPUT"
+  if hdiutil create -volname "$VOLUME" \
+    -srcfolder "$STAGE" -format UDZO -ov "$OUTPUT" >/dev/null; then
+    break
+  fi
+  if [[ "$attempt" == 5 ]]; then
+    echo "ERROR: hdiutil create failed $attempt times" >&2
+    exit 1
+  fi
+  echo "hdiutil create failed (try $attempt); trying again in $((attempt * 10)) s" >&2
+  sleep $((attempt * 10))
+done
 
 hdiutil verify "$OUTPUT" >/dev/null
 hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$OUTPUT" >/dev/null
