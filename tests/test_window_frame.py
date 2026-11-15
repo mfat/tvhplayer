@@ -226,6 +226,35 @@ def test_dialogs_get_the_apps_title_bar_too(qapp):
         qapp.processEvents()
 
 
+def test_a_dialog_freed_by_the_garbage_collector_raises_no_error(qapp):
+    # The collector cleared the frame's attributes first; the dialog, going
+    # after, still sent it events: AttributeError: no attribute 'window'.
+    import gc
+    import sys
+
+    from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout
+
+    framer = _framer(qapp)
+    errors = []
+    hook, sys.excepthook = sys.excepthook, lambda *info: errors.append(info)
+    try:
+        dialog = QDialog()
+        dialog.cycle = dialog
+        QVBoxLayout(dialog).addWidget(QLabel('Hello'))
+        dialog.show()
+        qapp.processEvents()
+        dialog.hide()
+        qapp.processEvents()
+        del dialog
+        gc.collect()
+        qapp.processEvents()
+    finally:
+        sys.excepthook = hook
+        framer.deleteLater()
+        qapp.processEvents()
+    assert not errors, errors[0][1]
+
+
 def test_message_boxes_get_it_without_maximize(qapp):
     from PyQt6.QtWidgets import QMessageBox
 

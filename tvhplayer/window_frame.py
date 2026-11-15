@@ -580,7 +580,9 @@ class _Frame(QObject):
         pass
 
     def eventFilter(self, obj, event):
-        if obj is self.window:
+        # A window Python's garbage collector frees loses this frame's
+        # attributes before the window itself goes, which still sends it events.
+        if obj is getattr(self, 'window', None):
             kind = event.type()
             if kind == QEvent.Type.Paint:
                 self._paint()
