@@ -46,23 +46,8 @@
     <release version="4.6.6" date="2026-11-15">
       <description>
         <ul>
-          <li>Performance improvements, and better handling of large playlists.</li>
-          <li>The Tasks panel shows each task as a two-line card with the time left and a progress bar.</li>
-          <li>The window no longer freezes while the server answers when you choose a channel, record, stop a recording, open a guide or load logos.</li>
-          <li>Big channel lists and playlists load, import and update much faster, and the built-in server starts faster.</li>
-          <li>The channel list no longer goes empty when you press Play after starting a recording on another server.</li>
-          <li>Choose hardware decoding in the playback settings.</li>
-          <li>Channels that fail the server's stream test are marked Not working and can be tested again; the marks can be turned off.</li>
-          <li>A channel scan shows each frequency, signal strength and quality bars, and says what went wrong.</li>
-          <li>TVHplayer says when a firewall hides an HDHomeRun from the built-in server.</li>
-          <li>A playlist's address, username, password, headers and User-agent can be edited; VLC and Chrome User-agents are offered.</li>
-          <li>Playlists and Xtream accounts load from providers that block Python's default User-Agent.</li>
-          <li>Dialogs get TVHplayer's own title bar too; on GNOME on Wayland it is on unless switched off.</li>
-          <li>The built-in server runs without access control, and stops when TVHplayer closes, crashes or is force quit.</li>
-          <li>Long programme descriptions in the TV Guide can be scrolled; Record Series from the guide works again.</li>
-          <li>The channel list no longer shows old programmes as next.</li>
-          <li>TVHplayer no longer crashes as it closes on GNOME Wayland.</li>
-          <li>On Windows: playlists given as file:// addresses open, compressed guides refresh, and NVIDIA hardware decoding is fixed.</li>
+          <li>Performance improvements.</li>
+          <li>Better handling of large playlists.</li>
         </ul>
       </description>
     </release>
