@@ -288,7 +288,7 @@ import logging
 import platform
 
 # Shown in About; the release notes in the metainfo file give the same version.
-APP_VERSION = "4.7.1"
+APP_VERSION = "4.7.2"
 UPDATE_CHECK_DELAY_MS = 10_000
 CHANNEL_RELOAD_SECONDS = 30
 # The not-working marks wait this long after the channel list fills.
