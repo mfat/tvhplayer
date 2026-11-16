@@ -34,9 +34,10 @@ The deb and rpm builds download `<repo>/archive/<commit>.tar.gz`, and the deb bu
 | `27012c084` | xmltv: find the installed grabbers while the configuration loads | not yet |
 | `9a2195c05` | epgdb: read and unpack the EPG database while the configuration loads | not yet |
 | `fd5952d15` | bouquet: fill a bouquet's active services in one pass at startup | not yet |
-| `d25bc4d11` | epggrab: resolve TVHplayer guide destinations directly by UUID | not yet |
+| `d25bc4d11` | epggrab: resolve TVHplayer guide destinations directly by UUID | [#2400](https://github.com/tvheadend/tvheadend/pull/2400) |
+| `22ba6e532` | epggrab: link a changed channel to its TVHplayer guide channel directly | [#2400](https://github.com/tvheadend/tvheadend/pull/2400) |
 
-Base: upstream `51ec612fa`. Packages pin `4b5877172`, the `tvhplayer` branch tip, which includes these fixes.
+Base: upstream `51ec612fa`. Packages pin `22ba6e532`, the `tvhplayer` branch tip, which includes these fixes.
 
 For startup investigation, enable the existing stderr/main trace with `-d --trace main`
 on a disposable, disk-backed copy of the configuration. Stage timing is emitted

@@ -1,8 +1,8 @@
 # The built-in server. These pins match packaging/tvheadend/pins.env;
 # tests/test_packaging_pins.py fails when they disagree.
 %global tvh_repo https://github.com/mfat/tvheadend
-%global tvh_commit 4b587717299b542defc1b0114a96ad6633dcbc4d
-%global tvh_version 4.3^2916.g4b5877172
+%global tvh_commit 22ba6e5324288f2a0dfd1f5aaec9ac091d50b515
+%global tvh_version 4.3^2917.g22ba6e532
 %global scan_commit 31d6fb8f8b86e204518ada99bfb8cf6807c717e5
 %global dvbcsa_version 1.1.0
 %global hdhomerun_version 20250815
