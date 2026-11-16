@@ -1228,8 +1228,12 @@ def test_accessibility_names_keyboard_and_contrast(monkeypatch, tmp_path):
         assert window.play_btn.toolTip() == "Play / Stop (P)"
         assert window.play_btn.statusTip() == ""
         from tvhplayer.a11y import keys_text  # macOS shows Ctrl+R as ⌘R.
-        # The built-in server has one Record window, so one key.
-        assert window.record_btn.toolTip() == keys_text("Record (Ctrl+R)")
+        # The built-in server has one Record window, so one key. Without a Tvheadend
+        # on this computer (as on CI) there is no built-in server, and Record offers both kinds.
+        if ui.is_builtin_server(window.current_server()):
+            assert window.record_btn.toolTip() == keys_text("Record (Ctrl+R)")
+        else:
+            assert window.record_btn.toolTip() == keys_text("Record (Ctrl+R / Ctrl+Shift+R)")
         assert window.record_btn.statusTip() == ""
         assert window.record_btn.isVisible()
         assert not window.stop_record_btn.isVisible()

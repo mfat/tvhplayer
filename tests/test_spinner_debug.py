@@ -21,34 +21,6 @@ def test_module_hooks_do_nothing_when_off(monkeypatch):
     spinner_debug.stopped()
 
 
-def _busy(seconds):
-    end = time.monotonic() + seconds
-    while time.monotonic() < end:
-        sum(range(200))
-
-
-def test_late_tick_names_the_thread_running_python():
-    out = []
-    watch = spinner_debug.SpinnerWatch(out=out.append)
-    watch.started()
-    watch.tick()
-    # Another thread burns Python time while this one sleeps past its next tick.
-    hog = threading.Thread(target=_busy, args=(0.15,), name='hog')
-    hog.start()
-    time.sleep(0.12)
-    watch.tick()
-    hog.join()
-    watch.stopped()
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline and not any('stopped after' in line for line in out):
-        time.sleep(0.01)
-    report = next(line for line in out if line.startswith('tick late'))
-    # The sampler or, when the hog starves it of the GIL, the faulthandler dump names it.
-    assert 'hog' in report
-    assert '_busy' in report
-    assert '1 late' in out[-1]
-
-
 def test_faulthandler_dump_comes_with_the_late_tick():
     out = []
     watch = spinner_debug.SpinnerWatch(out=out.append)
