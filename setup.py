@@ -7,7 +7,7 @@ HTSMSG = Extension('tvhplayer.core._htsmsg', ['tvhplayer/core/_htsmsg.c'], optio
 
 setup(
     name="tvhplayer",
-    version="4.7.0",
+    version="4.7.1",
     description="Desktop client for TVHeadend",
     author="mFat",
     author_email="mah.fat@gmail.com",
