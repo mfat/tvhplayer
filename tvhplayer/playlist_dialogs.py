@@ -798,9 +798,7 @@ def show_skipped(parent, skipped):
     box.exec()
 
 
-def check_hint(hides: bool) -> str:
-    fate = 'are hidden' if hides else 'are marked'
-    return f'Channels were imported successfully. Those that do not work {fate} as the check finds them. You can close this window; checking goes on.'
+CHECK_HINT = 'Channels were imported successfully. You can close this window now; checking goes on in background.'
 
 
 class ImportPlaylistDialog(QDialog):
@@ -973,7 +971,7 @@ class ImportPlaylistDialog(QDialog):
         self.progress_bar.hide()
         describe(self.progress_bar, 'Import progress')
         layout.addWidget(self.progress_bar)
-        self.hint_label = QLabel(check_hint(True))
+        self.hint_label = QLabel(CHECK_HINT)
         self.hint_label.setWordWrap(True)
         self.hint_label.hide()
         layout.addWidget(self.hint_label)
@@ -1149,7 +1147,6 @@ class ImportPlaylistDialog(QDialog):
         self._show_check_hint()
 
     def _show_check_hint(self):
-        self.hint_label.setText(check_hint(self._host.hides_dead_channels()))
         self.hint_label.show()
 
     def _finished(self, message, skipped):
@@ -1282,7 +1279,7 @@ class PlaylistsDialog(QDialog):
         self.progress_bar.hide()
         describe(self.progress_bar, 'Progress')
         detail.addWidget(self.progress_bar)
-        self.hint_label = QLabel(check_hint(True))
+        self.hint_label = QLabel(CHECK_HINT)
         self.hint_label.setWordWrap(True)
         self.hint_label.hide()
         detail.addWidget(self.hint_label)
@@ -1530,7 +1527,6 @@ class PlaylistsDialog(QDialog):
         self._sync_buttons()
 
     def _show_check_hint(self):
-        self.hint_label.setText(check_hint(self._host.hides_dead_channels()))
         self.hint_label.show()
 
     def _progress(self, done, total):

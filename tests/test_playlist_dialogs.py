@@ -512,7 +512,7 @@ def test_closing_while_checking_hands_the_job_to_the_host(app, tmp_path, monkeyp
     while time.monotonic() < deadline and dialog.hint_label.isHidden():
         app.processEvents()
         time.sleep(0.02)
-    assert dialog.hint_label.text() == dialogs.check_hint(host.hides_dead_channels())
+    assert dialog.hint_label.text() == dialogs.CHECK_HINT
     assert dialog.close_btn.text() == 'Close'
 
     job = dialog._job
