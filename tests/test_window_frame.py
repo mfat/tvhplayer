@@ -825,3 +825,17 @@ def test_a_wizard_keeps_its_pages_and_buttons_inside_the_frame(qapp):
         framer.deleteLater()
         parent.deleteLater()
         qapp.processEvents()
+
+
+def test_the_wayland_app_interface_is_found_on_qt_6_11_too(qapp):
+    # Qt 6.11 made QWaylandApplication revision 2, adding to its end. Asked for
+    # revision 1 only, it answered nothing: no window menu in the Flatpak, on Qt 6.11.
+    from tvhplayer.window_menu import _Wayland
+
+    for answers in (1, 2):
+        backend = object.__new__(_Wayland)
+        asked = []
+        backend.resolve_app = lambda app, name, revision, answers=answers: (
+            asked.append((name, revision)) or (1234 if revision == answers else None))
+        assert backend._app_interface() == 1234
+        assert all(name == b'QWaylandApplication' for name, _revision in asked)

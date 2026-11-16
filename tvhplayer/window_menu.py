@@ -42,6 +42,8 @@ XDG_TOPLEVEL_SHOW_WINDOW_MENU = 4
 SLOT_SEAT = 4
 SLOT_LAST_INPUT_SERIAL = 8
 SLOT_LAST_INPUT_SEAT = 9
+# Its revisions with those slots: 1 up to Qt 6.10, 2 from Qt 6.11.
+APP_INTERFACE_REVISIONS = (2, 1)
 # QtWaylandClient::QWaylandWindow::_surfaceRole() const, which returns an std::any
 # holding the window's xdg_toplevel. Called by name: its place in the vtable
 # moved in Qt 6.11.
@@ -185,7 +187,12 @@ class _Wayland:
         app = QGuiApplication.instance()
         if app is None:
             return None
-        return self.resolve_app(sip.unwrapinstance(app), b'QWaylandApplication', 1)
+        # Qt answers only the revision it has. Revision 2 (Qt 6.11) added to the end only.
+        for revision in APP_INTERFACE_REVISIONS:
+            interface = self.resolve_app(sip.unwrapinstance(app), b'QWaylandApplication', revision)
+            if interface:
+                return interface
+        return None
 
     @staticmethod
     def _virtual(interface, slot, restype):
