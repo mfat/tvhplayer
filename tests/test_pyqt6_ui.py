@@ -5315,3 +5315,20 @@ def test_the_idle_logo_shrinks_with_the_player(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def test_long_group_and_server_names_do_not_widen_the_channel_pane(monkeypatch, tmp_path):
+    # The Group list grew to its longest name, so the channel pane could not
+    # be dragged narrower than that.
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    try:
+        # The groups arrive before the row first shows, when the list sizes itself.
+        window.tag_combo.addItem("Persian satellite channels in high definition (123)", "x")
+        window.server_combo.addItem("A very long server name for testing purposes")
+        window.tag_row.setVisible(True)
+        window.show()
+        _settle(app)
+        assert window.left_pane.minimumSizeHint().width() <= 280
+    finally:
+        window.close()
+        app.processEvents()

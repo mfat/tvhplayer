@@ -4694,6 +4694,9 @@ class TVHeadendClient(QMainWindow):
         tag_layout.setSpacing(5)
         self.tag_combo = QComboBox()
         self.tag_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # Long group names are cut short, not a floor under the pane's width.
+        self.tag_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.tag_combo.setMinimumContentsLength(8)
         self.tag_combo.addItem("All channels", "")
         self.tag_combo.currentIndexChanged.connect(self._on_channel_tag_changed)
         describe(
