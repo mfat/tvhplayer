@@ -11,10 +11,12 @@ import pytest
 from tvhplayer.core import builtin_server
 from tvhplayer.core.ffmpeg_starter import (
     DEFAULT_USER_AGENT,
+    SHORT_PROBE,
     best_variant,
     install_starter,
     request_headers,
     with_best_variant,
+    with_short_probe,
 )
 from tvhplayer.core.playlist import ffmpeg_command, tvh_split
 from tvhplayer.core.playlist_sync import ffmpeg_for_server, retarget_commands
@@ -82,6 +84,17 @@ def test_ffmpeg_default_user_agent_is_sent_when_the_playlist_names_none():
     assert request_headers(['-reconnect', '1']) == {'User-Agent': DEFAULT_USER_AGENT}
 
 
+def test_channels_imported_earlier_get_the_short_look():
+    old = ['-nostdin', '-reconnect', '1', '-i', 'http://example.com/a.ts', '-c', 'copy', 'pipe:1']
+    new = with_short_probe(old)
+    assert new == old[:3] + ['-analyzeduration', '1000000', '-probesize', '1000000'] + old[3:]
+    assert with_short_probe(new) == new
+    own = ['-probesize', '32', '-i', 'http://example.com/a.ts']
+    assert with_short_probe(own) == own
+    remux = ['-i', 'pipe:0', '-c', 'copy']
+    assert with_short_probe(remux) == remux
+
+
 def test_inputs_that_are_not_web_addresses_are_not_fetched():
     def fetch(*_args):
         raise AssertionError('fetched')
@@ -125,7 +138,9 @@ def test_the_installed_stand_in_runs_ffmpeg_on_the_best_quality(tmp_path, web, f
     starter = install_starter(str(fake_ffmpeg), tmp_path / 'bin' / 'ffmpeg')
     args = ['-nostdin', '-i', f'{web}/index.m3u8', '-c', 'copy', '-f', 'mpegts', 'pipe:1']
     output = subprocess.run([starter] + args, capture_output=True, text=True, timeout=20, env={})
-    assert output.stdout.split('\n')[:-1] == ['-nostdin', '-i', f'{web}/01.m3u8', '-c', 'copy', '-f', 'mpegts', 'pipe:1']
+    assert output.stdout.split('\n')[:-1] == [
+        '-nostdin', *SHORT_PROBE, '-i', f'{web}/01.m3u8', '-c', 'copy', '-f', 'mpegts', 'pipe:1',
+    ]
 
 
 @pytest.mark.skipif(sys.platform == 'win32', reason='The stand-in serves the Linux built-in server')
@@ -134,7 +149,7 @@ def test_the_stand_in_passes_the_command_on_when_the_list_cannot_be_read(tmp_pat
     for url in (f'{web}/stream.ts', 'http://127.0.0.1:1/index.m3u8'):
         args = ['-i', url, 'pipe:1']
         output = subprocess.run([starter] + args, capture_output=True, text=True, timeout=20)
-        assert output.stdout.split('\n')[:-1] == args
+        assert output.stdout.split('\n')[:-1] == SHORT_PROBE + args
 
 
 def test_the_stand_in_is_written_once_and_only_where_python_can_run_it(tmp_path, monkeypatch):

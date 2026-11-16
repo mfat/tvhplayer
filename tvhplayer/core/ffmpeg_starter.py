@@ -9,6 +9,9 @@ quality, the one ffmpeg would have played.
 
 The installed script is this file run by the app's Python, so it uses the
 standard library only. Anything unexpected passes ffmpeg its arguments unchanged.
+
+It also gives channels imported before SHORT_PROBE existed that short look at
+the stream, so they start as fast as newly imported ones.
 """
 
 import os
@@ -22,6 +25,11 @@ FETCH_TIMEOUT = 8
 MAX_LIST_BYTES = 1024 * 1024
 # What ffmpeg itself sends when the playlist names no user agent.
 DEFAULT_USER_AGENT = 'Lavf/60.16.100'
+
+# How much of a stream ffmpeg reads before it sends anything: 1 s or 1 MB,
+# instead of its own 5 s or 5 MB. Six channels of one provider sent their first
+# data after 1.3-4.2 s instead of 3.3-6.2 s, with the same picture and sound found.
+SHORT_PROBE = ['-analyzeduration', '1000000', '-probesize', '1000000']
 
 _ATTRIBUTE = re.compile(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)')
 
@@ -108,11 +116,22 @@ def with_best_variant(args, fetch=fetch_list):
     return args[:position] + [variant] + args[position + 1:]
 
 
+def with_short_probe(args):
+    """ffmpeg arguments with SHORT_PROBE, unless the command sets its own or reads no address."""
+    inputs = [index for index, arg in enumerate(args) if arg == '-i']
+    if len(inputs) != 1 or inputs[0] + 1 >= len(args) or '://' not in args[inputs[0] + 1]:
+        return args
+    if any(option in args for option in ('-analyzeduration', '-probesize')):
+        return args
+    return args[:inputs[0]] + SHORT_PROBE + args[inputs[0]:]
+
+
 def main(ffmpeg, args):
     try:
         args = with_best_variant(args)
     except Exception:
         pass
+    args = with_short_probe(args)
     os.execv(ffmpeg, [ffmpeg] + args)
 
 

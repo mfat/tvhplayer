@@ -19,6 +19,7 @@ from urllib.request import url2pathname
 import requests
 
 from .errors import PlaylistError
+from .ffmpeg_starter import SHORT_PROBE
 from .proxy import configure_session
 
 NOT_A_PLAYLIST = 'This file is not a TV playlist.'
@@ -421,7 +422,7 @@ def plan_channels(
 
 def ffmpeg_command(ffmpeg: str, url: str, headers=None, name: str = '', provider: str = '') -> str:
     """A ``pipe://`` command that remuxes ``url`` to MPEG-TS with program 1."""
-    args = [ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error']
+    args = [ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error', *SHORT_PROBE]
     if url.split(':', 1)[0].lower() in ('http', 'https'):
         args += [
             '-reconnect', '1',

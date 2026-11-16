@@ -119,6 +119,15 @@ def test_ffmpeg_command_round_trips_through_tvheadend_splitting():
     assert args[-1] == 'pipe:1'
 
 
+def test_ffmpeg_takes_a_short_look_at_every_stream():
+    for url in ('http://example.com/a.ts', 'udp://@239.0.0.1:1234'):
+        args = tvh_split(ffmpeg_command('ffmpeg', url)[7:])
+        at = args.index('-analyzeduration')
+        assert args[at:at + 4] == ['-analyzeduration', '1000000', '-probesize', '1000000']
+        assert at < args.index('-i')
+        assert ffmpeg_input(' '.join(args)) == (url, {})
+
+
 def test_reconnect_options_only_for_web_streams():
     assert '-reconnect' in ffmpeg_command('ffmpeg', 'http://example.com/a.ts')
     udp = ffmpeg_command('ffmpeg', 'udp://@239.0.0.1:1234', {'Referer': 'x'})
