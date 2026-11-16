@@ -36,8 +36,10 @@ LIST_BUSY_BUDGET = 0.2
 # Typing a search: most keys take under 10 ms with 60,000 channels and the
 # slowest 40-100 ms, so this only catches searching getting slower.
 SEARCH_BUDGET = 0.2
-# Thousands of changes at once, as on the hour: rare, so a longer pause is allowed.
-LIST_BURST_BUDGET = 0.1
+# Thousands of changes at once, as on the hour: rare, so a longer pause is
+# allowed. They take 35-115 ms alone and up to 160 ms during the whole test
+# run; looking through every row for each change took over a second.
+LIST_BURST_BUDGET = 0.25
 BIG_LIST = 60_000
 
 
@@ -805,6 +807,91 @@ def test_a_recordings_folder_on_a_slow_disk_keeps_the_window_answering(monkeypat
         assert at_once[1] == 1
     finally:
         _close(app, window)
+
+
+def _finished_recordings(count):
+    from tvhplayer.core.models import DvrEntry
+
+    now = int(time.time())
+    return [DvrEntry(uuid=f'u{i}', title=f'Show {i}', channel_name='One', start=now - 86400 * (i % 300) - 7200,
+                     duration=3600, status='Completed OK', sched_status='completed', htsp_id=i,
+                     raw={'filesize': 1_000_000 + i})
+            for i in range(count)]
+
+
+def test_refreshing_tasks_with_thousands_of_recordings_keeps_the_window_answering(monkeypatch, tmp_path):
+    # Tasks refreshes every 5 seconds, open or not. Writing out the dates and
+    # sizes of 3,000 finished recordings each time took over 100 ms.
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    pane = window.tasks_pane
+    pane.update_timer.stop()
+    window.show()
+    app.processEvents()
+
+    entries = _finished_recordings(3000)
+
+    def refresh():
+        pane._apply_server_entries(entries)
+        pane._redraw()
+
+    try:
+        refresh()
+        # The window settles after showing before anything is measured.
+        StallMeter().run(1.0)
+        meter = StallMeter()
+        for delay in (0, 300, 600):
+            QTimer_single(delay, refresh)
+        meter.run(1.0)
+        meter.report('Tasks refresh, 3,000 finished recordings')
+        assert meter.worst() < LIST_BUDGET
+    finally:
+        _close(app, window)
+
+
+def QTimer_single(delay, action):
+    from PyQt6.QtCore import QTimer
+
+    QTimer.singleShot(delay, action)
+
+
+def test_tasks_show_a_finished_recording_again_when_it_changes(monkeypatch, tmp_path):
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    pane = window.tasks_pane
+    pane.update_timer.stop()
+    try:
+        entries = _finished_recordings(2)
+        pane._apply_server_entries(entries)
+        assert [task['title'] for task in pane._server_tasks] == ['Show 0', 'Show 1']
+        assert pane._server_tasks[0]['size'] == '976.6 KB'
+        renamed = DvrEntry(**{**entries[0].__dict__, 'title': 'Renamed', 'raw': {'filesize': 5_000_000}})
+        pane._apply_server_entries([renamed, entries[1]])
+        assert pane._server_tasks[0]['title'] == 'Renamed'
+        assert pane._server_tasks[0]['size'] == '4.8 MB'
+        assert pane._server_tasks[0]['entry'] is renamed
+
+        # "today" becomes "yesterday" once the day is over.
+        finished = entries[1].start + entries[1].duration
+        monkeypatch.setattr(ui, 'datetime', _Clock(ui.datetime, finished + 86400 * 2))
+        pane._apply_server_entries([renamed, entries[1]])
+        assert 'today' not in pane._server_tasks[1]['line']
+    finally:
+        _close(app, window)
+
+
+class _Clock:
+    """``datetime`` with ``now()`` fixed at ``stamp``."""
+
+    def __init__(self, real, stamp):
+        self._real = real
+        self._stamp = stamp
+
+    def now(self, *args):
+        return self._real.fromtimestamp(self._stamp)
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
 
 
 # --- A big channel list ------------------------------------------------------

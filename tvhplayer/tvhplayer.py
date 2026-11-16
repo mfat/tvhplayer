@@ -741,6 +741,10 @@ def _byte_count(value):
     return None
 
 
+# Where Tvheadend puts a recording's size; see _entry_filesize.
+_SIZE_KEYS = ('dataSize', 'data_size', 'filesize', 'file_size', 'size')
+
+
 def _entry_filesize(entry):
     """Bytes recorded so far.
 
@@ -1396,64 +1400,94 @@ class TasksPanel(QFrame):
             )
 
     def _tasks_from_entries(self, entries):
+        """Tasks for the server's recordings.
+
+        Writing out the dates and sizes of thousands of finished recordings
+        took over 100 ms on every refresh, every 5 seconds. A finished
+        recording does not change, so its task is made once and kept while
+        the recording stays the same, until the day changes ("today" turns
+        to "yesterday").
+        """
         tasks = []
         builtin = self._builtin_server()
         now = int(datetime.now().timestamp())
+        day = (datetime.fromtimestamp(now).date(), builtin)
+        if getattr(self, '_finished_day', None) != day:
+            self._finished_day = day
+            self._finished_tasks = {}
+        kept = self._finished_tasks
+        fresh = {}
         for entry in entries:
             category = entry.category()
-            if category == 'recording':
-                bucket = 'recording'
-                status = 'Recording'
-                start_text = datetime.fromtimestamp(entry.start).strftime('%Y-%m-%d %H:%M')
-                detail = (
-                    f"Started {start_text}, elapsed {_clock(now - entry.start)}, "
-                    f"{_clock(entry.start + entry.duration - now)} left"
-                )
-                brief = f"Recording, {_short_duration(entry.start + entry.duration - now)} left"
-                progress = _fraction(now - entry.start, entry.duration)
-            elif category == 'upcoming':
-                bucket = 'scheduled'
-                status = 'Scheduled'
-                start_text = datetime.fromtimestamp(entry.start).strftime('%Y-%m-%d %H:%M')
-                detail = f"Starts {start_text}, duration {_clock(entry.duration)}"
-                brief = f"Scheduled {_short_when(entry.start, now)}, {_short_duration(entry.duration)}"
-                progress = None
-            elif category == 'finished':
-                bucket = 'completed'
-                status = 'Completed'
-                finished_at = (entry.start or 0) + (entry.duration or 0)
-                finished_text = datetime.fromtimestamp(finished_at).strftime('%Y-%m-%d %H:%M')
-                detail = f"Finished {finished_text}, duration {_clock(entry.duration)}"
-                brief = f"Completed {_short_when(finished_at, now)}"
-                progress = None
-            else:
+            if category == 'finished':
+                raw = entry.raw or {}
+                same = (entry.htsp_id, entry.uuid, entry.start, entry.duration, entry.title,
+                        entry.channel_name, tuple(raw.get(key) for key in _SIZE_KEYS))
+                known = kept.get(same)
+                if known is None:
+                    known = self._task_from_entry(entry, category, now, builtin)
+                fresh[same] = known
+                tasks.append(dict(known, entry=entry))
                 continue
-            size_bytes = _entry_filesize(entry)
-            if size_bytes is None or (bucket not in ('recording', 'completed') and not size_bytes):
-                size_text = ""
-            else:
-                size_text = _format_size(size_bytes)
-            if entry.htsp_id is not None:
-                key = ('server', 'htsp', entry.htsp_id)
-            else:
-                key = ('server', 'uuid', entry.uuid)
-            tasks.append({
-                'kind': 'Server',
-                'bucket': bucket,
-                'key': key,
-                'entry': entry,
-                'channel': entry.channel_name or '',
-                'title': entry.title or '',
-                'status': status,
-                'size': size_text,
-                'detail': detail,
-                'line': _task_line('Server', entry.channel_name or '', brief),
-                'where': _task_where('Server', builtin),
-                'progress': progress,
-                'start': entry.start or 0,
-                'path': '',
-            })
+            task = self._task_from_entry(entry, category, now, builtin)
+            if task is not None:
+                tasks.append(task)
+        self._finished_tasks = fresh
         return tasks
+
+    def _task_from_entry(self, entry, category, now, builtin):
+        if category == 'recording':
+            bucket = 'recording'
+            status = 'Recording'
+            start_text = datetime.fromtimestamp(entry.start).strftime('%Y-%m-%d %H:%M')
+            detail = (
+                f"Started {start_text}, elapsed {_clock(now - entry.start)}, "
+                f"{_clock(entry.start + entry.duration - now)} left"
+            )
+            brief = f"Recording, {_short_duration(entry.start + entry.duration - now)} left"
+            progress = _fraction(now - entry.start, entry.duration)
+        elif category == 'upcoming':
+            bucket = 'scheduled'
+            status = 'Scheduled'
+            start_text = datetime.fromtimestamp(entry.start).strftime('%Y-%m-%d %H:%M')
+            detail = f"Starts {start_text}, duration {_clock(entry.duration)}"
+            brief = f"Scheduled {_short_when(entry.start, now)}, {_short_duration(entry.duration)}"
+            progress = None
+        elif category == 'finished':
+            bucket = 'completed'
+            status = 'Completed'
+            finished_at = (entry.start or 0) + (entry.duration or 0)
+            finished_text = datetime.fromtimestamp(finished_at).strftime('%Y-%m-%d %H:%M')
+            detail = f"Finished {finished_text}, duration {_clock(entry.duration)}"
+            brief = f"Completed {_short_when(finished_at, now)}"
+            progress = None
+        else:
+            return None
+        size_bytes = _entry_filesize(entry)
+        if size_bytes is None or (bucket not in ('recording', 'completed') and not size_bytes):
+            size_text = ""
+        else:
+            size_text = _format_size(size_bytes)
+        if entry.htsp_id is not None:
+            key = ('server', 'htsp', entry.htsp_id)
+        else:
+            key = ('server', 'uuid', entry.uuid)
+        return {
+            'kind': 'Server',
+            'bucket': bucket,
+            'key': key,
+            'entry': entry,
+            'channel': entry.channel_name or '',
+            'title': entry.title or '',
+            'status': status,
+            'size': size_text,
+            'detail': detail,
+            'line': _task_line('Server', entry.channel_name or '', brief),
+            'where': _task_where('Server', builtin),
+            'progress': progress,
+            'start': entry.start or 0,
+            'path': '',
+        }
 
     def _local_tasks(self):
         host = self._host
