@@ -36,6 +36,8 @@ LIST_BUSY_BUDGET = 0.2
 # Typing a search: most keys take under 10 ms with 60,000 channels and the
 # slowest 40-100 ms, so this only catches searching getting slower.
 SEARCH_BUDGET = 0.2
+# Thousands of changes at once, as on the hour: rare, so a longer pause is allowed.
+LIST_BURST_BUDGET = 0.1
 BIG_LIST = 60_000
 
 
@@ -865,6 +867,30 @@ def test_programme_changes_on_a_big_list_keep_the_window_answering(monkeypatch, 
         assert backend.take_channel_changes()[0] == {}
         assert meter.busy() < LIST_BUSY_BUDGET
         assert meter.worst() < LIST_BUDGET
+    finally:
+        window._channel_fetch = None
+        backend.close()
+        _close(app, window)
+
+
+@pytest.mark.parametrize('search', ['', 'channel 1'])
+def test_a_burst_of_programme_changes_on_a_big_list_keeps_the_window_answering(monkeypatch, tmp_path, search):
+    # On the hour, thousands of channels change programme at once; the window
+    # takes up to 2,000 changes at a time. Finding each one's row looked
+    # through every row, close to a second for 2,000 on 60,000 channels,
+    # longer still for a channel a search leaves out.
+    app, ui, window, backend = _big_htsp_window(monkeypatch, tmp_path)
+    try:
+        window.search_box.setText(search)
+        StallMeter().run(1.0)
+        for number in range(1, 2001):
+            number = number * 29 % BIG_LIST + 1
+            backend._on_async({'method': 'channelUpdate', 'channelId': number,
+                               'eventId': number * 10 + 5, 'nextEventId': number * 10 + 6})
+        meter = StallMeter()
+        meter.run(1.0, until=lambda: backend.take_channel_changes()[0] == {} and len(meter.ticks) > 20)
+        meter.report(f'2,000 programme changes at once, {BIG_LIST:,} channels, search {search!r}')
+        assert meter.worst() < LIST_BURST_BUDGET
     finally:
         window._channel_fetch = None
         backend.close()
