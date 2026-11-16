@@ -463,3 +463,34 @@ def test_wizard_says_when_a_firewall_hides_an_hdhomerun(monkeypatch):
     wizard.close()
     app.setFont(font)
     app.processEvents()
+
+
+def test_the_wizard_grows_for_tuners_found_after_it_opened(monkeypatch):
+    # Found while the window was open, four tuners were drawn over each other:
+    # the window kept the size it opened with.
+    import os
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    from PyQt6.QtWidgets import QApplication
+
+    from tvhplayer import setup_wizard
+
+    app = QApplication.instance() or QApplication([])
+    pending = []
+    monkeypatch.setattr(setup_wizard.SetupWizard, 'call', lambda self, fn, slot: pending.append(slot))
+    wizard = setup_wizard.SetupWizard({'name': 'Built-in'}, lambda _s: None, lambda _s: None)
+    try:
+        wizard.show()
+        app.processEvents()
+        page = wizard.source_page
+        tuners = [Tuner(uuid=f'fe{i}', name=f'HDHomeRun DVB-T Tuner #{i} (192.168.8.148)', kind='DVB-T',
+                        enabled=True, hardware='HDHomeRun(1240C1F5) - 192.168.8.148') for i in range(4)]
+        page._tuners_read(tuners, '')
+        for _ in range(3):
+            app.processEvents()
+        assert page.found.isVisible()
+        layout = page.layout()
+        assert page.height() >= layout.totalHeightForWidth(page.width())
+    finally:
+        wizard.close()
+        app.processEvents()

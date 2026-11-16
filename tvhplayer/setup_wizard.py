@@ -706,6 +706,8 @@ class SourcePage(QWizardPage):
         self.found.setVisible(bool(tuners))
         # The sentence stays for assistive technology. The rows say the same thing on screen.
         self.status.setVisible(not tuners)
+        # Found after the window opened: the rows need room it may not have.
+        QTimer.singleShot(0, self._fit_window)
 
     def _changed(self, *_args):
         iptv = self.iptv_radio.isChecked()
