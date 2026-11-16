@@ -192,8 +192,13 @@ class TvhAdmin:
         return data if isinstance(data, list) else []
 
     def list_tuner_muxes(self) -> List[dict]:
-        """Muxes received with a tuner. IPTV muxes, which carry a URL, are left out."""
-        return [row for row in self._grid('api/mpegts/mux/grid', hidemode='none') if 'iptv_url' not in row]
+        """The uuids of the muxes received with a tuner. IPTV muxes, which carry a URL, are left out.
+
+        Only the two fields that tell them apart are asked for: every field
+        of tens of thousands of IPTV muxes was tens of megabytes to read.
+        """
+        rows = self._grid('api/mpegts/mux/grid', hidemode='none', **_only(['iptv_url']))
+        return [row for row in rows if 'iptv_url' not in row]
 
     def list_services_all(self, fields=None) -> List[dict]:
         """Every service, including unverified and disabled ones; with ``fields``, only those fields of each."""

@@ -33,13 +33,17 @@ class TunerUse:
         return self.channel_mux.get(uuid) if uuid else None
 
 
+# All the service grid needs to send here, out of dozens of fields a service.
+SERVICE_FIELDS = ('multiplex_uuid', 'enabled', 'channel')
+
+
 def read_tuner_use(admin) -> TunerUse:
     tuners = sum(1 for tuner in read_tuners(admin) if tuner.enabled)
     if not tuners:
         return TunerUse()
     muxes = {row['uuid'] for row in admin.list_tuner_muxes() if row.get('uuid')}
     channel_mux = {}
-    for service in admin.list_services_all():
+    for service in admin.list_services_all(fields=SERVICE_FIELDS):
         mux = service.get('multiplex_uuid')
         if mux not in muxes or not service.get('enabled', True):
             continue

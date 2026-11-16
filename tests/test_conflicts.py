@@ -39,7 +39,7 @@ class Admin:
     def list_tuner_muxes(self):
         return [{'uuid': 'm1'}, {'uuid': 'm2'}]
 
-    def list_services_all(self):
+    def list_services_all(self, fields=None):
         return [
             {'multiplex_uuid': 'm1', 'channel': [A]},
             {'multiplex_uuid': 'm2', 'channel': [B]},
@@ -75,3 +75,32 @@ def test_overlaps_on_more_muxes_than_tuners():
     assert find_conflicts([first, entry('off', B, 1000, enabled=False)], use, 0) == []
     assert find_conflicts([first, second], use, now=10 * HOUR) == []
     assert find_conflicts([first, second], None, 0) == []
+
+
+def test_tuner_use_asks_only_for_the_fields_it_uses():
+    # A server with tens of thousands of IPTV channels sent every field of
+    # every mux and service, tens of megabytes; reading that held up the window.
+    from tvhplayer.core.tvh_admin import TvhAdmin
+
+    asked = []
+
+    class Recording(TvhAdmin):
+        def __init__(self):
+            pass
+
+        def _grid(self, path, filters=None, **params):
+            asked.append((path, params.get('list')))
+            if path == 'api/mpegts/mux/grid':
+                return [{'uuid': 'm1'}, {'uuid': 'iptv', 'iptv_url': 'http://x'}]
+            return [{'uuid': 's1', 'multiplex_uuid': 'm1', 'channel': [A]},
+                    {'uuid': 's2', 'multiplex_uuid': 'iptv', 'channel': [B]}]
+
+        def hardware_tree(self, uuid='root'):
+            return Admin.tree.get(uuid, [])
+
+    use = read_tuner_use(Recording())
+    assert use.channel_mux == {A: 'm1'}
+    assert asked == [
+        ('api/mpegts/mux/grid', 'iptv_url,uuid'),
+        ('api/mpegts/service/grid', 'channel,enabled,multiplex_uuid,uuid'),
+    ]
