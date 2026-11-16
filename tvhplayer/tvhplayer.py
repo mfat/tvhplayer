@@ -85,6 +85,7 @@ try:
         THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, normalize_accent,
         polish_main_window, set_accent, set_color_scheme, set_window_color, style_key,
     )
+    from .squeeze import SqueezeRow
     from .player_bar import (
         DOT_SVG,
         MENU_DOT_SVG,
@@ -189,6 +190,7 @@ except ImportError:
         THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, normalize_accent,
         polish_main_window, set_accent, set_color_scheme, set_window_color, style_key,
     )
+    from squeeze import SqueezeRow
     from player_bar import (
         DOT_SVG,
         MENU_DOT_SVG,
@@ -3140,6 +3142,9 @@ SIGNAL_COLORS = {
 class IdleSplash(QWidget):
     """Logo on the black player, and a line under it while a Cast device is playing."""
 
+    LOGO_SIZE = 240
+    LOGO_SMALLEST = 48
+
     def __init__(self, logo_path, parent=None):
         super().__init__(parent)
         self.setObjectName('idle_splash')
@@ -3151,9 +3156,7 @@ class IdleSplash(QWidget):
             "#idle_splash { background-color: black; }"
             "#idle_logo {"
             "background-color: transparent;"
-            f"background-image: url(\"{logo}\");"
-            "background-position: center;"
-            "background-repeat: no-repeat;"
+            f"border-image: url(\"{logo}\") 0 0 0 0 stretch stretch;"
             "}"
             "#idle_cast_caption {"
             "color: rgba(255, 255, 255, 230);"
@@ -3167,7 +3170,7 @@ class IdleSplash(QWidget):
         layout.addStretch(1)
         self.logo = QLabel(self)
         self.logo.setObjectName('idle_logo')
-        self.logo.setFixedSize(240, 240)
+        self.logo.setFixedSize(self.LOGO_SIZE, self.LOGO_SIZE)
         self.logo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.logo, 0, Qt.AlignmentFlag.AlignHCenter)
         self.caption = QLabel(self)
@@ -3180,10 +3183,26 @@ class IdleSplash(QWidget):
         layout.addStretch(1)
         self.clear_caption()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_logo()
+
+    def _fit_logo(self):
+        """The logo shrinks with a narrow or short player, down to a small icon."""
+        margins = self.layout().contentsMargins()
+        room_w = self.width() - margins.left() - margins.right()
+        room_h = self.height() - margins.top() - margins.bottom()
+        if not self.caption.isHidden():
+            room_h -= self.caption.sizeHint().height() + self.layout().spacing()
+        side = max(self.LOGO_SMALLEST, min(self.LOGO_SIZE, room_w, room_h))
+        if side != self.logo.width():
+            self.logo.setFixedSize(side, side)
+
     def set_playing_on(self, name):
         text = f"Playing on {name}" if name else "Playing on Chromecast"
         self.caption.setText(text)
         self.caption.show()
+        self._fit_logo()
         describe(self, text, "The channel is playing on this Chromecast.")
 
     def clear_caption(self):
@@ -4519,10 +4538,15 @@ class TVHeadendClient(QMainWindow):
         self.left_pane.setAccessibleName("Channels")
         left_layout = QVBoxLayout(self.left_pane)
         
-        # Server selection with add/remove buttons
-        server_layout = QHBoxLayout()
+        # Server selection with add/remove buttons. In a narrow pane the
+        # server names are cut short and Reload and TV Guide show only their icons.
+        self.server_row = SqueezeRow()
+        server_layout = QHBoxLayout(self.server_row)
+        server_layout.setContentsMargins(0, 0, 0, 0)
         self.server_combo = QComboBox()
         self.server_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.server_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.server_combo.setMinimumContentsLength(8)
         for server in self.servers:
             self.server_combo.addItem(server['name'])
         # The last server, chosen before the change signal is connected: the
@@ -4546,7 +4570,7 @@ class TVHeadendClient(QMainWindow):
         )
         self.manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(self.manage_servers_btn)
-        self.reload_channels_btn = QToolButton()
+        self.reload_channels_btn = IconToolButton(self.icons_dir / 'refresh.svg', 18)
         self.reload_channels_btn.setText("Reload")
         self.reload_channels_btn.clicked.connect(lambda: self.fetch_channels(keep_place=True))
         describe(
@@ -4556,7 +4580,7 @@ class TVHeadendClient(QMainWindow):
         )
         self.reload_channels_btn.setToolTip("Reload channel list (F5)")
         server_layout.addWidget(self.reload_channels_btn)
-        self.guide_btn = QToolButton()
+        self.guide_btn = IconToolButton(self.icons_dir / 'event_note.svg', 18)
         self.guide_btn.setText("TV Guide")
         self.guide_btn.clicked.connect(lambda: self.show_guide())
         describe(
@@ -4566,7 +4590,14 @@ class TVHeadendClient(QMainWindow):
         )
         self.guide_btn.setToolTip(keys_text("TV guide (Ctrl+G)"))
         server_layout.addWidget(self.guide_btn)
-        left_layout.addLayout(server_layout)
+
+        def short_buttons(on):
+            style = Qt.ToolButtonStyle.ToolButtonIconOnly if on else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+            for button in (self.reload_channels_btn, self.guide_btn):
+                button.setToolButtonStyle(style)
+
+        self.server_row.set_steps((short_buttons,))
+        left_layout.addWidget(self.server_row)
         
     
 

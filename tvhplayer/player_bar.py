@@ -26,8 +26,10 @@ from PyQt6.QtWidgets import (
 
 try:
     from .a11y import button_stylesheet, describe, keys_text, prefers_high_contrast, with_keys
+    from .squeeze import SqueezeRow
 except ImportError:
     from a11y import button_stylesheet, describe, keys_text, prefers_high_contrast, with_keys
+    from squeeze import SqueezeRow
 
 BAR_BACKGROUND = '#141414'
 FLOATING_BACKGROUND = QColor(20, 20, 20, 224)
@@ -138,7 +140,7 @@ def _menu_stylesheet():
     )
 
 
-class PlayerBar(QWidget):
+class PlayerBar(SqueezeRow):
     """Controls joined to the bottom of the picture.
 
     The window connects the buttons and reports state back through
@@ -159,6 +161,11 @@ class PlayerBar(QWidget):
         self._server = False
         self._local = False
         self._floating = False
+        # Visibility the bar's state asks for, and the controls hidden for want of room.
+        self._wanted = {}
+        self._dropped = set()
+        self._live_width = None
+        self._record_short = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 8)
@@ -413,12 +420,48 @@ class PlayerBar(QWidget):
                         self.cast_btn, self.mute_btn, self.volume_slider, self.fullscreen_btn):
             control.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
+        # Taken in this order as the bar gets narrower.
+        self.set_steps((
+            lambda on: self._drop((self.volume_slider,), on),
+            lambda on: self._drop((self.prev_btn, self.next_btn), on),
+            lambda on: self._drop((self.back_btn, self.forward_btn), on),
+            self._record_compact,
+        ))
+
         self.set_playing(False)
         self.set_timeshift(None)
         self.set_casting(False)
         self.set_muted(False)
         self.set_fullscreen(False)
         self._apply_background()
+
+    def _want(self, widget, visible):
+        """Show or hide a control for the bar's state; a narrow bar may still keep it hidden."""
+        visible = bool(visible)
+        if self._wanted.get(widget) == visible:
+            return
+        self._wanted[widget] = visible
+        widget.setVisible(visible and widget not in self._dropped)
+        self.refit()
+
+    def _drop(self, widgets, on):
+        for widget in widgets:
+            if on:
+                self._dropped.add(widget)
+            else:
+                self._dropped.discard(widget)
+            widget.setVisible(self._wanted.get(widget, True) and not on)
+
+    def _record_compact(self, on):
+        """Record and Stop recording as their icons alone."""
+        self._record_short = bool(on)
+        self._record_text.setVisible(not on)
+        inner = self.record_btn.layout()
+        inner.invalidate()
+        self.record_btn.setMinimumWidth(inner.sizeHint().width())
+        self.stop_record_btn.setText("" if on else " Stop recording")
+        self.recording_group.layout().invalidate()
+        self.recording_group.updateGeometry()
 
     def _icon_color(self):
         return '#000000' if self._contrast else ICON_LIGHT
@@ -482,7 +525,7 @@ class PlayerBar(QWidget):
         if visible != self._timeshift_visible:
             self._timeshift_visible = visible
             for control in self._timeshift_controls:
-                control.setVisible(visible)
+                self._want(control, visible)
         if state is None:
             self._paused = self._behind = None
             self._seek_span = 0
@@ -519,6 +562,9 @@ class PlayerBar(QWidget):
         self._behind = behind
         self.live_btn.setText(f"−{_clock(behind)}" if behind > 0 else "LIVE")
         self.live_btn.setEnabled(behind > 0)
+        if self.live_btn.sizeHint().width() != self._live_width:
+            self._live_width = self.live_btn.sizeHint().width()
+            self.refit()
 
     def _record_clicked(self):
         if self._single:
@@ -538,6 +584,8 @@ class PlayerBar(QWidget):
         self._single = single
         self._record_chevron.setVisible(not single)
         self.record_more_btn.setVisible(not single)
+        self._record_compact(self._record_short)
+        self.refit()
         if single:
             describe(self.record_btn, "Record", "Record the channel. Keyboard: Ctrl+R.")
             self.record_btn.setToolTip(keys_text("Record (Ctrl+R)"))
@@ -559,8 +607,8 @@ class PlayerBar(QWidget):
         local_here = bool(local) if local_here is None else bool(local_here)
         self._server, self._local = bool(server), bool(local)
         recording = self._server or self._local
-        self.record_btn.setVisible(not recording)
-        self.recording_group.setVisible(recording)
+        self._want(self.record_btn, not recording)
+        self._want(self.recording_group, recording)
         both = self._server and self._local
         if both:
             self.stop_record_btn.setToolTip("Stop recording… (asks which)")

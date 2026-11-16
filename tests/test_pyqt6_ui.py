@@ -5237,3 +5237,85 @@ def test_builtin_server_starting_keeps_the_other_servers_connection(monkeypatch,
     finally:
         window.close()
         app.processEvents()
+
+
+def _settle(app):
+    for _ in range(3):
+        app.processEvents()
+
+
+def test_the_window_narrows_to_half_a_1080p_screen_at_125_percent(monkeypatch, tmp_path):
+    # Issue #58: the row over the channel list and the player bar kept every
+    # control at full size, so the window could not be narrower than 865 px
+    # idle and 1081 px while playing with timeshift and a recording. Half of a
+    # 1080p screen at 125% is 768 px.
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    bar = window.controls_bar
+    try:
+        window.resize(1400, 700)
+        window.show()
+        _settle(app)
+        assert window.minimumSizeHint().width() <= 560
+        bar.set_timeshift((False, 30, 600))
+        bar.set_recording(True, False)
+        _settle(app)
+        assert window.minimumSizeHint().width() <= 680
+        # Wide, everything shows at full size.
+        assert bar.squeeze.level == 0 and window.server_row.squeeze.level == 0
+        assert bar.volume_slider.isVisibleTo(bar) and bar.back_btn.isVisibleTo(bar)
+        assert bar.stop_record_btn.text().strip() == "Stop recording"
+        assert window.guide_btn.toolButtonStyle() == ui.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+
+        window.resize(300, 500)
+        _settle(app)
+        assert window.width() <= 680
+        # Narrow: the extras are hidden, Record and the buttons over the list keep their icons.
+        assert not bar.volume_slider.isVisibleTo(bar)
+        assert not bar.prev_btn.isVisibleTo(bar) and not bar.back_btn.isVisibleTo(bar)
+        assert bar.mute_btn.isVisibleTo(bar) and bar.pause_btn.isVisibleTo(bar) and bar.live_btn.isVisibleTo(bar)
+        assert bar.stop_record_btn.isVisibleTo(bar) and bar.stop_record_btn.text() == ""
+        assert bar.stop_record_btn.accessibleName() == "Stop recording"
+        assert window.guide_btn.toolButtonStyle() == ui.Qt.ToolButtonStyle.ToolButtonIconOnly
+        assert window.guide_btn.accessibleName() == "TV guide"
+        # Nothing in the bar is cut: it is as wide as its controls need.
+        assert bar.width() >= bar.layout().totalMinimumSize().width()
+
+        # Recording stops while narrow: Record comes back as its icon, the hidden extras stay hidden.
+        bar.set_recording(False, False)
+        _settle(app)
+        assert bar.record_btn.isVisibleTo(bar) and not bar._record_text.isVisibleTo(bar)
+        assert not bar.volume_slider.isVisibleTo(bar)
+
+        window.resize(1400, 700)
+        _settle(app)
+        assert bar.squeeze.level == 0
+        assert bar.volume_slider.isVisibleTo(bar) and bar.prev_btn.isVisibleTo(bar) and bar.back_btn.isVisibleTo(bar)
+        assert bar._record_text.isVisibleTo(bar)
+        assert window.guide_btn.toolButtonStyle() == ui.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        # Timeshift ends: its controls hide even though the room for them is back.
+        bar.set_timeshift(None)
+        _settle(app)
+        assert not bar.back_btn.isVisibleTo(bar) and not bar.pause_btn.isVisibleTo(bar)
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_the_idle_logo_shrinks_with_the_player(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    splash = window.idle_splash
+    try:
+        window.show()
+        splash.show()
+        splash.resize(800, 600)
+        _settle(app)
+        assert splash.logo.width() == 240
+        splash.resize(150, 600)
+        _settle(app)
+        assert splash.logo.width() == 150 - 48
+        splash.resize(30, 30)
+        _settle(app)
+        assert splash.logo.width() == splash.LOGO_SMALLEST
+    finally:
+        window.close()
+        app.processEvents()
