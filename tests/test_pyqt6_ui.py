@@ -623,6 +623,9 @@ def test_spinner_shows_until_playback_starts(monkeypatch, tmp_path):
             for x in range(image.width())
         )
 
+        # The stream address comes from the server in the background; on a busy
+        # computer it can arrive after an early "playing" and start the channel again.
+        _wait_until(app, lambda: window._stream is not None, 'the stream address')
         fake_player._events.handlers['playing'](None)
         app.processEvents()
 

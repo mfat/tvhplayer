@@ -901,8 +901,8 @@ class _Clock:
 # --- A big channel list ------------------------------------------------------
 
 
-def _big_htsp_window(monkeypatch, tmp_path, count=BIG_LIST):
-    """The window showing ``count`` channels from an HTSP server that sends live updates."""
+def _big_htsp_window(monkeypatch, tmp_path, count=BIG_LIST, groups=0):
+    """The window showing ``count`` channels, in ``groups`` groups, from an HTSP server that sends live updates."""
     from tvhplayer.core.htsp_backend import HtspBackend
     from tvhplayer.core.models import ServerConfig
 
@@ -919,23 +919,33 @@ def _big_htsp_window(monkeypatch, tmp_path, count=BIG_LIST):
                                   keep_place=False, _now_next=False, deleteLater=lambda: None)
     window._channel_fetch = fetch
     for number in range(1, count + 1):
-        backend._on_async({'method': 'channelAdd', 'channelId': number, 'channelName': f'Channel {number}',
-                           'channelNumber': number, 'eventId': number * 10, 'nextEventId': number * 10 + 1})
+        message = {'method': 'channelAdd', 'channelId': number, 'channelName': f'Channel {number}',
+                   'channelNumber': number, 'eventId': number * 10, 'nextEventId': number * 10 + 1}
+        if groups:
+            message['tags'] = [(number - 1) % groups + 1]
+        backend._on_async(message)
+    for tag in range(1, groups + 1):
+        backend._on_async({'method': 'tagAdd', 'tagId': tag, 'tagName': f'Group {tag}',
+                           'members': list(range(tag, count + 1, groups))})
     backend._on_async({'method': 'initialSyncCompleted'})
     _load_channels(window, fetch, {'channels': [], 'tags': [], 'services': [], 'now_next': None})
     assert window.channel_model.rowCount() == count
+    if groups:
+        assert window.tag_combo.count() == groups + 1
     window.show()
     app.processEvents()
     return app, ui, window, backend
 
 
-def test_programme_changes_on_a_big_list_keep_the_window_answering(monkeypatch, tmp_path):
+@pytest.mark.parametrize('groups', [0, 1_034])
+def test_programme_changes_on_a_big_list_keep_the_window_answering(monkeypatch, tmp_path, groups):
     # Tvheadend sends a channelUpdate whenever a channel's programme changes.
     # With tens of thousands of channels that is a steady stream; none of
-    # them moves a row.
+    # them moves a row, nor changes how many channels a group has. Counting
+    # every group's channels again for each took 225-350 ms on a real server.
     from PyQt6.QtCore import QTimer
 
-    app, ui, window, backend = _big_htsp_window(monkeypatch, tmp_path)
+    app, ui, window, backend = _big_htsp_window(monkeypatch, tmp_path, groups=groups)
     try:
         sent = [0]
 
@@ -953,7 +963,7 @@ def test_programme_changes_on_a_big_list_keep_the_window_answering(monkeypatch, 
         meter = StallMeter()
         meter.run(3.0)
         feeder.stop()
-        meter.report(f'Programme changes, {BIG_LIST:,} channels, 50 a second')
+        meter.report(f'Programme changes, {BIG_LIST:,} channels in {groups:,} groups, 50 a second')
         assert sent[0] >= 100
         assert backend.take_channel_changes()[0] == {}
         assert meter.busy() < LIST_BUSY_BUDGET
@@ -1066,3 +1076,26 @@ def test_typing_a_search_on_a_big_list_keeps_the_window_answering(monkeypatch, t
         backend.close()
         _close(app, window)
 
+
+
+def test_a_channel_moving_group_still_updates_the_group_counts(monkeypatch, tmp_path):
+    app, ui, window, backend = _big_htsp_window(monkeypatch, tmp_path, count=10, groups=2)
+    try:
+        texts = lambda: [window.tag_combo.itemText(i) for i in range(1, window.tag_combo.count())]
+        assert texts() == ['Group 1 (5)', 'Group 2 (5)']
+        # Only the programme changes: the counts stay.
+        backend._on_async({'method': 'channelUpdate', 'channelId': 1, 'eventId': 999, 'nextEventId': 1000})
+        window._poll_channel_metadata()
+        assert texts() == ['Group 1 (5)', 'Group 2 (5)']
+        # Channel 2 is in group 2; given group 1 in its tags, it counts there too
+        # (group 2 still lists it as a member).
+        backend._on_async({'method': 'channelUpdate', 'channelId': 2, 'tags': [1]})
+        window._poll_channel_metadata()
+        assert texts() == ['Group 1 (6)', 'Group 2 (5)']
+        backend._on_async({'method': 'channelDelete', 'channelId': 4})
+        window._poll_channel_metadata()
+        assert texts() == ['Group 1 (6)', 'Group 2 (4)']
+    finally:
+        window._channel_fetch = None
+        backend.close()
+        _close(app, window)

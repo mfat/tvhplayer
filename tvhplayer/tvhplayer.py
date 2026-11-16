@@ -3319,6 +3319,14 @@ class IdleSplash(QWidget):
         describe(self, "Nothing playing", "TVHplayer logo, shown when nothing is playing")
 
 
+def _same_groups(old, new):
+    """Whether a channel's update leaves it in the same groups, as group counts see them."""
+    if old is None or new is None:
+        return old is new
+    return (old.uuid == new.uuid and old.htsp_id == new.htsp_id
+            and list(old.tag_ids) == list(new.tag_ids))
+
+
 class PlaybackSpinner(QWidget):
     """Ring drawn over the player until the first picture arrives.
 
@@ -6338,8 +6346,15 @@ class TVHeadendClient(QMainWindow):
             self._clear_channels()
         self._channels_server = server_key(server)
         updates = {}
+        # Whether any change can alter how many channels a group has. Most are
+        # a channel's programme changing, which does not; counting every
+        # group again for each of those held up the window for 200-350 ms on
+        # a server with tens of thousands of channels.
+        regroup = False
         for channel_id, channel in changes.items():
             old = self._live_channels.pop(channel_id, None)
+            if not regroup and not _same_groups(old, channel):
+                regroup = True
             if old is not None:
                 old_key = channel_key(old)
                 updates[old_key] = None
@@ -6354,7 +6369,7 @@ class TVHeadendClient(QMainWindow):
         self._channels = list(self._live_channels.values())
         if tags is not None:
             self._channel_tags = [tag for tag in tags if tag.enabled]
-        if tags is not None or (changes and self._channel_tags):
+        if tags is not None or (regroup and self._channel_tags):
             self._refresh_tag_combo()
         changed_channels = [channel for channel in changes.values() if channel is not None]
         self._channel_kinds.update(channel_kinds(changed_channels, (), self._channel_tags))
