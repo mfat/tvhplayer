@@ -5469,7 +5469,13 @@ class TVHeadendClient(QMainWindow):
         model = self.channel_model
         # Blank space keeps names lined up, but only when some channel has a logo
         # (from the server or a matching picon).
-        references = [self.channel_logo_reference(channel) for channel in shown] if options['logos'] else None
+        prepared, self._prepared_logo_references = getattr(self, '_prepared_logo_references', None), None
+        if (options['logos'] and prepared is not None and prepared[0] is self._channels
+                and prepared[1] == options['hide_disabled'] and prepared[2] is self.picons):
+            references = prepared[3]
+        else:
+            references = ([self.channel_logo_reference(channel) for channel in shown]
+                          if options['logos'] else None)
         logos = bool(references) and any(references)
         model.set_logos(logos, self._logo_pixmaps, self._logo_placeholder() if logos else None)
         model.set_kinds(self._channel_kinds)
@@ -5750,7 +5756,11 @@ class TVHeadendClient(QMainWindow):
         try:
             combo.clear()
             combo.addItem("All channels", "")
-            counts = tag_channel_counts(self._channels, self._channel_tags)
+            prepared, self._prepared_tag_counts = getattr(self, '_prepared_tag_counts', None), None
+            if prepared is not None and prepared[0] is self._channel_tags:
+                counts = prepared[1]
+            else:
+                counts = tag_channel_counts(self._channels, self._channel_tags)
             for tag, count in zip(self._channel_tags, counts):
                 if count:
                     combo.addItem(f"{tag.name or 'Unnamed'} ({count})", tag.uuid)
@@ -6113,16 +6123,61 @@ class TVHeadendClient(QMainWindow):
         return create_backend(server)
 
     def _on_channels_loaded(self, fetch, result):
-        if fetch is self._channel_fetch and hasattr(fetch.backend, 'channel_snapshot'):
-            # Everything the connection holds now, including what arrived
-            # while tags and programmes were read.
-            snapshot = fetch.backend.channel_snapshot()
-            if snapshot is not None:
-                result['channels'], result['tags'] = snapshot
-                result['tags'] = [tag for tag in result['tags'] if tag.enabled]
+        """Prepare the channels that came in off the UI thread, then show them.
+
+        Counting the channels of each group, finding each channel's kind and
+        logo took 700 ms for 58,868 channels in 1,034 groups, with the window
+        frozen: a menu clicked meanwhile opened only afterwards. The load
+        counts as running until the list is in, so live updates wait for it.
+        """
+        if fetch is not self._channel_fetch or getattr(fetch, 'preparing', False):
+            fetch.deleteLater()
+            self._adopt_backend(fetch)
+            return
+        fetch.preparing = True
+        backend = fetch.backend
+        hide_disabled = self.channel_options['hide_disabled']
+        logos = self.channel_options['logos']
+        picons = self.picons
+
+        def logo_reference(channel):
+            reference = channel_icon_reference(channel)
+            if reference or picons is None:
+                return reference
+            path = picons.find(channel.name)
+            return f"{PICON_PREFIX}{path}" if path is not None else ''
+
+        def prepare(_backend):
+            if hasattr(backend, 'channel_snapshot'):
+                # Everything the connection holds now, including what arrived
+                # while tags and programmes were read.
+                snapshot = backend.channel_snapshot()
+                if snapshot is not None:
+                    result['channels'], result['tags'] = snapshot
+                    result['tags'] = [tag for tag in result['tags'] if tag.enabled]
+            channels, tags = result['channels'], result['tags']
+            result['kinds'] = channel_kinds(channels, result['services'], tags)
+            result['tag_counts'] = (tags, tag_channel_counts(channels, tags))
+            if logos:
+                shown = [channel for channel in channels if channel.enabled] if hide_disabled else channels
+                result['logo_references'] = (
+                    channels, hide_disabled, picons, [logo_reference(channel) for channel in shown],
+                )
+            return result
+
+        def prepared(_result, error):
+            if error is not None:
+                print(f"Debug: Preparing the channel list failed: {error}")
+            self._channels_prepared(fetch, result)
+
+        call = ServerCall(None, prepare, self)
+        call.done.connect(prepared)
+        call.start()
+
+    def _channels_prepared(self, fetch, result):
         fetch.deleteLater()
         self._adopt_backend(fetch)
-        if fetch is not self._channel_fetch:
+        if fetch is not self._channel_fetch or getattr(self, '_closing', False):
             return
         self._channel_fetch = None
         # A background refresh for the previous channel snapshot must not
@@ -6141,7 +6196,11 @@ class TVHeadendClient(QMainWindow):
         self._live_channels = {channel.htsp_id: channel for channel in self._channels}
         self._channels_server = fetch.key
         self._channel_tags = result['tags']
-        self._channel_kinds = channel_kinds(self._channels, result['services'], self._channel_tags)
+        kinds = result.get('kinds')
+        self._channel_kinds = (kinds if kinds is not None
+                               else channel_kinds(self._channels, result['services'], self._channel_tags))
+        self._prepared_tag_counts = result.get('tag_counts')
+        self._prepared_logo_references = result.get('logo_references')
         if result['now_next'] is not None:
             self._now_next = result['now_next']
             self._now_next_loaded = bool(fetch._now_next and self._channels)

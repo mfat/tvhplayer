@@ -21,7 +21,7 @@ import types
 
 import pytest
 
-from test_pyqt6_ui import _make_player, _wait_until
+from test_pyqt6_ui import _load_channels, _make_player, _wait_until
 
 # How long the fake server takes to answer.
 SERVER_DELAY = 1.0
@@ -843,7 +843,9 @@ def test_refreshing_tasks_with_thousands_of_recordings_keeps_the_window_answerin
             QTimer_single(delay, refresh)
         meter.run(1.0)
         meter.report('Tasks refresh, 3,000 finished recordings')
-        assert meter.worst() < LIST_BUDGET
+        # About 40 ms alone and up to 110 ms during the whole test run;
+        # 270-300 ms when every line was written out again.
+        assert meter.worst() < 0.15
     finally:
         _close(app, window)
 
@@ -918,7 +920,7 @@ def _big_htsp_window(monkeypatch, tmp_path, count=BIG_LIST):
         backend._on_async({'method': 'channelAdd', 'channelId': number, 'channelName': f'Channel {number}',
                            'channelNumber': number, 'eventId': number * 10, 'nextEventId': number * 10 + 1})
     backend._on_async({'method': 'initialSyncCompleted'})
-    window._on_channels_loaded(fetch, {'channels': [], 'tags': [], 'services': [], 'now_next': None})
+    _load_channels(window, fetch, {'channels': [], 'tags': [], 'services': [], 'now_next': None})
     assert window.channel_model.rowCount() == count
     window.show()
     app.processEvents()
@@ -977,6 +979,55 @@ def test_a_burst_of_programme_changes_on_a_big_list_keeps_the_window_answering(m
         meter = StallMeter()
         meter.run(1.0, until=lambda: backend.take_channel_changes()[0] == {} and len(meter.ticks) > 20)
         meter.report(f'2,000 programme changes at once, {BIG_LIST:,} channels, search {search!r}')
+        assert meter.worst() < LIST_BURST_BUDGET
+    finally:
+        window._channel_fetch = None
+        backend.close()
+        _close(app, window)
+
+
+def test_a_big_list_arriving_keeps_the_window_answering(monkeypatch, tmp_path):
+    # 58,868 channels in 1,034 groups, as on a real built-in server: counting
+    # the groups and finding each channel's kind took 700 ms on the window's
+    # thread, so a menu clicked meanwhile opened only after it.
+    from tvhplayer.core.htsp_backend import HtspBackend
+    from tvhplayer.core.models import ServerConfig
+
+    count, groups = 58_868, 1_034
+    app, ui, window, _ = _make_player(monkeypatch, tmp_path)
+    backend = HtspBackend(ServerConfig(name='HTSP', url='http://127.0.0.1:9981', protocol='htsp'))
+    server = {'name': 'HTSP', 'url': 'http://127.0.0.1:9981', 'protocol': 'htsp'}
+    window.servers = [server]
+    window.server_combo.blockSignals(True)
+    window.server_combo.addItem('HTSP')
+    window.server_combo.setCurrentIndex(0)
+    window.server_combo.blockSignals(False)
+    fetch = types.SimpleNamespace(server=dict(server), backend=backend, key=ui.server_key(server),
+                                  keep_place=False, _now_next=False, deleteLater=lambda: None)
+    window._channel_fetch = fetch
+    for number in range(1, count + 1):
+        backend._on_async({'method': 'channelAdd', 'channelId': number, 'channelName': f'Channel {number}',
+                           'channelNumber': number, 'eventId': number * 10, 'nextEventId': number * 10 + 1,
+                           'tags': [number % groups + 1], 'channelIcon': f'imagecache/{number}',
+                           'services': [{'id': number, 'type': 'HDTV'}]})
+    for tag in range(1, groups + 1):
+        backend._on_async({'method': 'tagAdd', 'tagId': tag, 'tagName': f'Group {tag}',
+                           'members': list(range(tag, count + 1, groups))})
+    backend._on_async({'method': 'initialSyncCompleted'})
+    window.show()
+    StallMeter().run(1.0)
+    try:
+        meter = StallMeter()
+        _later(lambda: window._on_channels_loaded(
+            fetch, {'channels': [], 'tags': [], 'services': [], 'now_next': None}))
+        meter.run(5.0, until=lambda: window.channel_model.rowCount() == count)
+        meter.report(f'{count:,} channels in {groups:,} groups arriving')
+        assert window.channel_model.rowCount() == count
+        assert window._channel_fetch is None
+        assert window.tag_combo.count() == groups + 1
+        first = ui.tag_channel_counts(window._channels, window._channel_tags[:1])[0]
+        assert window.tag_combo.itemText(1) == f'{window._channel_tags[0].name} ({first})'
+        assert window._channel_kinds[ui.channel_key(window._channels[0])].kind == 'HD'
         assert meter.worst() < LIST_BURST_BUDGET
     finally:
         window._channel_fetch = None

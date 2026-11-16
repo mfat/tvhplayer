@@ -45,11 +45,22 @@ def test_onboarding_cancel_is_not_completion_and_explicit_dismissal_is_saved(mon
         app.processEvents()
 
 
+def _load_channels(window, fetch, result):
+    """Hand ``window`` the channels a load brought, and wait until they are shown.
+
+    They are prepared off the UI thread; the load ends when the list is in.
+    """
+    from PyQt6.QtWidgets import QApplication
+
+    window._on_channels_loaded(fetch, result)
+    _wait_until(QApplication.instance(), lambda: window._channel_fetch is not fetch, 'the channel list')
+
+
 def _onboarding_channels(ui, window, server, channels):
     fetch = types.SimpleNamespace(server=server, key=ui.server_key(server), backend=None,
                                   keep_place=False, _now_next=False, deleteLater=lambda: None)
     window._channel_fetch = fetch
-    window._on_channels_loaded(fetch, {'channels': channels, 'tags': [], 'services': [], 'now_next': {}})
+    _load_channels(window, fetch, {'channels': channels, 'tags': [], 'services': [], 'now_next': {}})
 
 
 def test_legacy_offered_flag_does_not_suppress_incomplete_onboarding(monkeypatch, tmp_path):
@@ -4952,7 +4963,7 @@ def test_htsp_list_appears_whole_then_takes_live_changes_and_ignores_old_server(
         assert window.channel_model.rowCount() == 0
         assert '1 received' in window.status_label.text()
         backend._on_async({'method': 'initialSyncCompleted'})
-        window._on_channels_loaded(fetch, {'channels': [], 'tags': [], 'services': [], 'now_next': None})
+        _load_channels(window, fetch, {'channels': [], 'tags': [], 'services': [], 'now_next': None})
         assert window.channel_model.rowCount() == 1
         assert window.channel_from_row(0).name == 'First'
         assert window.channel_stack.currentWidget() is window.channel_list
@@ -5002,7 +5013,7 @@ def test_htsp_completion_keeps_updates_received_during_optional_requests(monkeyp
         backend._on_async({'method': 'channelUpdate', 'channelId': 1, 'channelName': 'Latest'})
         backend._on_async({'method': 'initialSyncCompleted'})
         window._poll_channel_metadata()
-        window._on_channels_loaded(fetch, {'channels': stale, 'tags': [], 'services': [], 'now_next': {}})
+        _load_channels(window, fetch, {'channels': stale, 'tags': [], 'services': [], 'now_next': {}})
         assert window.channel_from_row(0).name == 'Latest'
         assert window._backend is backend
         backend._on_async({'method': 'channelDelete', 'channelId': 1})
@@ -5093,7 +5104,7 @@ def test_finished_load_shows_every_channel_without_working_through_queued_rows(m
         window._poll_channel_metadata()
         assert window.channel_model.rowCount() == 0
         channels = list(backend._channels.values())
-        window._on_channels_loaded(fetch, {'channels': channels, 'tags': [], 'services': [], 'now_next': None})
+        _load_channels(window, fetch, {'channels': channels, 'tags': [], 'services': [], 'now_next': None})
         # The snapshot holds every channel: all shown at once.
         assert window.channel_model.rowCount() == 5000
         assert backend.pending_channel_count == 0
