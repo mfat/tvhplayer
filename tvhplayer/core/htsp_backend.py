@@ -188,6 +188,9 @@ class HtspBackend(TvhBackend):
         raw['htsp_id'] = int(channel_id)
         if msg.get('channelNumber') in (None, 0) and existing and existing.number:
             raw['channelNumber'] = existing.number
+        elif 'channelNumberMinor' not in msg and raw is not msg:
+            # A number without a minor part comes without channelNumberMinor.
+            raw.pop('channelNumberMinor', None)
         self._channels[channel_id] = Channel.from_raw(raw)
 
     def _store_tag(self, msg, replace=False):

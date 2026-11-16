@@ -408,3 +408,25 @@ def test_a_programme_change_redraws_its_row_without_moving_any():
     model.set_filter('')
     assert model.channel_at(model.row_of_key('u3')) is update
     view.close()
+
+
+def test_number_column_shows_and_sorts_subchannels():
+    from PyQt6.QtCore import Qt
+
+    from tvhplayer.channel_view import COL_NUMBER
+    from tvhplayer.core.models import Channel
+
+    channels = [
+        Channel(uuid='a', name='B', number=2, number_minor=2),
+        Channel(uuid='b', name='A', number=2, number_minor=1),
+        Channel(uuid='c', name='C', number=3),
+    ]
+    app, model, view = _model(channels)
+    model.sort(COL_NUMBER, Qt.SortOrder.AscendingOrder)
+    assert _names(model) == ['A', 'B', 'C']
+    shown = [model.data(model.index(row, COL_NUMBER)) for row in range(3)]
+    assert [str(value) for value in shown] == ['2.1', '2.2', '3']
+    model.sort(COL_NUMBER, Qt.SortOrder.DescendingOrder)
+    assert _names(model) == ['C', 'B', 'A']
+    model.set_filter('2.2')
+    assert _names(model) == ['B']

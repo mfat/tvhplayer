@@ -58,6 +58,15 @@ def _optional_int(value):
         return None
 
 
+def _channel_number(value):
+    """(major, minor) from a channel number: ``7``, or ``"2.1"`` as api/channel/grid
+    sends one with a minor part. ``minor`` is None when the number has none."""
+    if isinstance(value, str) and '.' in value:
+        major, _, minor = value.strip().partition('.')
+        return _optional_int(major) or 0, _optional_int(minor) or None
+    return _optional_int(value) or 0, None
+
+
 def _id_list(value) -> List[str]:
     if not isinstance(value, list):
         return []
@@ -116,7 +125,9 @@ class Channel:
         if htsp_id is None:
             htsp_id = data.get('channelId')
         htsp_id = _optional_int(htsp_id)
-        number = _optional_int(data.get('number', data.get('channelNumber', 0))) or 0
+        number, minor = _channel_number(data.get('number', data.get('channelNumber', 0)))
+        if 'number_minor' in data or 'channelNumberMinor' in data:
+            minor = _optional_int(data.get('number_minor', data.get('channelNumberMinor')))
         return cls(
             uuid=str(data.get('uuid') or data.get('channelIdStr') or ('' if htsp_id is None else htsp_id)),
             name=data.get('name') or data.get('channelName') or 'Unknown Channel',
@@ -124,7 +135,7 @@ class Channel:
             htsp_id=htsp_id,
             icon=str(data.get('icon') or data.get('channelIcon') or ''),
             tag_ids=_id_list(data.get('tags')),
-            number_minor=_optional_int(data.get('number_minor', data.get('channelNumberMinor'))),
+            number_minor=minor,
             enabled=_enabled_flag(data),
             raw=data,
         )

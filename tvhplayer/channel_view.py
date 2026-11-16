@@ -45,6 +45,7 @@ try:
         progress,
     )
     from .core.backend import channel_sort_key
+    from .core.channel_edit import number_text
     from .core.config import default_cache_dir
     from .core.proxy import configure_session
     from .core.urls import http_auth
@@ -65,6 +66,7 @@ except ImportError:
         progress,
     )
     from core.backend import channel_sort_key
+    from core.channel_edit import number_text
     from core.config import default_cache_dir
     from core.proxy import configure_session
     from core.urls import http_auth
@@ -531,7 +533,7 @@ class ChannelTableModel(QAbstractTableModel):
         if column == COL_NAME:
             return channel.name
         if column == COL_NUMBER:
-            return channel.number
+            return number_text(channel)
         if column == COL_STATUS:
             return self._status(position)
         if column in (COL_NOW, COL_NEXT):
@@ -575,7 +577,7 @@ class ChannelTableModel(QAbstractTableModel):
                 return NOT_WORKING_TIP
             return None
         if column == COL_NUMBER:
-            return f'Channel {channel.number}' if role == _ACCESSIBLE_TEXT else 'Channel number'
+            return f'Channel {number_text(channel)}' if role == _ACCESSIBLE_TEXT else 'Channel number'
         if column == COL_NAME:
             if role == _ACCESSIBLE_TEXT:
                 return channel.name
@@ -599,7 +601,8 @@ class ChannelTableModel(QAbstractTableModel):
     def _sort_value(self, position):
         column = self._sort_column
         if column == COL_NUMBER:
-            return self._channels[position].number or 0
+            channel = self._channels[position]
+            return (channel.number or 0, channel.number_minor or 0)
         value = self._display(position, column)
         return str(value or '').casefold()
 
@@ -639,7 +642,7 @@ class ChannelTableModel(QAbstractTableModel):
                 continue
             if search:
                 channel = channels[position]
-                if search not in channel.name.lower() and search not in str(channel.number).lower():
+                if search not in channel.name.lower() and search not in number_text(channel):
                     continue
             kept.append(position)
         return kept

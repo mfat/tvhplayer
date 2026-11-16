@@ -5181,7 +5181,7 @@ class TVHeadendClient(QMainWindow):
         return None
 
     def _channel_description(self, channel, is_playing=False, is_recording=False):
-        description = f"Channel {channel.number}, {channel.name}."
+        description = f"Channel {number_text(channel)}, {channel.name}."
         if is_playing:
             description += " Playing."
         if is_recording:
@@ -6642,7 +6642,7 @@ class TVHeadendClient(QMainWindow):
         channel = getattr(self, '_playback_channel', None)
         if channel is not None:
             self.statusbar.showMessage(f"Playing: {channel.name}")
-            self._show_on_picture(f"{channel.number}  {channel.name}" if channel.number else channel.name)
+            self._show_on_picture(f"{number_text(channel)}  {channel.name}" if channel.number else channel.name)
 
     def _on_playback_failed(self, casting=False):
         if self.cast_manager.is_connected and not casting:

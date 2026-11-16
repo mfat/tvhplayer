@@ -315,6 +315,10 @@ def test_htsp_tags_guide_profiles_and_images():
     assert channel.number_minor == 2
     assert channel.tag_ids == ['3']
     assert channel.number == 1
+    # Tvheadend leaves channelNumberMinor out once the number has no minor part.
+    backend._on_async({'method': 'channelUpdate', 'channelId': 4, 'channelNumber': 5})
+    channel = backend.get_channels()[0]
+    assert (channel.number, channel.number_minor) == (5, None)
 
     conn.replies['getEvents'] = {'events': [
         {'eventId': 1, 'start': 1, 'stop': 2, 'title': 'Now', 'contentType': 16, 'summary': 'Live'},

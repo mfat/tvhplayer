@@ -462,5 +462,7 @@ def create_backend(server) -> TvhBackend:
 
 
 def channel_sort_key(channel: Channel):
+    """Number, then sub-channel (2 before 2.1 before 2.2 before 2.10), then name,
+    as Tvheadend orders channels. Channels without a number go last."""
     number = channel.number if channel.number else float('inf')
-    return (number, (channel.name or '').lower())
+    return (number, channel.number_minor or 0, (channel.name or '').lower())

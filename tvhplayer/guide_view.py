@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
 try:
     from .a11y import announce, announce_label, buddy_label, describe, prefers_high_contrast
     from .core.backend import create_backend
+    from .core.channel_edit import number_text
     from .core.channel_info import channel_icon_reference, channel_key, channels_in_tag, tag_channel_counts
     from .core.dvr import GRID_LIMIT
     from .core.guide_grid import (
@@ -61,6 +62,7 @@ try:
 except ImportError:
     from a11y import announce, announce_label, buddy_label, describe, prefers_high_contrast
     from core.backend import create_backend
+    from core.channel_edit import number_text
     from core.channel_info import channel_icon_reference, channel_key, channels_in_tag, tag_channel_counts
     from core.dvr import GRID_LIMIT
     from core.guide_grid import (
@@ -462,7 +464,7 @@ class GuideGrid(QAbstractScrollArea):
         for step in range(count):
             row = (self._row + step + (1 if len(typed) == 1 else 0)) % count
             channel = self.channels[row]
-            if channel.name.casefold().startswith(typed) or str(channel.number or '').startswith(typed):
+            if channel.name.casefold().startswith(typed) or number_text(channel).startswith(typed):
                 self._row = row
                 self._refocus()
                 return
@@ -733,9 +735,7 @@ class GuideGrid(QAbstractScrollArea):
             painter.setPen(QPen(line, 1))
             painter.drawLine(QPointF(0, y + self.row_height - 0.5), QPointF(self.CHANNEL_WIDTH, y + self.row_height - 0.5))
             x = 10
-            number = str(channel.number) if channel.number else ''
-            if channel.number_minor is not None and number:
-                number += f'.{channel.number_minor}'
+            number = number_text(channel)
             painter.setPen(text)
             painter.setFont(small)
             painter.drawText(QRectF(x, y, 34, self.row_height), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, number)
@@ -1109,7 +1109,7 @@ class GuideWindow(QDialog):
         if text:
             channels = [
                 channel for channel in channels
-                if text in channel.name.casefold() or str(channel.number or '').startswith(text)
+                if text in channel.name.casefold() or number_text(channel).startswith(text)
             ]
         self.grid.data.set_channels(self._host_channels())
         self.grid.set_channels(channels)
@@ -1200,7 +1200,8 @@ class GuideWindow(QDialog):
             for button in (self.watch_btn, self.record_btn, self.series_btn):
                 button.setEnabled(False)
             return
-        number = f"{channel.number}  " if channel.number else ""
+        number = number_text(channel)
+        number = f"{number}  " if number else ""
         self.channel_label.setText(f"{number}{channel.name}")
         self.watch_btn.setEnabled(True)
         describe(self.watch_btn, f"Watch {channel.name}", "Play this channel now in the main window.")

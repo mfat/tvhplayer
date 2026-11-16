@@ -92,3 +92,29 @@ def test_recordings_to_stop_keeps_other_jobs_when_several_are_running():
     assert recordings_to_stop([first, second], Channel(uuid='b', name='BBC')) == [second]
     assert recordings_to_stop([first, second], None) == []
     assert recordings_to_stop([first, second], Channel(uuid='c', name='Other')) == []
+
+
+def test_http_channel_number_with_a_subchannel():
+    # api/channel/grid sends a number with a minor part as the text "2.1",
+    # and a plain number as an integer.
+    ch = Channel.from_raw({'uuid': 'u', 'name': 'KTVU', 'number': '2.1'})
+    assert (ch.number, ch.number_minor) == (2, 1)
+    ch = Channel.from_raw({'uuid': 'u', 'name': 'KTVU', 'number': '2.10'})
+    assert (ch.number, ch.number_minor) == (2, 10)
+    ch = Channel.from_raw({'uuid': 'u', 'name': 'BBC', 'number': 7})
+    assert (ch.number, ch.number_minor) == (7, None)
+
+
+def test_channels_sort_by_major_then_minor_then_name():
+    from tvhplayer.core.backend import channel_sort_key
+
+    channels = [
+        Channel(uuid='a', name='Zeta', number=2, number_minor=2),
+        Channel(uuid='b', name='Alpha', number=2, number_minor=1),
+        Channel(uuid='c', name='Main', number=2),
+        Channel(uuid='d', name='Beta', number=2, number_minor=10),
+        Channel(uuid='e', name='None'),
+        Channel(uuid='f', name='Ten', number=10),
+    ]
+    assert [c.name for c in sorted(channels, key=channel_sort_key)] == [
+        'Main', 'Alpha', 'Zeta', 'Beta', 'Ten', 'None']
