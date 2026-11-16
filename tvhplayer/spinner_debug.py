@@ -161,8 +161,16 @@ class SpinnerWatch:
             if not self._running:
                 return
             self._running = False
+            now = time.monotonic()
+            # A stall that the stop ended, as when the window is busy just as
+            # the picture comes, has no next tick to report it.
+            gap = now - self._last
+            if gap > LATE_SECONDS:
+                self._late.append(gap)
+                self._reports.append((gap, self._samples))
+            self._samples = []
             self._disarm()
-            took = time.monotonic() - self._run_started
+            took = now - self._run_started
             late = list(self._late)
             ticks = self._ticks
         worst = f', worst {max(late) * 1000:.0f} ms' if late else ''
@@ -235,7 +243,7 @@ class SpinnerWatch:
         while self._reports:
             item = self._reports.pop(0)
             if not isinstance(item, tuple):
-                # A dump here belongs to no late tick, such as a stall the stop ended.
+                # A dump here belongs to no late tick.
                 self._new_dump()
                 self._out(item)
                 continue

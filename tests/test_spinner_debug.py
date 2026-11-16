@@ -63,3 +63,21 @@ def test_threads_in_blocking_calls_are_marked_waiting():
         event.set()
         waiter.join()
     assert 'sleeper: waiting at' in text
+
+
+def test_a_stall_that_ends_with_the_stop_is_reported():
+    # The window is often busy right as the picture comes: the spinner stops
+    # without another tick, and that stall must still be reported.
+    out = []
+    watch = spinner_debug.SpinnerWatch(out=out.append)
+    watch.started()
+    watch.tick()
+    time.sleep(spinner_debug.FAULT_SECONDS + 0.05)
+    watch.stopped()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and not any('stopped after' in line for line in out):
+        time.sleep(0.01)
+    report = next((line for line in out if line.startswith('tick late')), None)
+    assert report is not None, out
+    assert 'test_a_stall_that_ends_with_the_stop_is_reported' in report
+    assert '1 late' in out[-1]
