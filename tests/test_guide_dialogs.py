@@ -262,3 +262,39 @@ def test_match_channels_by_id_suggestion_and_hand(app, tmp_path):
     dialog.guide_combo.activated.emit(0)
     assert 'c1' not in host.choices
     dialog.done(0)
+
+
+@pytest.mark.parametrize('which', ['find', 'match'])
+def test_closing_while_the_server_answers_does_not_wait_for_it(app, tmp_path, monkeypatch, which):
+    # Closing waited for the server's answer, up to 15 seconds, with the whole app frozen.
+    import threading
+
+    gate = threading.Event()
+    asked = threading.Event()
+
+    class SlowAdmin(FakeAdmin):
+        def list_channels(self, fields=None):
+            asked.set()
+            gate.wait(5)
+            return super().list_channels(fields)
+
+    monkeypatch.setattr(dialogs, 'TvhAdmin', SlowAdmin)
+    FakeAdmin.channels = [{'uuid': 'c1', 'name': 'BBC One', 'epg': 'BBCOne.uk'}]
+    monkeypatch.setattr(dialogs, 'find_guides', lambda *a, **k: ([], []))
+    host = FakeHost(tmp_path)
+    if which == 'find':
+        dialog = dialogs.FindGuidesDialog(host, BUILTIN)
+    else:
+        dialog = dialogs.MatchChannelsDialog(host, BUILTIN)
+    assert _until(app, asked.is_set)
+    task = dialog._task
+    try:
+        started = time.monotonic()
+        dialog.reject()
+        assert time.monotonic() - started < 0.3
+    finally:
+        gate.set()
+    # The late answer goes nowhere, and the worker is not destroyed while it runs.
+    del dialog
+    assert _until(app, lambda: task.isFinished())
+    app.processEvents()

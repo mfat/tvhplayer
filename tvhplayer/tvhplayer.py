@@ -359,6 +359,11 @@ class DVRStatusDialog(QDialog):
             server = parent.current_server()
         self.server = dict(server) if server else None
         self._stop_pending = False
+        # The server is asked off the UI thread, one request at a time;
+        # refreshes asked for meanwhile become one more request after it.
+        self._fetching = False
+        self._fetch_again = False
+        self._sync_indicator = False
         self.setWindowTitle("DVR Status")
         self.resize(800, 600)
         self.setup_ui()
@@ -516,14 +521,14 @@ class DVRStatusDialog(QDialog):
             self.action_label,
             f"Stopped {title} on {channel}. The recorded file is kept.",
         )
+        self._sync_indicator = True
         self.update_status()
-        self._sync_parent_indicator()
 
     def _stop_failed(self, error):
         print(f"Debug: Error stopping DVR entry: {error}")
         QMessageBox.critical(self, "Error", f"Failed to stop recording: {error}")
 
-    def _sync_parent_indicator(self):
+    def _sync_parent_indicator(self, entries):
         """Clear the main-window pulse when no server recording is still running."""
         parent = self.parent()
         if parent is None or not hasattr(parent, 'stop_recording_indicator'):
@@ -531,13 +536,7 @@ class DVRStatusDialog(QDialog):
         local_running = getattr(parent, 'local_recording_running', None)
         if local_running is not None and local_running():
             return
-        try:
-            running = [
-                item for item in self.backend.list_dvr_entries()
-                if item.category() == 'recording'
-            ]
-        except Exception:
-            return
+        running = [item for item in entries if item.category() == 'recording']
         if not running and getattr(parent, 'is_recording', False):
             parent.stop_recording_indicator()
             if hasattr(parent, 'statusbar'):
@@ -571,9 +570,36 @@ class DVRStatusDialog(QDialog):
                 return
         
     def update_status(self):
+        """Ask the server for its recordings; the tables fill when it answers.
+
+        A slow server kept the whole app from answering while this dialog
+        was open, on opening and on every refresh.
+        """
+        if self._fetching:
+            self._fetch_again = True
+            return
+        self._fetching = True
+        self._fetch_again = False
+        call = ServerCall(self.backend, lambda backend: backend.list_dvr_entries(), self)
+        call.done.connect(self._entries_arrived)
+        call.start()
+
+    def _entries_arrived(self, entries, error):
+        self._fetching = False
+        if self._fetch_again:
+            self.update_status()
+            return
+        if error is not None:
+            print(f"Debug: Error updating DVR status: {error}")
+            return
+        if self._sync_indicator:
+            self._sync_indicator = False
+            self._sync_parent_indicator(entries or [])
+        self._show_entries(entries or [])
+
+    def _show_entries(self, entries):
         selected_key = self._entry_key(self._selected_entry())
         try:
-            entries = self.backend.list_dvr_entries()
             upcoming = []
             finished = []
             failed = []
@@ -2876,6 +2902,9 @@ class ServerStatusDialog(QDialog):
         self.backend = backend
         self.server = backend.server.to_dict()
         self.parent = parent
+        # One request to the server at a time, off the UI thread.
+        self._fetching = False
+        self._fetch_again = False
         self.setWindowTitle("Server Status")
         self.resize(800, 600)
         self.setup_ui()
@@ -2947,7 +2976,54 @@ class ServerStatusDialog(QDialog):
         close_btn.clicked.connect(self.accept)
         layout.addWidget(close_btn)
         
+    @staticmethod
+    def _ask_server(backend):
+        """Everything the dialog shows, as ``{part: (result, error)}``; runs off the UI thread."""
+        answers = {}
+        for part, request in (
+            ('info', backend.get_server_info),
+            ('inputs', backend.get_inputs),
+            ('connections', backend.get_connections),
+            ('subscriptions', backend.get_subscriptions),
+        ):
+            try:
+                answers[part] = (request(), None)
+            except Exception as exc:
+                answers[part] = (None, exc)
+        return answers
+
     def update_status(self):
+        """Ask the server for its status; the tabs fill when it answers.
+
+        A slow server kept the whole app from answering while this dialog
+        was open, on opening and on every refresh.
+        """
+        if self._fetching:
+            self._fetch_again = True
+            return
+        self._fetching = True
+        self._fetch_again = False
+        call = ServerCall(self.backend, self._ask_server, self)
+        call.done.connect(self._status_arrived)
+        call.start()
+
+    def _status_arrived(self, answers, error):
+        self._fetching = False
+        if self._fetch_again:
+            self.update_status()
+            return
+        if error is not None:
+            print(f"Debug: Error in update_status: {error}")
+            return
+        self._show_status(answers)
+
+    def _show_status(self, answers):
+        def answer(part):
+            result, error = answers[part]
+            if error is not None:
+                raise error
+            return result
+
         try:
             # 1. Update Server Info Tab
             protocol = self.server.get('protocol', PROTOCOL_HTTP)
@@ -2958,7 +3034,7 @@ class ServerStatusDialog(QDialog):
             if protocol == PROTOCOL_HTSP:
                 server_info += f"HTSP port: {self.server.get('htsp_port', 9982)}\n"
             try:
-                info = self.backend.get_server_info()
+                info = answer('info')
                 server_info += f"\nServer Version: {info.version or 'Unknown'}\n"
                 server_info += f"API Version: {info.api_version or 'Unknown'}\n"
                 server_info += f"Server Name: {info.name or 'Unknown'}\n"
@@ -2973,7 +3049,7 @@ class ServerStatusDialog(QDialog):
 
             # 2. Update Signal Status Tab
             try:
-                inputs = self.backend.get_inputs() or []
+                inputs = answer('inputs') or []
                 if inputs is not None:
                     
                     # Set up table with double the rows (signal and SNR on separate rows)
@@ -3036,8 +3112,8 @@ class ServerStatusDialog(QDialog):
 
             # 3. Update Active Streams Tab
             try:
-                connections = self.backend.get_connections() or []
-                subscriptions = self.backend.get_subscriptions() or []
+                connections = answer('connections') or []
+                subscriptions = answer('subscriptions') or []
                 if connections is not None:
                     
                     # Calculate total rows needed (connections + subscriptions)
@@ -5509,13 +5585,25 @@ class TVHeadendClient(QMainWindow):
         entry = dialog.chosen()
         if result != QDialog.DialogCode.Accepted or entry is None:
             return
-        try:
-            self.get_backend().update_dvr_entry(entry, DvrEntryUpdate(priority=PRIORITY_IMPORTANT))
-        except Exception as exc:
+
+        def failed(exc):
             QMessageBox.warning(self, "Not Enough Tuners", f"Could not change {entry.title}: {exc}")
-            return
-        self.statusbar.showMessage(f"{entry.title} is now the most important recording.")
-        self._refresh_tasks()
+
+        def done(_result, error):
+            if error is not None:
+                failed(error)
+                return
+            self.statusbar.showMessage(f"{entry.title} is now the most important recording.")
+            self._refresh_tasks()
+
+        # A slow server kept the whole window from answering until it had made the change.
+        try:
+            self.run_dvr_change(
+                lambda backend: backend.update_dvr_entry(entry, DvrEntryUpdate(priority=PRIORITY_IMPORTANT)),
+                done,
+            )
+        except Exception as exc:
+            failed(exc)
 
     def _check_awake(self):
         """Read the built-in server's recordings when it is not the selected server, then decide."""
@@ -5534,9 +5622,27 @@ class TVHeadendClient(QMainWindow):
         self._check_disk_space()
 
     def _check_disk_space(self):
-        """Show a warning in the status bar while the recordings folder is nearly full."""
+        """Show a warning in the status bar while the recordings folder is nearly full.
+
+        The disk is asked off the UI thread: a network share that has gone
+        away can take seconds to answer, all that time with the window frozen.
+        """
+        if getattr(self, '_space_checking', False):
+            self._space_check_again = True
+            return
+        self._space_checking = True
+        self._space_check_again = False
         folder = self.config.get('local_recording_dir') or default_recording_dir()
-        message = low_space_message(free_bytes(folder), self.low_space_gb())
+        call = ServerCall(None, lambda _backend: free_bytes(folder), self)
+        call.done.connect(lambda free, _error: self._disk_space_read(folder, free))
+        call.start()
+
+    def _disk_space_read(self, folder, free):
+        self._space_checking = False
+        if self._space_check_again:
+            self._check_disk_space()
+            return
+        message = low_space_message(free, self.low_space_gb())
         label = getattr(self, 'space_warning', None)
         if label is None:
             return
@@ -8300,26 +8406,15 @@ class TVHeadendClient(QMainWindow):
         lookup_failed = False
         supervisor = getattr(self, 'builtin', None)
         if supervisor is not None and supervisor.is_running():
-            # Ask the built-in server itself, whichever server is selected.
-            backend = None
-            try:
-                server = find_builtin_server(self.servers)
-                if server is None:
-                    raise TvhError('Built-in server entry is missing')
-                # Over HTSP the recordings come only after every channel, seconds
-                # for a big list; the HTTP API answers with just the recordings.
-                backend = create_backend(dict(server, protocol=PROTOCOL_HTTP))
-                entries = backend.list_dvr_entries()
-                titles = recording_titles(entries)
-                upcoming = upcoming_recordings(entries)
-            except Exception:
-                lookup_failed = True
-            finally:
-                if backend is not None:
-                    try:
-                        backend.close()
-                    except Exception:
-                        pass
+            # Ask the built-in server itself, whichever server is selected. A
+            # busy server kept the window from answering while it was asked, so
+            # the question is asked off the UI thread; with the answer in, the
+            # window is closed again and the answer is used.
+            lookup, self._quit_lookup = getattr(self, '_quit_lookup', None), None
+            if lookup is None:
+                self._start_quit_lookup()
+                return False
+            titles, upcoming, lookup_failed = lookup
         playlist_updates = [
             job.source.name for job in getattr(self, '_playlist_jobs', []) if job.is_writing()
         ]
@@ -8337,6 +8432,40 @@ class TVHeadendClient(QMainWindow):
             QMessageBox.StandardButton.No,
         )
         return answer == QMessageBox.StandardButton.Yes
+
+    def _start_quit_lookup(self):
+        """Ask the built-in server for its recordings, then close the window again."""
+        if getattr(self, '_quit_lookup_call', None) is not None:
+            return
+        server = find_builtin_server(self.servers)
+
+        def ask(_backend):
+            if server is None:
+                raise TvhError('Built-in server entry is missing')
+            # Over HTSP the recordings come only after every channel, seconds
+            # for a big list; the HTTP API answers with just the recordings.
+            backend = create_backend(dict(server, protocol=PROTOCOL_HTTP))
+            try:
+                return backend.list_dvr_entries()
+            finally:
+                try:
+                    backend.close()
+                except Exception:
+                    pass
+
+        def done(entries, error):
+            self._quit_lookup_call = None
+            if error is not None:
+                self._quit_lookup = ([], [], True)
+            else:
+                self._quit_lookup = (recording_titles(entries), upcoming_recordings(entries), False)
+            self.close()
+
+        self.statusbar.showMessage("Checking for recordings before quitting…")
+        call = ServerCall(None, ask, self)
+        self._quit_lookup_call = call
+        call.done.connect(done)
+        call.start()
 
     def _on_builtin_ready(self, http_port, htsp_port):
         self.servers = apply_builtin_endpoint(
@@ -8517,7 +8646,24 @@ class TVHeadendClient(QMainWindow):
     def remove_picons(self):
         if self.picon_job is not None and self.picon_job.is_download():
             self.picon_job.cancel()
-        shutil.rmtree(default_picon_dir(), ignore_errors=True)
+        # A pack is tens of thousands of files, seconds to delete on a slow
+        # disk, all that time with the window frozen. Moved aside at once, so
+        # a new download starts clean, the files are deleted off the UI thread.
+        folder = Path(default_picon_dir())
+        doomed = folder.with_name(f'{folder.name}.removing-{time.time_ns()}')
+        try:
+            folder.rename(doomed)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            shutil.rmtree(folder, ignore_errors=True)
+        # Also what an earlier removal left when the app quit before it was done.
+        leftovers = list(folder.parent.glob(f'{folder.name}.removing-*'))
+        if leftovers:
+            threading.Thread(
+                target=lambda: [shutil.rmtree(path, ignore_errors=True) for path in leftovers],
+                name='picon-removal', daemon=True,
+            ).start()
         self.picons = None
         self._picons_changed()
 

@@ -574,6 +574,237 @@ def test_pressing_record_twice_in_the_tv_guide_asks_the_server_once(monkeypatch,
         guide.close()
         _close(app, window)
 
+class _SlowStatusServer(_SlowServer):
+    """The slow server, with what the Server Status window asks for."""
+
+    def __init__(self, delay=SERVER_DELAY):
+        super().__init__(delay)
+        self.server = types.SimpleNamespace(to_dict=lambda: {
+            'name': 'tv', 'url': 'http://tv.example:9981', 'protocol': 'http',
+        })
+
+    def get_server_info(self):
+        self._wait('get_server_info')
+        return types.SimpleNamespace(version='4.3', api_version=19, name='tv', capabilities=[])
+
+    def get_inputs(self):
+        self._wait('get_inputs')
+        return [{'input': 'Tuner 1', 'signal': 52428, 'signal_scale': 1,
+                 'snr': 30000, 'snr_scale': 2, 'stream': 'News', 'weight': 1}]
+
+    def get_connections(self):
+        self._wait('get_connections')
+        return [{'peer': '10.0.0.2', 'user': 'tv', 'started': int(time.time()) - 5}]
+
+    def get_subscriptions(self):
+        self._wait('get_subscriptions')
+        return [{'channel': 'News', 'username': 'tv', 'start': int(time.time()) - 5, 'state': 'Running'}]
+
+
+def test_opening_dvr_status_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    dialogs = []
+    try:
+        meter = StallMeter()
+        _later(lambda: dialogs.append(ui.DVRStatusDialog(backend, window, server=window.current_server())))
+        meter.run(SERVER_DELAY * 3, until=lambda: dialogs and dialogs[0].upcoming_table.rowCount() == 1)
+        meter.report('Open DVR Status, server answers in 1 s')
+        assert dialogs[0].upcoming_table.item(0, 1).text() == 'News'
+        assert meter.worst() < SERVER_BUDGET
+
+        # Its refresh every 5 seconds does not wait for the server either.
+        calls = len(backend.calls)
+        meter = StallMeter()
+        _later(dialogs[0].update_timer.timeout.emit)
+        meter.run(SERVER_DELAY * 3, until=lambda: len(backend.calls) > calls and not dialogs[0]._fetching)
+        meter.report('Refresh DVR Status, server answers in 1 s')
+        assert meter.worst() < SERVER_BUDGET
+    finally:
+        for dialog in dialogs:
+            dialog.update_timer.stop()
+            dialog.close()
+        _close(app, window)
+
+
+def test_refreshing_dvr_status_while_the_server_answers_asks_once(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    backend.delay = 0.3
+    dialog = ui.DVRStatusDialog(backend, window, server=window.current_server())
+    dialog.update_timer.stop()
+    try:
+        dialog.update_status()
+        dialog.update_status()
+        StallMeter().run(1.5, until=lambda: not dialog._fetching)
+        # The first ask, then one more for the refreshes that came while it was out.
+        assert backend.calls == ['list_dvr_entries', 'list_dvr_entries']
+    finally:
+        dialog.close()
+        _close(app, window)
+
+
+def test_opening_server_status_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    backend = _SlowStatusServer(delay=0.3)
+    dialogs = []
+    try:
+        meter = StallMeter()
+        _later(lambda: dialogs.append(ui.ServerStatusDialog(backend, window)))
+        meter.run(3, until=lambda: dialogs and dialogs[0].subscriptions_table.rowCount() == 2)
+        meter.report('Open Server Status, server answers each request in 0.3 s')
+        dialog = dialogs[0]
+        assert 'Server Version: 4.3' in dialog.info_text.toPlainText()
+        assert dialog.signal_table.item(0, 1).text() == '80.0% (good)'
+        assert dialog.subscriptions_table.item(1, 4).text() == 'Subscription (Running)'
+        assert meter.worst() < SERVER_BUDGET
+    finally:
+        for dialog in dialogs:
+            dialog.update_timer.stop()
+            dialog.close()
+        _close(app, window)
+
+
+def test_choosing_the_recording_to_keep_on_a_slow_server_keeps_the_window_answering(monkeypatch, tmp_path):
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, backend, channel, played = _remote_window(monkeypatch, tmp_path)
+    updates = []
+
+    def update_dvr_entry(entry, update):
+        backend._wait('update_dvr_entry')
+        updates.append((entry.uuid, update.priority))
+
+    backend.update_dvr_entry = update_dvr_entry
+    entries = [
+        DvrEntry(uuid='a', title='News', channel_name='BBC ONE', start=1_800_000_000, duration=3600),
+        DvrEntry(uuid='b', title='Film', channel_name='ITV', start=1_800_001_800, duration=7200),
+    ]
+    dialog = ui.RecordingConflictDialog(entries, 1, window)
+    dialog.list.setCurrentRow(1)
+    try:
+        meter = StallMeter()
+        _later(lambda: window._conflict_answered(dialog, ui.QDialog.DialogCode.Accepted))
+        meter.run(SERVER_DELAY * 3, until=lambda: 'most important' in window.statusbar.currentMessage())
+        meter.report('Keep a recording, server answers in 1 s')
+        assert updates == [('b', 0)]
+        assert meter.worst() < SERVER_BUDGET
+    finally:
+        dialog.close()
+        _close(app, window)
+
+
+def test_quitting_while_the_builtin_server_is_slow_keeps_the_window_answering(monkeypatch, tmp_path):
+    from tvhplayer.core.models import DvrEntry
+
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    window.servers = [{
+        'name': 'Built-in Server', 'url': 'http://127.0.0.1:24111', 'protocol': 'htsp',
+        'username': 'tvhplayer', 'password': 'secret', 'builtin': True,
+    }]
+    window.builtin = types.SimpleNamespace(
+        is_running=lambda: True, username='tvhplayer', password='secret',
+        stop=lambda: None, shut_down=lambda: None,
+    )
+
+    class Backend:
+        def __init__(self, server):
+            pass
+
+        def list_dvr_entries(self):
+            time.sleep(SERVER_DELAY)
+            return [DvrEntry(uuid='1', title='News Hour', channel_name='One', start=0, duration=60,
+                             status='Running', sched_status='recording')]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ui, 'create_backend', Backend)
+    asked = []
+    monkeypatch.setattr(
+        ui.QMessageBox, 'question',
+        lambda _parent, _title, text, *a: asked.append(text) or ui.QMessageBox.StandardButton.No,
+    )
+    window.show()
+    app.processEvents()
+    try:
+        meter = StallMeter()
+        _later(window.close)
+        meter.run(SERVER_DELAY * 3, until=lambda: bool(asked))
+        meter.report('Quit, built-in server answers in 1 s')
+        assert 'News Hour' in asked[0]
+        assert window.isVisible()
+        assert meter.worst() < SERVER_BUDGET
+    finally:
+        window.builtin = None
+        _close(app, window)
+
+
+def test_removing_picons_keeps_the_window_answering(monkeypatch, tmp_path):
+    # A full pack is some 44,000 files; deleting them on a slow disk takes seconds.
+    import shutil
+
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    folder = tmp_path / 'picons'
+    folder.mkdir(exist_ok=True)
+    (folder / 'bbcone.png').write_bytes(b'png')
+    delete = shutil.rmtree
+
+    def slow_delete(path, *args, **kwargs):
+        time.sleep(SERVER_DELAY)
+        delete(path, *args, **kwargs)
+
+    monkeypatch.setattr(ui.shutil, 'rmtree', slow_delete)
+    try:
+        meter = StallMeter()
+        _later(window.remove_picons)
+        meter.run(SERVER_DELAY * 3, until=lambda: not any(tmp_path.glob('picons*')))
+        meter.report('Remove picons, disk takes 1 s')
+        assert not folder.exists()
+        assert window.picons is None
+        assert not any(tmp_path.glob('picons*'))
+        assert meter.worst() < SERVER_BUDGET
+    finally:
+        _close(app, window)
+
+
+def test_a_recordings_folder_on_a_slow_disk_keeps_the_window_answering(monkeypatch, tmp_path):
+    # A network share that has gone away can take seconds, or for ever, to say how full it is.
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    asked = []
+    at_once = [0, 0]
+
+    def slow_free_bytes(folder):
+        asked.append(folder)
+        at_once[0] += 1
+        at_once[1] = max(at_once)
+        time.sleep(SERVER_DELAY)
+        at_once[0] -= 1
+        return 1024 ** 3 // 2
+
+    monkeypatch.setattr(ui, 'free_bytes', slow_free_bytes)
+    window.config['local_recording_dir'] = str(tmp_path)
+    window.show()
+    app.processEvents()
+    try:
+        meter = StallMeter()
+        _later(window._check_disk_space)
+        meter.run(SERVER_DELAY * 3, until=lambda: window.space_warning.isVisible())
+        meter.report('Check free space, disk answers in 1 s')
+        assert 'GB' in window.space_warning.text() or 'MB' in window.space_warning.text()
+        assert meter.worst() < SERVER_BUDGET
+
+        # Asked again while the disk has not answered: still one question at a time.
+        StallMeter().run(SERVER_DELAY * 3, until=lambda: not window._space_checking)
+        asked.clear()
+        window._check_disk_space()
+        window._check_disk_space()
+        window._check_disk_space()
+        StallMeter().run(SERVER_DELAY * 4, until=lambda: len(asked) == 2 and not window._space_checking)
+        assert len(asked) == 2
+        assert at_once[1] == 1
+    finally:
+        _close(app, window)
+
+
 # --- A big channel list ------------------------------------------------------
 
 

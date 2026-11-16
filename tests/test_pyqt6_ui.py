@@ -1110,7 +1110,7 @@ def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
     dialog = ui.DVRStatusDialog(backend, parent)
     dialog.update_timer.stop()
     try:
-        assert dialog.upcoming_table.rowCount() == 2
+        _wait_until(app, lambda: dialog.upcoming_table.rowCount() == 2, 'the recordings')
         assert dialog.stop_btn.isEnabled() is False
 
         dialog.upcoming_table.selectRow(0)
@@ -1125,7 +1125,7 @@ def test_dvr_status_dialog_stops_selected_recording(monkeypatch):
         dialog.stop_selected()
         assert backend.stopped == ['run']
         assert 'News' in dialog.action_label.text()
-        assert dialog.upcoming_table.rowCount() == 1
+        _wait_until(app, lambda: dialog.upcoming_table.rowCount() == 1, 'the refresh')
         assert dialog.stop_btn.isEnabled() is False
         assert parent.cleared is True
         assert parent.messages == ['Recording stopped']
@@ -1747,6 +1747,7 @@ def test_dvr_status_stop_does_not_freeze_the_window(monkeypatch, tmp_path):
     dialog.update_timer.stop()
     try:
         dialog.show()
+        _wait_until(app, lambda: dialog.upcoming_table.rowCount() == 2, 'the recordings')
         dialog.upcoming_table.selectRow(0)
         app.processEvents()
         assert dialog.stop_btn.isEnabled() is True
@@ -1763,7 +1764,7 @@ def test_dvr_status_stop_does_not_freeze_the_window(monkeypatch, tmp_path):
         gate.set()
         _wait_until(app, lambda: backend.stopped == ['run'], 'the stop')
         _wait_until(app, lambda: 'Stopped News' in dialog.action_label.text(), 'the result')
-        assert dialog.upcoming_table.rowCount() == 1
+        _wait_until(app, lambda: dialog.upcoming_table.rowCount() == 1, 'the refresh')
         assert dialog.update_timer.isActive() is True
         assert opened == ['tv']
 
@@ -1773,6 +1774,7 @@ def test_dvr_status_stop_does_not_freeze_the_window(monkeypatch, tmp_path):
             duration=3600, status='Running', sched_status='recording', htsp_id=9,
         ))
         dialog.update_status()
+        _wait_until(app, lambda: not dialog._fetching and dialog.upcoming_table.rowCount() == 2, 'the refresh')
         gate.clear()
         dialog.upcoming_table.selectRow(0)
         app.processEvents()
@@ -2797,6 +2799,7 @@ def test_quit_asks_the_builtin_server_even_when_another_is_selected(monkeypatch,
         lambda _parent, _title, text, *a: messages.append(text) or ui.QMessageBox.StandardButton.No,
     )
     assert window._confirm_quit() is False
+    _wait_until(app, lambda: bool(messages), 'the question')
     assert [server['name'] for server in asked] == ['Built-in Server']
     assert asked[0]['protocol'] == 'http'
     assert 'News Hour' in messages[0]
@@ -4174,8 +4177,10 @@ def test_conflict_dialog_makes_the_chosen_recording_important(monkeypatch, tmp_p
         dialog.list.setCurrentRow(1)
         updates = []
         backend = types.SimpleNamespace(update_dvr_entry=lambda entry, update: updates.append((entry, update)))
-        monkeypatch.setattr(window, 'get_backend', lambda: backend)
+        monkeypatch.setattr(window, 'current_server', lambda: {'name': 'tv', 'url': 'http://tv'})
+        monkeypatch.setattr(window, 'open_backend', lambda _server: backend)
         window._conflict_answered(dialog, ui.QDialog.DialogCode.Accepted)
+        _wait_until(app, lambda: bool(updates), 'the change')
         assert updates[0][0] is entries[1]
         assert updates[0][1].priority == 0
         window._conflict_answered(dialog, ui.QDialog.DialogCode.Rejected)
