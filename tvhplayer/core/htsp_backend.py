@@ -12,7 +12,7 @@ import threading
 import time
 from typing import List, Optional
 
-from .backend import TvhBackend, channel_sort_key
+from .backend import TvhBackend, channel_sort_key, in_batches
 from .dvr import (
     HtspRecordingFile,
     MOVE_CATEGORIES,
@@ -398,7 +398,10 @@ class HtspBackend(TvhBackend):
         ids = [int(event_id) for event_id in event_ids or []]
         if not ids:
             return []
-        return parse_events(_rows(self._proxy('epg/events/load', {'eventId': ids})))
+        events = []
+        for batch in in_batches(ids):
+            events.extend(parse_events(_rows(self._proxy('epg/events/load', {'eventId': batch}))))
+        return events
 
     def list_related_events(self, event_id: int) -> List[EpgEvent]:
         return self._epg_list('epg/events/related', event_id)

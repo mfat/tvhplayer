@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import requests
 
-from .backend import TvhBackend, channel_sort_key
+from .backend import TvhBackend, channel_sort_key, in_batches
 from .dvr import (
     HttpRecordingFile,
     autorec_http_conf,
@@ -132,8 +132,11 @@ class HttpBackend(TvhBackend):
         ids = [int(event_id) for event_id in event_ids or []]
         if not ids:
             return []
-        data = self._request('POST', 'api/epg/events/load', data={'eventId': json.dumps(ids)})
-        return parse_events(_rows(data))
+        events = []
+        for batch in in_batches(ids):
+            data = self._request('POST', 'api/epg/events/load', data={'eventId': json.dumps(batch)})
+            events.extend(parse_events(_rows(data)))
+        return events
 
     def list_channel_services(self) -> List[dict]:
         params = {'list': 'uuid,channel,dvb_servicetype,encrypted,provider', 'hidemode': 'none'}

@@ -213,3 +213,35 @@ def test_htsp_now_next_loads_the_ids_sent_with_each_channel():
     assert conn.calls[-1] == ('api', {'path': 'epg/events/load', 'args': {'eventId': [20, 21]}})
     assert (result['2'].now.title, result['2'].next.title) == ('Match', 'Highlights')
     assert backend.list_channel_services() == []
+
+
+def test_many_events_are_loaded_in_batches():
+    # Now/next asks for the next programme of every channel. With 59,000
+    # channels one reply was 28 MB; decoding it kept every other thread,
+    # the window's too, waiting for over 200 ms.
+    from tvhplayer.core.backend import EVENT_BATCH
+
+    ids = list(range(1, 2 * EVENT_BATCH + 2))
+    http = _http()
+    for _ in range(3):
+        http._session.queue.append({'entries': []})
+    http._session.queue[0] = {'entries': [{'eventId': 1, 'title': 'First', 'start': 1, 'stop': 2}]}
+    http._session.queue[2] = {'entries': [{'eventId': ids[-1], 'title': 'Last', 'start': 1, 'stop': 2}]}
+    events = http.load_events(ids)
+    asked = [json.loads(call[2]['data']['eventId']) for call in http._session.calls]
+    assert [len(batch) for batch in asked] == [EVENT_BATCH, EVENT_BATCH, 1]
+    assert sum(asked, []) == ids
+    assert [event.title for event in events] == ['First', 'Last']
+
+    htsp, _conn = _htsp()
+    asked = []
+
+    def proxy(path, args=None):
+        asked.append(list(args['eventId']))
+        return {'entries': [{'eventId': args['eventId'][0], 'title': str(len(asked)), 'start': 1, 'stop': 2}]}
+
+    htsp._proxy = proxy
+    events = htsp.load_events(ids)
+    assert [len(batch) for batch in asked] == [EVENT_BATCH, EVENT_BATCH, 1]
+    assert sum(asked, []) == ids
+    assert [event.title for event in events] == ['1', '2', '3']

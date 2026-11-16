@@ -31,6 +31,17 @@ from .models import (
     TimerecSpec,
 )
 
+# Events asked for in one request by load_events. A reply is decoded in one
+# go, with every other thread, the window's too, waiting: 59,000 events were
+# 28 MB and over 200 ms; 5,000 are a few milliseconds.
+EVENT_BATCH = 5000
+
+
+def in_batches(ids: List[int], size: int = EVENT_BATCH):
+    """``ids`` in lists of at most ``size``."""
+    return [ids[start:start + size] for start in range(0, len(ids), size)]
+
+
 
 class TvhBackend(ABC):
     """One connection to a TVHeadend server (HTTP JSON or HTSP).
