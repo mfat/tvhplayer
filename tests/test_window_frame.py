@@ -789,3 +789,39 @@ def test_dialog_framer_stops_watching_once_the_app_quits(tmp_path):
     result = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
     assert 'FILTER CALLS AFTER EXIT 0' in result.stdout, result.stdout + result.stderr
+
+
+def test_a_wizard_keeps_its_pages_and_buttons_inside_the_frame(qapp):
+    # A QWizard spreads its contents over the whole window, ignoring the margins
+    # the frame keeps for its shadow and title bar. The heading lay under the
+    # title bar and Next ran past the bottom and right edges (Set Up Channels on GNOME).
+    from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWizard, QWizardPage
+
+    framer = _framer(qapp)
+    parent = QWidget()
+    wizard = QWizard(parent)
+    wizard.setWizardStyle(QWizard.WizardStyle.ClassicStyle)
+    page = QWizardPage()
+    QVBoxLayout(page).addWidget(QLabel('How do you get TV?'))
+    wizard.addPage(page)
+    try:
+        wizard.resize(600, 520)
+        wizard.show()
+        qapp.processEvents()
+        inside = wizard.contentsRect()
+        assert inside.top() >= SHADOW_MARGINS.top() + TITLE_BAR_HEIGHT
+        for widget in (page, wizard.button(QWizard.WizardButton.NextButton),
+                       wizard.button(QWizard.WizardButton.CancelButton)):
+            rect = widget.rect().translated(widget.mapTo(wizard, QPoint(0, 0)))
+            assert inside.contains(rect), (widget, rect, inside)
+        # And after the window is resized.
+        wizard.resize(wizard.width() + 40, wizard.height() + 30)
+        qapp.processEvents()
+        inside = wizard.contentsRect()
+        button = wizard.button(QWizard.WizardButton.NextButton)
+        rect = button.rect().translated(button.mapTo(wizard, QPoint(0, 0)))
+        assert inside.contains(rect), (rect, inside)
+    finally:
+        framer.deleteLater()
+        parent.deleteLater()
+        qapp.processEvents()

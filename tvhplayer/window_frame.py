@@ -20,7 +20,7 @@ from pathlib import Path
 from PyQt6.QtCore import QEvent, QMargins, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PyQt6.QtWidgets import (
-    QAbstractButton, QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMenuBar, QWidget,
+    QAbstractButton, QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMenuBar, QWidget, QWizard,
 )
 
 try:
@@ -735,11 +735,40 @@ class DialogFrame(_Frame):
         # two found the window resizable and showed Maximize. Now it is settled.
         self.title_bar.sync_state()
         self._place_grips()
+        self._wizard_body = _wizard_body(window)
+        if self._wizard_body is not None:
+            self._wizard_body.installEventFilter(self)
+            self._place_wizard_body()
 
     def _place_title_bar(self):
         m = self.margins
         self.title_bar.setGeometry(m.left(), m.top(), self.window.width() - m.left() - m.right(), self.title_room)
         self.title_bar.raise_()
+        self._place_wizard_body()
+
+    def _place_wizard_body(self):
+        """A wizard spreads its pages and buttons over the whole window, under
+        the title bar and the shadow. They go inside the contents margins."""
+        body = getattr(self, '_wizard_body', None)
+        if body is not None and body.geometry() != self.window.contentsRect():
+            body.setGeometry(self.window.contentsRect())
+
+    def eventFilter(self, obj, event):
+        # The wizard sizes its body after the window's resize has passed this frame.
+        if obj is getattr(self, '_wizard_body', None):
+            if event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
+                self._place_wizard_body()
+            return False
+        return super().eventFilter(obj, event)
+
+
+def _wizard_body(window):
+    """The child that holds a QWizard's pages and buttons, which it keeps at the window's full size."""
+    if not isinstance(window, QWizard):
+        return None
+    # It has no class name of its own to find it by; the buttons are its children.
+    body = window.button(QWizard.WizardButton.CancelButton).parentWidget()
+    return body if body is not None and body.parentWidget() is window else None
 
 
 # Windows that keep the system's frame, or have none: menus, tool tips and the like.
