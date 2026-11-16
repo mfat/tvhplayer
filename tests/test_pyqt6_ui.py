@@ -5348,3 +5348,101 @@ def test_long_group_and_server_names_do_not_widen_the_channel_pane(monkeypatch, 
     finally:
         window.close()
         app.processEvents()
+
+
+def test_spinner_ticks_repaint_only_the_ring(monkeypatch, tmp_path):
+    from PyQt6.QtCore import QEvent, QObject
+
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        spinner = ui.PlaybackSpinner()
+        spinner.resize(1920, 1080)
+        spinner.set_running(True)
+        app.processEvents()
+        painted = []
+
+        class Paints(QObject):
+            def eventFilter(self, obj, event):
+                if obj is spinner and event.type() == QEvent.Type.Paint:
+                    painted.append(event.rect())
+                return False
+
+        watcher = Paints()
+        spinner.installEventFilter(watcher)
+        spinner._advance()
+        app.processEvents()
+        spinner.removeEventFilter(watcher)
+        spinner.set_running(False)
+        assert painted
+        # The ring is at most 72 pixels across; the rest of a 1080p overlay does not change.
+        assert all(rect.width() <= 100 and rect.height() <= 100 for rect in painted)
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_one_start_watch_per_channel_start(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    created = []
+
+    class Watch(ui.StartWatch):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(ui, 'StartWatch', Watch)
+    try:
+        window.show()
+        app.processEvents()
+
+        class Backend:
+            def stream_url(self, channel, profile=None):
+                return 'http://tv.example/stream/channel/news'
+
+        window.get_backend = lambda: Backend()
+        window.current_server = lambda: {'name': 'Home', 'url': 'http://192.0.2.1:9981'}
+        window._server_requests_ready = lambda: True
+        window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        _wait_until(app, lambda: window._stream is not None, 'the stream address')
+        # Asking for the address and starting the player are one start: one watch, still running.
+        assert len(created) == 1
+        assert window._start_watch is created[0]
+        assert not created[0]._stopped.is_set()
+
+        window.stop_playback()
+        manager = window.cast_manager
+        monkeypatch.setattr(type(manager), 'is_connected', property(lambda _self: True))
+        monkeypatch.setattr(manager, 'play_channel', lambda *_args: False)
+        window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        # The cast device reports how the channel starts; no watch on this server.
+        assert len(created) == 1
+        assert window._start_watch is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_stream_address_failure_shows_over_the_player(monkeypatch, tmp_path):
+    app, ui, window, _fake_player = _make_player(monkeypatch, tmp_path)
+    try:
+        window.show()
+        app.processEvents()
+
+        class Backend:
+            def stream_url(self, channel, profile=None):
+                raise RuntimeError('No such channel')
+
+        window.get_backend = lambda: Backend()
+        window.servers = []
+        window.play_channel_by_data(ui.Channel(uuid='news', name='News'))
+        _wait_until(app, lambda: not window._awaiting_playback, 'the failure')
+        # Shown over the player too, where it is seen in fullscreen.
+        assert window.playback_spinner.isVisible()
+        assert window.playback_spinner.showing_problem()
+        assert 'No such channel' in window.playback_spinner.accessibleName()
+    finally:
+        window.close()
+        app.processEvents()

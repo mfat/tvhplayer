@@ -284,7 +284,9 @@ def test_a_server_that_cannot_give_a_stream_address_is_reported(monkeypatch, tmp
         assert played == []
         assert window._playback_channel is None
         assert window.status_label.text() == 'Playback error: Server not reachable'
-        assert not window.playback_spinner.isVisible()
+        # The ring stops; the reason stays over the player, where it shows in fullscreen too.
+        assert not window.playback_spinner._timer.isActive()
+        assert window.playback_spinner.accessibleName() == 'Playback error: Server not reachable'
     finally:
         _close(app, window)
 

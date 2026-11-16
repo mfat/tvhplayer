@@ -637,3 +637,28 @@ def test_invalid_hardware_decoding_keeps_previous_choice(engine):
         player.set_hardware_decoding('invalid')
     player.play('http://example.test/stream')
     assert mpv.props['hwdec'] == 'no'
+
+
+def test_a_late_start_of_the_previous_channel_is_ignored(engine):
+    player, mpv, seen = engine
+    queued = []
+    # Callbacks reach the window later, through its event queue.
+    player.set_handlers(
+        on_playing=lambda: seen.append('playing'),
+        on_stopped=lambda: seen.append('stopped'),
+        on_error=lambda: seen.append('error'),
+        schedule=queued.append,
+    )
+    player.play('http://nas.example:9981/stream/channel/1')
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    mpv.fire(_event(_EventID.END_FILE, _EndFile.ERROR))
+    # Another channel is chosen before the window hears that the first one started.
+    player.play('http://nas.example:9981/stream/channel/2')
+    for callback in queued:
+        callback()
+    assert seen == []
+    queued.clear()
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    for callback in queued:
+        callback()
+    assert seen == ['playing']

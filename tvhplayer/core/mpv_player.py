@@ -111,14 +111,30 @@ class MpvPlayer(Player):
         if kind == mpv.MpvEventID.PLAYBACK_RESTART:
             if self._waiting_for_picture:
                 self._waiting_for_picture = False
-                self._emit(self._on_playing)
+                self._emit_for_stream(self._on_playing)
         elif kind == mpv.MpvEventID.END_FILE:
             reason = event.data.reason
             if reason == mpv.MpvEventEndFile.ERROR:
                 self._waiting_for_picture = False
-                self._emit(self._on_error)
+                self._emit_for_stream(self._on_error)
             elif reason in (mpv.MpvEventEndFile.EOF, mpv.MpvEventEndFile.ABORTED):
                 self._emit(self._on_stopped)
+
+    def _emit_for_stream(self, callback):
+        """Report a start or failure only if that stream is still the one playing when the window hears it.
+
+        Callbacks wait in the window's event queue; a channel chosen meanwhile must
+        not lose its spinner to the previous channel's first picture or error.
+        """
+        if callback is None:
+            return
+        serial = self._stream_serial
+
+        def report():
+            if serial == self._stream_serial:
+                callback()
+
+        self._emit(report)
 
     def play(self, url: str):
         self._stop_buffer_recording()

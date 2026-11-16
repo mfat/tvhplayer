@@ -3385,10 +3385,25 @@ class PlaybackSpinner(QWidget):
             spinner_debug.stopped()
             self.hide()
 
+    def _ring(self):
+        """The ring's square and line width for the current size."""
+        span = min(self.width(), self.height())
+        diameter = max(36, min(72, span // 6 if span else 36))
+        rect = QRectF(
+            (self.width() - diameter) / 2,
+            (self.height() - diameter) / 2,
+            diameter,
+            diameter,
+        )
+        return rect, max(4, diameter // 10)
+
     def _advance(self):
         spinner_debug.tick()
         self._angle = (self._angle + 8) % 360
-        self.update()
+        # Only the ring moves: repainting the whole player area each tick is
+        # wasted work on a large or fullscreen window.
+        rect, thickness = self._ring()
+        self.update(rect.adjusted(-thickness, -thickness, thickness, thickness).toAlignedRect())
 
     def paintEvent(self, _event):
         started = time.perf_counter()
@@ -3411,15 +3426,7 @@ class PlaybackSpinner(QWidget):
             )
             painter.end()
             return
-        span = min(self.width(), self.height())
-        diameter = max(36, min(72, span // 6 if span else 36))
-        thickness = max(4, diameter // 10)
-        rect = QRectF(
-            (self.width() - diameter) / 2,
-            (self.height() - diameter) / 2,
-            diameter,
-            diameter,
-        )
+        rect, thickness = self._ring()
         track = QPen(QColor(255, 255, 255, 50), thickness)
         track.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(track)
@@ -4001,6 +4008,8 @@ class StartWatch(QObject):
         super().__init__(parent)
         self._server = dict(server)
         self._name = channel_name
+        # Which start it follows, as (play generation, channel), set by the window.
+        self.start_of = None
         self._stopped = threading.Event()
         self._thread = threading.Thread(target=self._run, name='start-watch', daemon=True)
 
@@ -6727,8 +6736,11 @@ class TVHeadendClient(QMainWindow):
             spinner.set_running(False)
             spinner.setAccessibleName("")
 
-    def _show_playback_wait(self):
-        """Cover the player until mpv reports that playback has started."""
+    def _show_playback_wait(self, watch=True):
+        """Cover the player until mpv reports that playback has started.
+
+        ``watch`` follows the server's status meanwhile; a cast device reports its own.
+        """
         self._awaiting_playback = True
         if hasattr(self, '_splash_idle_timer'):
             self._splash_idle_timer.stop()
@@ -6738,16 +6750,25 @@ class TVHeadendClient(QMainWindow):
             spinner.set_caption(STARTING)
         self._set_playback_spinner(True)
         self._sync_play_button()
-        self._watch_start()
+        if watch:
+            self._watch_start()
+        else:
+            self._stop_start_watch()
 
     def _watch_start(self):
         """Show what the server says about the channel while it starts."""
-        self._stop_start_watch()
         channel = getattr(self, '_playback_channel', None)
+        generation = getattr(self, '_play_generation', 0)
+        current = getattr(self, '_start_watch', None)
+        if current is not None and channel is not None and current.start_of == (generation, channel):
+            # The same start, now past asking for the stream address: keep its watch and connection.
+            return
+        self._stop_start_watch()
         server = self.current_server()
         if channel is None or not server:
             return
         watch = StartWatch(server, channel.name, self)
+        watch.start_of = (generation, channel)
         watch.caption.connect(lambda text, watch=watch: self._on_start_caption(watch, text))
         watch.signal.connect(lambda level, words, watch=watch: self._on_start_signal(watch, level, words))
         self._start_signal = ('', '')
@@ -9857,8 +9878,7 @@ class TVHeadendClient(QMainWindow):
             profile = profiles.get(server_key(server), AUTO_PROFILE if casting else '') if server else ''
             if casting:
                 self._stream = None
-                self._show_playback_wait()
-                self._stop_start_watch()
+                self._show_playback_wait(watch=False)
                 self._mark_playing_channel(scroll=True)
                 self.player.stop()
                 if not self.cast_manager.play_channel(server, channel, profile):
@@ -9926,7 +9946,8 @@ class TVHeadendClient(QMainWindow):
             self._sync_play_button()
         self._playback_channel = None
         self._mark_playing_channel()
-        self.statusbar.showMessage(f"Playback error: {error}")
+        # Over the player as well, where it is seen in fullscreen.
+        self._show_playback_problem(f"Playback error: {error}")
 
     def show_server_status(self):
         """Show server status dialog"""
