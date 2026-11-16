@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-TVHEADEND_COMMIT = '22ba6e5324288f2a0dfd1f5aaec9ac091d50b515'
+TVHEADEND_COMMIT = '21bc3036d986f403b8e7a9ab1662fbd42e0ecfdd'
 RELEASE_ARTIFACTS = {'tvheadend.tar', 'sbom.spdx.json', 'licenses.tar.gz', 'corresponding-source.tar.gz'}
 
 

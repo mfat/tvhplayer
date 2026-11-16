@@ -36,8 +36,11 @@ The deb and rpm builds download `<repo>/archive/<commit>.tar.gz`, and the deb bu
 | `fd5952d15` | bouquet: fill a bouquet's active services in one pass at startup | not yet |
 | `d25bc4d11` | epggrab: resolve TVHplayer guide destinations directly by UUID | [#2400](https://github.com/tvheadend/tvheadend/pull/2400) |
 | `22ba6e532` | epggrab: link a changed channel to its TVHplayer guide channel directly | [#2400](https://github.com/tvheadend/tvheadend/pull/2400) |
+| `a927e4be8` | wrappers: open files close-on-exec without holding fork_lock | not yet |
+| `d3b99a1f5` | prop: look up saved fields through a hash while loading an object | not yet |
+| `21bc3036d` | settings: free large loaded settings trees on a background thread | not yet |
 
-Base: upstream `51ec612fa`. Packages pin `22ba6e532`, the `tvhplayer` branch tip, which includes these fixes.
+Base: upstream `51ec612fa`. Packages pin `21bc3036d`, the `tvhplayer` branch tip, which includes these fixes.
 
 For startup investigation, enable the existing stderr/main trace with `-d --trace main`
 on a disposable, disk-backed copy of the configuration. Stage timing is emitted
