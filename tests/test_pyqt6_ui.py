@@ -4077,7 +4077,7 @@ def test_tv_guide_opens_from_the_view_menu_at_the_selected_channel(monkeypatch, 
         window.channel_recordings_changed([])
         assert guide.grid.recordings == {}
         assert window.guide_btn.accessibleName() == 'TV guide'
-        assert window.guide_btn.text() == 'TV Guide'
+        assert window.guide_btn.text() == ''
         window.selected_channel = lambda: channels[0]
         window.guide_btn.click()
         assert window._guide is guide
@@ -5261,22 +5261,19 @@ def test_the_window_narrows_to_half_a_1080p_screen_at_125_percent(monkeypatch, t
         _settle(app)
         assert window.minimumSizeHint().width() <= 680
         # Wide, everything shows at full size.
-        assert bar.squeeze.level == 0 and window.server_row.squeeze.level == 0
+        assert bar.squeeze.level == 0
         assert bar.volume_slider.isVisibleTo(bar) and bar.back_btn.isVisibleTo(bar)
         assert bar.stop_record_btn.text().strip() == "Stop recording"
-        assert window.guide_btn.toolButtonStyle() == ui.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
 
         window.resize(300, 500)
         _settle(app)
         assert window.width() <= 680
-        # Narrow: the extras are hidden, Record and the buttons over the list keep their icons.
+        # Narrow: the extras are hidden, Record keeps its icon.
         assert not bar.volume_slider.isVisibleTo(bar)
         assert not bar.prev_btn.isVisibleTo(bar) and not bar.back_btn.isVisibleTo(bar)
         assert bar.mute_btn.isVisibleTo(bar) and bar.pause_btn.isVisibleTo(bar) and bar.live_btn.isVisibleTo(bar)
         assert bar.stop_record_btn.isVisibleTo(bar) and bar.stop_record_btn.text() == ""
         assert bar.stop_record_btn.accessibleName() == "Stop recording"
-        assert window.guide_btn.toolButtonStyle() == ui.Qt.ToolButtonStyle.ToolButtonIconOnly
-        assert window.guide_btn.accessibleName() == "TV guide"
         # Nothing in the bar is cut: it is as wide as its controls need.
         assert bar.width() >= bar.layout().totalMinimumSize().width()
 
@@ -5291,7 +5288,6 @@ def test_the_window_narrows_to_half_a_1080p_screen_at_125_percent(monkeypatch, t
         assert bar.squeeze.level == 0
         assert bar.volume_slider.isVisibleTo(bar) and bar.prev_btn.isVisibleTo(bar) and bar.back_btn.isVisibleTo(bar)
         assert bar._record_text.isVisibleTo(bar)
-        assert window.guide_btn.toolButtonStyle() == ui.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         # Timeshift ends: its controls hide even though the room for them is back.
         bar.set_timeshift(None)
         _settle(app)

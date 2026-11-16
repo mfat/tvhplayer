@@ -85,7 +85,6 @@ try:
         THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, normalize_accent,
         polish_main_window, set_accent, set_color_scheme, set_window_color, style_key,
     )
-    from .squeeze import SqueezeRow
     from .player_bar import (
         DOT_SVG,
         MENU_DOT_SVG,
@@ -190,7 +189,6 @@ except ImportError:
         THEME_TVHPLAYER, ThemeStyle, apply as apply_theme, color as theme_color, is_organic, normalize_accent,
         polish_main_window, set_accent, set_color_scheme, set_window_color, style_key,
     )
-    from squeeze import SqueezeRow
     from player_bar import (
         DOT_SVG,
         MENU_DOT_SVG,
@@ -4539,10 +4537,8 @@ class TVHeadendClient(QMainWindow):
         left_layout = QVBoxLayout(self.left_pane)
         
         # Server selection with add/remove buttons. In a narrow pane the
-        # server names are cut short and Reload and TV Guide show only their icons.
-        self.server_row = SqueezeRow()
-        server_layout = QHBoxLayout(self.server_row)
-        server_layout.setContentsMargins(0, 0, 0, 0)
+        # server names are cut short.
+        server_layout = QHBoxLayout()
         self.server_combo = QComboBox()
         self.server_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.server_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -4571,7 +4567,6 @@ class TVHeadendClient(QMainWindow):
         self.manage_servers_btn.setToolTip("Manage servers")
         server_layout.addWidget(self.manage_servers_btn)
         self.reload_channels_btn = IconToolButton(self.icons_dir / 'refresh.svg', 18)
-        self.reload_channels_btn.setText("Reload")
         self.reload_channels_btn.clicked.connect(lambda: self.fetch_channels(keep_place=True))
         describe(
             self.reload_channels_btn,
@@ -4581,7 +4576,6 @@ class TVHeadendClient(QMainWindow):
         self.reload_channels_btn.setToolTip("Reload channel list (F5)")
         server_layout.addWidget(self.reload_channels_btn)
         self.guide_btn = IconToolButton(self.icons_dir / 'event_note.svg', 18)
-        self.guide_btn.setText("TV Guide")
         self.guide_btn.clicked.connect(lambda: self.show_guide())
         describe(
             self.guide_btn,
@@ -4590,14 +4584,7 @@ class TVHeadendClient(QMainWindow):
         )
         self.guide_btn.setToolTip(keys_text("TV guide (Ctrl+G)"))
         server_layout.addWidget(self.guide_btn)
-
-        def short_buttons(on):
-            style = Qt.ToolButtonStyle.ToolButtonIconOnly if on else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-            for button in (self.reload_channels_btn, self.guide_btn):
-                button.setToolButtonStyle(style)
-
-        self.server_row.set_steps((short_buttons,))
-        left_layout.addWidget(self.server_row)
+        left_layout.addLayout(server_layout)
         
     
 
