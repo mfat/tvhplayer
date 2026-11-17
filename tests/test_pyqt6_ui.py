@@ -3537,6 +3537,56 @@ def test_channels_show_before_now_and_next_arrive(monkeypatch, tmp_path):
         app.processEvents()
 
 
+@pytest.mark.parametrize('enabled_before_load', [True, False])
+def test_programme_under_channel_name_without_now_or_next_columns(monkeypatch, tmp_path, enabled_before_load):
+    from tvhplayer.channel_view import SUBTITLE_ROLE
+    from tvhplayer.core.channel_info import NowNext
+    from tvhplayer.core.models import EpgEvent
+
+    now = int(time.time())
+    backend = _ExtrasBackend(now)
+    app, ui, window = _channel_list_window(monkeypatch, tmp_path, backend)
+    window.logo_loader.request = lambda *args: None
+    try:
+        window._channel_column_actions['now'].setChecked(False)
+        window._channel_option_actions['two_line'].setChecked(enabled_before_load)
+        window.fetch_channels()
+        _wait_for_channels(app, window)
+        _wait_for_now_next(app, window)
+        if not enabled_before_load:
+            assert backend.now_next_calls == 0
+            window._channel_option_actions['two_line'].setChecked(True)
+            _wait_for_now_next(app, window)
+
+        table = window.channel_list
+        assert table.isColumnHidden(ui.COL_NOW)
+        assert table.isColumnHidden(ui.COL_NEXT)
+        assert window._channel_delegate.two_line
+        assert backend.now_next_calls == 1
+        news_row = _channel_row(table, 'News')
+        assert _cell(table, news_row, ui.COL_NAME).data(SUBTITLE_ROLE) == 'Headlines'
+
+        # Programme changes still refresh when only the subtitle needs them.
+        backend.now_next['news'].now.stop = now - 1
+        backend.now_next = {'news': NowNext(EpgEvent(
+            start=now - 1, stop=now + 1200, title='Weather', channel_uuid='news', event_id=2
+        ), None)}
+        window._now_next_fetched -= 61
+        window._tick_now_next()
+        _wait_for_now_next(app, window)
+        assert backend.now_next_calls == 2
+        assert _cell(table, news_row, ui.COL_NAME).data(SUBTITLE_ROLE) == 'Weather'
+
+        window._channel_option_actions['two_line'].setChecked(False)
+        window._now_next_fetched -= 700
+        window._tick_now_next()
+        _wait_for_now_next(app, window)
+        assert backend.now_next_calls == 2
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_now_next_is_fetched_again_when_a_programme_ends(monkeypatch, tmp_path):
     now = int(time.time())
     backend = _ExtrasBackend(now)

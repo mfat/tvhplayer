@@ -5415,7 +5415,8 @@ class TVHeadendClient(QMainWindow):
         return bool(self.channel_options['columns'].get(key))
 
     def _wants_now_next(self):
-        return self._visible_channel_column('now') or self._visible_channel_column('next')
+        return (self._visible_channel_column('now') or self._visible_channel_column('next')
+                or self.channel_options['two_line'])
 
     def _load_channel_kinds(self, backend):
         services = []
@@ -5996,6 +5997,7 @@ class TVHeadendClient(QMainWindow):
         self._mark_playing_channel()
 
     def _set_channel_option(self, key, value):
+        had_now_next = self._wants_now_next()
         self.channel_options[key] = bool(value)
         self._save_channel_options()
         if key in ('logos', 'hide_disabled'):
@@ -6010,6 +6012,8 @@ class TVHeadendClient(QMainWindow):
         elif key == 'tag_filter':
             self.tag_row.setVisible(bool(value) and self.tag_combo.count() > 1)
             self._apply_channel_filter()
+        if key == 'two_line' and value and not had_now_next:
+            self._fetch_now_next()
 
     def _set_channel_density(self, density):
         if density not in DENSITIES:
