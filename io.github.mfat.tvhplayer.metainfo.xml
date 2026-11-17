@@ -43,6 +43,14 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.7.4" date="2026-11-17">
+      <description>
+        <ul>
+          <li>Adds system tray and a run in background option</li>
+          <li>Bug fixes</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.7.3" date="2026-11-16">
       <description>
         <ul>
