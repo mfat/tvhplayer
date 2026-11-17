@@ -2528,11 +2528,11 @@ def test_settings_folder_change_shows_server_acceptance(monkeypatch, tmp_path):
         assert window.config_store.load()['local_recording_dir'] == str(second)
         assert supervisor.recordings_dir == str(second)
         assert supervisor.applied_recordings_dir == str(first)
-        assert 'has not accepted' in dialog.folder_status.text()
+        assert 'has not accepted' in dialog.folder_edit.toolTip()
         accepted = True
         assert supervisor.set_recordings_dir(str(second))
         assert supervisor.applied_recordings_dir == str(second)
-        assert dialog.folder_status.text() == ''
+        assert dialog.folder_edit.toolTip() == window.local_recording_dir()
     finally:
         window.builtin = None
         window.close()
@@ -2564,7 +2564,7 @@ def test_flatpak_stale_saved_folder_is_replaced_before_server_recording(monkeypa
             monkeypatch.setattr(ui, 'validate_recording_folder', revoked)
 
         dialog = window.show_settings()
-        assert 'Cannot save recordings here:' in dialog.folder_status.text()
+        assert 'Cannot save recordings here:' in dialog.folder_edit.toolTip()
 
         class Box(ui.QMessageBox):
             def exec(self):
@@ -2581,7 +2581,7 @@ def test_flatpak_stale_saved_folder_is_replaced_before_server_recording(monkeypa
         assert calls and all(folder == str(replacement) for folder in calls)
         assert window.config_store.load()['local_recording_dir'] == str(replacement)
         assert dialog.folder_edit.text() == str(replacement)
-        assert dialog.folder_status.text() == ''
+        assert dialog.folder_edit.toolTip() == window.local_recording_dir()
         if stale == 'deleted':
             assert not old.exists()
     finally:
@@ -4814,7 +4814,7 @@ def test_recording_folder_display_never_becomes_picker_or_writer_path(monkeypatc
         folder.mkdir()
         dialog._refresh_folder_status()
         assert window.recording_folder_problem() == ''
-        assert 'Cannot save recordings here:' not in dialog.folder_status.text()
+        assert 'Cannot save recordings here:' not in dialog.folder_edit.toolTip()
         assert window.local_recording_dir() == str(folder)
     finally:
         window.close()
@@ -5601,7 +5601,7 @@ def test_background_setting_and_denial_are_saved_truthfully(monkeypatch, tmp_pat
         window.background._permission(False, 'Denied')
         assert not window.config['keep_builtin_running']
         assert not dialog.background_check.isChecked()
-        assert 'quits' in dialog.background_status.text()
+        assert 'quits' in dialog.background_check.toolTip()
     finally:
         dialog.close()
         window.close()
@@ -5691,7 +5691,7 @@ def test_login_startup_setting_is_independent_and_registration_failure_is_visibl
         dialog.login_check.setChecked(True)
         assert not window.config['start_at_login']
         assert not dialog.login_check.isChecked()
-        assert 'cannot be written' in dialog.login_status.text()
+        assert 'cannot be written' in dialog.login_check.toolTip()
         assert messages
     finally:
         dialog.close()

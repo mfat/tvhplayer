@@ -848,9 +848,12 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert host.updates is False
     dialog.updates_btn.click()
     assert host.update_checks == 1
-    # Appearance comes first and Settings opens on it.
-    assert dialog.nav.item(0).text() == 'Appearance'
-    assert dialog.pages.currentWidget().widget().findChild(QLabel, 'pageTitle').text() == 'Appearance'
+    # General opens first; Appearance controls remain available on the next page.
+    assert dialog.nav.item(0).text() == 'General'
+    assert dialog.pages.currentWidget().widget().findChild(QLabel, 'pageTitle').text() == 'General'
+    from tvhplayer.settings_widgets import StatusStrip
+    assert not dialog.findChildren(StatusStrip)
+    dialog.nav.setCurrentRow(1)
     assert dialog.title_bar_check.isVisibleTo(dialog)
     assert dialog._title_bar_row.description.text() == 'Takes effect the next time TVHplayer starts.'
     assert dialog.title_bar_check.accessibleDescription() == 'Takes effect the next time TVHplayer starts.'
@@ -876,7 +879,6 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     assert dialog.mark_check.isChecked()
     dialog.mark_check.click()
     assert host.mark is False
-    assert dialog.status_label.text() == 'Channels that do not work are no longer marked.'
     dialog.mark_check.click()
     assert host.mark is True
     assert not dialog.play_check.isChecked()
@@ -921,9 +923,9 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     host.picons = 24054
     host.picon_job.finished.emit(None, '')
     assert dialog.picon_btn.text() == 'Up&date Picons'
-    assert dialog.picon_status.text().startswith('24,054 picons are ready.')
+    assert dialog.picon_btn.toolTip().startswith('24,054 picons are ready.')
     dialog.picon_remove_btn.click()
-    assert dialog.picon_status.text() == 'No picons downloaded.'
+    assert dialog.picon_btn.toolTip() == 'No picons downloaded.'
     assert (dialog.early_spin.value(), dialog.late_spin.value(), dialog.space_spin.value()) == (2, 5, 5)
     dialog.late_spin.setValue(10)
     dialog.space_spin.setValue(0)
@@ -937,11 +939,11 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog.options_edit.setText('-metadata "title=unclosed')
     dialog._options_edited()
     assert not hasattr(host, 'options')
-    assert 'not saved' in dialog.options_status.text()
+    assert 'not saved' in dialog.options_edit.toolTip()
     dialog.options_edit.setText(' -b:a 128k ')
     dialog._options_edited()
     assert host.options == '-b:a 128k'
-    assert dialog.options_status.text() == ''
+    assert 'not saved' not in dialog.options_edit.toolTip()
 
     assert not dialog.delete_check.isEnabled()
     dialog.convert_check.click()
@@ -951,21 +953,20 @@ def test_settings_toggle_hiding_and_check_now(app, monkeypatch):
     dialog.convert_edit.setText('-c:v nope')
     dialog._convert_edited()
     assert host.convert_text == '-c:v nope'
-    assert 'no nope encoder' in dialog.convert_status.text()
+    assert 'no nope encoder' in dialog.convert_edit.toolTip()
     dialog.convert_edit.setText('')
     dialog._convert_edited()
     assert host.convert_text == ''
     assert dialog.convert_edit.text() == '-c:v libx264 -crf 18'
-    assert dialog.convert_status.text() == ''
+    assert 'no nope encoder' not in dialog.convert_edit.toolTip()
     dialog.hide_check.click()
     assert host.hide is False
-    assert 'shown again' in dialog.status_label.text()
     dialog.check_btn.click()
     assert host.checks == 1
-    assert dialog.status_label.text() == 'There are no imported playlists to check.'
+    assert dialog.check_btn.toolTip() == 'There are no imported playlists to check.'
     host.sources = [PlaylistSource('old', 'http://x/old.m3u', 'http://gone')]
     dialog.check_btn.click()
-    assert dialog.status_label.text() == 'The server of 1 playlist was removed, so it cannot be checked.'
+    assert dialog.check_btn.toolTip() == 'The server of 1 playlist was removed, so it cannot be checked.'
 
 
 def test_a_playlist_being_updated_cannot_be_refreshed(app, tmp_path):
