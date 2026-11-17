@@ -5747,7 +5747,7 @@ def test_background_permission_refresh_keeps_flatpak_login_registration(monkeypa
         app.processEvents()
 
 
-def test_hidden_login_does_not_start_playback_or_an_opted_out_server(monkeypatch, tmp_path):
+def test_hidden_login_loads_the_last_server_without_play_on_start(monkeypatch, tmp_path):
     (tmp_path / 'tvhplayer.conf').write_text(json.dumps({'play_on_start': True, 'builtin_autostart': False}))
     calls = []
     def prepare(ui):
@@ -5761,8 +5761,7 @@ def test_hidden_login_does_not_start_playback_or_an_opted_out_server(monkeypatch
         assert not window.isVisible()
         assert window.background.hidden
         assert not window._play_on_start
-        assert not calls
-        assert window._login_channels_deferred
+        assert calls == ['fetch']
         window.background.show_window()
         assert window.isVisible()
         assert calls == ['fetch']

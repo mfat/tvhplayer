@@ -5014,14 +5014,8 @@ class TVHeadendClient(QMainWindow):
             announce_label(self.status_label, message)
         self.statusbar.showMessage = custom_show_message
         
-        # A login launch must respect the separate server autostart preference.
-        self._login_channels_deferred = (
-            self.background.hidden and is_builtin_server(self.current_server())
-            and not self.config.get('builtin_autostart'))
-        if self._login_channels_deferred:
-            self._show_channel_state('The built-in server is stopped.', retry=True)
-        else:
-            self.fetch_channels()
+        # Hidden login still loads the last server (starting the built-in one when needed).
+        self.fetch_channels()
         
         # Connect channel list double click to play
         

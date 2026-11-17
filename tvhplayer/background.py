@@ -225,9 +225,6 @@ class BackgroundMode(QObject):
         window._now_next_timer.start()
         if self.portal is not None:
             self.portal.set_status('')
-        if getattr(window, '_login_channels_deferred', False):
-            window._login_channels_deferred = False
-            window.fetch_channels()
         if self.deferred_backend_setup:
             self.deferred_backend_setup = False
             QTimer.singleShot(0, window._resume_windows_backend_setup)
