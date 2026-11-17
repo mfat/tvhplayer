@@ -6,8 +6,10 @@ from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 try:
+    from .core import autostart
     from .core.updates import installed_by_flatpak
 except ImportError:
+    from core import autostart
     from core.updates import installed_by_flatpak
 
 
@@ -28,7 +30,18 @@ class BackgroundMode(QObject):
         self.tray = None
         self._hidden_windows = []
         self.deferred_setup = False
+        self.deferred_backend_setup = False
         self.deferred_update = None
+        self._startup_request = None
+        self.startup_problem = ''
+        if not self.flatpak and self.window.config.get('start_at_login'):
+            try:
+                if not autostart.is_enabled():
+                    self.window.config['start_at_login'] = False
+                    self.startup_problem = 'Login startup registration is missing or points to another app location. Enable it again to update it.'
+            except OSError as error:
+                self.window.config['start_at_login'] = False
+                self.startup_problem = str(error)
 
     @property
     def enabled(self):
@@ -52,6 +65,32 @@ class BackgroundMode(QObject):
         if self.granted:
             self._permission(True, '')
             return
+        self._request_portal()
+
+    @property
+    def starts_at_login(self):
+        return bool(self.window.config.get('start_at_login'))
+
+    def set_starts_at_login(self, enabled):
+        if self.pending:
+            return
+        self.startup_problem = ''
+        if self.flatpak:
+            self._startup_request = bool(enabled)
+            self._request_portal()
+            return
+        try:
+            autostart.set_enabled(bool(enabled))
+        except (OSError, ValueError) as error:
+            self.startup_problem = str(error)
+            self.changed.emit()
+            QMessageBox.warning(self.window, 'Login Startup Unavailable', str(error))
+            return
+        self.window.config['start_at_login'] = bool(enabled)
+        self.window.save_config()
+        self.changed.emit()
+
+    def _request_portal(self):
         if self.pending:
             return
         try:
@@ -67,12 +106,27 @@ class BackgroundMode(QObject):
             self.portal.finished.connect(self._permission)
         self.pending = True
         self.changed.emit()
-        self.portal.request()
+        requested = self.starts_at_login if self._startup_request is None else self._startup_request
+        self.portal.request(autostart=requested, commandline=autostart.launch_command())
 
     def _permission(self, granted, reason):
+        requested, self._startup_request = self._startup_request, None
         self.pending = False
-        self.granted = granted
-        self.window.config['keep_builtin_running'] = granted
+        succeeded = self.portal is not None and self.portal.succeeded
+        if requested is None or succeeded:
+            self.granted = granted
+        if requested is None or (succeeded and not granted):
+            self.window.config['keep_builtin_running'] = granted
+        if succeeded:
+            self.window.config['start_at_login'] = self.portal.autostart
+        problem = ''
+        if requested is not None:
+            if not succeeded or self.portal.autostart != requested:
+                problem = reason or 'The desktop did not apply the login startup preference.'
+            elif requested and not granted:
+                problem = ('Login startup was enabled, but background activity was denied. '
+                           'TVHplayer will open its window at login.')
+            self.startup_problem = problem
         self.window.save_config()
         self.changed.emit()
         hide, self._hide_when_granted = self._hide_when_granted, False
@@ -80,8 +134,19 @@ class BackgroundMode(QObject):
             self._ensure_tray()
             if hide and not self.quitting:
                 self.window.close()
-        else:
+        if problem:
+            QMessageBox.warning(self.window, 'Login Startup', problem)
+        elif not granted and requested is None:
             QMessageBox.warning(self.window, 'Background Mode Unavailable', reason)
+
+    def start_hidden(self):
+        """Login launch: the window has never been shown or started playback."""
+        self.hidden = True
+        self.window._metadata_timer.stop()
+        self.window._now_next_timer.stop()
+        self._ensure_tray()
+        if self.portal is not None:
+            self.portal.set_status('TVHplayer running in the background')
 
     def _ensure_tray(self):
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -160,6 +225,12 @@ class BackgroundMode(QObject):
         window._now_next_timer.start()
         if self.portal is not None:
             self.portal.set_status('')
+        if getattr(window, '_login_channels_deferred', False):
+            window._login_channels_deferred = False
+            window.fetch_channels()
+        if self.deferred_backend_setup:
+            self.deferred_backend_setup = False
+            QTimer.singleShot(0, window._resume_windows_backend_setup)
         if self.deferred_setup:
             self.deferred_setup = False
             QTimer.singleShot(0, window._offer_channel_setup)

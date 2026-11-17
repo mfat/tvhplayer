@@ -1,4 +1,4 @@
-"""Asynchronous, explicit Flatpak background permission (no login autostart)."""
+"""Asynchronous Flatpak background and optional login startup permission."""
 
 from __future__ import annotations
 
@@ -20,14 +20,18 @@ class BackgroundPortal(QObject):
         super().__init__(parent)
         self.bus = QDBusConnection.sessionBus()
         self.handle = ''
+        self.autostart = None
+        self.succeeded = False
         self.watcher = None
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(lambda: self._finish(False, 'The desktop did not answer the background request.'))
 
-    def request(self):
+    def request(self, autostart=False, commandline=None):
         if self.handle:
             return
+        self.autostart = None
+        self.succeeded = False
         if not self.bus.isConnected():
             self.finished.emit(False, 'The desktop background portal is unavailable.')
             return
@@ -38,11 +42,14 @@ class BackgroundPortal(QObject):
             self._finish(False, 'Could not receive desktop background permission.')
             return
         message = QDBusMessage.createMethodCall(SERVICE, PATH, INTERFACE, 'RequestBackground')
-        message.setArguments(['', {
+        options = {
             'handle_token': token,
             'reason': 'Keep the TV server and scheduled recordings running when the player window closes',
-            'autostart': False,
-        }])
+            'autostart': bool(autostart),
+        }
+        if autostart:
+            options['commandline'] = list(commandline or ['tvhplayer', '--background'])
+        message.setArguments(['', options])
         self.watcher = QDBusPendingCallWatcher(self.bus.asyncCall(message, 10000), self)
         self.watcher.finished.connect(lambda watcher, handle=self.handle: self._requested(watcher, handle))
         self.timer.start(120000)
@@ -66,7 +73,9 @@ class BackgroundPortal(QObject):
     def _response(self, response, results):
         if not self.handle:
             return
-        granted = response == 0 and results.get('background') is True
+        self.succeeded = response == 0
+        self.autostart = bool(results.get('autostart')) if self.succeeded else None
+        granted = self.succeeded and results.get('background') is True
         self._finish(granted, '' if granted else 'The desktop did not allow TVHplayer to run in the background.')
 
     def _finish(self, granted, reason):

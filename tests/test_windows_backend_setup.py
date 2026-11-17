@@ -61,7 +61,7 @@ def test_reopening_app_resumes_saved_setup_even_without_autostart(tmp_path, qapp
     calls = []
     supervisor = SimpleNamespace(config_dir=tmp_path / 'config', is_running=lambda: False,
                                  start=lambda: calls.append('verify_and_start'))
-    host = SimpleNamespace(builtin=supervisor,
+    host = SimpleNamespace(builtin=supervisor, background=SimpleNamespace(hidden=False),
                            show_windows_backend_setup=lambda: calls.append('show_setup'))
     TVHeadendClient._resume_windows_backend_setup(host)
     assert calls == []
@@ -77,7 +77,7 @@ def test_disabled_backend_never_resumes_setup_on_launch(tmp_path, qapp):
     calls = []
     supervisor = SimpleNamespace(config_dir=tmp_path / 'config', disabled=True,
                                  start=lambda: calls.append('start'))
-    host = SimpleNamespace(builtin=supervisor,
+    host = SimpleNamespace(builtin=supervisor, background=SimpleNamespace(hidden=False),
                            show_windows_backend_setup=lambda: calls.append('dialog'))
     save_setup(supervisor.config_dir, 'disabled', 'bios')
     TVHeadendClient._resume_windows_backend_setup(host)
@@ -101,3 +101,22 @@ def test_setup_progress_shows_specific_stage_without_marking_server_ready(tmp_pa
     assert not dialog.progress.isHidden()
     assert dialog.checklist.isHidden()
     dialog.reject()
+
+
+def test_login_launch_defers_pending_backend_setup_until_window_is_open(tmp_path, qapp):
+    from types import SimpleNamespace
+    from tvhplayer.tvhplayer import TVHeadendClient
+    from tvhplayer.core.windows_prerequisites import save_setup
+    calls = []
+    supervisor = SimpleNamespace(config_dir=tmp_path / 'config', is_running=lambda: False,
+                                 start=lambda: calls.append('start'))
+    background = SimpleNamespace(hidden=True, deferred_backend_setup=False)
+    host = SimpleNamespace(builtin=supervisor, background=background,
+                           show_windows_backend_setup=lambda: calls.append('dialog'))
+    save_setup(supervisor.config_dir, 'restart_required', 'repair')
+    TVHeadendClient._resume_windows_backend_setup(host)
+    assert background.deferred_backend_setup
+    assert not calls
+    background.hidden = False
+    TVHeadendClient._resume_windows_backend_setup(host)
+    assert calls == ['dialog', 'start']

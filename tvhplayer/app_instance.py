@@ -65,9 +65,11 @@ class AppInstance(QObject):
             os.close(self._lock_fd)
             self._lock_fd = None
 
-    def acquire(self):
+    def acquire(self, activate=True):
         """Return True for the owner, False after activating it; raise on failure."""
         if not self._try_lock():
+            if not activate:
+                return False
             socket = QLocalSocket(self)
             socket.connectToServer(self.name)
             if not socket.waitForConnected(3000):

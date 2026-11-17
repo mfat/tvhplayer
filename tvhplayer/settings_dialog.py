@@ -413,6 +413,17 @@ class SettingsDialog(QDialog):
     def _sleep_page(self, host):
         page = SettingsPage('Sleep')
         background = getattr(host, 'background', None)
+        if background is not None:
+            startup = page.add(SettingsGroup('Application startup'))
+            self.login_check = ToggleSwitch('Start TVHplayer at login')
+            startup.add_row(SettingRow(
+                'Start TVHplayer at login',
+                'Start the app in the background when you sign in. The built-in server starts only '
+                'if Start with TVHplayer is enabled in Servers. Off by default.', self.login_check))
+            self.login_status = startup.add_strip(StatusStrip()).label
+            self.login_check.toggled.connect(background.set_starts_at_login)
+            background.changed.connect(self._sync_login_startup)
+            self._sync_login_startup()
         if background is not None and getattr(host, 'builtin', None) is not None:
             group = page.add(SettingsGroup('Background server'))
             self.background_check = ToggleSwitch('Keep the server running when the window closes')
@@ -511,6 +522,17 @@ class SettingsDialog(QDialog):
         return page
 
     # Behaviour (unchanged from the tabbed dialog) --------------------------
+
+    def _sync_login_startup(self):
+        background = self._host.background
+        self.login_check.blockSignals(True)
+        self.login_check.setChecked(background.starts_at_login)
+        self.login_check.setEnabled(not background.pending)
+        self.login_check.blockSignals(False)
+        self.login_status.setText(
+            'Waiting for desktop permission…' if background.pending else
+            background.startup_problem or ('Enabled for your next login.' if background.starts_at_login
+                                           else 'TVHplayer will not start automatically at login.'))
 
     def _sync_background(self):
         background = self._host.background

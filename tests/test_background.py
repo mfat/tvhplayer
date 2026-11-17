@@ -57,7 +57,8 @@ def test_configuration_profiles_have_independent_instances(qapp, tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which('dbus-run-session'), reason='needs an isolated D-Bus session')
-@pytest.mark.parametrize('mode', ['grant', 'deny', 'cancel', 'unavailable', 'autostart-only'])
+@pytest.mark.parametrize('mode', ['grant', 'deny', 'cancel', 'unavailable', 'autostart-only',
+                                   'startup-grant', 'startup-denied', 'startup-background-denied', 'startup-disable'])
 def test_background_portal_real_dbus_response(mode):
     # A fake desktop on a private bus exercises actual Qt marshalling and the
     # Response subscription, without asking the developer's desktop permission.
@@ -69,11 +70,15 @@ from tvhplayer.background_portal import BackgroundPortal, SERVICE, PATH, INTERFA
 app = QCoreApplication([])
 bus = QDBusConnection.sessionBus()
 mode = sys.argv[1]
-grant = mode == 'grant'
+grant = mode in ('grant', 'startup-grant', 'startup-denied', 'startup-disable')
+requested_startup = mode.startswith('startup-') and mode != 'startup-disable'
+autostart_granted = mode in ('autostart-only', 'startup-grant', 'startup-background-denied')
 class Desktop(QObject):
     @pyqtSlot(str, 'QVariantMap', QDBusMessage)
     def RequestBackground(self, parent, options, message):
-        assert options['autostart'] is False
+        assert options['autostart'] is requested_startup
+        if requested_startup:
+            assert options['commandline'] == ['tvhplayer', '--background']
         if mode == 'unavailable':
             message.setDelayedReply(True)
             bus.send(message.createErrorReply('org.freedesktop.DBus.Error.UnknownMethod',
@@ -90,7 +95,7 @@ class Desktop(QObject):
             code = QDBusArgument()
             code.add(1 if mode == 'cancel' else 0, QMetaType.Type.UInt.value)
             signal.setArguments([code, {'background': grant or mode == 'cancel',
-                                        'autostart': mode == 'autostart-only'}])
+                                        'autostart': autostart_granted}])
             bus.send(signal)
         QTimer.singleShot(10, respond)
 desktop = Desktop()
@@ -102,11 +107,12 @@ def finished(ok, reason):
     results.append((ok, reason))
     app.quit()
 portal.finished.connect(finished)
-portal.request()
+portal.request(autostart=requested_startup)
 QTimer.singleShot(3000, app.quit)
 app.exec()
 assert len(results) == 1, results
 assert results[0][0] is grant, results
+assert portal.autostart == (None if mode in ('cancel', 'unavailable') else autostart_granted)
 assert not portal.handle
 assert not portal.timer.isActive()
 '''
@@ -156,4 +162,21 @@ def test_activation_accepts_only_show_command(qapp, tmp_path):
         assert owner.server.isListening()
     finally:
         socket.abort()
+        owner.close()
+
+
+def test_login_launch_does_not_activate_existing_instance(qapp, tmp_path):
+    from tvhplayer.app_instance import AppInstance
+    owner = AppInstance(tmp_path)
+    login = AppInstance(tmp_path)
+    activations = []
+    owner.show_requested.connect(lambda: activations.append(True))
+    try:
+        assert owner.acquire()
+        assert not login.acquire(activate=False)
+        qapp.processEvents()
+        assert not activations
+        assert owner.server.isListening()
+    finally:
+        login.close()
         owner.close()

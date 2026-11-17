@@ -4244,7 +4244,7 @@ class TVHeadendClient(QMainWindow):
     # Player callbacks. The engine calls from its own threads; a signal runs them on this one.
     _player_callback = pyqtSignal(object)
 
-    def __init__(self):
+    def __init__(self, start_hidden=False):
         super().__init__()
         self.engine = 'mpv'
         self.setup_paths()
@@ -4321,6 +4321,7 @@ class TVHeadendClient(QMainWindow):
         self._guide_timer.start(GUIDE_CHECK_MS)
         self._closing = False
         self.background = BackgroundMode(self)
+        self.background.hidden = start_hidden
         self._settings_dialog = None
         # A playlist check shows and hides channels for hours; reload the list at most this often.
         self._channel_reload_timer = QTimer(self)
@@ -4342,7 +4343,7 @@ class TVHeadendClient(QMainWindow):
         self._channels = []
         self._setup_offer_this_session = False
         # Play the last channel once the first channel list arrives.
-        self._play_on_start = self.plays_on_start()
+        self._play_on_start = self.plays_on_start() and not start_hidden
         # server_key() of the server _channels came from, and the fetch still running.
         self._channels_server = None
         self._channel_fetch = None
@@ -5013,8 +5014,14 @@ class TVHeadendClient(QMainWindow):
             announce_label(self.status_label, message)
         self.statusbar.showMessage = custom_show_message
         
-        # Initialize
-        self.fetch_channels()
+        # A login launch must respect the separate server autostart preference.
+        self._login_channels_deferred = (
+            self.background.hidden and is_builtin_server(self.current_server())
+            and not self.config.get('builtin_autostart'))
+        if self._login_channels_deferred:
+            self._show_channel_state('The built-in server is stopped.', retry=True)
+        else:
+            self.fetch_channels()
         
         # Connect channel list double click to play
         
@@ -8708,6 +8715,9 @@ class TVHeadendClient(QMainWindow):
             self.statusbar.showMessage('The built-in server is stopped.')
 
     def _resume_windows_backend_setup(self):
+        if self.background.hidden:
+            self.background.deferred_backend_setup = True
+            return
         if getattr(self.builtin, 'disabled', False):
             return
         try:
@@ -10133,19 +10143,25 @@ class NoDialogButtonIconsStyle(ThemeStyle):
 def main():
     """Main entry point for the application"""
     configure_logging()
-    # A Windows or macOS build carries its own libmpv.
-    frozen_libs.prepare()
+    background_launch = '--background' in sys.argv[1:]
     try:
         try:
             settings = ConfigStore().data
+            # Old login registrations must become harmless once disabled.
+            if background_launch and not settings.get('start_at_login'):
+                return
             theme = settings['ui_theme']
             scheme = settings['color_scheme']
             accent = settings['accent_color']
             window_color = settings['window_color']
         except Exception as e:
             print(f"Debug: Could not read the theme settings: {e}")
+            if background_launch:
+                return
             theme = DEFAULT_THEME
             scheme = accent = window_color = None
+        # A Windows or macOS build carries its own libmpv.
+        frozen_libs.prepare()
         LAUNCH_ENVIRON.update(os.environ)
         cursor_debug.prepare()
         app = QApplication(sys.argv)
@@ -10164,7 +10180,7 @@ def main():
             from core.config import default_config_dir
         instance = AppInstance(default_config_dir(), app)
         try:
-            if not instance.acquire():
+            if not instance.acquire(activate=not background_launch):
                 return
         except (OSError, RuntimeError) as error:
             QMessageBox.warning(None, 'TVHplayer', str(error))
@@ -10191,10 +10207,75 @@ def main():
             set_window_color(app, window_color)
             apply_theme(app, theme, NoDialogButtonIconsStyle)
         print(f"Debug: Theme: {theme or 'system (high contrast)'}")
-        player = TVHeadendClient()
-        instance.show_requested.connect(player.background.show_window)
-        app.commitDataRequest.connect(player.background.end_session)
-        player.show()
+        player = None
+        activation_requested = False
+
+        def activate():
+            nonlocal activation_requested
+            activation_requested = True
+            if player is not None:
+                player.background.show_window()
+
+        instance.show_requested.connect(activate)
+
+        def start_player(hidden, portal=None):
+            nonlocal player
+            try:
+                player = TVHeadendClient(start_hidden=hidden and not activation_requested)
+                app.commitDataRequest.connect(player.background.end_session)
+                if portal is not None:
+                    portal.setParent(player.background)
+                    player.background.portal = portal
+                    player.background.granted = hidden
+                    portal.finished.connect(player.background._permission)
+                if hidden and not activation_requested:
+                    player.background.start_hidden()
+                else:
+                    player.show()
+            except Exception:
+                print(f"Error starting TVHplayer: {traceback.format_exc()}")
+                app.exit(1)
+
+        if background_launch and installed_by_flatpak():
+            try:
+                from .background_portal import BackgroundPortal
+                from .core.autostart import launch_command
+            except ImportError:
+                from background_portal import BackgroundPortal
+                from core.autostart import launch_command
+            portal = BackgroundPortal(app)
+
+            def checked(granted, reason):
+                portal.finished.disconnect(checked)
+                if portal.succeeded:
+                    store = ConfigStore()
+                    store.data['start_at_login'] = bool(portal.autostart)
+                    if not granted:
+                        store.data['keep_builtin_running'] = False
+                    try:
+                        store.save()
+                    except OSError as error:
+                        print(f"Error saving login startup permission: {error}")
+                        app.exit(1)
+                        return
+                if portal.succeeded and not portal.autostart and not activation_requested:
+                    print('Debug: Login startup is no longer permitted by the desktop.')
+                    app.quit()
+                elif granted:
+                    start_player(True, portal)
+                elif (portal.succeeded and portal.autostart) or activation_requested:
+                    # Autostart and background grants are independent. If the
+                    # desktop allows only login startup, open a visible window.
+                    start_player(False, portal)
+                else:
+                    print(f"Debug: Background login launch was not allowed: {reason}")
+                    app.quit()
+
+            portal.finished.connect(checked)
+            # Start after exec(), so even an immediate connection failure can quit.
+            QTimer.singleShot(0, lambda: portal.request(autostart=True, commandline=launch_command()))
+        else:
+            QTimer.singleShot(0, lambda: start_player(background_launch))
         sys.exit(app.exec())
     except Exception as e:
         print(f"Error starting application: {str(e)}")

@@ -256,7 +256,7 @@ class _FakePlayer:
         return self._volume
 
 
-def _make_player(monkeypatch, tmp_path, prepare=None):
+def _make_player(monkeypatch, tmp_path, prepare=None, start_hidden=False):
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     fake_player = _FakePlayer()
     sys.modules.pop('tvhplayer.tvhplayer', None)
@@ -286,7 +286,7 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
 
     app = QApplication.instance() or QApplication([])
     app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
-    window = ui.TVHeadendClient()
+    window = ui.TVHeadendClient(start_hidden=start_hidden)
     # Not GitHub: once a newer release is out, its Update Available box waits for a click.
     # On the window, not the class: its check comes 10 s after it opens, often during a
     # later test, when a stub on the class would be undone.
@@ -5663,3 +5663,110 @@ def test_stopped_server_does_not_leave_idle_app_hidden(monkeypatch, tmp_path):
     app.processEvents()
     assert window._closing and not window.background.hidden
     assert stopped == [True]
+
+
+def test_login_startup_setting_is_independent_and_registration_failure_is_visible(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    from tvhplayer.settings_dialog import SettingsDialog
+    from tvhplayer.core import autostart
+    applied = []
+    window.builtin = None  # App startup is available without a packaged server.
+    window.background.flatpak = False
+    monkeypatch.setattr(autostart, 'set_enabled', applied.append)
+    messages = []
+    monkeypatch.setattr(ui.QMessageBox, 'warning', lambda *args: messages.append(args[2]))
+    dialog = SettingsDialog(window, window)
+    try:
+        assert not dialog.login_check.isChecked()
+        dialog.login_check.setChecked(True)
+        assert applied == [True]
+        assert window.config['start_at_login']
+        assert not window.config['builtin_autostart']
+        assert not window.config['keep_builtin_running']  # Existing explicit opt-out is preserved.
+        dialog.login_check.setChecked(False)
+        assert applied == [True, False]
+        def fail(enabled):
+            raise OSError('Registration cannot be written')
+        monkeypatch.setattr(autostart, 'set_enabled', fail)
+        dialog.login_check.setChecked(True)
+        assert not window.config['start_at_login']
+        assert not dialog.login_check.isChecked()
+        assert 'cannot be written' in dialog.login_status.text()
+        assert messages
+    finally:
+        dialog.close()
+        window.close()
+        app.processEvents()
+
+
+@pytest.mark.parametrize('autostart_granted,background_granted', [(True, True), (False, True), (True, False)])
+def test_login_startup_checks_flatpak_grants_independently(monkeypatch, tmp_path,
+                                                        autostart_granted, background_granted):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    background = window.background
+    background.flatpak = True
+    background.granted = False
+    requests = []
+    background.portal = types.SimpleNamespace(
+        succeeded=True, autostart=autostart_granted,
+        request=lambda **options: requests.append(options), cancel=lambda: None)
+    monkeypatch.setattr(background, '_ensure_tray', lambda: None)
+    monkeypatch.setattr(ui.QMessageBox, 'warning', lambda *args: None)
+    try:
+        background.set_starts_at_login(True)
+        assert background.pending
+        assert not window.config['start_at_login']  # No optimistic checkbox/save.
+        assert requests[0]['autostart'] is True
+        background._permission(background_granted, 'Permission denied')
+        assert window.config['start_at_login'] is autostart_granted
+        assert not background.pending
+        if not autostart_granted or not background_granted:
+            assert background.startup_problem
+        if not background_granted:
+            assert not window.config['keep_builtin_running']
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_background_permission_refresh_keeps_flatpak_login_registration(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    window.builtin = types.SimpleNamespace(status='stopped', is_running=lambda: False, shut_down=lambda: None)
+    background = window.background
+    background.flatpak = True
+    background.granted = False
+    window.config['start_at_login'] = True
+    requests = []
+    background.portal = types.SimpleNamespace(request=lambda **options: requests.append(options), cancel=lambda: None)
+    try:
+        background.set_enabled(True)
+        assert requests[0]['autostart'] is True
+    finally:
+        window._confirm_quit = lambda: True
+        window.background.quit()
+        app.processEvents()
+
+
+def test_hidden_login_does_not_start_playback_or_an_opted_out_server(monkeypatch, tmp_path):
+    (tmp_path / 'tvhplayer.conf').write_text(json.dumps({'play_on_start': True, 'builtin_autostart': False}))
+    calls = []
+    def prepare(ui):
+        monkeypatch.setattr(ui.TVHeadendClient, '_new_video_surface', lambda self: ui.QWidget())
+        monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, **kwargs: calls.append('fetch'))
+        monkeypatch.setattr(ui, 'find_bundled_binary', lambda: tmp_path / 'tvheadend')
+        monkeypatch.setattr(ui.BuiltinSupervisor, 'start', lambda self: calls.append('server'))
+    app, ui, window, player = _make_player(monkeypatch, tmp_path, prepare=prepare, start_hidden=True)
+    try:
+        window.background.start_hidden()
+        assert not window.isVisible()
+        assert window.background.hidden
+        assert not window._play_on_start
+        assert not calls
+        assert window._login_channels_deferred
+        window.background.show_window()
+        assert window.isVisible()
+        assert calls == ['fetch']
+    finally:
+        window._confirm_quit = lambda: True
+        window.background.quit()
+        app.processEvents()

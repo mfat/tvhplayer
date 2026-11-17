@@ -60,3 +60,22 @@ Name: "{autodesktop}\TVHplayer"; Filename: "{app}\TVHplayer.exe"; Tasks: desktop
 
 [Run]
 Filename: "{app}\TVHplayer.exe"; Description: "Launch TVHplayer"; Flags: nowait postinstall skipifsilent
+
+[Code]
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  StartupCommand, InstalledExe: String;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    InstalledExe := ExpandConstant('{app}\TVHplayer.exe');
+    if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
+                          'TVHplayer', StartupCommand) then
+    begin
+      { Preserve a registration that belongs to another portable installation. }
+      if (CompareText(StartupCommand, '"' + InstalledExe + '" --background') = 0) or
+         (CompareText(StartupCommand, InstalledExe + ' --background') = 0) then
+        RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'TVHplayer');
+    end;
+  end;
+end;
