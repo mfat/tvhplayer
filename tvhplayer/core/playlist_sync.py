@@ -698,7 +698,10 @@ def sync_playlist(
         if done % SAVE_BATCH == 0 or now - last_progress >= PROGRESS_SECONDS:
             save_changes()
             progress(done, total)
-            last_progress, reported = now, done
+            # Start the next interval after the requests finish. Counting
+            # their latency makes a slow save flush every subsequent channel
+            # separately instead of letting the next batch accumulate.
+            last_progress, reported = clock(), done
     if created_since_checkpoint:
         checkpoint()
 

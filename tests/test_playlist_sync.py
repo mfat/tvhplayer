@@ -276,7 +276,8 @@ def test_unchanged_refresh_writes_nothing():
     assert admin.saved == []
 
 
-def test_large_url_edit_saves_batches_before_reporting_progress():
+@pytest.mark.parametrize("save_seconds", [0, 1])
+def test_large_url_edit_saves_batches_before_reporting_progress(save_seconds):
     from tvhplayer.core.tvh_admin import SAVE_BATCH
 
     admin = FakeAdmin()
@@ -289,6 +290,16 @@ def test_large_url_edit_saves_batches_before_reporting_progress():
     original = dict(source.muxes)
     admin.saved.clear()
     progress = []
+    now = [0.0]
+    batches = []
+    save = admin.save
+
+    def slow_save(nodes):
+        batches.append(len(nodes))
+        save(nodes)
+        now[0] += save_seconds
+
+    admin.save = slow_save
 
     def saved_progress(done, total):
         progress.append((done, total))
@@ -298,10 +309,11 @@ def test_large_url_edit_saves_batches_before_reporting_progress():
     source.location = source.location.replace('old.example', 'new.example')
     result = sync_playlist(
         admin, source, _plans(text.replace('old.example', 'new.example')),
-        check=False, progress=saved_progress,
+        check=False, progress=saved_progress, clock=lambda: now[0],
     )
     assert (result.added, result.updated, result.removed) == (0, count, 0)
     assert source.muxes == original
+    assert batches == [SAVE_BATCH, SAVE_BATCH, 3]
     assert progress == [(SAVE_BATCH, count), (SAVE_BATCH * 2, count), (count, count)]
 
 
