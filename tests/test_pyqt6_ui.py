@@ -269,6 +269,8 @@ def _make_player(monkeypatch, tmp_path, prepare=None):
     monkeypatch.setattr(ui, 'windows_backend_enabled', lambda: False)
     monkeypatch.setattr('tvhplayer.core.builtin_runtime.windows_backend_enabled', lambda: False)
     store = ConfigStore(tmp_path / 'tvhplayer.conf')
+    # General UI tests exercise normal close/cleanup; background tests opt in below.
+    store.data['keep_builtin_running'] = False
     monkeypatch.setattr(ui, 'ConfigStore', lambda *a, **k: store)
     # Not the picon pack on this computer: each window read its tens of thousands of logos.
     monkeypatch.setattr(ui, 'default_picon_dir', lambda: tmp_path / 'picons')

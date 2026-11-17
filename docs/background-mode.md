@@ -1,8 +1,8 @@
 # Keep the built-in server running when the window closes
 
-Enable **Settings → Sleep → Keep the server running when the window closes**.
-The option is off by default and appears only when this build has a built-in
-server. It does not start the server; **Start with TVHplayer** remains a separate
+**Keep the server running when the window closes** is enabled by default.
+You can turn it off under **Settings → Sleep**. The option appears only when
+this build has a built-in server. Existing explicit choices are preserved. It does not start the server; **Start with TVHplayer** remains a separate
 server preference.
 
 With the option enabled and the server starting, running, or stopping, the close

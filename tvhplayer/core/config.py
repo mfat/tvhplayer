@@ -84,7 +84,7 @@ def default_config():
         'window_geometry': dict(DEFAULT_GEOMETRY),
         'servers': [],
         'builtin_autostart': False,
-        'keep_builtin_running': False,
+        'keep_builtin_running': True,
         'builtin_http_port': 0,
         'builtin_htsp_port': 0,
         'playlists': [],
