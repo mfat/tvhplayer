@@ -571,6 +571,56 @@ def mux_conf(plan: ChannelPlan) -> dict:
     }
 
 
+
+def _reuse_xtream_muxes(source: PlaylistSource, plans, rows) -> bool:
+    """Keep a renamed XC stream's mux when its old and new keys differ.
+
+    EPG IDs and display names can change between provider mirrors. The
+    account's stream ID is a better fallback, but only when it identifies
+    exactly one saved mux and one incoming channel. Never cross playlists.
+    """
+    if source.source_type != 'xc':
+        return False
+    wanted = {plan.key for plan in plans}
+    if not (set(source.muxes) - wanted) or all(plan.key in source.muxes for plan in plans):
+        return False
+
+    def stream_id(url):
+        address, _headers = _stream_source(url)
+        match = _XTREAM_STREAM.match(address)
+        if match is None or match['kind'] != 'live':
+            return None
+        # XC exposes the same numeric ID with .ts or .m3u8 playback.
+        number = match['rest'].split('.', 1)[0]
+        return number if number.isascii() and number.isdigit() else None
+
+    old_by_id = {}
+    new_by_id = {}
+    for key, uuid in source.muxes.items():
+        ident = stream_id(rows[uuid].get('iptv_url', ''))
+        if ident is not None:
+            old_by_id.setdefault(ident, []).append(key)
+    for plan in plans:
+        ident = stream_id(plan.url)
+        if ident is not None:
+            new_by_id.setdefault(ident, []).append(plan.key)
+
+    moved = {}
+    for ident, new_keys in new_by_id.items():
+        old_keys = old_by_id.get(ident, [])
+        if len(old_keys) != 1 or len(new_keys) != 1:
+            continue
+        old, new = old_keys[0], new_keys[0]
+        if old in wanted or new in source.muxes:
+            continue
+        source.muxes[new] = source.muxes.pop(old)
+        if old in source.health:
+            source.health[new] = source.health.pop(old)
+        moved[old] = new
+    if moved:
+        source.left_out = [moved.get(key, key) for key in source.left_out]
+    return bool(moved)
+
 def sync_playlist(
     admin,
     source: PlaylistSource,
@@ -626,6 +676,9 @@ def sync_playlist(
     known = {key: uuid for key, uuid in source.muxes.items() if uuid in rows}
     if known != source.muxes:
         source.muxes = known
+        checkpoint()
+
+    if _reuse_xtream_muxes(source, plans, rows):
         checkpoint()
 
     # Muxes in this network the saved map lost: an import that stopped before
@@ -708,14 +761,16 @@ def sync_playlist(
             checkpoint()
             created_since_checkpoint = 0
             last_checkpoint = now
-        # Pending updates flush by size, not elapsed time: a busy UI or slow
-        # processing must not turn bulk edits into one request per channel.
-        # With no pending edits, slow channel creation still reports progress.
-        if len(changes) >= SAVE_BATCH or (not changes and now - last_progress >= PROGRESS_SECONDS):
+        # Flush edits by size even when processing is slow. Report completed
+        # work separately: a partial edit batch must not suppress progress
+        # while genuinely new channels are being created one at a time.
+        flushed = len(changes) >= SAVE_BATCH
+        if flushed:
             save_changes()
-            progress(done, total)
-            # Measure the next progress interval from the completed request.
-            last_progress, reported = clock(), done
+        completed = done - len(changes)
+        if completed > reported and (flushed or now - last_progress >= PROGRESS_SECONDS):
+            progress(completed, total)
+            last_progress, reported = clock(), completed
     if created_since_checkpoint:
         checkpoint()
 

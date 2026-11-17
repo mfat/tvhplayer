@@ -340,6 +340,74 @@ def test_update_without_checks_cancels_old_scans_only_in_this_playlist():
     assert all(admin.muxes[uuid]['scan_state'] == 1 for uuid in other.muxes.values())
     assert admin.scanned == []
 
+
+def test_xtream_renames_after_5200_channels_reuse_existing_muxes():
+    count = 6000
+    old_text = '#EXTM3U\n' + ''.join(
+        f'#EXTINF:-1,Channel {i}\nhttp://old.example/live/user/pass/{i}.ts\n'
+        for i in range(count)
+    )
+    new_text = '#EXTM3U\n' + ''.join(
+        f'#EXTINF:-1,{"Renamed" if i >= 5200 else "Channel"} {i}\n'
+        f'http://new.example/live/user/newpass/{i}.m3u8\n'
+        for i in range(count)
+    )
+    admin = FakeAdmin()
+    source = PlaylistSource('List', '', 'builtin', source_type='xc')
+    sync_playlist(admin, source, _plans(old_text), check=False)
+    original = dict(source.muxes)
+    source.health['name:Channel 5200'] = {'status': 'failed', 'scan_result': 2}
+    result = sync_playlist(admin, source, _plans(new_text), check=False)
+    assert (result.added, result.updated, result.removed) == (0, count, 0)
+    assert len(admin.muxes) == count
+    for i in range(count):
+        key = f'name:{"Renamed" if i >= 5200 else "Channel"} {i}'
+        assert source.muxes[key] == original[f'name:Channel {i}']
+    assert source.health['name:Renamed 5200']['status'] == 'failed'
+    assert 'name:Channel 5200' not in source.health
+
+
+@pytest.mark.parametrize('ambiguous_side', ['old', 'new', 'm3u'])
+def test_stream_id_fallback_does_not_guess_for_ambiguous_or_m3u_entries(ambiguous_side):
+    def text(names):
+        return '#EXTM3U\n' + ''.join(
+            f'#EXTINF:-1,{name}\nhttp://x/live/u/p/1.ts\n' for name in names
+        )
+    admin = FakeAdmin()
+    source = PlaylistSource('List', '', 'builtin', source_type='m3u' if ambiguous_side == 'm3u' else 'xc')
+    sync_playlist(admin, source, _plans(text(['Old', 'Other'] if ambiguous_side == 'old' else ['Old'])), check=False)
+    original = set(source.muxes.values())
+    result = sync_playlist(admin, source, _plans(text(['New', 'Extra'] if ambiguous_side == 'new' else ['New'])), check=False)
+    assert result.added == (2 if ambiguous_side == 'new' else 1)
+    assert not original.intersection(source.muxes.values())
+
+
+def test_partial_update_batch_does_not_hide_progress_during_new_channel_creation():
+    admin = FakeAdmin()
+    source = PlaylistSource('List', '', 'builtin')
+    sync_playlist(admin, source, _plans(FIRST), check=False)
+    admin.finish_scans()
+    admin.saved.clear()
+    new = FIRST.replace('http://x/a.ts', 'http://x/new-a.ts') + ''.join(
+        f'#EXTINF:-1,New {i}\nhttp://x/{i}.ts\n' for i in range(20)
+    )
+    now = [0.0]
+    progress = []
+
+    def clock():
+        now[0] += 0.2
+        return now[0]
+
+    def report(done, total):
+        # One unchanged channel, new channels already created, and saved edits.
+        assert done <= 1 + len(admin.muxes) - 2 + len(admin.saved)
+        progress.append(done)
+
+    result = sync_playlist(admin, source, _plans(new), check=False, clock=clock, progress=report)
+    assert (result.updated, result.added) == (1, 20)
+    assert len([done for done in progress if done < 22]) >= 5
+    assert progress[-1] == 22
+
 def test_a_slow_small_import_shows_progress_while_it_adds_channels():
     # Each channel is a request of its own; on a slow server a list shorter
     # than one save batch must not sit at nothing until the end.
@@ -803,10 +871,10 @@ def test_real_server_refresh_clears_scan_backlog_and_keeps_update_batches(tvhead
 
     count = SAVE_BATCH * 2 + 3
     text = '#EXTM3U\n' + ''.join(
-        f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://127.0.0.1:9/old/{i}.ts\n'
+        f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://127.0.0.1:9/live/user/old/{i}.ts\n'
         for i in range(count)
     )
-    source = PlaylistSource('Batch test', '', 'builtin')
+    source = PlaylistSource('Batch test', '', 'builtin', source_type='xc')
     with TvhAdmin({'url': f'http://127.0.0.1:{tvheadend}'}) as admin:
         source.network_uuid = admin.create_network(dict(NETWORK_CONF, networkname=source.name))
         for plan in _plans(text):
@@ -822,9 +890,9 @@ def test_real_server_refresh_clears_scan_backlog_and_keeps_update_batches(tvhead
             save(nodes)
 
         admin.save = record_save
-        result = sync_playlist(admin, source, _plans(text.replace('/old/', '/new/')), check=False)
+        result = sync_playlist(admin, source, _plans(text.replace('/old/', '/new/').replace('tvg-id="c', 'tvg-id="renamed')), check=False)
         assert (result.added, result.updated, result.removed) == (0, count, 0)
-        assert source.muxes == original
+        assert source.muxes == {f'id:renamed{i}': original[f'id:c{i}'] for i in range(count)}
         assert batches == [SAVE_BATCH, SAVE_BATCH, 3]
         rows = admin.list_muxes(source.network_uuid, fields=('scan_state', 'iptv_url'))
         assert len(rows) == count
