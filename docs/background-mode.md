@@ -1,7 +1,7 @@
 # Keep the built-in server running when the window closes
 
 **Keep the server running when the window closes** is enabled by default.
-You can turn it off under **Settings → Sleep**. The option appears only when
+You can turn it off under **Settings → General**. The option appears only when
 this build has a built-in server. Existing explicit choices are preserved. It
 does not start the server; **Start with TVHplayer** remains a separate server
 preference.
@@ -64,7 +64,7 @@ References: [Background portal](https://flatpak.github.io/xdg-desktop-portal/doc
 
 ## Start TVHplayer at login
 
-**Settings → Sleep → Start TVHplayer at login** is off by default. This is an app
+**Settings → General → Start TVHplayer at login** is off by default. This is an app
 preference available even without a packaged built-in server. It is independent
 of both **Start with TVHplayer** in Servers and the close-to-background option.
 Enabling it registers the current app to launch with `--background` at the next
