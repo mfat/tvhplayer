@@ -419,10 +419,10 @@ class SettingsDialog(QDialog):
             self._sync_login_startup()
         if background is not None and getattr(host, 'builtin', None) is not None:
             group = page.add(SettingsGroup('Run in background'))
-            self.background_check = ToggleSwitch('Keep the server running when the window closes')
+            self.background_check = ToggleSwitch('Keep the app running when the window closes')
             self.background_check.setChecked(background.enabled)
             group.add_row(SettingRow(
-                'Keep the server running when the window closes',
+                'Keep the app running when the window closes',
                 'Enable this to keep the app running in background when you close the window. '
                 'Recommended if you use the built-in server with many channels', self.background_check))
             self.background_check.toggled.connect(background.set_enabled)
