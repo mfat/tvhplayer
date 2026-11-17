@@ -165,7 +165,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # A binary RPM requires the python(abi) of the Fedora it was built on.
+        # The C decoder and system libraries target the Fedora used to build.
         # Add releases here to publish RPMs for them.
         fedora: ['44']
         arch: [x86_64, aarch64]
