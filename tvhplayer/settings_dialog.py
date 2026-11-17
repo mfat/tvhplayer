@@ -99,7 +99,7 @@ CONVERT_INTRO = (
 AWAKE_HELP = (
     'The computer never sleeps while it is recording. With this on, it also stays awake while a '
     'recording is scheduled on the built-in server or another server on this computer, so the '
-    'recording is not missed. TVHplayer has to be open for the built-in server to record.'
+    'recording is not missed. TVHplayer has to be running for the built-in server to record.'
 )
 PADDING_HELP = (
     'The built-in server starts each recording this many minutes before the programme and '
@@ -412,6 +412,22 @@ class SettingsDialog(QDialog):
 
     def _sleep_page(self, host):
         page = SettingsPage('Sleep')
+        background = getattr(host, 'background', None)
+        if background is not None and getattr(host, 'builtin', None) is not None:
+            group = page.add(SettingsGroup('Background server'))
+            self.background_check = ToggleSwitch('Keep the server running when the window closes')
+            self.background_check.setChecked(background.enabled)
+            group.add_row(SettingRow(
+                'Keep the server running when the window closes',
+                'Closing the window stops playback and hides TVHplayer. Reopen it from the tray or '
+                'application launcher. Quit TVHplayer stops the server. Requires desktop permission '
+                'in Flatpak; ends at logout.', self.background_check))
+            self.background_status = QLabel()
+            self.background_status.setWordWrap(True)
+            group.layout().addWidget(self.background_status)
+            self.background_check.toggled.connect(background.set_enabled)
+            background.changed.connect(self._sync_background)
+            self._sync_background()
         group = page.add(SettingsGroup())
         self.awake_check = ToggleSwitch('Keep the computer awake for scheduled recordings')
         self.awake_check.setChecked(host.stays_awake_for_scheduled())
@@ -424,7 +440,7 @@ class SettingsDialog(QDialog):
         ))
         group.add_strip(StatusStrip(
             'The computer never sleeps while it is recording. '
-            'TVHplayer has to be open for the built-in server to record.'
+            'TVHplayer has to be running for the built-in server to record.'
         ))
         page.finish()
         return page
@@ -495,6 +511,18 @@ class SettingsDialog(QDialog):
         return page
 
     # Behaviour (unchanged from the tabbed dialog) --------------------------
+
+    def _sync_background(self):
+        background = self._host.background
+        self.background_check.blockSignals(True)
+        self.background_check.setChecked(background.enabled and not background.pending)
+        self.background_check.setEnabled(not background.pending)
+        self.background_check.blockSignals(False)
+        self.background_status.setText(
+            'Waiting for desktop permission…' if background.pending else
+            'Enabled for this session.' if background.enabled and background.granted else
+            'Desktop permission will be requested before hiding the window.' if background.enabled else
+            'Closing the window quits TVHplayer.')
 
     def _theme_chosen(self, _index):
         # Once the list has closed: a theme change restyles every widget, the list's too.

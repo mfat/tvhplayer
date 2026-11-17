@@ -5499,3 +5499,165 @@ def test_stream_address_failure_shows_over_the_player(monkeypatch, tmp_path):
     finally:
         window.close()
         app.processEvents()
+
+
+def _make_background_player(monkeypatch, tmp_path):
+    # These tests exercise window lifetime, without an OpenGL renderer. The
+    # stand-in player does not install mpv's render context on the real surface.
+    def prepare(ui):
+        monkeypatch.setattr(ui.TVHeadendClient, '_new_video_surface', lambda self: ui.QWidget())
+        monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
+    return _make_player(monkeypatch, tmp_path, prepare=prepare)
+
+
+def test_background_close_preserves_server_and_recording_jobs(monkeypatch, tmp_path):
+    app, ui, window, player = _make_background_player(monkeypatch, tmp_path)
+    stops = []
+    window.builtin = types.SimpleNamespace(status='running', shut_down=lambda: stops.append('server'))
+    recorder = types.SimpleNamespace(is_running=True, file_path='/tmp/recording.ts',
+                                     stop=lambda: stops.append('recording'))
+    window.local_jobs = [ui.LocalJob(recorder, types.SimpleNamespace(name='One'))]
+    window.config['keep_builtin_running'] = True
+    window.background.granted = True
+    monkeypatch.setattr(window.background, '_ensure_tray', lambda: None)
+    monkeypatch.setattr(window, '_confirm_quit', lambda: pytest.fail('close-to-background must not ask to quit'))
+    window.show()
+    try:
+        window.close()
+        app.processEvents()
+        assert window.background.hidden
+        assert not window.isVisible()
+        assert not window.isMinimized()
+        assert not window._closing
+        assert stops == []
+        assert window._awake_timer.isActive()
+        assert window._guide_timer.isActive()
+        assert not window._metadata_timer.isActive()
+        window.background.show_window()
+        assert window.isVisible()
+        assert window._metadata_timer.isActive()
+        assert stops == []
+    finally:
+        monkeypatch.setattr(window, '_confirm_quit', lambda: True)
+        window.background.quit()
+        app.processEvents()
+    assert stops == ['server', 'recording']
+
+
+def test_background_quit_cancel_allows_subsequent_close_to_hide(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    window.builtin = types.SimpleNamespace(status='running', shut_down=lambda: None)
+    window.config['keep_builtin_running'] = True
+    window.background.granted = True
+    monkeypatch.setattr(window.background, '_ensure_tray', lambda: None)
+    monkeypatch.setattr(window, '_confirm_quit', lambda: False)
+    try:
+        window.background.quit()
+        assert window.isVisible()
+        assert not window.background.quitting
+        assert window._metadata_timer.isActive()
+        window.close()
+        assert window.background.hidden
+    finally:
+        monkeypatch.setattr(window, '_confirm_quit', lambda: True)
+        window.background.quit()
+        app.processEvents()
+
+
+def test_background_permission_pending_does_not_hide_or_stop_server(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    stops = []
+    window.builtin = types.SimpleNamespace(status='running', shut_down=lambda: stops.append(True))
+    window.config['keep_builtin_running'] = True
+    window.background.granted = False
+    requested = []
+    monkeypatch.setattr(window.background, 'set_enabled', requested.append)
+    window.show()
+    try:
+        window.close()
+        assert window.isVisible()
+        assert not window.background.hidden
+        assert requested == [True]
+        assert stops == []
+    finally:
+        window._confirm_quit = lambda: True
+        window.background.quit()
+        app.processEvents()
+
+
+def test_background_setting_and_denial_are_saved_truthfully(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    window.builtin = types.SimpleNamespace(status='stopped', is_running=lambda: False, shut_down=lambda: None)
+    from tvhplayer.settings_dialog import SettingsDialog
+    monkeypatch.setattr(window.background, '_ensure_tray', lambda: None)
+    monkeypatch.setattr(ui.QMessageBox, 'warning', lambda *a: None)
+    dialog = SettingsDialog(window, window)
+    try:
+        window.background.granted = True
+        dialog.background_check.setChecked(True)
+        assert window.config['keep_builtin_running']
+        window.background._permission(False, 'Denied')
+        assert not window.config['keep_builtin_running']
+        assert not dialog.background_check.isChecked()
+        assert 'quits' in dialog.background_status.text()
+    finally:
+        dialog.close()
+        window.close()
+        app.processEvents()
+
+
+def test_background_permission_grant_completes_pending_close(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    window.builtin = types.SimpleNamespace(status='running', shut_down=lambda: None)
+    window.config['keep_builtin_running'] = True
+    background = window.background
+    background.granted = False
+    monkeypatch.setattr(background, '_ensure_tray', lambda: None)
+    monkeypatch.setattr(background, 'set_enabled', lambda enabled: setattr(background, 'pending', enabled))
+    window.show()
+    try:
+        window.close()
+        assert background.pending and window.isVisible()
+        background._permission(True, '')
+        assert background.hidden and not window.isVisible()
+    finally:
+        window._confirm_quit = lambda: True
+        background.quit()
+        app.processEvents()
+
+
+def test_background_explicit_quit_survives_async_recording_lookup(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    stopped = []
+    window.builtin = types.SimpleNamespace(
+        status='running', is_running=lambda: True, shut_down=lambda: stopped.append(True))
+    window.config['keep_builtin_running'] = True
+    window.background.granted = True
+    monkeypatch.setattr(window.background, '_ensure_tray', lambda: None)
+    monkeypatch.setattr(window, '_start_quit_lookup', lambda: setattr(window, '_quit_lookup_call', object()))
+    window.show()
+    window.close()
+    assert window.background.hidden
+    window.background.quit()
+    assert window.background.quitting and not window._closing
+    assert window.isVisible()
+    assert not stopped
+    # The real server call closes the window again once it has its answer.
+    window._quit_lookup_call = None
+    window._quit_lookup = ([], [], False)
+    window.close()
+    app.processEvents()
+    assert window._closing
+    assert stopped == [True]
+
+
+def test_stopped_server_does_not_leave_idle_app_hidden(monkeypatch, tmp_path):
+    app, ui, window, _player = _make_background_player(monkeypatch, tmp_path)
+    stopped = []
+    window.builtin = types.SimpleNamespace(
+        status='stopped', is_running=lambda: False, shut_down=lambda: stopped.append(True))
+    window.config['keep_builtin_running'] = True
+    window.close()
+    app.processEvents()
+    assert window._closing and not window.background.hidden
+    assert stopped == [True]

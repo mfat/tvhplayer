@@ -1,6 +1,9 @@
 # Proposal: Keep the built-in server running in the background
 
-- **Status:** Proposed; not implemented.
+- **Status:** Close-to-background implementation added; platform acceptance pending.
+  See [implemented behavior and validation](../background-mode.md). Login startup,
+  headless startup, controller extraction, and periodic Windows snapshots below
+  remain future work.
 - **Date:** 2026-11-06
 - **Baseline:** v4.6.1, including the Windows startup and settings-storage changes.
 - **Decision:** Add an optional desktop background mode for Windows and Linux,
@@ -23,7 +26,7 @@ This proposal changes the relationship between the window and the app-owned
 server. It does not change ownership of user-added local or remote servers, add
 network exposure, or implement a macOS backend.
 
-## Current implementation
+## Original implementation (proposal baseline)
 
 The main window currently owns most application work. Its `closeEvent` saves
 configuration, calls `builtin.shut_down()`, cancels jobs, releases sleep

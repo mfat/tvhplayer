@@ -75,6 +75,7 @@ try:
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
         starting_caption, stream_path, stream_reason,
     )
+    from .background import BackgroundMode
     from .builtin_supervisor import BuiltinSupervisor
     from .core.builtin_runtime import create_supervisor, windows_backend_enabled
     from . import cursor_debug
@@ -179,6 +180,7 @@ except ImportError:
         SIGNAL_FAIR, SIGNAL_GOOD, STARTING, find_subscription, find_tuner, receiving, scrambled_notice, signal_report,
         starting_caption, stream_path, stream_reason,
     )
+    from background import BackgroundMode
     from builtin_supervisor import BuiltinSupervisor
     from core.builtin_runtime import create_supervisor, windows_backend_enabled
     import cursor_debug
@@ -4318,6 +4320,7 @@ class TVHeadendClient(QMainWindow):
         self._guide_timer.timeout.connect(self._update_due_guides)
         self._guide_timer.start(GUIDE_CHECK_MS)
         self._closing = False
+        self.background = BackgroundMode(self)
         self._settings_dialog = None
         # A playlist check shows and hides channels for hours; reload the list at most this often.
         self._channel_reload_timer = QTimer(self)
@@ -4636,11 +4639,11 @@ class TVHeadendClient(QMainWindow):
         file_menu.addSeparator()
 
         # Create actions
-        exit_action = QAction("E&xit", self)
+        exit_action = QAction("&Quit TVHplayer", self)
         # Qt's Ctrl is Command on macOS: Ctrl+Q is ⌘Q there. "Cmd+Q" is no key at all.
         exit_action.setShortcut("Ctrl+Q")
         exit_action.setMenuRole(QAction.MenuRole.QuitRole)
-        exit_action.triggered.connect(self.close)
+        exit_action.triggered.connect(self.background.quit)
         file_menu.addAction(exit_action)
         self.window_frame = window_frame.install(
             self, menubar, self.draws_title_bar(), guard_path=os.path.join(self.config_dir, 'window-menu.json'),
@@ -8053,6 +8056,11 @@ class TVHeadendClient(QMainWindow):
         return box
 
     def _show_update_available(self, release):
+        if self._closing:
+            return
+        if self.background.hidden:
+            self.background.deferred_update = release
+            return
         box = self._update_box(
             QMessageBox.Icon.Information, "Update Available", f"TVHplayer {release.version} is available.")
         flatpak = installed_by_flatpak()
@@ -8464,10 +8472,22 @@ class TVHeadendClient(QMainWindow):
 
     def closeEvent(self, event):
         """Save configuration when closing the application"""
-        if not self._confirm_quit():
+        if self._closing:
+            event.accept()
+            return
+        if self.background.close_to_background():
+            event.ignore()
+            return
+        if not self.background.session_ending and not self._confirm_quit():
+            if getattr(self, '_quit_lookup_call', None) is None:
+                was_quitting = self.background.quitting
+                self.background.quitting = False
+                if was_quitting:
+                    self.background.show_window()
             event.ignore()
             return
         self._closing = True
+        self.background.shutdown()
         self._metadata_timer.stop()
         fetch, self._channel_fetch = self._channel_fetch, None
         if fetch is not None and hasattr(fetch, 'cancel'):
@@ -8522,6 +8542,9 @@ class TVHeadendClient(QMainWindow):
         if not self.config_store.flush(timeout=30):
             print("Debug: The settings were still being saved when TVHplayer closed")
         super().closeEvent(event)
+        # Hidden/transient windows must not keep an explicitly quit app alive.
+        if getattr(QApplication.instance(), '_tvhplayer_instance', None) is not None:
+            QApplication.instance().quit()
 
     def _builtin_credentials(self):
         supervisor = getattr(self, 'builtin', None)
@@ -8623,6 +8646,8 @@ class TVHeadendClient(QMainWindow):
 
     def _on_builtin_failed(self, message):
         print(f"Debug: Built-in server failed: {message}")
+        if self.background.hidden:
+            self.background.show_window()
         if getattr(self.builtin, 'disabled', False):
             self.config['builtin_autostart'] = False
             self.save_config()
@@ -8668,6 +8693,9 @@ class TVHeadendClient(QMainWindow):
             dialog._fix(action)
 
     def _on_builtin_phase(self, phase):
+        if (self.builtin is not None and self.builtin.status == phase
+                and phase in ('stopped', 'failed') and self.background.hidden):
+            self.background.show_window()
         if self.builtin is None or self.builtin.status != phase or not is_builtin_server(self.current_server()):
             return
         if phase == 'installing':
@@ -8756,6 +8784,11 @@ class TVHeadendClient(QMainWindow):
         self.ensure_server_ready(server, ready, self.statusbar.showMessage)
 
     def _offer_channel_setup(self):
+        if self._closing:
+            return
+        if self.background.hidden:
+            self.background.deferred_setup = True
+            return
         if (is_builtin_server(self.current_server()) and not self._channels
                 and not self.config.get('setup_dismissed')):
             self.show_setup_wizard()
@@ -10103,11 +10136,6 @@ def main():
     # A Windows or macOS build carries its own libmpv.
     frozen_libs.prepare()
     try:
-        problem = mpv_missing()
-        if problem:
-            print(f"Error: libmpv is required: {problem}")
-            sys.exit(1)
-        print("Debug: Playback engine: mpv")
         try:
             settings = ConfigStore().data
             theme = settings['ui_theme']
@@ -10128,6 +10156,27 @@ def main():
         app.setApplicationDisplayName("TVHplayer")
         app.setDesktopFileName("io.github.mfat.tvhplayer")
         app.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings, True)
+        try:
+            from .app_instance import AppInstance
+            from .core.config import default_config_dir
+        except ImportError:
+            from app_instance import AppInstance
+            from core.config import default_config_dir
+        instance = AppInstance(default_config_dir(), app)
+        try:
+            if not instance.acquire():
+                return
+        except (OSError, RuntimeError) as error:
+            QMessageBox.warning(None, 'TVHplayer', str(error))
+            return
+        app._tvhplayer_instance = instance
+        app.aboutToQuit.connect(instance.close)
+        app.setQuitOnLastWindowClosed(False)
+        problem = mpv_missing()
+        if problem:
+            print(f"Error: libmpv is required: {problem}")
+            sys.exit(1)
+        print("Debug: Playback engine: mpv")
         # Before any widget exists: a style change goes to every widget alive.
         # The TVHplayer theme runs on Fusion, the same base on Linux, macOS and
         # Windows; another theme is that Qt style. High contrast keeps the system look.
@@ -10143,6 +10192,8 @@ def main():
             apply_theme(app, theme, NoDialogButtonIconsStyle)
         print(f"Debug: Theme: {theme or 'system (high contrast)'}")
         player = TVHeadendClient()
+        instance.show_requested.connect(player.background.show_window)
+        app.commitDataRequest.connect(player.background.end_session)
         player.show()
         sys.exit(app.exec())
     except Exception as e:

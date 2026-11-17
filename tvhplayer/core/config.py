@@ -84,6 +84,7 @@ def default_config():
         'window_geometry': dict(DEFAULT_GEOMETRY),
         'servers': [],
         'builtin_autostart': False,
+        'keep_builtin_running': False,
         'builtin_http_port': 0,
         'builtin_htsp_port': 0,
         'playlists': [],
@@ -189,6 +190,7 @@ def _normalize(data):
         cfg['volume'] = 50
     cfg['channel_list'] = channel_list_options(data.get('channel_list'))
     cfg['builtin_autostart'] = bool(cfg.get('builtin_autostart'))
+    cfg['keep_builtin_running'] = bool(cfg.get('keep_builtin_running'))
     for key in (
         'play_on_start', 'hide_dead_channels', 'mark_dead_channels', 'convert_after_recording', 'delete_converted_original',
         'stay_awake_for_scheduled', 'setup_offered', 'check_for_updates', 'fast_channel_start',
