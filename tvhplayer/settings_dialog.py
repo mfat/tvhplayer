@@ -418,18 +418,17 @@ class SettingsDialog(QDialog):
             background.changed.connect(self._sync_login_startup)
             self._sync_login_startup()
         if background is not None and getattr(host, 'builtin', None) is not None:
-            group = page.add(SettingsGroup('Background server'))
+            group = page.add(SettingsGroup('Run in background'))
             self.background_check = ToggleSwitch('Keep the server running when the window closes')
             self.background_check.setChecked(background.enabled)
             group.add_row(SettingRow(
                 'Keep the server running when the window closes',
-                'Closing the window stops playback and hides TVHplayer. Reopen it from the tray or '
-                'application launcher. Quit TVHplayer stops the server. Requires desktop permission '
-                'in Flatpak; ends at logout.', self.background_check))
+                'Enable this to keep the app running in background when you close the window. '
+                'Recommended if you use the built-in server with many channels', self.background_check))
             self.background_check.toggled.connect(background.set_enabled)
             background.changed.connect(self._sync_background)
             self._sync_background()
-        group = page.add(SettingsGroup())
+        group = page.add(SettingsGroup('Keep computer awake'))
         self.awake_check = ToggleSwitch('Keep the computer awake for scheduled recordings')
         self.awake_check.setChecked(host.stays_awake_for_scheduled())
         describe(self.awake_check, description=AWAKE_HELP)
