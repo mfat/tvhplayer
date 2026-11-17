@@ -1299,6 +1299,7 @@ def test_edit_moves_a_playlist_to_the_providers_new_address(app, monkeypatch):
 
     host, source, loaded = _imported_xtream(app, monkeypatch)
     [uuid] = source.muxes.values()
+    monkeypatch.setattr(dialogs, 'wait_for_checks', lambda *_a, **_kw: pytest.fail('Unexpected stream checks'))
     dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN, source=source)
     dialog.location_input.setText('http://new.example')
     dialog.username_input.setText('renewed')
@@ -1313,6 +1314,59 @@ def test_edit_moves_a_playlist_to_the_providers_new_address(app, monkeypatch):
     assert ffmpeg_input(mux['iptv_url'][7:])[0] == 'http://new.example/live/renewed/pass/1.ts'
     assert not host.busy
 
+
+
+def test_edit_playlist_url_updates_existing_streams_without_checks(app, tmp_path, monkeypatch):
+    from tvhplayer.core.playlist import ffmpeg_input
+
+    old = tmp_path / 'old.m3u'
+    new = tmp_path / 'new.m3u'
+    for path, host_name in ((old, 'old.example'), (new, 'new.example')):
+        path.write_text('#EXTM3U\n' + ''.join(
+            f'#EXTINF:-1 tvg-id="{i}",Channel {i}\nhttp://{host_name}/{i}.ts\n'
+            for i in range(300)
+        ))
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    imported = dialogs.ImportPlaylistDialog(host)
+    imported.location_input.setText(str(old))
+    _run(app, imported)
+    source = PlaylistSource.from_dict(host.stored[-1])
+    assert len(source.muxes) == 300
+
+    def unexpected_check(*_args, **_kwargs):
+        raise AssertionError('Changing a playlist address must not test streams')
+
+    monkeypatch.setattr(FakeAdmin, 'scan_muxes', unexpected_check, raising=False)
+    monkeypatch.setattr(dialogs, 'wait_for_checks', unexpected_check)
+    # A previous scan still pending must not hold up this edit either.
+    for row in FakeAdmin.servers[BUILTIN['url']]['muxes'].values():
+        row['scan_state'] = 1
+    statuses = []
+    original_start = dialogs.PlaylistJob.start
+
+    def start(job):
+        job.status.connect(statuses.append)
+        original_start(job)
+
+    monkeypatch.setattr(dialogs.PlaylistJob, 'start', start)
+    dialog = dialogs.ImportPlaylistDialog(host, server=BUILTIN, source=source)
+    dialog.location_input.setText(str(new))
+    _run(app, dialog)
+    assert not dialog._job.is_running()
+    assert 'Stream checks were skipped.' in dialog.status_label.text()
+    assert 'Updating channels…' in statuses
+    assert 'Adding channels…' not in statuses
+    assert 'Checking channels…' not in statuses
+    assert len(host.stored) == 1
+    saved = PlaylistSource.from_dict(host.stored[0])
+    assert saved.location == str(new)
+    assert saved.network_uuid == source.network_uuid
+    assert saved.muxes == source.muxes
+    rows = FakeAdmin.servers[BUILTIN['url']]['muxes']
+    assert len(rows) == 300
+    for key, uuid in saved.muxes.items():
+        assert ffmpeg_input(rows[uuid]['iptv_url'][7:])[0] == f'http://new.example/{key[3:]}.ts'
+    assert not host.busy
 
 def test_edit_to_an_address_that_does_not_work_changes_nothing(app, monkeypatch):
     bad = 'http://wrong.example/get.php?username=user&password=pass'

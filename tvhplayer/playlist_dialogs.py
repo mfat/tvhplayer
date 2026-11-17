@@ -170,7 +170,9 @@ class PlaylistJob(QObject):
     playlist; ``previous`` is the source as it was).
     ``replaces`` is the saved source a SYNC takes the place of when its
     address or account changed. It is replaced once the playlist has been
-    read from the new address, so an address that does not work changes nothing. A sync and a check
+    read from the new address, so an address that does not work changes nothing.
+    Moving an existing playlist updates its channels without testing every stream;
+    use CHECK to test the new addresses separately. Other syncs and checks
     both wait for the server's stream test and save its verdicts, which the
     channel list marks; channels that fail are hidden too while the host
     hides them.
@@ -194,6 +196,7 @@ class PlaylistJob(QObject):
         super().__init__(parent)
         self._previous = previous
         self._replaces = replaces
+        self._check_streams = replaces is None or not source.network_uuid
         self._host = host
         self.source = source
         self.server = server
@@ -328,7 +331,7 @@ class PlaylistJob(QObject):
         if self._choose is not None and self._plans and not self._choose(self._plans, self.source):
             self._stop_with('Nothing was changed.')
             return
-        self.status.emit('Adding channels…')
+        self.status.emit('Adding channels…' if self._first_import else 'Updating channels…')
         self._run(self._sync, self._synced)
 
     def _sync(self, task):
@@ -351,7 +354,7 @@ class PlaylistJob(QObject):
                 progress=task.progress.emit,
                 cancelled=lambda: self._cancelled,
                 checkpoint=lambda: task.checkpoint.emit(source.to_dict()),
-                check=True,
+                check=self._check_streams,
                 hide=self._hides_failed(),
             )
             result.films = self._playlist.films
@@ -373,7 +376,7 @@ class PlaylistJob(QObject):
         if self.action == self.SYNC and not result.cancelled:
             guide_url = self._playlist.guide_url if self._playlist is not None else ''
             self._host.after_playlist_sync(self.server, self.source, guide_url, result)
-        if result.cancelled:
+        if result.cancelled or not self._check_streams:
             self._checked(result)
             return
         self._checking = True
@@ -411,6 +414,11 @@ class PlaylistJob(QObject):
             message = check_message(self.source.name, result)
         else:
             message = result_message(self.source.name, result, self._first_import)
+            if not self._check_streams and not result.cancelled:
+                message += (
+                    ' Stream checks were skipped. To test the new addresses, choose '
+                    'Settings → Channels → Check channels now.'
+                )
         self.finished.emit(message, result.skipped)
 
     def _start_check(self, _task):
