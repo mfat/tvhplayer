@@ -171,8 +171,8 @@ class PlaylistJob(QObject):
     ``replaces`` is the saved source a SYNC takes the place of when its
     address or account changed. It is replaced once the playlist has been
     read from the new address, so an address that does not work changes nothing.
-    Moving an existing playlist updates its channels without testing every stream;
-    use CHECK to test the new addresses separately. Other syncs and checks
+    Refreshing or moving an existing playlist updates it without testing every stream;
+    use CHECK to test its addresses separately. First imports and explicit checks
     both wait for the server's stream test and save its verdicts, which the
     channel list marks; channels that fail are hidden too while the host
     hides them.
@@ -196,7 +196,7 @@ class PlaylistJob(QObject):
         super().__init__(parent)
         self._previous = previous
         self._replaces = replaces
-        self._check_streams = replaces is None or not source.network_uuid
+        self._check_streams = action == self.CHECK or not source.network_uuid
         self._host = host
         self.source = source
         self.server = server
@@ -274,6 +274,8 @@ class PlaylistJob(QObject):
 
     def _server_ready(self, server):
         self.server = server
+        # Queued jobs may have received a newer saved source before starting.
+        self._check_streams = self.action == self.CHECK or not self.source.network_uuid
         if self._cancelled:
             self._stop_with('Import stopped.')
             return
@@ -416,7 +418,7 @@ class PlaylistJob(QObject):
             message = result_message(self.source.name, result, self._first_import)
             if not self._check_streams and not result.cancelled:
                 message += (
-                    ' Stream checks were skipped. To test the new addresses, choose '
+                    ' Stream checks were skipped. To test the channels, choose '
                     'Settings → Channels → Check channels now.'
                 )
         self.finished.emit(message, result.skipped)

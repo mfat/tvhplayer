@@ -278,7 +278,10 @@ def test_import_again_refreshes_the_same_playlist(app, tmp_path):
     _run(app, dialog)
     _run(app, dialog)
     assert len(host.stored) == 1
-    assert dialog.status_label.text() == 'The channels from news are up to date.'
+    assert dialog.status_label.text() == (
+        'The channels from news are up to date. Stream checks were skipped. '
+        'To test the channels, choose Settings → Channels → Check channels now.'
+    )
 
 
 def test_xtream_provider_and_headers_reuse_the_playlist_pipeline(app, monkeypatch):
@@ -429,7 +432,10 @@ def test_playlists_dialog_refreshes_and_removes(app, tmp_path, monkeypatch):
     assert dialog.health_btn.isEnabled()
     dialog.refresh_btn.click()
     _wait_job(app, dialog)
-    assert dialog.status_label.text() == 'The channels from news are up to date.'
+    assert dialog.status_label.text() == (
+        'The channels from news are up to date. Stream checks were skipped. '
+        'To test the channels, choose Settings → Channels → Check channels now.'
+    )
 
     monkeypatch.setattr(
         dialogs.QMessageBox, 'question', lambda *_args, **_kwargs: dialogs.QMessageBox.StandardButton.Yes
@@ -1367,6 +1373,24 @@ def test_edit_playlist_url_updates_existing_streams_without_checks(app, tmp_path
     for key, uuid in saved.muxes.items():
         assert ffmpeg_input(rows[uuid]['iptv_url'][7:])[0] == f'http://new.example/{key[3:]}.ts'
     assert not host.busy
+
+
+def test_refresh_existing_playlist_does_not_restart_stream_checks(app, tmp_path, monkeypatch):
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    path = _playlist(tmp_path, TWO)
+    source = PlaylistSource('news', path, 'builtin')
+    _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True))
+    original = dict(source.muxes)
+    # Retry a previous refresh with pending server scans and new addresses.
+    for row in FakeAdmin.servers[BUILTIN['url']]['muxes'].values():
+        row['scan_state'] = 1
+    _playlist(tmp_path, TWO.replace('http://x/', 'http://new.example/'))
+    monkeypatch.setattr(dialogs, 'wait_for_checks', lambda *_a, **_kw: pytest.fail('Unexpected checks'))
+    job = dialogs.PlaylistJob(host, source, BUILTIN)
+    events = _finish(app, job)
+    assert len(events) == 1 and 'Stream checks were skipped.' in events[0]
+    assert source.muxes == original
+    assert all(row['scan_state'] == 0 for row in FakeAdmin.servers[BUILTIN['url']]['muxes'].values())
 
 def test_edit_to_an_address_that_does_not_work_changes_nothing(app, monkeypatch):
     bad = 'http://wrong.example/get.php?username=user&password=pass'

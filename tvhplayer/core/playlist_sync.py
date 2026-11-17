@@ -589,7 +589,8 @@ def sync_playlist(
     reads the verdicts the server has; the others keep their last verdict
     until the playlist is checked. With ``hide`` too, channels known not to
     work are hidden, and without it every channel is shown. Without
-    ``check`` visibility is left alone.
+    ``check`` visibility is left alone and previously queued stream checks
+    are cancelled before updating the playlist.
     ``source`` is updated in place. ``checkpoint`` is called whenever its
     mux map changed, so a cancelled or failed import leaves the saved map
     matching the server.
@@ -618,7 +619,9 @@ def sync_playlist(
     bouquets = admin.has_network_bouquets(source.network_uuid)
 
     rows = {
-        row['uuid']: row for row in admin.list_muxes(source.network_uuid, fields=MUX_CONF_FIELDS) if row.get('uuid')
+        row['uuid']: row
+        for row in admin.list_muxes(source.network_uuid, fields=(*MUX_CONF_FIELDS, 'scan_state'))
+        if row.get('uuid')
     }
     known = {key: uuid for key, uuid in source.muxes.items() if uuid in rows}
     if known != source.muxes:
@@ -646,6 +649,20 @@ def sync_playlist(
             admin.delete(leftover)
             result.removed += len(leftover)
         checkpoint()
+
+    if not check:
+        # A stopped import/refresh can leave thousands of scans queued on the
+        # server. Merely declining to enqueue more does not stop that work.
+        pending = [
+            {'uuid': uuid, 'scan_state': SCAN_IDLE}
+            for uuid in source.muxes.values()
+            if rows[uuid].get('scan_state', SCAN_IDLE) != SCAN_IDLE
+        ]
+        for start in range(0, len(pending), SAVE_BATCH):
+            if cancelled():
+                result.cancelled = True
+                return result
+            admin.save(pending[start:start + SAVE_BATCH])
 
     wanted = {plan.key for plan in plans}
     stale = [key for key in source.muxes if key not in wanted]
@@ -679,7 +696,7 @@ def sync_playlist(
         if uuid:
             if _differs(conf, rows[uuid]):
                 changes.append(dict(conf, uuid=uuid))
-                if _stream_source(conf['iptv_url']) != _stream_source(rows[uuid].get('iptv_url', '')):
+                if check and _stream_source(conf['iptv_url']) != _stream_source(rows[uuid].get('iptv_url', '')):
                     retest.append(uuid)
         else:
             source.muxes[plan.key] = admin.create_mux(source.network_uuid, conf)
@@ -691,16 +708,13 @@ def sync_playlist(
             checkpoint()
             created_since_checkpoint = 0
             last_checkpoint = now
-        # Changes reach the server in batches during the walk, and progress
-        # counts only what is there. Progress goes out once a batch or every
-        # PROGRESS_SECONDS, so a slow walk moves and a fast one does not
-        # flood the window with updates.
-        if done % SAVE_BATCH == 0 or now - last_progress >= PROGRESS_SECONDS:
+        # Pending updates flush by size, not elapsed time: a busy UI or slow
+        # processing must not turn bulk edits into one request per channel.
+        # With no pending edits, slow channel creation still reports progress.
+        if len(changes) >= SAVE_BATCH or (not changes and now - last_progress >= PROGRESS_SECONDS):
             save_changes()
             progress(done, total)
-            # Start the next interval after the requests finish. Counting
-            # their latency makes a slow save flush every subsequent channel
-            # separately instead of letting the next batch accumulate.
+            # Measure the next progress interval from the completed request.
             last_progress, reported = clock(), done
     if created_since_checkpoint:
         checkpoint()

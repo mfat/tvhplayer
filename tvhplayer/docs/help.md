@@ -97,8 +97,8 @@ The channels appear in the channel list when the import finishes.
 
 The server keeps the channels, so TVHplayer does not read the playlist again by itself. When your provider adds or removes channels, or changes their addresses, refresh it. To manage your playlists, choose **File → Manage Playlists…**:
 
-- **Refresh** reads the playlist again now: new channels are added, channels that left the playlist are removed, and channels whose address changed are tested again.
-- **Edit…** changes the playlist's address, Xtream Codes server, username, password, user agent, or other headers. A new password or new headers are written into the playlist's channels on the server without reading the playlist again; use **Settings → Channels → Check channels now** to test the channels with them. A new address or username, for example when your provider moves to a new domain, is read from there and the existing channels are updated, keeping their recordings and guide. If the new address does not work, nothing is changed.
+- **Refresh** reads the playlist again now: new channels are added, channels that left the playlist are removed, and existing channel addresses are updated. Previous queued stream checks for this playlist are stopped; existing channels are not automatically retested. Use **Settings → Channels → Check channels now** when you want to test them.
+- **Edit…** changes the playlist's address, Xtream Codes server, username, password, user agent, or other headers. A new password or new headers are written into the playlist's channels on the server without reading the playlist again; use **Settings → Channels → Check channels now** to test the channels with them. A new address or username, for example when your provider moves to a new domain, is read from there and the existing channels are updated without retesting every stream, keeping their recordings and guide. If the new address does not work, nothing is changed.
 - **Health…** shows the latest saved Tvheadend check result and completion time for every channel.
 - **Remove** removes the playlist and its channels.
 
@@ -204,7 +204,7 @@ Press F1 (**Help → Keyboard Shortcuts**) for the full list. The most used ones
 - **Cannot connect to a server**: check that Tvheadend is running and reachable, and that the address includes `http://` and the port. **Test Connection** in Manage servers says what went wrong.
 - **Built-in server problems**: open its log from Manage servers → **Server Log**.
 - **Imported channels are missing**: when **Settings → Channels → Hide channels that do not work** is on (it is off by default), channels that fail the stream test are hidden. Turn it off to see them all, or **Check channels now** to test them again.
-- **A channel is faded and says Not working**: its stream failed the server's last test after an import, a refresh, or **Check channels now**. Right-click it and choose **Test Stream Again** to have the server try it now; the mark goes away when it works. To stop marking channels, turn off **Settings → Channels → Mark channels that do not work**.
+- **A channel is faded and says Not working**: its stream failed the server's last test after an import or **Check channels now**. Right-click it and choose **Test Stream Again** to have the server try it now; the mark goes away when it works. To stop marking channels, turn off **Settings → Channels → Mark channels that do not work**.
 
 **Help → Open Log Folder** opens the folder with `app.log` (TVHplayer) and `tvheadend.log` (the built-in server). Please attach both when you [report a bug](https://github.com/mfat/tvhplayer/issues/new).
 
