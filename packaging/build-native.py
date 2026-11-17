@@ -5,6 +5,9 @@ Every package runs this before copying tvhplayer/, with the Python it ships:
 
     python3 packaging/build-native.py
 
+The deb uses --abi3 to build once for Python 3.11 and newer, so the same
+package works across distributions with different Python minor versions.
+
 On Linux and macOS it compiles with the compiler and flags that Python was
 built with (sysconfig) plus CFLAGS/LDFLAGS from the environment, so no
 setuptools is needed. On Windows it uses setuptools' build_ext (MSVC).
@@ -15,6 +18,7 @@ channel lists several times slower, so a package must not lose it unnoticed.
 
 from __future__ import annotations
 
+import argparse
 import os
 import shlex
 import subprocess
@@ -24,7 +28,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'tvhplayer' / 'core' / '_htsmsg.c'
-TARGET = SOURCE.with_name('_htsmsg' + sysconfig.get_config_var('EXT_SUFFIX'))
 
 
 def run(command):
@@ -32,17 +35,20 @@ def run(command):
     subprocess.run(command, check=True)
 
 
-def build_posix():
+def build_posix(target, abi3=False):
     cc = shlex.split(sysconfig.get_config_var('CC') or 'cc')
     ldshared = shlex.split(sysconfig.get_config_var('LDSHARED') or 'cc -shared')
     cflags = shlex.split(sysconfig.get_config_var('CCSHARED') or '-fPIC')
     cflags += ['-O2', '-Wall', '-I' + sysconfig.get_paths()['include']]
+    if abi3:
+        # Py_buffer entered the stable ABI in Python 3.11.
+        cflags += ['-DPy_LIMITED_API=0x030B0000', '-Werror=implicit-function-declaration']
     cflags += shlex.split(os.environ.get('CPPFLAGS', '')) + shlex.split(os.environ.get('CFLAGS', ''))
     ldflags = shlex.split(os.environ.get('LDFLAGS', ''))
-    obj = TARGET.with_suffix('.o')
+    obj = target.with_suffix('.o')
     try:
         run(cc + cflags + ['-c', str(SOURCE), '-o', str(obj)])
-        run(ldshared + [str(obj)] + ldflags + ['-o', str(TARGET)])
+        run(ldshared + [str(obj)] + ldflags + ['-o', str(target)])
     finally:
         if obj.exists():
             obj.unlink()
@@ -52,7 +58,7 @@ def build_windows():
     run([sys.executable, str(ROOT / 'setup.py'), 'build_ext', '--inplace'])
 
 
-def check():
+def check(target):
     """Load the built module and decode a message as the Python decoder does.
 
     Both are loaded from their files, without the rest of the app, whose
@@ -74,16 +80,24 @@ def check():
         'assert native.deserialize(body, False) == python.python_deserialize(body) == m\n'
         'print("C decoder:", sys.argv[1])\n'
     )
-    subprocess.run([sys.executable, '-c', code, str(TARGET),
+    subprocess.run([sys.executable, '-c', code, str(target),
                     str(ROOT / 'tvhplayer' / 'core' / 'htsmsg.py')], check=True)
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--abi3', action='store_true',
+                        help='Build a POSIX extension for the Python 3.11+ stable ABI')
+    args = parser.parse_args()
+    if args.abi3 and (os.name == 'nt' or sys.version_info < (3, 11)):
+        parser.error('--abi3 requires POSIX and Python 3.11 or newer')
+    suffix = '.abi3.so' if args.abi3 else sysconfig.get_config_var('EXT_SUFFIX')
+    target = SOURCE.with_name('_htsmsg' + suffix)
     if os.name == 'nt':
         build_windows()
     else:
-        build_posix()
-    check()
+        build_posix(target, args.abi3)
+    check(target)
 
 
 if __name__ == '__main__':

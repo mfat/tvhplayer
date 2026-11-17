@@ -66,6 +66,27 @@ def test_deeply_nested_with_doubles_and_strings():
     assert _roundtrip(msg) == msg
 
 
+def test_double_bits_survive_decoding():
+    """Exercise the stable-ABI decoder's IEEE 754 conversion at its edges."""
+    import struct
+
+    from tvhplayer.core import htsmsg
+
+    patterns = [
+        0, 1 << 63,                         # positive and negative zero
+        1, (1 << 63) | 1,                  # smallest positive/negative subnormal
+        0x0010000000000000,                # smallest normal
+        0x7fefffffffffffff,                # largest finite
+        0x7ff0000000000000, 0xfff0000000000000,  # infinities
+        0x7ff8000000000001, 0xfff8000000000001,  # NaNs with payloads
+    ]
+    for bits in patterns:
+        data = bits.to_bytes(8, 'little')
+        body = struct.pack('>BBI', htsmsg.HMF_DBL, 1, 8) + b'd' + data
+        assert struct.pack('<d', deserialize(body)['d']) == data
+        assert struct.pack('<d', htsmsg.python_deserialize(body)['d']) == data
+
+
 def test_truncated_field_is_refused():
     import pytest
     body = serialize({'name': 'value'})[4:]

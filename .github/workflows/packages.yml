@@ -53,8 +53,6 @@ jobs:
     # Oldest supported Ubuntu, so the package installs on it and everything newer.
     container: ubuntu:24.04
     timeout-minutes: 30
-    permissions:
-      contents: write
     steps:
       - name: Install packaging tools
         run: |
@@ -99,7 +97,7 @@ jobs:
 
       - name: Install and smoke-test package
         run: |
-          DEBIAN_FRONTEND=noninteractive apt-get install -y ./artifacts/tvhplayer_*.deb desktop-file-utils
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ./artifacts/tvhplayer_*.deb desktop-file-utils
           desktop-file-validate /usr/share/applications/io.github.mfat.tvhplayer.desktop
           cd / && python3 "$GITHUB_WORKSPACE/packaging/check-installed.py"
 
@@ -121,12 +119,44 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload to release
+  deb-compat:
+    name: Debian 13 (${{ matrix.arch }}) installs the Ubuntu-built deb
+    needs: deb
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    container: debian:13
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: deb-${{ matrix.arch }}
+          path: artifacts
+
+      - name: Install and smoke-test the same package on Python 3.13
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ./artifacts/tvhplayer-*.deb desktop-file-utils
+          desktop-file-validate /usr/share/applications/io.github.mfat.tvhplayer.desktop
+          cd / && python3 "$GITHUB_WORKSPACE/packaging/check-installed.py"
+
+      - name: Upload verified package to release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: release-assets/*
+          files: artifacts/*
           fail_on_unmatched_files: true
           overwrite_files: false
 

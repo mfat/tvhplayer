@@ -20,7 +20,7 @@ override_dh_auto_configure:
 override_dh_auto_build:
 	packaging/tvheadend/build-tvheadend.sh build $(TVH_SOURCES) $(TVH_WORK)
 	# The C decoder for HTSP messages, next to the code copied below.
-	python3 packaging/build-native.py
+	python3 packaging/build-native.py --abi3
 
 override_dh_auto_test:
 	# The test suite runs in CI before packaging.
@@ -31,6 +31,8 @@ override_dh_auto_install:
 	# Same layout as the Flatpak: the app reads icons/ next to its own code.
 	mkdir -p $(APP)
 	cp -a tvhplayer/. $(APP)/
+	# Install only the stable extension, after dh_python3 scans the Python code.
+	find $(APP) -name '_htsmsg*.so' -delete
 	cp -a icons $(APP)/icons
 	chmod 644 $(APP)/icons/*
 	find $(APP) -type d -name __pycache__ -prune -exec rm -rf {} +
@@ -49,7 +51,10 @@ override_dh_auto_install:
 	chmod 755 $(PKG)/usr/bin/tvhplayer
 
 override_dh_python3:
+	# Ubuntu 24.04's dh_python3 does not understand abi3. Install the stable
+	# extension after its scan; debian/control declares the minimum Python.
 	dh_python3 /usr/share/tvhplayer
+	install -m 644 tvhplayer/core/_htsmsg.abi3.so $(APP)/core/
 
 override_dh_auto_clean:
 	rm -rf $(TVH_WORK)

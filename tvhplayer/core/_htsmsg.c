@@ -10,6 +10,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <limits.h>
+#include <float.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -90,7 +91,19 @@ decode_double(const unsigned char *p, Py_ssize_t len)
         PyErr_SetString(PyExc_ValueError, "Invalid HTSMSG double");
         return NULL;
     }
-#if PY_VERSION_HEX >= 0x030B0000
+#ifdef Py_LIMITED_API
+    /* Supported deb architectures (amd64/arm64) use IEEE 754 binary64.
+     * PyFloat_Unpack8 is outside the limited API. Assemble the little-endian
+     * bits as an integer, then copy them without aliasing or alignment casts. */
+    _Static_assert(sizeof(double) == sizeof(uint64_t) && DBL_MANT_DIG == 53 && DBL_MAX_EXP == 1024,
+                   "The stable-ABI decoder requires IEEE 754 binary64");
+    uint64_t bits = 0;
+    double value;
+    for (int i = 7; i >= 0; i--)
+        bits = (bits << 8) | p[i];
+    memcpy(&value, &bits, sizeof(value));
+    return PyFloat_FromDouble(value);
+#elif PY_VERSION_HEX >= 0x030B0000
     return PyFloat_FromDouble(PyFloat_Unpack8((const char *)p, 1));
 #else
     return PyFloat_FromDouble(_PyFloat_Unpack8(p, 1));
@@ -101,15 +114,18 @@ static PyObject *
 decode_uuid(const unsigned char *p, Py_ssize_t len)
 {
     static const char digits[] = "0123456789abcdef";
-    PyObject *text = PyUnicode_New(len * 2, 127);
-    Py_UCS1 *out;
-    if (text == NULL)
+    PyObject *bytes = PyBytes_FromStringAndSize(NULL, len * 2);
+    PyObject *text;
+    char *out;
+    if (bytes == NULL)
         return NULL;
-    out = PyUnicode_1BYTE_DATA(text);
+    out = PyBytes_AsString(bytes);
     for (Py_ssize_t i = 0; i < len; i++) {
         out[2 * i] = digits[p[i] >> 4];
         out[2 * i + 1] = digits[p[i] & 15];
     }
+    text = PyUnicode_DecodeASCII(out, len * 2, NULL);
+    Py_DECREF(bytes);
     return text;
 }
 
@@ -156,7 +172,7 @@ decode_body(const unsigned char *body, Py_ssize_t offset, Py_ssize_t end, int is
             if (raw == NULL || binary_type == NULL) {
                 item = raw;
             } else {
-                item = PyObject_CallOneArg(binary_type, raw);
+                item = PyObject_CallFunctionObjArgs(binary_type, raw, NULL);
                 Py_DECREF(raw);
             }
             break;
@@ -220,7 +236,9 @@ static PyObject *
 set_binary_type(PyObject *self, PyObject *type)
 {
     Py_XINCREF(type);
-    Py_XSETREF(binary_type, type);
+    PyObject *old_type = binary_type;
+    binary_type = type;
+    Py_XDECREF(old_type);
     Py_RETURN_NONE;
 }
 
