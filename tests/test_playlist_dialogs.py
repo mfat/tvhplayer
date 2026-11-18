@@ -417,6 +417,37 @@ def _wait_job(app, dialog, timeout=10):
         app.processEvents()
 
 
+@pytest.mark.parametrize('state', ['ready', 'busy', 'removed_server'])
+def test_playlist_double_click_opens_editor_when_edit_is_available(app, monkeypatch, state):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    server = 'http://gone' if state == 'removed_server' else 'builtin'
+    sources = [PlaylistSource(name, f'http://example.com/{name}.m3u', server) for name in ('one', 'two')]
+    host.stored = [source.to_dict() for source in sources]
+    if state == 'busy':
+        host.busy.add(source_key(sources[1]))
+    opened = []
+    monkeypatch.setattr(
+        dialogs.ImportPlaylistDialog, 'exec',
+        lambda editor: opened.append((editor.windowTitle(), editor._source.location, editor._server)),
+    )
+    dialog = dialogs.PlaylistsDialog(host)
+    if state == 'removed_server':
+        dialog.server_list.setCurrentRow(1)
+    dialog.show()
+    app.processEvents()
+    try:
+        item = dialog.playlist_list.item(1)
+        position = dialog.playlist_list.visualItemRect(item).center()
+        QTest.mouseClick(dialog.playlist_list.viewport(), Qt.MouseButton.LeftButton, pos=position)
+        QTest.mouseDClick(dialog.playlist_list.viewport(), Qt.MouseButton.LeftButton, pos=position)
+        assert opened == ([('Edit Source', sources[1].location, BUILTIN)] if state == 'ready' else [])
+    finally:
+        dialog.close()
+
+
 def test_playlists_dialog_refreshes_and_removes(app, tmp_path, monkeypatch):
     removed = []
     monkeypatch.setattr(dialogs, 'remove_playlist', lambda _admin, source: removed.append(source.name))

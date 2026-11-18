@@ -1310,6 +1310,7 @@ class PlaylistsDialog(QDialog):
 
         self.server_list.currentRowChanged.connect(lambda _row: self._show_server())
         self.playlist_list.currentRowChanged.connect(lambda _row: self._sync_buttons())
+        self.playlist_list.itemDoubleClicked.connect(lambda _item: self.edit_btn.click())
         self._load()
         # Updates started elsewhere (at startup, from Settings, or by an import
         # window that was closed) end on their own; follow them.
