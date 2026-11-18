@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/81b82de6-d414-4de1-824e-5ae826cfe540
 ## About
 TVHplayer is a cross-platform desktop app for watching and recording live TV using [Tvheadend](https://tvheadend.org/), a mature and feature-rich streaming server and recorder for Linux. It supports IPTV, satellite receivers, USB tuners and HDHomerun. This application is a client for Tvheadend.
 
-<img width="1965" height="1055" alt="image" src="https://github.com/user-attachments/assets/fe5fae0a-90df-45f0-9bcd-a272cefd76ba" />
+<img width="1443" height="944" alt="image" src="https://github.com/user-attachments/assets/b5d95ff8-a524-46b6-9ce3-ac33c6af7db9" />
 
 
 ## Do I need a Tvheadend server to use this?
