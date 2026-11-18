@@ -111,6 +111,39 @@ def _later(action):
     QTimer.singleShot(0, action)
 
 
+def test_background_guide_scan_keeps_the_window_answering(tmp_path):
+    # An unwanted ID sharing a prefix with thousands of wanted IDs made
+    # the regex hold the GIL for seconds, blocking the Qt thread too.
+    from tvhplayer.core.guide_feeds import wanted_programmes
+
+    path = tmp_path / 'guide.xml'
+    path.write_bytes(
+        b'<tv>'
+        + b'<programme channel="Channel09999.test"><title>Skip</title></programme>' * 30_000
+        + b'<programme channel="Channel00000.test"><title>Keep</title></programme></tv>'
+    )
+    wanted = {f'Channel{i:05d}.test' for i in range(9_999)}
+    titles = []
+    done = threading.Event()
+
+    def scan():
+        try:
+            titles.extend(el.findtext('title') for el in wanted_programmes(str(path), wanted))
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=scan)
+    meter = StallMeter()
+    _later(worker.start)
+    try:
+        meter.run(10, until=done.is_set)
+    finally:
+        worker.join()
+    meter.report('Background guide scan with 9,999 wanted channels')
+    assert titles == ['Keep']
+    assert meter.worst() < SERVER_BUDGET
+
+
 class _SlowServer:
     """A remote server that takes ``SERVER_DELAY`` to answer every request."""
 
