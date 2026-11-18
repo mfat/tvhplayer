@@ -264,8 +264,9 @@ def summarize(path: str, cancelled: Callable[[], bool] = lambda: False) -> Guide
 class GuideCache:
     """Downloaded guides and their summaries, one pair per address."""
 
-    def __init__(self, folder):
+    def __init__(self, folder, work_folder=None):
         self.folder = Path(folder)
+        self.work_folder = Path(work_folder) if work_folder is not None else self.folder
 
     def _stem(self, location: str) -> Path:
         digest = hashlib.sha256(location.strip().encode('utf-8')).hexdigest()[:20]
@@ -311,7 +312,8 @@ class GuideCache:
         """
         previous = self.summary(location)
         self.folder.mkdir(parents=True, exist_ok=True)
-        handle, part = tempfile.mkstemp(prefix='download-', suffix='.part', dir=str(self.folder))
+        self.work_folder.mkdir(parents=True, exist_ok=True)
+        handle, part = tempfile.mkstemp(prefix='download-', suffix='.part', dir=str(self.work_folder))
         try:
             with os.fdopen(handle, 'wb') as out:
                 if is_web_address(location):

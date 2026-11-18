@@ -33,7 +33,8 @@ try:
     from .core.errors import TvhError
     from .core.guide_feeds import UPDATE_HOURS, GuideError, build_index, find_guides, guide_name, is_web_address
     from .core.guide_match import Choice, assign, main_region
-    from .core.guide_update import server_channels, update_server_guide
+    from .core.guide_update import server_channels
+    from .core.guide_process import run_guide_update
     from .core.playlist_sync import error_message, server_key
     from .core.proxy import configure_session
     from .core.tvh_admin import TvhAdmin
@@ -43,7 +44,8 @@ except ImportError:
     from core.errors import TvhError
     from core.guide_feeds import UPDATE_HOURS, GuideError, build_index, find_guides, guide_name, is_web_address
     from core.guide_match import Choice, assign, main_region
-    from core.guide_update import server_channels, update_server_guide
+    from core.guide_update import server_channels
+    from core.guide_process import run_guide_update
     from core.playlist_sync import error_message, server_key
     from core.proxy import configure_session
     from core.tvh_admin import TvhAdmin
@@ -182,12 +184,11 @@ class GuideJob(QObject):
         force = self.force
 
         def work(task):
-            with TvhAdmin(server) as admin:
-                report = update_server_guide(
-                    admin, server, cache, sources, choices, force,
-                    status=task.status.emit, progress=task.progress.emit,
-                    cancelled=lambda: self._cancelled,
-                )
+            report = run_guide_update(
+                server, cache, sources, choices, force,
+                status=task.status.emit, progress=task.progress.emit,
+                cancelled=lambda: self._cancelled,
+            )
             return report, sources
 
         task = _Task(work, self)

@@ -296,7 +296,7 @@ def update_server_guide(
         report.until = max(last_stop.values(), default=0)
         return report
     status('Loading the TV guide into the server…')
-    built = write_server_guide(cache, assignments, names, cache.folder, cancelled, now)
+    built = write_server_guide(cache, assignments, names, cache.work_folder, cancelled, now)
     try:
         try:
             send_guide(socket_path, built.path)

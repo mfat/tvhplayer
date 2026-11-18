@@ -10145,6 +10145,10 @@ class NoDialogButtonIconsStyle(ThemeStyle):
 
 def main():
     """Main entry point for the application"""
+    # Frozen builds must dispatch spawned guide workers before starting Qt
+    # or acquiring the single-instance lock.
+    import multiprocessing
+    multiprocessing.freeze_support()
     configure_logging()
     background_launch = '--background' in sys.argv[1:]
     try:
