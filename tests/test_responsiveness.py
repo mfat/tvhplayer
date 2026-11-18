@@ -21,7 +21,8 @@ import types
 
 import pytest
 
-from test_pyqt6_ui import _load_channels, _make_player, _wait_until
+# These tests measure window work with a fake player, without an mpv GL context.
+from test_pyqt6_ui import _load_channels, _make_background_player as _make_player, _wait_until
 
 # How long the fake server takes to answer.
 SERVER_DELAY = 1.0
@@ -33,6 +34,9 @@ SERVER_BUDGET = 0.3
 LIST_BUDGET = 0.05
 # The share of the time the window may spend on live updates to the list.
 LIST_BUSY_BUDGET = 0.2
+# Continuous imports include decoding thousands of messages on a Python
+# worker as well as applying them; the UI must still be free most of the time.
+IMPORT_BUSY_BUDGET = 0.5
 # Typing a search: most keys take under 10 ms with 60,000 channels and the
 # slowest 40-100 ms, so this only catches searching getting slower.
 SEARCH_BUDGET = 0.2
@@ -1031,6 +1035,51 @@ def test_a_burst_of_programme_changes_on_a_big_list_keeps_the_window_answering(m
         _close(app, window)
 
 
+@pytest.mark.parametrize('filtered', [False, True])
+def test_guide_import_updates_keep_the_list_answering(monkeypatch, tmp_path, filtered):
+    from tvhplayer.core.channel_info import NowNext, channel_key
+    from tvhplayer.core.models import EpgEvent
+
+    app, ui, window, backend = _big_htsp_window(monkeypatch, tmp_path, groups=1_034)
+    stopped = threading.Event()
+    sent = [0]
+
+    def send():
+        while not stopped.is_set():
+            for _ in range(2_000):
+                sent[0] += 1
+                number = sent[0] % BIG_LIST + 1
+                backend._on_async({'method': 'channelUpdate', 'channelId': number,
+                                   'eventId': sent[0] + BIG_LIST * 10})
+            stopped.wait(0.1)
+
+    feeder = threading.Thread(target=send)
+    try:
+        if filtered:
+            window.tag_combo.setCurrentIndex(1)
+        window.channel_options['two_line'] = True
+        window._apply_channel_row_style()
+        now = int(time.time())
+        programme = NowNext(EpgEvent(start=now - 600, stop=now + 3_000, title='Current programme'))
+        window._now_next = {channel_key(channel): programme for channel in window._channels}
+        window._now_next_loaded = True
+        window._update_programme_cells()
+        feeder.start()
+        meter = StallMeter()
+        meter.run(3)
+        meter.report(f'Guide import updates, filtered={filtered}')
+        assert sent[0] >= 20_000
+        assert meter.busy() < IMPORT_BUSY_BUDGET
+        assert meter.worst() < LIST_BURST_BUDGET
+    finally:
+        stopped.set()
+        if feeder.ident is not None:
+            feeder.join()
+        window._channel_fetch = None
+        backend.close()
+        _close(app, window)
+
+
 def test_a_big_list_arriving_keeps_the_window_answering(monkeypatch, tmp_path):
     # 58,868 channels in 1,034 groups, as on a real built-in server: counting
     # the groups and finding each channel's kind took 700 ms on the window's
@@ -1115,19 +1164,28 @@ def test_a_channel_moving_group_still_updates_the_group_counts(monkeypatch, tmp_
     app, ui, window, backend = _big_htsp_window(monkeypatch, tmp_path, count=10, groups=2)
     try:
         texts = lambda: [window.tag_combo.itemText(i) for i in range(1, window.tag_combo.count())]
+        guide_updates = []
+        monkeypatch.setattr(window, '_guide_channels_changed', lambda: guide_updates.append(True))
+        window.tag_combo.setCurrentIndex(1)
         assert texts() == ['Group 1 (5)', 'Group 2 (5)']
         # Only the programme changes: the counts stay.
         backend._on_async({'method': 'channelUpdate', 'channelId': 1, 'eventId': 999, 'nextEventId': 1000})
         window._poll_channel_metadata()
         assert texts() == ['Group 1 (5)', 'Group 2 (5)']
+        assert guide_updates == []
         # Channel 2 is in group 2; given group 1 in its tags, it counts there too
         # (group 2 still lists it as a member).
         backend._on_async({'method': 'channelUpdate', 'channelId': 2, 'tags': [1]})
         window._poll_channel_metadata()
         assert texts() == ['Group 1 (6)', 'Group 2 (5)']
+        assert window.channel_model.rowCount() == 6
+        assert guide_updates == [True]
         backend._on_async({'method': 'channelDelete', 'channelId': 4})
         window._poll_channel_metadata()
         assert texts() == ['Group 1 (6)', 'Group 2 (4)']
+        backend._on_async({'method': 'channelUpdate', 'channelId': 1, 'channelName': 'Renamed'})
+        window._poll_channel_metadata()
+        assert len(guide_updates) == 3
     finally:
         window._channel_fetch = None
         backend.close()

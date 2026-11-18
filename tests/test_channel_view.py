@@ -430,3 +430,22 @@ def test_number_column_shows_and_sorts_subchannels():
     assert _names(model) == ['C', 'B', 'A']
     model.set_filter('2.2')
     assert _names(model) == ['B']
+
+
+def test_programme_import_batch_sends_one_change_notification():
+    from tvhplayer.core.channel_info import channel_key
+    from tvhplayer.core.models import Channel
+
+    channels = [Channel(uuid=f'u{i}', name=f'Channel {i}', number=i, raw={'eventId': i})
+                for i in range(2_000)]
+    app, model, view = _model(channels)
+    changed, layouts = [], []
+    model.dataChanged.connect(lambda first, last, roles: changed.append((first.row(), last.row())))
+    model.layoutChanged.connect(lambda: layouts.append(True))
+    updates = {channel_key(ch): Channel(uuid=ch.uuid, name=ch.name, number=ch.number,
+                                       raw={'eventId': ch.number + 10_000}) for ch in channels}
+    model.update_channels(updates)
+    assert changed == [(0, 1_999)]
+    assert layouts == []
+    assert all(model.channel_at(i).raw['eventId'] == i + 10_000 for i in range(2_000))
+    view.close()

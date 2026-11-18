@@ -391,8 +391,11 @@ class ChannelTableModel(QAbstractTableModel):
             if row >= 0:
                 rows.append(row)
         last = len(COLUMN_TITLES) - 1
-        for row in rows:
-            self.dataChanged.emit(self.index(row, 0), self.index(row, last), [])
+        if rows:
+            # A guide import can update thousands of rows per batch. One
+            # signal per row made Qt spend the whole UI turn handling model
+            # notifications. A range lets the view schedule one repaint.
+            self.dataChanged.emit(self.index(min(rows), 0), self.index(max(rows), last), [])
         return True
 
     def set_filter(self, search, members=None):

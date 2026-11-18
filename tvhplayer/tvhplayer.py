@@ -6359,10 +6359,15 @@ class TVHeadendClient(QMainWindow):
         # group again for each of those held up the window for 200-350 ms on
         # a server with tens of thousands of channels.
         regroup = False
+        guide_changed = reset or tags is not None
         for channel_id, channel in changes.items():
             old = self._live_channels.pop(channel_id, None)
             if not regroup and not _same_groups(old, channel):
                 regroup = True
+            if not guide_changed and (old is None or channel is None or
+                    (old.name, old.number, old.number_minor, old.icon, old.enabled) !=
+                    (channel.name, channel.number, channel.number_minor, channel.icon, channel.enabled)):
+                guide_changed = True
             if old is not None:
                 old_key = channel_key(old)
                 updates[old_key] = None
@@ -6394,7 +6399,10 @@ class TVHeadendClient(QMainWindow):
             top = table.rowAt(0)
             anchor = self.channel_model.key_at(top) if top >= 0 else ''
         self.channel_model.update_channels(updates, references)
-        self._apply_channel_filter()
+        # Programme IDs change in a flood during guide imports. They do not
+        # change group membership; avoid scanning every channel per batch.
+        if regroup or tags is not None or reset:
+            self._apply_channel_filter()
         if anchor:
             row = self.channel_model.row_of_key(anchor)
             if row >= 0:
@@ -6402,7 +6410,8 @@ class TVHeadendClient(QMainWindow):
                                QAbstractItemView.ScrollHint.PositionAtTop)
         if self._channels:
             self._show_channel_list()
-        self._guide_channels_changed()
+        if guide_changed or regroup:
+            self._guide_channels_changed()
         self._visible_logo_timer.start()
 
     def _show_channel_state(self, text, busy=False, retry=False):
