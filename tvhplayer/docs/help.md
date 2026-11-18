@@ -93,7 +93,7 @@ You can add internet TV channels from an M3U playlist or an Xtream Codes provide
 4. If you have more than one server, choose where the channels go. The built-in server is chosen for you.
 5. Click **Import**.
 
-The channels appear in the channel list when the import finishes.
+The channels appear in the channel list when the import finishes. Importing does not test their streams. To find channels that do not work, choose **Settings → Channels → Check channels now**.
 
 The server keeps the channels, so TVHplayer does not read the playlist again by itself. When your provider adds or removes channels, or changes their addresses, refresh it. To manage your playlists, choose **File → Manage Playlists…**:
 

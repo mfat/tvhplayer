@@ -5,10 +5,9 @@ without a scan (Service ID 1), and the network's bouquet maps them to
 channels. An entry keeps its mux across refreshes through its key, so a
 changed stream address or name edits the channel instead of replacing it.
 
-Tvheadend still scans each new mux once, and a refresh scans the muxes
-whose stream address changed. Only a mux whose scan passed keeps its
-service enabled; disabling a service makes the bouquet delete its channel,
-so dead streams never show. Checking a playlist scans all its muxes again.
+Imports and refreshes can skip stream checks. An explicit playlist check
+scans all its muxes. Failed services can then be disabled, making the
+bouquet remove their channels; untested channels remain visible.
 
 Tvheadend 4.2 has no network bouquet, so there TVHplayer does its work:
 ``map_channels`` gives each enabled service a channel and deletes the

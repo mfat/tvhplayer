@@ -428,7 +428,7 @@ def test_playlists_dialog_refreshes_and_removes(app, tmp_path, monkeypatch):
     dialog = dialogs.PlaylistsDialog(host)
     assert dialog.playlist_list.count() == 1
     assert dialog.playlist_list.item(0).text() == 'news'
-    assert dialog.health_label.text().startswith('Stream health: 2 working')
+    assert dialog.health_label.text().startswith('Stream health: 2 untested')
     assert dialog.health_btn.isEnabled()
     dialog.refresh_btn.click()
     _wait_job(app, dialog)
@@ -486,56 +486,32 @@ def test_a_server_on_this_computer_gets_the_guide_as_a_guide_source(app, tmp_pat
     assert host.synced == [(BUILTIN['url'], 'news', 'http://127.0.0.1:1/guide.xml', 2)]
 
 
-def test_job_says_when_only_the_stream_test_is_left(app, tmp_path):
-    host = FakeHost([BUILTIN], current=BUILTIN)
-    source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
-    job = dialogs.PlaylistJob(host, source, BUILTIN)
-    events = []
-    job.checking.connect(lambda: events.append('checking'))
-    job.finished.connect(lambda message, _skipped: events.append(message))
-    job.start()
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and job.is_running():
-        app.processEvents()
-        time.sleep(0.02)
-    app.processEvents()
-    assert events == ['checking', 'Updated the channels from news: 2 added.']
-
-
-def test_closing_while_checking_hands_the_job_to_the_host(app, tmp_path, monkeypatch):
-    class SlowScan(FakeAdmin):
+@pytest.mark.parametrize('hide_dead', [False, True])
+def test_import_finishes_without_testing_streams(app, tmp_path, monkeypatch, hide_dead):
+    class Unscanned(FakeAdmin):
         def create_mux(self, network_uuid, conf):
             uuid = super().create_mux(network_uuid, conf)
-            self.muxes[uuid].update(scan_state=1, scan_result=0)
+            self.muxes[uuid].update(scan_state=0, scan_result=0)
             return uuid
 
-    monkeypatch.setattr(dialogs, 'TvhAdmin', SlowScan)
-    host = FakeHost([BUILTIN], current=BUILTIN)
-    dialog = dialogs.ImportPlaylistDialog(host)
-    dialog.location_input.setText(_playlist(tmp_path, TWO))
-    dialog.import_btn.click()
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and dialog.hint_label.isHidden():
-        app.processEvents()
-        time.sleep(0.02)
-    assert dialog.hint_label.text() == dialogs.CHECK_HINT
-    assert dialog.close_btn.text() == 'Close'
+        def scan_network(self, _network_uuid):
+            pytest.fail('Import must not scan the playlist')
 
-    job = dialog._job
-    finished = []
-    dialog.close_btn.click()
-    assert host.kept == [job]
-    assert dialog._job is None
-    assert job.is_checking()
-    job.finished.connect(lambda message, _skipped: finished.append(message))
-    for mux in FakeAdmin.servers[BUILTIN['url']]['muxes'].values():
-        mux.update(scan_state=0, scan_result=1)
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and job.is_running():
-        app.processEvents()
-        time.sleep(0.02)
-    app.processEvents()
-    assert finished == ['Added 2 channels from news.']
+    monkeypatch.setattr(dialogs, 'TvhAdmin', Unscanned)
+    monkeypatch.setattr(dialogs, 'wait_for_checks', lambda *_a, **_kw: pytest.fail('Unexpected checks'))
+    host = FakeHost([BUILTIN], current=BUILTIN)
+    host.hide_dead = hide_dead
+    source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
+    job = dialogs.PlaylistJob(host, source, BUILTIN, first_import=True)
+    assert _finish(app, job) == ['Added 2 channels from news.']
+    stored = PlaylistSource.from_dict(host.stored[-1])
+    assert len(stored.muxes) == 2
+    assert stored.health == {}
+    assert stored.health_totals['untested'] == 2
+    assert stored.last_checked == 0
+    network = FakeAdmin.servers[BUILTIN['url']]['networks']['net']
+    assert network['scan_create'] is False
+    assert network['skipinitscan'] is True
 
 
 def _finish(app, job, timeout=10):
@@ -571,14 +547,15 @@ class _OneDead(FakeAdmin):
         _OneDead.hidden.extend(node['uuid'] for node in nodes if node.get('enabled') is False)
 
 
-def test_import_without_hiding_still_tests_and_marks_failures(app, tmp_path, monkeypatch):
+def test_manual_check_without_hiding_tests_and_marks_failures(app, tmp_path, monkeypatch):
     monkeypatch.setattr(dialogs, 'TvhAdmin', _OneDead)
     _OneDead.hidden = []
     host = FakeHost([BUILTIN], current=BUILTIN)
     host.hide_dead = False
     source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
-    events = _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True))
-    assert events == ['checking', 'Added 2 channels from news. 1 is marked in the channel list because it is not working.']
+    _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True))
+    events = _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, action=dialogs.PlaylistJob.CHECK))
+    assert events == ['checking', 'Checked the channels from news: 1 working. 1 is marked in the channel list because it is not working.']
     assert _OneDead.hidden == []
     health = PlaylistSource.from_dict(host.stored[-1]).health
     assert [item['channels'] for item in health.values() if item['status'] == 'failed'] == [['cm2']]
@@ -595,7 +572,8 @@ def test_turning_hiding_off_during_the_test_marks_instead(app, tmp_path, monkeyp
     SlowScan.hidden = []
     host = FakeHost([BUILTIN], current=BUILTIN)
     source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
-    job = dialogs.PlaylistJob(host, source, BUILTIN, first_import=True)
+    _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True))
+    job = dialogs.PlaylistJob(host, source, BUILTIN, action=dialogs.PlaylistJob.CHECK)
 
     def finish_scans():
         host.hide_dead = False
@@ -604,7 +582,7 @@ def test_turning_hiding_off_during_the_test_marks_instead(app, tmp_path, monkeyp
 
     job.checking.connect(finish_scans)
     events = _finish(app, job)
-    assert events == ['checking', 'Added 2 channels from news. 1 is marked in the channel list because it is not working.']
+    assert events == ['checking', 'Checked the channels from news: 1 working. 1 is marked in the channel list because it is not working.']
     assert SlowScan.hidden == []
 
 
@@ -1015,7 +993,8 @@ def test_removing_a_playlist_being_updated_stops_the_update_first(app, tmp_path,
     monkeypatch.setattr(dialogs.QMessageBox, 'question', yes)
     host = FakeHost([BUILTIN], current=BUILTIN)
     source = PlaylistSource('news', _playlist(tmp_path, TWO), 'builtin')
-    job = dialogs.PlaylistJob(host, source, BUILTIN, first_import=True)
+    _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True))
+    job = dialogs.PlaylistJob(host, source, BUILTIN, action=dialogs.PlaylistJob.CHECK)
     host.kept.append(job)
     job.start()
     deadline = time.monotonic() + 10
@@ -1190,7 +1169,7 @@ def test_job_adds_only_the_chosen_channels(app, tmp_path):
         return True
 
     events = _finish(app, dialogs.PlaylistJob(host, source, BUILTIN, first_import=True, choose=keep_news))
-    assert events == ['checking', 'Added 2 channels from news.']
+    assert events == ['Added 2 channels from news.']
     stored = PlaylistSource.from_dict(host.stored[-1])
     assert stored.chosen_groups == ['News']
     assert sorted(stored.muxes) == ['name:A', 'name:B']

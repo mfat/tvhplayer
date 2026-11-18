@@ -196,7 +196,7 @@ class PlaylistJob(QObject):
         super().__init__(parent)
         self._previous = previous
         self._replaces = replaces
-        self._check_streams = action == self.CHECK or not source.network_uuid
+        self._check_streams = action == self.CHECK
         self._host = host
         self.source = source
         self.server = server
@@ -274,8 +274,8 @@ class PlaylistJob(QObject):
 
     def _server_ready(self, server):
         self.server = server
-        # Queued jobs may have received a newer saved source before starting.
-        self._check_streams = self.action == self.CHECK or not self.source.network_uuid
+        # Stream checks run only when explicitly requested.
+        self._check_streams = self.action == self.CHECK
         if self._cancelled:
             self._stop_with('Import stopped.')
             return
@@ -416,7 +416,7 @@ class PlaylistJob(QObject):
             message = check_message(self.source.name, result)
         else:
             message = result_message(self.source.name, result, self._first_import)
-            if not self._check_streams and not result.cancelled:
+            if not self._check_streams and not result.cancelled and not self._first_import:
                 message += (
                     ' Stream checks were skipped. To test the channels, choose '
                     'Settings → Channels → Check channels now.'
