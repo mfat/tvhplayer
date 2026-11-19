@@ -43,6 +43,16 @@
   <url type="bugtracker">https://github.com/mfat/tvhplayer/issues</url>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="4.7.6" date="2026-11-19">
+      <description>
+        <ul>
+          <li>Added more limpv decoder options</li>
+          <li>Added custom DNS settings</li>
+          <li>Fixed XMLTV guide imports into the Windows WSLc container</li>
+          <li>Bug fixes and improvements</li>
+        </ul>
+      </description>
+    </release>
     <release version="4.7.5" date="2026-11-18">
       <description>
         <ul>

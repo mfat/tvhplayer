@@ -11,7 +11,7 @@
 %global mpv_wheel_sha256 dcf77f612e3f5ce49bd89393f37d286de7ac290db6b0800f1fdcfe0aeb5ba9b8
 
 Name:           tvhplayer
-Version:        4.7.5
+Version:        4.7.6
 Release:        1%{?dist}
 Summary:        Tvheadend desktop client with a built-in server
 
@@ -119,6 +119,12 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.mfat.tvhpla
 %{_metainfodir}/io.github.mfat.tvhplayer.metainfo.xml
 
 %changelog
+* Thu Nov 19 2026 mFat <newmfat@gmail.com> - 4.7.6-1
+- Added more limpv decoder options
+- Added custom DNS settings
+- Fixed XMLTV guide imports into the Windows WSLc container
+- Bug fixes and improvements
+
 * Wed Nov 18 2026 mFat <newmfat@gmail.com> - 4.7.5-1
 - Performance improvements
 
