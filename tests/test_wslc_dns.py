@@ -62,14 +62,20 @@ def test_inherited_list_dedupes_and_stops_at_three():
     assert select_inherited_dns(rows, best_index=4) == ['192.168.8.1', '1.1.1.1', '8.8.8.8']
 
 
-def test_merge_appends_the_extra_server_and_refuses_to_replace_windows_dns():
+def test_merge_prefers_custom_dns_while_retaining_windows_dns():
     assert merge_dns_servers(['192.168.8.1', '192.168.8.1'], '172.23.160.1') == [
-        '192.168.8.1', '172.23.160.1']
-    assert merge_dns_servers(['192.168.8.1', '1.1.1.1'], '1.1.1.1') == ['192.168.8.1', '1.1.1.1']
+        '172.23.160.1', '192.168.8.1']
+    assert merge_dns_servers(['192.168.8.1', '1.1.1.1'], '1.1.1.1') == ['1.1.1.1', '192.168.8.1']
     assert merge_dns_servers(['192.168.8.1', '1.1.1.1', '8.8.8.8'], '9.9.9.9') == [
-        '192.168.8.1', '1.1.1.1', '8.8.8.8', '9.9.9.9']
+        '9.9.9.9', '192.168.8.1', '1.1.1.1', '8.8.8.8']
     with pytest.raises(DnsDiscoveryError, match='was not applied'):
         merge_dns_servers([], '1.1.1.1')
+
+
+def test_custom_dns_is_always_within_glibc_first_three():
+    servers = merge_dns_servers(['192.168.8.1', '192.168.8.2', '10.0.0.53'], '172.23.160.1')
+    assert servers == ['172.23.160.1', '192.168.8.1', '192.168.8.2', '10.0.0.53']
+    assert servers[0] == '172.23.160.1'
 
 
 def test_discovery_is_refused_off_windows(monkeypatch):
@@ -129,16 +135,16 @@ def test_launch_without_extra_dns_adds_no_dns_flags_and_keeps_published_ports():
     assert '192.168.8.211:30001:30001/udp' in args
 
 
-def test_launch_appends_dns_flags_in_order_without_changing_publication():
+def test_launch_uses_preferred_dns_first_without_changing_tcp_udp_publication():
     runtime = _runtime()
     udp = [('192.168.8.211', 30000)]
     runtime.launch(
         IMAGE, NAME, OWNER, r'C:\Config', r'D:\TV recordings', (24111, 24112), udp,
-        dns_servers=('192.168.8.1', '172.23.160.1'))
+        dns_servers=('172.23.160.1', '192.168.8.1'))
     args = runtime.runner.calls[0]
-    assert args[args.index('--dns') + 1] == '192.168.8.1'
+    assert args[args.index('--dns') + 1] == '172.23.160.1'
     flags = [args[index + 1] for index, arg in enumerate(args) if arg == '--dns']
-    assert flags == ['192.168.8.1', '172.23.160.1']
+    assert flags == ['172.23.160.1', '192.168.8.1']
     assert '127.0.0.1:24111:9981/tcp' in args
     assert '127.0.0.1:24112:9982/tcp' in args
     assert '192.168.8.211:30000:30000/udp' in args
@@ -177,9 +183,9 @@ def test_supervisor_appends_discovered_dns_and_reports_a_failed_lookup(monkeypat
     monkeypatch.setattr('tvhplayer.core.windows_dns.discover_windows_dns', discover)
     supervisor = SimpleNamespace(_progress=lambda message: None, _emit_log=lambda text: None)
     assert WslcBuiltinSupervisor._extra_dns_servers(supervisor, '172.23.160.1') == (
-        '192.168.8.1', '172.23.160.1')
+        '172.23.160.1', '192.168.8.1')
     assert WslcBuiltinSupervisor._extra_dns_servers(supervisor, '172.23.160.1') == (
-        '192.168.8.1', '172.23.160.1')
+        '172.23.160.1', '192.168.8.1')
     assert len(calls) == 2
     monkeypatch.setattr('tvhplayer.core.windows_dns.discover_windows_dns', lambda: [])
     with pytest.raises(WslcError, match='was not applied') as error:
