@@ -134,6 +134,9 @@ def default_config():
         'builtin_padding_late': 5,
         # Warn when the recordings folder has less than this many GB free; 0 never warns.
         'low_space_gb': 5,
+        # Windows WSLc only: an extra DNS server after the ones Windows already provides.
+        'wslc_extra_dns': False,
+        'wslc_extra_dns_address': '',
         # Legacy field: having offered setup is not evidence that channels exist.
         'setup_offered': False,
         'setup_started': False,
@@ -253,6 +256,21 @@ def _normalize(data):
     value = cfg.get('timeshift_gb')
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= TIMESHIFT_MAX_GB:
         cfg['timeshift_gb'] = defaults['timeshift_gb']
+    cfg['wslc_extra_dns'] = bool(cfg.get('wslc_extra_dns'))
+    address = cfg.get('wslc_extra_dns_address')
+    if not isinstance(address, str):
+        address = ''
+    else:
+        address = address.strip()
+    if address:
+        try:
+            from .windows_dns import canonical_dns_address
+            address = canonical_dns_address(address)
+        except ValueError:
+            address = ''
+    if not address:
+        cfg['wslc_extra_dns'] = False
+    cfg['wslc_extra_dns_address'] = address
     return cfg
 
 

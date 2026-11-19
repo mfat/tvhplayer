@@ -35,8 +35,9 @@ class Runtime:
     def backup_config(self, *, upgrade=False):
         self.backups.append(upgrade)
         return Path('native-backup.tar.gz')
-    def launch(self, image, name, owner, config, recordings, ports, udp_ports=()):
+    def launch(self, image, name, owner, config, recordings, ports, udp_ports=(), dns_servers=()):
         self.starts.append((name, owner, ports, udp_ports))
+        self.dns_servers = tuple(dns_servers)
         if len(self.starts) <= self.collisions:
             raise WslcError('bind: Address already in use')
     def verify_running(self, name, owner, ports, udp_ports=()):

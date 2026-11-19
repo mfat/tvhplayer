@@ -4408,6 +4408,9 @@ class TVHeadendClient(QMainWindow):
             if ensure_recording_dir(folder):
                 self.builtin.recordings_dir = folder
             self.builtin.padding = self.recording_padding()
+            if getattr(self.builtin, 'uses_wslc', False):
+                self.builtin.extra_dns = (
+                    self.config['wslc_extra_dns_address'] if self.config['wslc_extra_dns'] else '')
             self.builtin.ready.connect(self._on_builtin_ready)
             self.builtin.failed.connect(self._on_builtin_failed)
             self.builtin.status_changed.connect(self._on_builtin_phase, Qt.ConnectionType.QueuedConnection)
@@ -9257,6 +9260,37 @@ class TVHeadendClient(QMainWindow):
         self.config['stay_awake_for_scheduled'] = bool(on)
         self.save_config()
         self._sync_awake()
+
+    def extra_dns_enabled(self):
+        return bool(self.config.get('wslc_extra_dns'))
+
+    def extra_dns_address(self):
+        return self.config.get('wslc_extra_dns_address') or ''
+
+    def set_extra_dns(self, enabled, address):
+        """Save an extra WSLc DNS server. It is used the next time the server starts."""
+        try:
+            from .core.windows_dns import DnsAddressError, canonical_dns_address
+        except ImportError:
+            from core.windows_dns import DnsAddressError, canonical_dns_address
+        enabled = bool(enabled)
+        text = '' if address is None else str(address)
+        if enabled:
+            stored = canonical_dns_address(text)
+        else:
+            try:
+                stored = canonical_dns_address(text) if text.strip() else self.extra_dns_address()
+            except DnsAddressError:
+                stored = self.extra_dns_address()
+        self.config['wslc_extra_dns'] = bool(enabled and stored)
+        if stored:
+            self.config['wslc_extra_dns_address'] = stored
+        elif not enabled:
+            self.config['wslc_extra_dns_address'] = ''
+        self.save_config()
+        if getattr(self.builtin, 'uses_wslc', False):
+            self.builtin.extra_dns = stored if self.config['wslc_extra_dns'] else ''
+        return self.config['wslc_extra_dns']
 
     def recording_padding(self):
         """Minutes the built-in server starts recordings early and ends them late."""

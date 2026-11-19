@@ -199,6 +199,7 @@ class WslcBuiltinSupervisor(QObject):
 
     available = True
     can_install = True
+    uses_wslc = True
 
     def __init__(self, config_dir, backend_dir, http_port=0, htsp_port=0, parent=None,
                  runtime=None):
@@ -210,6 +211,8 @@ class WslcBuiltinSupervisor(QObject):
         self.username = self.password = ''
         self.recordings_dir = ''
         self.padding = None
+        # Extra DNS address, or '' when the setting is off. Read on the backend thread at launch.
+        self.extra_dns = ''
         self._status = 'stopped'
         self._thread = None
         self._cancel = threading.Event()
@@ -358,6 +361,14 @@ class WslcBuiltinSupervisor(QObject):
             transport = self._plan_hdhomerun_transport()
             self._phase.emit('starting')
             self._progress('Starting the server…')
+            if self._cancel.is_set():
+                return
+            # Read once, before any container exists, so a discovery failure
+            # does not leave a container behind and retries keep the same list.
+            extra_dns = self.extra_dns
+            dns_servers = self._extra_dns_servers(extra_dns)
+            if self._cancel.is_set():
+                return
             for attempt in range(3):
                 ports = (self.http_port, self.htsp_port)
                 udp_ports = self._udp_specs(transport)
@@ -366,7 +377,8 @@ class WslcBuiltinSupervisor(QObject):
                 # Mark before launch: if the CLI times out, the container may exist.
                 launched = True
                 try:
-                    self.runtime.launch(image, name, owner, self.config_dir, recordings, ports, udp_ports)
+                    self.runtime.launch(image, name, owner, self.config_dir, recordings, ports, udp_ports,
+                                        dns_servers=dns_servers)
                     break
                 except WslcError as exc:
                     if attempt == 2 or not port_conflict(exc) or self._cancel.is_set():
@@ -476,6 +488,30 @@ class WslcBuiltinSupervisor(QObject):
                 except Exception as exc:
                     error = (error + '\n' if error else '') + f'Backend cleanup failed ({name}): {exc}'
             self._completed.emit(error)
+
+    def _extra_dns_servers(self, address):
+        """Full ``--dns`` list, or none when the extra server is off.
+
+        Discovery stays on this thread. An empty Windows list is reported
+        instead of launching with only the address the user added.
+        """
+        address = (address or '').strip()
+        if not address:
+            return ()
+        self._progress('Reading Windows DNS servers…')
+        try:
+            from .core.windows_dns import DnsDiscoveryError, discover_windows_dns, merge_dns_servers
+        except ImportError:
+            from core.windows_dns import DnsDiscoveryError, discover_windows_dns, merge_dns_servers
+        try:
+            servers = tuple(merge_dns_servers(discover_windows_dns(), address))
+        except DnsDiscoveryError as exc:
+            raise WslcError(str(exc)) from exc
+        if len(servers) > 3:
+            self._emit_log(
+                'The built-in server uses the first three DNS servers. '
+                'The additional server is after those and may not be asked.\n')
+        return servers
 
     @staticmethod
     def _udp_specs(transport):

@@ -196,6 +196,7 @@ def test_launch_publishes_only_two_loopback_ports_without_credentials():
     runtime.config_storage = SimpleNamespace(volume='tvhplayer-config-' + OWNER)
     runtime.launch(IMAGE, NAME, OWNER, r'C:\Config', r'D:\TV recordings', (24111, 24112))
     args = cli.calls[0]
+    assert '--dns' not in args
     assert args.count('--publish') == 2
     assert '127.0.0.1:24111:9981/tcp' in args
     assert '127.0.0.1:24112:9982/tcp' in args
@@ -397,7 +398,7 @@ def test_cancel_before_provision_completes_never_launches(tmp_path, monkeypatch)
             reached.set()
             release.wait(5)
             return IMAGE
-        def launch(self, *args):
+        def launch(self, *args, **kwargs):
             pytest.fail('Cancelled setup must not launch a container')
     monkeypatch.setattr(module, 'protect_config', lambda folder: folder.mkdir(parents=True, exist_ok=True))
     supervisor = module.WslcBuiltinSupervisor(tmp_path / 'config', tmp_path, runtime=Runtime())

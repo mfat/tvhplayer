@@ -248,11 +248,22 @@ class WslcRuntimeAdapter:
         if any(self._server_settings.get(key) != value for key, value in changes.items()):
             self.config_storage.update_server_settings(dict(self._server_settings, **changes))
 
-    def launch(self, image, name, owner, config, recordings, ports, udp_ports=()):
+    def launch(self, image, name, owner, config, recordings, ports, udp_ports=(), dns_servers=()):
         if self.config_storage is None or not self.config_storage.volume:
             raise WslcError('Linux server settings have not been prepared.')
+        from .windows_dns import DnsAddressError, canonical_dns_address
+        # --dns replaces inherited resolvers, so the caller passes the full list.
+        # An empty list keeps WSLc's own DNS and adds no flags.
+        dns = []
+        for address in dns_servers:
+            try:
+                dns.append(canonical_dns_address(address))
+            except DnsAddressError as exc:
+                raise WslcError(str(exc)) from exc
         args = ['run', '--detach', '--pull', 'never', '--name', name,
                 '--label', f'tvhplayer.owner={owner}', '--stop-timeout', '5']
+        for address in dns:
+            args += ['--dns', address]
         for host, guest in zip(ports, (9981, 9982)):
             args += ['--publish', f'127.0.0.1:{int(host)}:{guest}/tcp']
         # HDHomeRun MPEG-TS return path: tuner n sends to local_port+n on the

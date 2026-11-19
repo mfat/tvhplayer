@@ -120,6 +120,13 @@ DELETE_HELP = 'Only after a successful conversion. Recordings converted by hand 
 TITLE_BAR_HELP = 'Takes effect the next time TVHplayer starts.'
 UPDATES_HELP = 'Once a day, TVHplayer asks GitHub whether a newer version has been released and tells you if so.'
 UPDATES_NOW_HELP = 'Ask GitHub now. A version you skipped is shown again.'
+DNS_HELP = (
+    'Adds this DNS server after the ones Windows already gives the built-in server. '
+    'It does not replace them. Restart the built-in server to apply this. '
+    'A public address may receive queries when an earlier server does not answer, '
+    'and it cannot look up names that exist only on your network.'
+)
+DNS_ADDRESS_HELP = 'An IPv4 or IPv6 address, for example 1.1.1.1. Used in addition to Windows DNS.'
 
 
 def _swatch_icon(fill, edge, size=14):
@@ -175,6 +182,10 @@ class SettingsDialog(QDialog):
         for (title, subtitle), page in zip(self.PAGES, pages):
             self.nav.add_page(title, subtitle)
             self.pages.addWidget(page)
+        # Appended, so the page indexes above stay the same on Linux and macOS.
+        if getattr(getattr(host, 'builtin', None), 'uses_wslc', False):
+            self.nav.add_page('Built-in Server', 'Network')
+            self.pages.addWidget(self._builtin_network_page(host))
         self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.nav.setCurrentRow(0)
 
@@ -388,6 +399,57 @@ class SettingsDialog(QDialog):
             padding.add_row(SettingRow(late_label, '', self.late_spin))
         page.finish()
         return page
+
+    def _builtin_network_page(self, host):
+        page = SettingsPage('Built-in server')
+        group = page.add(SettingsGroup('Network'))
+        self.dns_check = ToggleSwitch('Use additional DNS server')
+        self.dns_check.setChecked(host.extra_dns_enabled())
+        describe(self.dns_check, description=DNS_HELP)
+        group.add_row(SettingRow('Use additional DNS server', DNS_HELP, self.dns_check))
+        self.dns_edit = QLineEdit(host.extra_dns_address())
+        self.dns_edit.setPlaceholderText('1.1.1.1')
+        self.dns_edit.setEnabled(self.dns_check.isChecked())
+        describe(self.dns_edit, 'DNS server address', DNS_ADDRESS_HELP)
+        group.add_row(SettingRow('DNS server &address', DNS_ADDRESS_HELP, self.dns_edit, stacked=True))
+        self.dns_check.toggled.connect(self._dns_toggled)
+        self.dns_edit.editingFinished.connect(self._dns_edited)
+        page.finish()
+        return page
+
+    def _dns_toggled(self, on):
+        self.dns_edit.blockSignals(True)
+        self.dns_edit.setEnabled(on)
+        self.dns_edit.blockSignals(False)
+        if not on:
+            self._host.set_extra_dns(False, self.dns_edit.text())
+            self._feedback(self.dns_edit, DNS_HELP)
+            self._dns_restart_hint()
+            return
+        self._dns_edited()
+
+    def _dns_edited(self):
+        if not self.dns_check.isChecked():
+            return
+        try:
+            from .core.windows_dns import DnsAddressError
+        except ImportError:
+            from core.windows_dns import DnsAddressError
+        try:
+            self._host.set_extra_dns(True, self.dns_edit.text())
+        except DnsAddressError as exc:
+            self._feedback(self.dns_edit, str(exc), notify=True)
+            return
+        self.dns_edit.setText(self._host.extra_dns_address())
+        self._feedback(self.dns_edit, DNS_HELP)
+        self._dns_restart_hint()
+
+    def _dns_restart_hint(self):
+        builtin = getattr(self._host, 'builtin', None)
+        running = builtin is not None and getattr(builtin, 'is_running', lambda: False)()
+        bar = getattr(self._host, 'statusbar', None)
+        if running and bar is not None:
+            bar.showMessage('Restart the built-in server to apply the DNS change.')
 
     def _conversion_page(self, host):
         page = SettingsPage('Converting for editing', CONVERT_INTRO)
