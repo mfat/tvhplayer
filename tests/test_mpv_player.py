@@ -617,13 +617,15 @@ def test_real_buffer_recording_contains_rewound_and_new_footage(tmp_path, disk):
         player.close()
 
 
-@pytest.mark.parametrize('mode', ['auto-safe', 'auto-copy', 'd3d11va-copy', 'no'])
+@pytest.mark.parametrize('mode', ['auto-safe', 'auto-copy', 'nvdec-copy', 'd3d11va-copy', 'no'])
 def test_hardware_decoding_changes_only_on_next_stream(engine, mode):
+    from tvhplayer.core.player import HARDWARE_DECODING_DEFAULT
+
     player, mpv, _ = engine
     player.play('http://example.test/first')
-    assert mpv.props['hwdec'] == 'no'
+    assert mpv.props['hwdec'] == HARDWARE_DECODING_DEFAULT
     player.set_hardware_decoding(mode)
-    assert mpv.props['hwdec'] == 'no'
+    assert mpv.props['hwdec'] == HARDWARE_DECODING_DEFAULT
     player.play('http://example.test/second')
     assert mpv.props['hwdec'] == mode
     player.play('http://example.test/third')

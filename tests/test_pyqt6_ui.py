@@ -3107,11 +3107,14 @@ def test_last_channel_plays_at_start_when_asked(monkeypatch, tmp_path):
         window.set_plays_on_start(True)
         assert window.plays_on_start()
 
-        assert window.hardware_decoding() == 'no'
-        assert window.player.hardware_decoding == 'no'
-        window.set_hardware_decoding('auto-safe')
-        assert window.config['hardware_decoding'] == 'auto-safe'
-        assert window.player.hardware_decoding == 'auto-safe'
+        from tvhplayer.core.player import HARDWARE_DECODING_DEFAULT
+
+        assert window.hardware_decoding() == HARDWARE_DECODING_DEFAULT
+        assert window.player.hardware_decoding == HARDWARE_DECODING_DEFAULT
+        other = 'no' if HARDWARE_DECODING_DEFAULT == 'auto-safe' else 'auto-safe'
+        window.set_hardware_decoding(other)
+        assert window.config['hardware_decoding'] == other
+        assert window.player.hardware_decoding == other
 
         assert not window.starts_channels_fast()
         assert window.player.fast_start is False

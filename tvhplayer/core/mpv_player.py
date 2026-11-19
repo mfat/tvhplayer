@@ -13,13 +13,13 @@ from time import monotonic
 from .buffer_recorder import BufferRecorder
 from .player import (
     BufferRecordingPoint, DEINTERLACE_AUTO, DEINTERLACE_MODES, DEINTERLACE_OFF, DEINTERLACE_ON,
-    HARDWARE_DECODING_MODES, NO_TRACK, Player, Timeshift,
+    HARDWARE_DECODING_DEFAULT, HARDWARE_DECODING_MODES, NO_TRACK, Player, Timeshift,
 )
 from .proxy import hide_http_proxy, stream_proxy
 
 MPV_OPTIONS = {
     'vo': 'libmpv',
-    'hwdec': 'no',
+    'hwdec': HARDWARE_DECODING_DEFAULT,
     # A player inside the app: no mpv keys, controls, scripts or config files.
     'input_default_bindings': False,
     'input_vo_keyboard': False,

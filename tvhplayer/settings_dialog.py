@@ -68,8 +68,9 @@ FAST_START_HELP = (
     'Applies the next time a channel starts.'
 )
 HARDWARE_DECODING_HELP = (
-    'Disabled uses the CPU (the default). Auto picks a safe GPU decoder; Copy-back is more '
-    'compatible with this window. Named APIs force one backend. Applies the next time a stream starts.'
+    'Software uses the CPU. Automatic and copy-back use the GPU when available; '
+    'copy-back is more compatible with this window. Default is Software on Windows, '
+    'Hardware — automatic elsewhere. Applies the next time a stream starts.'
 )
 TIMESHIFT_HELP = (
     'Sets mpv --cache-on-disk, so you can pause and go back much further. '
