@@ -39,7 +39,6 @@ No, TVHplayer is a standalone IPTV/HDHomerun player, as comes with its own built
 **TV guide**
 - Browse EPG
 - Fetch missing program guides from online sources
-- Pause, rewind, and replay live TV in real time (timeshift)
 
 **Record**
 - Instant and scheduled recordings
