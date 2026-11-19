@@ -48,6 +48,28 @@ a content-addressed backend artifact (see below), verifies it, and packages the 
 bundle into both Windows release formats. No WSL setup is performed as an installer
 side effect. The app never downloads a backend at runtime.
 
+## Investigating startup time
+
+The connection-readiness stage waits for Tvheadend to finish loading its
+configuration and EPG, then checks both HTTP and HTSP. It has no fixed ten-second
+delay. The packaged fork includes native stage timers. To enable them for a
+source launch from PowerShell:
+
+```powershell
+$env:TVHPLAYER_TRACE_STARTUP = '1'
+.\.venv\Scripts\python.exe tvhplayer/tvhplayer.py
+Remove-Item Env:TVHPLAYER_TRACE_STARTUP
+```
+
+The built-in server log includes `startup mpegts_init`, `startup channel_init`,
+`startup bouquet_service_resolve`, `startup epggrab_init`, and `startup epg_init`
+timings. After the server answers, those stage lines are also copied into
+`app.log` as `Built-in startup:` entries. EPG reading/inflation overlaps
+configuration loading; do not add that background time to the foreground stage
+totals. Tracing adds measurement/logging overhead and should be disabled for
+final performance comparisons. It changes no settings, EPG restoration,
+authentication, port publication, or readiness rules.
+
 ## Backend fingerprint and reusable CI artifacts
 
 Backend identity is a SHA-256 fingerprint of the inputs that affect the image and

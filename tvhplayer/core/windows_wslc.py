@@ -267,6 +267,7 @@ class WslcRuntimeAdapter:
     def configure_hdhomerun(self, transport):
         changes = transport.config() if transport else {'local_ip': '', 'local_port': 0}
         if any(self._server_settings.get(key) != value for key, value in changes.items()):
+            self._progress('Saving tuner addresses…')
             self.config_storage.update_server_settings(dict(self._server_settings, **changes))
 
     def launch(self, image, name, owner, config, recordings, ports, udp_ports=(), dns_servers=()):
@@ -296,9 +297,13 @@ class WslcRuntimeAdapter:
         # as on Linux, and verify_running checks that before the app uses them.
         args += ['--mount', f'type=volume,source={self.config_storage.volume},target=/config',
                  '--mount', bind_mount(str(recordings), '/recordings'), '--entrypoint', '/bin/sh']
-        self.command(*args, image, '-c',
-                     'umask 077; exec /usr/libexec/tvhplayer/tvheadend -c /config/data -B '
-                     '--bindaddr 0.0.0.0 --noacl --http_port 9981 --htsp_port 9982', timeout=60)
+        server_command = ('umask 077; exec /usr/libexec/tvhplayer/tvheadend -c /config/data -B '
+                          '--bindaddr 0.0.0.0 --noacl --http_port 9981 --htsp_port 9982')
+        if os.environ.get('TVHPLAYER_TRACE_STARTUP') == '1':
+            # The pinned fork already measures its native loading stages.
+            # Keep this opt-in: tracing adds logging and per-event EPG clocks.
+            server_command += ' -d --trace main'
+        self.command(*args, image, '-c', server_command, timeout=60)
 
     def inspect_owned(self, name, owner, cancellable=True, missing_ok=False):
         if not re.fullmatch(r'[0-9a-f]{32}', owner) or name != 'tvhplayer-' + owner:
@@ -373,9 +378,13 @@ class WslcRuntimeAdapter:
         finally:
             logging.getLogger(__name__).info('Shutdown: WSLc %s took %.3fs', name, time.monotonic() - started)
 
-    def logs_owned(self, name, owner):
+    def logs_owned(self, name, owner, *, tail=200):
+        # Startup tracing asks for a longer tail once. Steady monitoring stays short.
+        tail = int(tail)
+        if tail < 1 or tail > 1000:
+            raise WslcError('Server log request is out of range.')
         self.inspect_owned(name, owner)
-        return self.command('logs', '--tail', '200', name, timeout=5)
+        return self.command('logs', '--tail', str(tail), name, timeout=5)
 
     def monitor_owned(self, name, owner, ports, udp_ports=()):
         """Verify ownership/running state/publication once before reading logs."""

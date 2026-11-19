@@ -2,6 +2,7 @@ import contextlib
 import csv
 import io
 import json
+import logging
 import subprocess
 import sys
 import threading
@@ -24,6 +25,7 @@ class Runtime:
         self.starts = []
         self.stops = []
         self.backups = []
+        self.log_tails = []
     def check(self):
         pass
     def provision(self, folder):
@@ -44,8 +46,9 @@ class Runtime:
             raise WslcError('bind: Address already in use')
     def verify_running(self, name, owner, ports, udp_ports=()):
         pass
-    def logs_owned(self, name, owner):
-        return ''
+    def logs_owned(self, name, owner, **kwargs):
+        self.log_tails.append(kwargs.get('tail', 200))
+        return getattr(self, 'trace_log', '')
     def monitor_owned(self, name, owner, ports, udp_ports=()):
         self.verify_running(name, owner, ports, udp_ports)
         return self.logs_owned(name, owner)
@@ -54,6 +57,7 @@ class Runtime:
 
 
 def supervisor(tmp_path, monkeypatch, runtime):
+    monkeypatch.delenv('TVHPLAYER_TRACE_STARTUP', raising=False)
     monkeypatch.setattr(module, 'bind_mount', lambda *args: None)
     monkeypatch.setattr(module, 'protect_config', lambda path: path.mkdir(parents=True, exist_ok=True))
     monkeypatch.setattr(module, 'serverinfo_ok', lambda *args, **kwargs: True)
@@ -67,6 +71,67 @@ def supervisor(tmp_path, monkeypatch, runtime):
     s.recordings_dir = str(tmp_path / 'recordings')
     s.ready.connect(lambda *_ports: s.stop())
     return s
+
+
+def test_native_startup_observations_keep_stage_lines_only():
+    text = '\n'.join([
+        '2026-11-19 13:45:59.001 [  TRACE] main: startup iptv_network_init: 1916 ms',
+        '2026-11-19 13:45:59.001 [  TRACE] main: startup iptv threads: 0 ms (2 thread(s))',
+        '2026-11-19 13:45:59.001 [  TRACE] main: mpegts_init() leave',
+        '2026-11-19 13:45:59.001 [  TRACE] main: startup mpegts_init: 1935 ms',
+        '2026-11-19 13:46:01.662 [  TRACE] main: startup epg decode/restore/destroy: 56/1170/29 ms',
+        '2026-11-19 13:46:01.664 [ NOTICE] START: HTS Tvheadend version started',
+        'startup mpegts_init without the trace marker',
+    ])
+    assert module.native_startup_observations(text) == [
+        'iptv_network_init: 1916 ms',
+        'iptv threads: 0 ms (2 thread(s))',
+        'mpegts_init: 1935 ms',
+        'epg decode/restore/destroy: 56/1170/29 ms',
+    ]
+    assert module.native_startup_observations('') == []
+    assert module.native_startup_observations(None) == []
+
+
+def test_traced_startup_records_native_stages_once(tmp_path, monkeypatch, caplog):
+    runtime = Runtime()
+    runtime.trace_log = (
+        '2026-11-19 13:45:59.001 [  TRACE] main: startup mpegts_init: 1935 ms\n'
+        '2026-11-19 13:45:59.979 [  TRACE] main: startup channel_init: 977 ms\n'
+    )
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    monkeypatch.setenv('TVHPLAYER_TRACE_STARTUP', '1')
+    with caplog.at_level(logging.INFO):
+        s._run()
+    assert runtime.log_tails == [1000]
+    assert 'Built-in startup: mpegts_init: 1935 ms' in caplog.text
+    assert 'Built-in startup: channel_init: 977 ms' in caplog.text
+    assert 'Connection readiness took' in caplog.text
+    readiness = caplog.text.index('Connection readiness took')
+    assert caplog.text.index('mpegts_init: 1935 ms') > readiness
+
+
+def test_startup_trace_read_failure_does_not_fail_startup(tmp_path, monkeypatch, caplog):
+    runtime = Runtime()
+
+    def logs_owned(name, owner, **kwargs):
+        raise module.WslcError('logs unavailable')
+
+    runtime.logs_owned = logs_owned
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    monkeypatch.setenv('TVHPLAYER_TRACE_STARTUP', '1')
+    with caplog.at_level(logging.INFO):
+        s._run()
+    assert runtime.stops
+    assert 'native stage trace was not read' in caplog.text
+    assert 'Built-in startup completed' in caplog.text
+
+
+def test_normal_startup_does_not_read_a_native_trace(tmp_path, monkeypatch):
+    runtime = Runtime()
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    s._run()
+    assert runtime.log_tails == []
 
 
 def test_port_collision_recreates_only_owned_container(tmp_path, monkeypatch):
@@ -126,6 +191,19 @@ def test_transport_planning_uses_configured_device_without_broadcast(tmp_path, m
     monkeypatch.setattr(module, 'probe_host_device', probe)
     monkeypatch.setattr(module, 'plan_transport', plan)
     assert s._plan_hdhomerun_transport().device_ip == device.ip
+
+
+def test_startup_steps_are_logged_and_tuner_settings_are_separate(tmp_path, monkeypatch, caplog):
+    runtime = Runtime()
+    runtime.hdhomerun_device = lambda: ''
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    with caplog.at_level(logging.INFO):
+        assert s._plan_hdhomerun_transport() is None
+    assert 'Built-in startup: Reading tuner settings…' in caplog.text
+    assert 'Built-in startup: Checking tuner networking…' in caplog.text
+    reading = caplog.text.index('Reading tuner settings…')
+    checking = caplog.text.index('Checking tuner networking…')
+    assert reading < checking
 
 
 def test_unreadable_live_config_does_not_launch_or_overwrite_it(tmp_path, monkeypatch):

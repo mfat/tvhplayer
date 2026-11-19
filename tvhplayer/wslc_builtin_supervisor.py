@@ -35,6 +35,25 @@ except ImportError:  # PyInstaller/source script imports
 
 
 GUEST_FFMPEG_MIGRATION = 1
+_NATIVE_STAGE_MARK = 'main: startup '
+
+
+def native_startup_observations(text):
+    """Stage timings from an opt-in ``--trace main`` log, in log order.
+
+    Enter/leave traces and ordinary info lines are not stages. The returned
+    text starts at the stage name, for example ``mpegts_init: 1935 ms``.
+    """
+    found = []
+    for line in (text or '').splitlines():
+        index = line.find(_NATIVE_STAGE_MARK)
+        if index == -1:
+            continue
+        stage = line[index + len(_NATIVE_STAGE_MARK):].strip()
+        if ' ms' not in stage:
+            continue
+        found.append(stage)
+    return found
 
 
 def _private_acl(sddl, sid, expected_sddl=None):
@@ -275,8 +294,10 @@ class WslcBuiltinSupervisor(QObject):
         self.status_changed.emit(status)
 
     def _progress(self, message):
+        # The channel list spinner stays on one caption. These steps are the
+        # status bar text and the program log.
+        logging.getLogger(__name__).info('Built-in startup: %s', message)
         self.setup_progress.emit(message)
-        self._emit_log(message + '\n')
 
     def start(self):
         if self.disabled or self._closing or self._thread is not None:
@@ -357,13 +378,13 @@ class WslcBuiltinSupervisor(QObject):
             state_path = self.config_dir / '.tvhplayer-runtime.json'
             previous_state = json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
             if previous_state.get('image') and previous_state['image'] != image:
+                self._progress('Backing up server settings…')
                 snapshot = self.runtime.backup_config(upgrade=True)
                 self._emit_log(f'Backing up backend settings to {snapshot}\n')
             recordings = Path(self.recordings_dir) if self.recordings_dir else self.config_dir.parent / 'Recordings'
             bind_mount(str(recordings), '/recordings')
             recordings.mkdir(parents=True, exist_ok=True)
             self.http_port, self.htsp_port = initial_ports(self.http_port, self.htsp_port)
-            self._progress('Checking tuner networking…')
             transport = self._startup_step('Tuner networking', self._plan_hdhomerun_transport)
             self._phase.emit('starting')
             self._progress('Starting the server…')
@@ -400,7 +421,7 @@ class WslcBuiltinSupervisor(QObject):
                     self._emit_log('Server ports were in use; retrying with different ports.\n')
             readiness_started = time.monotonic()
             deadline = readiness_started + 60
-            self._progress('Checking the server connection…')
+            self._progress('Waiting for Tvheadend to finish starting…')
             while not self._cancel.is_set():
                 self.runtime.verify_running(name, owner, ports, udp_ports)
                 if serverinfo_ok(self.http_port, username=self.username, password=self.password):
@@ -412,6 +433,7 @@ class WslcBuiltinSupervisor(QObject):
                     self._progress('Applying server settings…')
                     logging.getLogger(__name__).info('Built-in startup: Connection readiness took %.3fs',
                                                      time.monotonic() - readiness_started)
+                    self._record_native_startup(name, owner)
                     failures = self._startup_step('Server settings', apply_builtin_defaults,
                                                   self.http_port, self.username, self.password,
                                                   '/recordings', self.padding)
@@ -506,6 +528,23 @@ class WslcBuiltinSupervisor(QObject):
                     error = (error + '\n' if error else '') + f'Backend cleanup failed ({name}): {exc}'
             self._completed.emit(error)
 
+    def _record_native_startup(self, name, owner):
+        """Copy opt-in native stage lines into the app log once the server answers.
+
+        This read is outside the readiness measurement. It does not run on a
+        normal launch, and a log failure must not fail startup.
+        """
+        if os.environ.get('TVHPLAYER_TRACE_STARTUP') != '1':
+            return
+        try:
+            text = self.runtime.logs_owned(name, owner, tail=1000)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                'Built-in startup: native stage trace was not read: %s', exc)
+            return
+        for stage in native_startup_observations(text):
+            logging.getLogger(__name__).info('Built-in startup: %s', stage)
+
     def _startup_step(self, label, operation, *args, **kwargs):
         started = time.monotonic()
         try:
@@ -550,7 +589,11 @@ class WslcBuiltinSupervisor(QObject):
         Broadcast discovery belongs to setup, not every server start. Absence
         of a tuner must not prevent IPTV, recordings or guide access.
         """
+        # The address lives in the Linux volume, so reading it starts a
+        # container. That is not the network check.
+        self._progress('Reading tuner settings…')
         address = self.runtime.hdhomerun_device()
+        self._progress('Checking tuner networking…')
         try:
             device = probe_host_device(address, cancel=self._cancel) if address else None
             if self._cancel.is_set():

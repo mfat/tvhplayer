@@ -6132,8 +6132,8 @@ class TVHeadendClient(QMainWindow):
                 self._show_builtin_problem()
                 self.statusbar.showMessage('The built-in server needs attention.')
                 return
-            self._show_channel_state("Starting built-in server…", busy=True)
-            self.statusbar.showMessage("Starting built-in server...")
+            self._show_channel_state('Loading channels', busy=True)
+            self.statusbar.showMessage('Starting the built-in server…')
             supervisor.start()
             return
         print(f"Debug: Fetching channels from server: {server['url']}")
@@ -6153,7 +6153,11 @@ class TVHeadendClient(QMainWindow):
             self.channel_busy.show()
         else:
             self._clear_channels()
-            self._show_channel_state(f"Loading channels from {server.get('name') or 'the server'}…", busy=True)
+            if is_builtin_server(server):
+                caption = 'Loading channels'
+            else:
+                caption = f"Loading channels from {server.get('name') or 'the server'}…"
+            self._show_channel_state(caption, busy=True)
         self.statusbar.showMessage("Connecting to server...")
         fetch.start()
 
@@ -8803,7 +8807,7 @@ class TVHeadendClient(QMainWindow):
 
     def _on_builtin_progress(self, message):
         if is_builtin_server(self.current_server()) and not self._channels:
-            self._show_channel_state(message, busy=True)
+            self._show_channel_state('Loading channels', busy=True)
             self.statusbar.showMessage(message)
 
     def _fix_builtin_setup(self, action):
@@ -8818,8 +8822,8 @@ class TVHeadendClient(QMainWindow):
         if self.builtin is None or self.builtin.status != phase or not is_builtin_server(self.current_server()):
             return
         if phase == 'installing':
-            self._show_channel_state('Preparing the built-in server…', busy=True)
-            self.statusbar.showMessage('Loading the offline server image…')
+            if not self._channels:
+                self._show_channel_state('Loading channels', busy=True)
         elif phase == 'stopping':
             self._show_channel_state('Stopping the built-in server…', busy=True)
         elif phase == 'stopped':

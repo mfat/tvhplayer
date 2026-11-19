@@ -208,6 +208,65 @@ def test_launch_publishes_only_two_loopback_ports_without_credentials():
     assert '-c /config/data' in args[-1]
 
 
+@pytest.mark.parametrize('trace', [None, '', '0', '1', 'yes'])
+def test_native_startup_tracing_is_explicit_and_preserves_launch_contract(monkeypatch, trace):
+    from types import SimpleNamespace
+
+    if trace is None:
+        monkeypatch.delenv('TVHPLAYER_TRACE_STARTUP', raising=False)
+    else:
+        monkeypatch.setenv('TVHPLAYER_TRACE_STARTUP', trace)
+    cli = Cli()
+    runtime = WslcRuntimeAdapter('wslc.exe', cli)
+    runtime.config_storage = SimpleNamespace(volume='tvhplayer-config-' + OWNER)
+    runtime.launch(IMAGE, NAME, OWNER, r'C:\Config', r'D:\Recordings', (24111, 24112))
+    command = cli.calls[0]
+    server_command = command[-1]
+    assert ('--trace main' in server_command) == (trace == '1')
+    assert (' -d' in server_command) == (trace == '1')
+    assert '-c /config/data -B --bindaddr 0.0.0.0 --noacl' in server_command
+    assert command[command.index('--label') + 1] == 'tvhplayer.owner=' + OWNER
+    assert command.count('--publish') == 2
+    assert not any('password' in value for value in command)
+
+
+def test_tuner_address_save_is_reported_only_when_the_settings_change():
+    from types import SimpleNamespace
+    runtime = WslcRuntimeAdapter('wslc.exe', Cli())
+    saved = []
+    runtime.config_storage = SimpleNamespace(update_server_settings=saved.append)
+    stages = []
+    runtime.progress = stages.append
+    transport = SimpleNamespace(config=lambda: {'local_ip': '192.0.2.10', 'local_port': 30000})
+    runtime._server_settings = {'local_ip': '192.0.2.10', 'local_port': 30000}
+    runtime.configure_hdhomerun(transport)
+    assert stages == [] and saved == []
+    runtime._server_settings = {'local_ip': '', 'local_port': 0}
+    runtime.configure_hdhomerun(transport)
+    assert stages == ['Saving tuner addresses…']
+    assert saved == [{'local_ip': '192.0.2.10', 'local_port': 30000}]
+
+
+def test_startup_trace_log_tail_is_bounded(monkeypatch):
+    cli = Cli(json.dumps(state()))
+
+    def runner(args, **kwargs):
+        result = cli(args, **kwargs)
+        if args[1] == 'logs':
+            result.stdout = 'main: startup mpegts_init: 1935 ms\n'
+        return result
+
+    runtime = WslcRuntimeAdapter('wslc.exe', runner)
+    assert 'mpegts_init' in runtime.logs_owned(NAME, OWNER, tail=1000)
+    logs = next(call for call in cli.calls if call[1] == 'logs')
+    assert logs[logs.index('--tail') + 1] == '1000'
+    assert logs[-1] == NAME
+    with pytest.raises(WslcError, match='out of range'):
+        runtime.logs_owned(NAME, OWNER, tail=1001)
+    with pytest.raises(WslcError, match='out of range'):
+        runtime.logs_owned(NAME, OWNER, tail=0)
+
+
 def test_container_healthcheck_and_entrypoint_use_live_settings_path():
     root = Path(__file__).resolve().parents[1]
     containerfile = (root / 'windows' / 'backend' / 'Containerfile').read_text(encoding='utf-8')

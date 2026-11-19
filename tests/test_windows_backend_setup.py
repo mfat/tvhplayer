@@ -93,6 +93,29 @@ def test_unexpected_failure_preserves_summary_and_technical_diagnostic(tmp_path,
     dialog.reject()
 
 
+def test_channel_list_spinner_stays_on_loading_channels(qapp):
+    from types import SimpleNamespace
+    from tvhplayer.tvhplayer import TVHeadendClient
+    shown = []
+    status = []
+    host = SimpleNamespace(
+        _channels=[],
+        current_server=lambda: {'builtin': True, 'name': 'Built-in Server'},
+        _show_channel_state=lambda text, busy=False, retry=False: shown.append((text, busy, retry)),
+        statusbar=SimpleNamespace(showMessage=status.append),
+        builtin=SimpleNamespace(status='installing'),
+        background=SimpleNamespace(hidden=False),
+    )
+    TVHeadendClient._on_builtin_progress(host, 'Checking the server image…')
+    TVHeadendClient._on_builtin_phase(host, 'installing')
+    assert shown == [('Loading channels', True, False), ('Loading channels', True, False)]
+    assert status == ['Checking the server image…']
+    host._channels = [{'name': 'One'}]
+    TVHeadendClient._on_builtin_progress(host, 'Applying server settings…')
+    assert shown == [('Loading channels', True, False), ('Loading channels', True, False)]
+    assert status == ['Checking the server image…']
+
+
 def test_setup_progress_shows_specific_stage_without_marking_server_ready(tmp_path, qapp):
     supervisor = WslcBuiltinSupervisor(tmp_path / 'config', tmp_path / 'bundle')
     dialog = WindowsBackendSetup(supervisor)
