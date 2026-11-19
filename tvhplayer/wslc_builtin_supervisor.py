@@ -208,6 +208,7 @@ class WslcBuiltinSupervisor(QObject):
         self.backend_dir = Path(backend_dir)
         self.runtime = runtime or WslcRuntimeAdapter()
         self.http_port, self.htsp_port = http_port, htsp_port
+        self.guide_container = None
         self.username = self.password = ''
         self.recordings_dir = ''
         self.padding = None
@@ -435,6 +436,7 @@ class WslcBuiltinSupervisor(QObject):
                                              'guest_ffmpeg': GUEST_FFMPEG_MIGRATION,
                                              'config_generation': generation})
                     (self.config_dir.parent / 'wslc-setup.json').unlink(missing_ok=True)
+                    self.guide_container = (name, owner)
                     self._started.emit()
                     break
                 if time.monotonic() > deadline:
@@ -480,6 +482,7 @@ class WslcBuiltinSupervisor(QObject):
                 except Exception:
                     pass
         finally:
+            self.guide_container = None
             if launched:
                 try:
                     self.runtime.stop_owned(name, owner)

@@ -281,8 +281,16 @@ def update_server_guide(
     assignments = assign(channels, index, choices)
     report.unmatched = [channel.name for channel in channels if channel.uuid not in assignments]
     socket_path = admin.enable_xmltv_socket()
-    if not usable_socket(server, socket_path):
+    container = server.get('_guide_container') if server.get('builtin') else None
+    if container:
+        from .wslc_guide import ContainerGuide
+        transport = ContainerGuide(container, cancelled)
+        transport.check(socket_path)
+        send = transport.send
+    elif not usable_socket(server, socket_path):
         raise GuideError(NO_SOCKET)
+    else:
+        send = send_guide
     if server.get('builtin'):
         admin.keep_guide_after_import()
     names = {channel.uuid: channel.name for channel in channels}
@@ -299,12 +307,18 @@ def update_server_guide(
     built = write_server_guide(cache, assignments, names, cache.work_folder, cancelled, now)
     try:
         try:
-            send_guide(socket_path, built.path)
+            send(socket_path, built.path)
+            if cancelled():
+                raise GuideError('Stopped.')
             wanted = {guide_channel_id(uuid) for uuid in assignments}
             found = guide_channels_on_server(admin, wanted, LINK_WAIT_SECONDS, sleep, cancelled)
+            if cancelled():
+                raise GuideError('Stopped.')
             if link_channels(admin, channels, assignments, found, take_over=bool(server.get('builtin'))):
                 # The server dropped the programmes of guide channels that had no TV channel yet.
-                send_guide(socket_path, built.path)
+                send(socket_path, built.path)
+            if cancelled():
+                raise GuideError('Stopped.')
         except PlaylistError as exc:
             raise GuideError(str(exc)) from exc
     finally:

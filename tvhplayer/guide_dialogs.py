@@ -182,10 +182,18 @@ class GuideJob(QObject):
         choices = self._host.guide_choices(server)
         cache = self._host.guide_cache()
         force = self.force
+        worker_server = dict(server)
+        builtin = getattr(self._host, 'builtin', None)
+        if server.get('builtin') and getattr(builtin, 'uses_wslc', False):
+            identity = getattr(builtin, 'guide_container', None)
+            if not identity:
+                self._stop_with('The built-in server stopped before the guide could be loaded.')
+                return
+            worker_server['_guide_container'] = identity
 
         def work(task):
             report = run_guide_update(
-                server, cache, sources, choices, force,
+                worker_server, cache, sources, choices, force,
                 status=task.status.emit, progress=task.progress.emit,
                 cancelled=lambda: self._cancelled,
             )
