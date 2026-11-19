@@ -345,24 +345,33 @@ class WslcRuntimeAdapter:
                 raise WslcError('HDHomeRun stream ports must be published on one LAN address.')
 
     def stop_owned(self, name, owner):
-        data = self.inspect_owned(name, owner, cancellable=False, missing_ok=True)
+        data = self._cleanup_step('inspect', self.inspect_owned, name, owner,
+                                  cancellable=False, missing_ok=True)
         if data is None:
             return False
         if data.get('State', {}).get('Running'):
             try:
-                self.command('stop', '--time', '5', name, timeout=8, cancellable=False)
+                self._cleanup_step('stop', self.command, 'stop', '--time', '5', name,
+                                   timeout=8, cancellable=False)
             except WslcCommandError as exc:
                 # Stop can race with an exit that already deleted the container.
                 if not object_missing(exc.output, name):
                     raise
                 return True
         try:
-            self.command('remove', name, timeout=5, cancellable=False)
+            self._cleanup_step('remove', self.command, 'remove', name, timeout=5, cancellable=False)
         except WslcCommandError as exc:
             # WSLc may delete on stop, or another cleanup may win the race.
             if not object_missing(exc.output, name):
                 raise
         return True
+
+    def _cleanup_step(self, name, operation, *args, **kwargs):
+        started = time.monotonic()
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            logging.getLogger(__name__).info('Shutdown: WSLc %s took %.3fs', name, time.monotonic() - started)
 
     def logs_owned(self, name, owner):
         self.inspect_owned(name, owner)

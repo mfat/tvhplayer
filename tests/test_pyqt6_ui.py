@@ -5744,6 +5744,67 @@ def test_late_tasks_read_closes_its_backend_on_the_worker_during_quit(monkeypatc
         app.processEvents()
 
 
+@pytest.mark.parametrize('failure', ['poll', 'auth', 'constructor'])
+def test_stopped_log_watcher_does_not_report_shutdown_disconnect(monkeypatch, capsys, failure):
+    import tvhplayer.tvhplayer as ui
+
+    watch = ui.ServerLogWatch({'url': 'http://example.test:9981'})
+    notes, lines, closed = [], [], []
+    watch.note.connect(notes.append)
+    watch.lines.connect(lines.append)
+
+    class Feed:
+        def __init__(self, server):
+            if failure == 'constructor':
+                watch.stop()
+                raise RuntimeError('closed during construction')
+
+        def poll(self):
+            watch.stop()
+            if failure == 'auth':
+                raise ui.TvhAuthError('connection closed')
+            raise RuntimeError('Remote end closed connection without response')
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(ui, 'ServerLogFeed', Feed)
+    watch._run()
+    assert notes == lines == []
+    assert 'Server log unavailable' not in capsys.readouterr().out
+    assert closed == ([] if failure == 'constructor' else [True])
+
+
+def test_log_watcher_reports_a_real_connection_failure(monkeypatch, capsys):
+    import tvhplayer.tvhplayer as ui
+
+    watch = ui.ServerLogWatch({'url': 'http://example.test:9981'})
+    watch.RETRY_SECONDS = 0
+    notes, closed = [], []
+    watch.note.connect(notes.append)
+
+    class Feed:
+        polls = 0
+
+        def __init__(self, server):
+            pass
+
+        def poll(self):
+            self.polls += 1
+            if self.polls == 1:
+                raise RuntimeError('server unreachable')
+            return types.SimpleNamespace(admin=False, lines=[])
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(ui, 'ServerLogFeed', Feed)
+    watch._run()
+    assert 'Server log unavailable: server unreachable' in capsys.readouterr().out
+    assert notes[0] == 'Cannot reach the server. Trying again every few seconds.'
+    assert closed == [True]
+
+
 def test_windows_backend_that_already_stopped_does_not_defer_close(monkeypatch, tmp_path):
     from tvhplayer.wslc_builtin_supervisor import WslcBuiltinSupervisor
 

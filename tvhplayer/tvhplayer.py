@@ -4111,12 +4111,16 @@ class ServerLogWatch(QObject):
                 try:
                     poll = feed.poll()
                 except TvhAuthError:
+                    if self._stopped.is_set():
+                        break
                     self.note.emit(
                         "The server did not accept this sign-in. "
                         "Check the username and password in the server settings."
                     )
                     break
                 except Exception as exc:
+                    if self._stopped.is_set():
+                        break
                     if not failing:
                         print(f"Debug: Server log unavailable: {exc}")
                     failing = True
@@ -4138,7 +4142,8 @@ class ServerLogWatch(QObject):
                 if poll.lines:
                     self.lines.emit(poll.lines)
         except Exception as exc:
-            self.note.emit(f"Cannot show this server's log: {exc}")
+            if not self._stopped.is_set():
+                self.note.emit(f"Cannot show this server's log: {exc}")
         finally:
             if feed is not None:
                 feed.close()
@@ -8542,6 +8547,7 @@ class TVHeadendClient(QMainWindow):
             event.ignore()
             return
         self._closing = True
+        self._shutdown_started_at = time.monotonic()
         # Stop foreground work before waiting for the backend. A queued stream
         # URL or playback-start callback must not revive it during shutdown.
         self._play_generation += 1
@@ -8584,6 +8590,7 @@ class TVHeadendClient(QMainWindow):
             job.cancel()
         if self.builtin is not None:
             if getattr(self.builtin, 'uses_wslc', False):
+                self._shutdown_backend_started_at = time.monotonic()
                 self.builtin.shutdown_finished.connect(self._builtin_shutdown_finished)
                 if not self.builtin.shut_down():
                     # Keep Qt and the supervisor alive while its worker stops
@@ -8598,6 +8605,8 @@ class TVHeadendClient(QMainWindow):
         self._quit_after_close()
 
     def _builtin_shutdown_finished(self):
+        print(f'Debug: Shutdown: built-in backend took '
+              f'{time.monotonic() - self._shutdown_backend_started_at:.3f}s')
         self.builtin.shutdown_finished.disconnect(self._builtin_shutdown_finished)
         self._finish_close_resources()
         self.close()
@@ -8607,6 +8616,7 @@ class TVHeadendClient(QMainWindow):
         """Release remaining resources once the built-in backend is stopped."""
         if getattr(self, '_close_resources_done', False):
             return
+        workers_started = time.monotonic()
         # With the server gone, a running stream test notices within seconds.
         for job in self._playlist_jobs:
             if not job.shutdown(10000):
@@ -8614,8 +8624,9 @@ class TVHeadendClient(QMainWindow):
         for job in self._guide_jobs.values():
             if not job.shutdown(10000):
                 print("Debug: A guide update did not stop in time")
+        print(f'Debug: Shutdown: playlist and guide workers took {time.monotonic() - workers_started:.3f}s')
         for job in self.local_jobs:
-            job.recorder.stop()
+            self._shutdown_step('local recorder', job.recorder.stop)
         self._awake_timer.stop()
         self.sleep_inhibitor.release()
         for conversion in self.conversions:
@@ -8623,22 +8634,30 @@ class TVHeadendClient(QMainWindow):
         self._now_next_timer.stop()
         guide = getattr(self, '_guide', None)
         if guide is not None:
-            guide.shutdown()
+            self._shutdown_step('TV guide', guide.shutdown)
             guide.close()
         self._visible_logo_timer.stop()
-        self.logo_loader.shutdown()
+        self._shutdown_step('logo loader', self.logo_loader.shutdown)
         if self.picon_job is not None:
             self.picon_job.cancel()
-        self.close_backend()
+        self._shutdown_step('server connections', self.close_backend)
         if getattr(self, 'cast_manager', None) is not None:
-            self.cast_manager.close()
+            self._shutdown_step('Chromecast', self.cast_manager.close)
         if getattr(self, 'player', None) is not None:
-            self.player.close()
-        if not self.config_store.flush(timeout=30):
+            self._shutdown_step('mpv', self.player.close)
+        if not self._shutdown_step('settings flush', self.config_store.flush, timeout=30):
             print("Debug: The settings were still being saved when TVHplayer closed")
         self._close_resources_done = True
 
+    def _shutdown_step(self, name, operation, *args, **kwargs):
+        started = time.monotonic()
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            print(f'Debug: Shutdown: {name} took {time.monotonic() - started:.3f}s')
+
     def _quit_after_close(self):
+        print(f'Debug: Shutdown: cleanup complete in {time.monotonic() - self._shutdown_started_at:.3f}s')
         # Hidden/transient windows must not keep an explicitly quit app alive.
         if getattr(QApplication.instance(), '_tvhplayer_instance', None) is not None:
             QApplication.instance().quit()
@@ -8706,7 +8725,10 @@ class TVHeadendClient(QMainWindow):
                 except Exception:
                     pass
 
+        started = time.monotonic()
+
         def done(entries, error):
+            print(f'Debug: Shutdown: recording check took {time.monotonic() - started:.3f}s')
             self._quit_lookup_call = None
             if error is not None:
                 self._quit_lookup = ([], [], True)
@@ -10397,7 +10419,10 @@ def main():
             QTimer.singleShot(0, lambda: portal.request(autostart=True, commandline=launch_command()))
         else:
             QTimer.singleShot(0, lambda: start_player(background_launch))
-        sys.exit(app.exec())
+        exit_code = app.exec()
+        if player is not None and getattr(player, '_closing', False):
+            print('Debug: Shutdown: Qt event loop exited')
+        sys.exit(exit_code)
     except Exception as e:
         print(f"Error starting application: {str(e)}")
         print(f"Traceback: {traceback.format_exc()}")
