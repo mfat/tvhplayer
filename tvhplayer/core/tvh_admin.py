@@ -204,8 +204,19 @@ class TvhAdmin:
         except TvhError as exc:
             if 'HTTP 400' not in str(exc):
                 raise
+            # Stock Tvheadend rejects a JSON list in conf with HTTP 400. A
+            # bulk-capable server can also return 400 for a bad payload; only
+            # disable lists when the first conf creates successfully alone.
+            try:
+                first = self._create_one_mux(network_uuid, confs[0])
+            except TvhError as single:
+                if 'HTTP 400' in str(single):
+                    raise exc from single
+                raise
             self._mux_create_lists = False
-            return [self._create_one_mux(network_uuid, conf) for conf in confs]
+            return [first] + [
+                self._create_one_mux(network_uuid, conf) for conf in confs[1:]
+            ]
         return _uuids(data, 'mux')
 
     def _create_one_mux(self, network_uuid: str, conf: dict) -> str:

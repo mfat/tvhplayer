@@ -255,6 +255,7 @@ def test_partial_create_batch_keeps_created_muxes_then_fails():
     count = SAVE_BATCH + 1
     text = '#EXTM3U\n' + ''.join(f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://x/{i}.ts\n' for i in range(count))
     real = admin.create_muxes
+    checkpoints = []
 
     def partial(network_uuid, confs):
         if len(confs) == SAVE_BATCH:
@@ -263,8 +264,12 @@ def test_partial_create_batch_keeps_created_muxes_then_fails():
 
     admin.create_muxes = partial
     with pytest.raises(TvhError, match='created 2 of'):
-        sync_playlist(admin, source, _plans(text), check=False)
+        sync_playlist(
+            admin, source, _plans(text), check=False,
+            checkpoint=lambda: checkpoints.append(dict(source.muxes)),
+        )
     assert set(source.muxes) == {'id:c0', 'id:c1'}
+    assert checkpoints and set(checkpoints[-1]) == {'id:c0', 'id:c1'}
 
 
 def test_create_muxes_falls_back_when_server_rejects_a_list():
@@ -287,6 +292,20 @@ def test_create_muxes_falls_back_when_server_rejects_a_list():
     calls.clear()
     assert admin.create_muxes('net', [{'c': 3}, {'d': 4}]) == ['u1', 'u2']
     assert all(not conf.startswith('[') for conf in calls)
+
+
+def test_create_muxes_keeps_lists_when_payload_also_fails_alone():
+    from tvhplayer.core.errors import TvhError
+
+    admin = TvhAdmin({'url': 'http://127.0.0.1:9'})
+
+    def request(path, data=None, params=None):
+        raise TvhError(f'HTTP 400 for {path}: invalid conf')
+
+    admin._request = request
+    with pytest.raises(TvhError, match='HTTP 400'):
+        admin.create_muxes('net', [{'a': 1}, {'b': 2}])
+    assert admin._mux_create_lists is True
 
 
 def test_create_muxes_returns_partial_uuid_list():

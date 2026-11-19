@@ -740,17 +740,35 @@ def sync_playlist(
             admin.scan_muxes(retest)
             retest.clear()
 
+    def persist_creates():
+        nonlocal created_since_checkpoint, last_checkpoint
+        if not created_since_checkpoint:
+            return
+        checkpoint()
+        created_since_checkpoint = 0
+        last_checkpoint = clock()
+
     def flush_creates():
         nonlocal created_since_checkpoint
         while pending_creates:
             batch = pending_creates[:SAVE_BATCH]
             del pending_creates[:SAVE_BATCH]
-            uuids = admin.create_muxes(source.network_uuid, [conf for _plan, conf in batch])
+            try:
+                uuids = admin.create_muxes(source.network_uuid, [conf for _plan, conf in batch])
+            except Exception:
+                # Earlier batches in this flush may already be in source.muxes.
+                pending_creates[:0] = batch
+                persist_creates()
+                raise
             for (plan, _conf), uuid in zip(batch, uuids):
                 source.muxes[plan.key] = uuid
             result.added += len(uuids)
             created_since_checkpoint += len(uuids)
             if len(uuids) < len(batch):
+                # Keep uncreated plans queued; persist what the server did make
+                # before the import stops so the next run does not duplicate them.
+                pending_creates[:0] = batch[len(uuids):]
+                persist_creates()
                 raise TvhError(
                     f'The server created {len(uuids)} of {len(batch)} muxes'
                 )
@@ -773,9 +791,7 @@ def sync_playlist(
         if len(pending_creates) >= SAVE_BATCH:
             flush_creates()
         if created_since_checkpoint and now - last_checkpoint >= CHECKPOINT_SECONDS:
-            checkpoint()
-            created_since_checkpoint = 0
-            last_checkpoint = now
+            persist_creates()
         # Flush edits by size even when processing is slow. Report completed
         # work separately: a partial edit batch must not suppress progress
         # while new channels are still queued for create.
@@ -795,8 +811,7 @@ def sync_playlist(
     # Plans accepted before cancel still need their create requests sent so the
     # saved map matches the server.
     flush_creates()
-    if created_since_checkpoint:
-        checkpoint()
+    persist_creates()
 
     save_changes()
     if reported != done:
