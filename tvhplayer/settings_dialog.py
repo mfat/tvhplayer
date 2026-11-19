@@ -121,12 +121,12 @@ TITLE_BAR_HELP = 'Takes effect the next time TVHplayer starts.'
 UPDATES_HELP = 'Once a day, TVHplayer asks GitHub whether a newer version has been released and tells you if so.'
 UPDATES_NOW_HELP = 'Ask GitHub now. A version you skipped is shown again.'
 DNS_HELP = (
-    'Adds this DNS server after the ones Windows already gives the built-in server. '
-    'It does not replace them. Restart the built-in server to apply this. '
-    'A public address may receive queries when an earlier server does not answer, '
-    'and it cannot look up names that exist only on your network.'
+    'Uses this DNS server first inside the built-in WSLc container, followed '
+    'by Windows DNS servers. Windows DNS settings are unchanged. Restart the '
+    'built-in server to apply this. A public DNS server may not resolve '
+    'private IPTV, local, or VPN names; disable this option if they stop working.'
 )
-DNS_ADDRESS_HELP = 'An IPv4 or IPv6 address, for example 1.1.1.1. Used in addition to Windows DNS.'
+DNS_ADDRESS_HELP = 'An IPv4 or IPv6 address, for example 1.1.1.1. Preferred inside this container; Windows DNS follows.'
 
 
 def _swatch_icon(fill, edge, size=14):
