@@ -3,8 +3,8 @@
 ``wslc run --dns`` replaces the resolver list. Passing only the address the
 user added would drop the servers the container otherwise inherits. This module
 reads the IPv4 resolvers WSL copies from Windows adapters when it mirrors host
-DNS (``HostDnsInfo::GetDnsSettings(IncludeVpn)``), then appends the extra
-address.
+DNS (``HostDnsInfo::GetDnsSettings(IncludeVpn)``), then puts the user-configured server first, followed by the discovered
+Windows servers.
 
 That is the list observed inside WSLc when the container inherits the Windows
 adapter resolvers. A NAT-gateway or DNS-tunneling resolver is a different
@@ -80,20 +80,20 @@ def _dedupe(addresses):
 
 
 def merge_dns_servers(inherited, additional):
-    """Inherited servers first, then ``additional`` if it is not already there.
+    """Prefer the configured resolver, retaining inherited servers afterward.
 
-    An empty inherited list is a discovery failure. The extra address is not
-    returned on its own, because that would replace Windows DNS.
+    An empty inherited list is a discovery failure. The custom resolver is not
+    returned on its own, because that would drop Windows DNS altogether.
+    Only the first three entries are usable by glibc; putting the custom
+    resolver first ensures that it is one of them.
     """
     extra = canonical_dns_address(additional)
     servers = _dedupe(inherited)
     if not servers:
         raise DnsDiscoveryError(DISCOVERY_FAILED)
-    if any(ipaddress.ip_address(item) == ipaddress.ip_address(extra) for item in servers):
-        return servers
-    # Keep every inherited server. resolv.conf uses the first three; the
-    # caller logs when the extra address falls past that.
-    return servers + [extra]
+    # Keep inherited resolvers, with the configured one first. DNS order
+    # affects only the WSLc container; published TCP/UDP ports are unchanged.
+    return [extra] + [server for server in servers if server != extra]
 
 
 def select_inherited_dns(adapters, best_index, *, include_ipv6=False, limit=INHERITED_DNS_LIMIT):
