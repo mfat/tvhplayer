@@ -26,8 +26,9 @@ def test_container_resolves_with_windows_dns_plus_an_extra_server():
     inherited = discover_windows_dns()
     extra = os.environ.get('TVHPLAYER_WSLC_TEST_DNS', '1.1.1.1')
     servers = merge_dns_servers(inherited, extra)
-    assert servers[0] == inherited[0]
-    assert extra in servers
+    assert servers[0] == extra
+    assert all(server in servers for server in inherited)
+    assert len(servers) == len(set(servers))
     directory = windows_backend_dir()
     if not (directory / 'manifest.json').is_file():
         pytest.skip('offline backend image is not installed')
