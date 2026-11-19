@@ -44,6 +44,9 @@ class Runtime:
         pass
     def logs_owned(self, name, owner):
         return ''
+    def monitor_owned(self, name, owner, ports, udp_ports=()):
+        self.verify_running(name, owner, ports, udp_ports)
+        return self.logs_owned(name, owner)
     def stop_owned(self, name, owner):
         self.stops.append((name, owner))
 
@@ -316,3 +319,18 @@ def test_failed_playlist_migration_is_retried(tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'use_guest_ffmpeg', lambda *a: 0)
     s._run()
     assert json.loads((s.config_dir / '.tvhplayer-runtime.json').read_text())['guest_ffmpeg'] == module.GUEST_FFMPEG_MIGRATION
+
+
+@pytest.mark.parametrize('previous_success,pending,expected', [(False, False, False), (True, False, True), (True, True, False)])
+def test_fast_start_requires_previous_success_and_no_pending_setup(tmp_path, monkeypatch, previous_success, pending, expected):
+    from tvhplayer.core import windows_prerequisites
+    runtime = Runtime()
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    s.config_dir.mkdir(parents=True, exist_ok=True)
+    if previous_success:
+        (s.config_dir / '.tvhplayer-runtime.json').write_text('{}')
+    monkeypatch.setattr(windows_prerequisites, 'pending_setup', lambda _: {'stage': 'check_required'} if pending else None)
+    checked = []
+    runtime.check = lambda: checked.append(runtime.established)
+    s._run()
+    assert checked == [expected]

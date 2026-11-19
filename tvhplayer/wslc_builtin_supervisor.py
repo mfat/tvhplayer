@@ -315,6 +315,7 @@ class WslcBuiltinSupervisor(QObject):
         self.start()
 
     def _run(self):
+        startup_started = time.monotonic()
         owner = uuid.uuid4().hex
         name = 'tvhplayer-' + owner
         launched = False
@@ -322,18 +323,20 @@ class WslcBuiltinSupervisor(QObject):
         record = self.config_dir / 'wslc-owner.json'
         try:
             try:
-                from .core.windows_prerequisites import restart_still_required
+                from .core.windows_prerequisites import restart_still_required, pending_setup
             except ImportError:
-                from core.windows_prerequisites import restart_still_required
+                from core.windows_prerequisites import restart_still_required, pending_setup
             if restart_still_required(self.config_dir):
                 raise WslcPrerequisiteError(
                     'Restart Windows to finish built-in server setup, even if no reboot prompt appeared. '
                     'Save your work, use Start > Power > Restart, then reopen TVHplayer. '
                     'Restarting only the app does not complete setup.', 'reboot')
             self._progress('Checking Windows support…')
-            self.runtime.check()
+            self.runtime.established = ((self.config_dir / '.tvhplayer-runtime.json').is_file()
+                                        and not pending_setup(self.config_dir))
+            self._startup_step('Windows support', self.runtime.check)
             self._progress('Protecting server settings…')
-            protect_config(self.config_dir)
+            self._startup_step('Protect settings', protect_config, self.config_dir)
             # QLockFile ensures no second UI is using this config. A stale record
             # identifies only our previous randomly named, labelled container.
             if record.exists():
@@ -341,12 +344,12 @@ class WslcBuiltinSupervisor(QObject):
                 self.runtime.stop_owned(previous['name'], previous['owner'])
                 record.unlink()
             self._phase.emit('installing')
-            image = self.runtime.provision(self.backend_dir)
+            image = self._startup_step('Server image', self.runtime.provision, self.backend_dir)
             if self._cancel.is_set():
                 return
             self.username, self.password = ensure_superuser(self.config_dir)
             self._progress('Preparing server storage…')
-            self.runtime.prepare_config(image, self.config_dir)
+            self._startup_step('Server storage', self.runtime.prepare_config, image, self.config_dir)
             if self._cancel.is_set():
                 return
             state_path = self.config_dir / '.tvhplayer-runtime.json'
@@ -359,7 +362,7 @@ class WslcBuiltinSupervisor(QObject):
             recordings.mkdir(parents=True, exist_ok=True)
             self.http_port, self.htsp_port = initial_ports(self.http_port, self.htsp_port)
             self._progress('Checking tuner networking…')
-            transport = self._plan_hdhomerun_transport()
+            transport = self._startup_step('Tuner networking', self._plan_hdhomerun_transport)
             self._phase.emit('starting')
             self._progress('Starting the server…')
             if self._cancel.is_set():
@@ -367,7 +370,7 @@ class WslcBuiltinSupervisor(QObject):
             # Read once, before any container exists, so a discovery failure
             # does not leave a container behind and retries keep the same list.
             extra_dns = self.extra_dns
-            dns_servers = self._extra_dns_servers(extra_dns)
+            dns_servers = self._startup_step('DNS discovery', self._extra_dns_servers, extra_dns)
             if self._cancel.is_set():
                 return
             for attempt in range(3):
@@ -378,8 +381,9 @@ class WslcBuiltinSupervisor(QObject):
                 # Mark before launch: if the CLI times out, the container may exist.
                 launched = True
                 try:
-                    self.runtime.launch(image, name, owner, self.config_dir, recordings, ports, udp_ports,
-                                        dns_servers=dns_servers)
+                    self._startup_step('Container launch', self.runtime.launch,
+                                       image, name, owner, self.config_dir, recordings, ports, udp_ports,
+                                       dns_servers=dns_servers)
                     break
                 except WslcError as exc:
                     if attempt == 2 or not port_conflict(exc) or self._cancel.is_set():
@@ -392,7 +396,8 @@ class WslcBuiltinSupervisor(QObject):
                     owner = uuid.uuid4().hex
                     name = 'tvhplayer-' + owner
                     self._emit_log('Server ports were in use; retrying with different ports.\n')
-            deadline = time.monotonic() + 60
+            readiness_started = time.monotonic()
+            deadline = readiness_started + 60
             self._progress('Checking the server connection…')
             while not self._cancel.is_set():
                 self.runtime.verify_running(name, owner, ports, udp_ports)
@@ -403,8 +408,11 @@ class WslcBuiltinSupervisor(QObject):
                         self._cancel.wait(.5)
                         continue
                     self._progress('Applying server settings…')
-                    failures = apply_builtin_defaults(self.http_port, self.username, self.password,
-                                                      '/recordings', self.padding)
+                    logging.getLogger(__name__).info('Built-in startup: Connection readiness took %.3fs',
+                                                     time.monotonic() - readiness_started)
+                    failures = self._startup_step('Server settings', apply_builtin_defaults,
+                                                  self.http_port, self.username, self.password,
+                                                  '/recordings', self.padding)
                     if transport is not None and not apply_hdhomerun_transport(
                             self.http_port, transport.local_ip, transport.base_port,
                             self.username, self.password):
@@ -425,7 +433,8 @@ class WslcBuiltinSupervisor(QObject):
                             or previous_state.get('config_generation') != generation
                             or previous_state.get('image') != image):
                         self._progress('Updating playlist commands…')
-                        migrated = use_guest_ffmpeg(self.http_port, self.username, self.password, self._cancel)
+                        migrated = self._startup_step('Playlist migration', use_guest_ffmpeg,
+                                                      self.http_port, self.username, self.password, self._cancel)
                         if migrated < 0:
                             if self._cancel.is_set():
                                 return
@@ -437,6 +446,8 @@ class WslcBuiltinSupervisor(QObject):
                                              'config_generation': generation})
                     (self.config_dir.parent / 'wslc-setup.json').unlink(missing_ok=True)
                     self.guide_container = (name, owner)
+                    logging.getLogger(__name__).info('Built-in startup completed in %.3fs',
+                                                     time.monotonic() - startup_started)
                     self._started.emit()
                     break
                 if time.monotonic() > deadline:
@@ -444,8 +455,7 @@ class WslcBuiltinSupervisor(QObject):
                 self._cancel.wait(.5)
             previous_log = ''
             while not self._cancel.wait(2):
-                self.runtime.verify_running(name, owner, ports, udp_ports)
-                current_log = self.runtime.logs_owned(name, owner)
+                current_log = self.runtime.monitor_owned(name, owner, ports, udp_ports)
                 if current_log != previous_log:
                     delta = current_log[len(previous_log):] if current_log.startswith(previous_log) else current_log
                     self._emit_log(delta + '\n')
@@ -491,6 +501,14 @@ class WslcBuiltinSupervisor(QObject):
                 except Exception as exc:
                     error = (error + '\n' if error else '') + f'Backend cleanup failed ({name}): {exc}'
             self._completed.emit(error)
+
+    def _startup_step(self, label, operation, *args, **kwargs):
+        started = time.monotonic()
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            logging.getLogger(__name__).info('Built-in startup: %s took %.3fs',
+                                             label, time.monotonic() - started)
 
     def _extra_dns_servers(self, address):
         """Full ``--dns`` list, or none when the extra server is off.

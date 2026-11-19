@@ -410,3 +410,70 @@ def test_cancel_before_provision_completes_never_launches(tmp_path, monkeypatch)
     app.processEvents()
     assert supervisor.status == 'stopped'
     assert supervisor._thread is None
+
+
+def test_successful_runtime_check_skips_windows_diagnostics(monkeypatch):
+    from tvhplayer.core import windows_prerequisites
+    monkeypatch.setattr(windows_prerequisites, 'probe_windows', lambda: pytest.fail('CIM on healthy start'))
+    runtime = WslcRuntimeAdapter('wslc.exe')
+    runtime.established = True
+    calls = []
+    runtime.command = lambda command: calls.append(command) or 'WSLc version 3.0.5'
+    for _ in range(2):
+        runtime.check()
+    assert calls == ['version', 'info', 'version', 'info']
+    assert runtime._prerequisite_state == {}
+
+
+def test_failed_runtime_check_runs_windows_diagnostics(monkeypatch):
+    from tvhplayer.core import windows_prerequisites, windows_wslc
+    monkeypatch.setattr(windows_wslc.sys, 'platform', 'win32')
+    calls = []
+    monkeypatch.setattr(windows_prerequisites, 'probe_windows', lambda: calls.append('probe') or {'feature': 2})
+    runtime = WslcRuntimeAdapter('wslc.exe')
+    runtime.established = True
+    def command(name):
+        if name == 'version': return '3.0.5'
+        raise WslcError('unavailable')
+    runtime.command = command
+    with pytest.raises(windows_wslc.WslcPrerequisiteError) as error:
+        runtime.check()
+    assert error.value.action == 'repair'
+    assert calls == ['probe']
+
+
+@pytest.mark.parametrize('fault', [None, 'owner', 'stopped', 'ports'])
+def test_monitor_inspects_once_and_rejects_bad_state(fault):
+    data = state()
+    if fault == 'owner': data['Config']['Labels']['tvhplayer.owner'] = 'other'
+    if fault == 'stopped': data['State']['Running'] = False
+    if fault == 'ports': data['NetworkSettings']['Ports'] = {}
+    cli = Cli(json.dumps(data))
+    runtime = WslcRuntimeAdapter('wslc.exe', cli)
+    if fault:
+        with pytest.raises(WslcError):
+            runtime.monitor_owned(NAME, OWNER, (24111, 24112))
+        assert [c[1] for c in cli.calls] == ['inspect']
+    else:
+        runtime.monitor_owned(NAME, OWNER, (24111, 24112))
+        assert [c[1] for c in cli.calls] == ['inspect', 'logs']
+
+
+def test_cancelled_runtime_check_does_not_probe(monkeypatch):
+    from tvhplayer.core import windows_prerequisites
+    monkeypatch.setattr(windows_prerequisites, 'probe_windows', lambda: pytest.fail('probe after cancellation'))
+    runtime = WslcRuntimeAdapter('wslc.exe')
+    runtime.established = True
+    runtime.cancel = threading.Event()
+    runtime.cancel.set()
+    def command(*args): raise WslcError('cancelled')
+    runtime.command = command
+    with pytest.raises(WslcError, match='cancelled'):
+        runtime.check()
+
+
+@pytest.mark.parametrize('error', [subprocess.TimeoutExpired('info', 20), OSError('missing')])
+def test_runtime_check_failure_remains_bounded(error):
+    def runner(*args, **kwargs): raise error
+    with pytest.raises(WslcError):
+        WslcRuntimeAdapter('wslc.exe', runner).check()

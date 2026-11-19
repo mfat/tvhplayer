@@ -73,6 +73,7 @@ class WslcRuntimeAdapter:
         self.progress = None
         self.image_state = 'not_checked'
         self.archive_verified = False
+        self.established = False
 
     def _progress(self, message):
         if self.progress:
@@ -134,6 +135,26 @@ class WslcRuntimeAdapter:
         from .windows_prerequisites import probe_windows, prerequisite_issue, setup_checks
         if self.executable is None:
             self.executable = find_wslc()
+        # Normal starts use the runtime itself. CIM diagnostics are relatively
+        # expensive and are useful only when the runtime cannot answer. This
+        # does not claim that virtualization works: launch/readiness still
+        # establish that, and command() translates virtualization failures.
+        self._prerequisite_state = {}
+        version_error = None
+        version = ''
+        if self.established:
+            try:
+                version = self.command('version')
+                match = re.search(r'(\d+)\.(\d+)\.(\d+)', version)
+                if match and tuple(map(int, match.groups())) >= (2, 9, 3):
+                    self.command('info')
+                    self.setup_checks = setup_checks({}, True, tuple(map(int, match.groups())))
+                    return
+            except WslcError as exc:
+                if self.cancel is not None and self.cancel.is_set():
+                    raise
+                if not version:
+                    version_error = exc
         issue = None
         if sys.platform == 'win32' and self.runner is None:
             self._prerequisite_state = probe_windows()
@@ -142,11 +163,11 @@ class WslcRuntimeAdapter:
                 issue = ('Install WSL to set up the built-in server. Setup enables the required '
                          'Windows features. Restart Windows when setup finishes, even if no reboot '
                          'prompt appears.', 'install')
-        version_error = None
-        try:
-            version = self.command('version')
-        except WslcError as exc:
-            version, version_error = '', exc
+        if not self.established:
+            try:
+                version = self.command('version')
+            except WslcError as exc:
+                version_error = exc
         match = re.search(r'(\d+)\.(\d+)\.(\d+)', version)
         self.setup_checks = setup_checks(self._prerequisite_state, bool(self.executable),
                                         tuple(map(int, match.groups())) if match else None)
@@ -345,4 +366,9 @@ class WslcRuntimeAdapter:
 
     def logs_owned(self, name, owner):
         self.inspect_owned(name, owner)
+        return self.command('logs', '--tail', '200', name, timeout=5)
+
+    def monitor_owned(self, name, owner, ports, udp_ports=()):
+        """Verify ownership/running state/publication once before reading logs."""
+        self.verify_running(name, owner, ports, udp_ports)
         return self.command('logs', '--tail', '200', name, timeout=5)
