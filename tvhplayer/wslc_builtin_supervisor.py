@@ -23,7 +23,8 @@ try:
     from .core.windows_backend_paths import bind_mount
     from .core.logs import sanitize, SERVER_LOGGER
     from .core.hdhomerun import probe_host_device, pick_udp_base, plan_transport
-    from .core.windows_wslc import WslcRuntimeAdapter, WslcError, WslcPrerequisiteError, port_conflict
+    from .core.windows_wslc import (WslcRuntimeAdapter, WslcError, WslcPrerequisiteError,
+                                    image_absent, port_conflict)
 except ImportError:  # PyInstaller/source script imports
     from core.builtin_server import (ensure_superuser, initial_ports, serverinfo_ok,
                                     apply_builtin_defaults, apply_hdhomerun_transport,
@@ -31,11 +32,21 @@ except ImportError:  # PyInstaller/source script imports
     from core.windows_backend_paths import bind_mount
     from core.logs import sanitize, SERVER_LOGGER
     from core.hdhomerun import probe_host_device, pick_udp_base, plan_transport
-    from core.windows_wslc import WslcRuntimeAdapter, WslcError, WslcPrerequisiteError, port_conflict
+    from core.windows_wslc import (WslcRuntimeAdapter, WslcError, WslcPrerequisiteError,
+                                   image_absent, port_conflict)
 
 
 GUEST_FFMPEG_MIGRATION = 1
 _NATIVE_STAGE_MARK = 'main: startup '
+
+
+def tcp_accepts(port, timeout=0.05):
+    """Whether a loopback TCP handshake completes. This is not an API reply."""
+    try:
+        with socket.create_connection(('127.0.0.1', int(port)), timeout):
+            return True
+    except OSError:
+        return False
 
 
 def native_startup_observations(text):
@@ -367,69 +378,139 @@ class WslcBuiltinSupervisor(QObject):
                 self.runtime.stop_owned(previous['name'], previous['owner'])
                 record.unlink()
             self._phase.emit('installing')
-            image = self._startup_step('Server image', self.runtime.provision, self.backend_dir)
-            if self._cancel.is_set():
-                return
-            self.username, self.password = ensure_superuser(self.config_dir)
-            self._progress('Preparing server storage…')
-            self._startup_step('Server storage', self.runtime.prepare_config, image, self.config_dir)
-            if self._cancel.is_set():
-                return
             state_path = self.config_dir / '.tvhplayer-runtime.json'
             previous_state = json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
-            if previous_state.get('image') and previous_state['image'] != image:
-                self._progress('Backing up server settings…')
-                snapshot = self.runtime.backup_config(upgrade=True)
-                self._emit_log(f'Backing up backend settings to {snapshot}\n')
-            recordings = Path(self.recordings_dir) if self.recordings_dir else self.config_dir.parent / 'Recordings'
-            bind_mount(str(recordings), '/recordings')
-            recordings.mkdir(parents=True, exist_ok=True)
-            self.http_port, self.htsp_port = initial_ports(self.http_port, self.htsp_port)
-            transport = self._startup_step('Tuner networking', self._plan_hdhomerun_transport)
-            self._phase.emit('starting')
-            self._progress('Starting the server…')
-            if self._cancel.is_set():
-                return
-            # Read once, before any container exists, so a discovery failure
-            # does not leave a container behind and retries keep the same list.
-            extra_dns = self.extra_dns
-            dns_servers = self._startup_step('DNS discovery', self._extra_dns_servers, extra_dns)
-            if self._cancel.is_set():
-                return
-            for attempt in range(3):
-                ports = (self.http_port, self.htsp_port)
-                udp_ports = self._udp_specs(transport)
-                self.runtime.configure_hdhomerun(transport)
-                write_record(record, {'name': name, 'owner': owner})
-                # Mark before launch: if the CLI times out, the container may exist.
-                launched = True
+            trusted_image = previous_state.get('image') if isinstance(previous_state, dict) else None
+            image = None
+            recordings = transport = dns_servers = None
+            for image_attempt in range(2):
+                image = self._startup_step(
+                    'Server image', self.runtime.provision, self.backend_dir,
+                    trusted_image=trusted_image if image_attempt == 0 else None)
+                if self._cancel.is_set():
+                    return
+                if image_attempt == 0:
+                    self.username, self.password = ensure_superuser(self.config_dir)
                 try:
-                    self._startup_step('Container launch', self.runtime.launch,
-                                       image, name, owner, self.config_dir, recordings, ports, udp_ports,
-                                       dns_servers=dns_servers)
+                    self._progress('Preparing server storage…')
+                    self._startup_step('Server storage', self.runtime.prepare_config, image, self.config_dir)
+                    if self._cancel.is_set():
+                        return
+                    if previous_state.get('image') and previous_state['image'] != image:
+                        self._progress('Backing up server settings…')
+                        snapshot = self.runtime.backup_config(upgrade=True)
+                        self._emit_log(f'Backing up backend settings to {snapshot}\n')
+                    recordings = Path(self.recordings_dir) if self.recordings_dir else self.config_dir.parent / 'Recordings'
+                    bind_mount(str(recordings), '/recordings')
+                    recordings.mkdir(parents=True, exist_ok=True)
+                    self.http_port, self.htsp_port = initial_ports(self.http_port, self.htsp_port)
+                    transport = self._startup_step('Tuner networking', self._plan_hdhomerun_transport)
+                    self._phase.emit('starting')
+                    self._progress('Starting the server…')
+                    if self._cancel.is_set():
+                        return
+                    # Read once, before any container exists, so a discovery failure
+                    # does not leave a container behind and retries keep the same list.
+                    extra_dns = self.extra_dns
+                    dns_servers = self._startup_step('DNS discovery', self._extra_dns_servers, extra_dns)
+                    if self._cancel.is_set():
+                        return
+                    for attempt in range(3):
+                        ports = (self.http_port, self.htsp_port)
+                        udp_ports = self._udp_specs(transport)
+                        self.runtime.configure_hdhomerun(transport)
+                        write_record(record, {'name': name, 'owner': owner})
+                        # Mark before launch: if the CLI times out, the container may exist.
+                        launched = True
+                        try:
+                            self._startup_step('Container launch', self.runtime.launch,
+                                               image, name, owner, self.config_dir, recordings, ports, udp_ports,
+                                               dns_servers=dns_servers)
+                            break
+                        except WslcError as exc:
+                            # A skipped inspect can be stale. Let the outer attempt
+                            # import the bundle instead of burning the port retries.
+                            if (image_attempt == 0 and getattr(self.runtime, 'skipped_image_inspect', False)
+                                    and image_absent(exc, image)):
+                                raise
+                            if attempt == 2 or not port_conflict(exc) or self._cancel.is_set():
+                                raise
+                            self.runtime.stop_owned(name, owner)
+                            launched = False
+                            record.unlink(missing_ok=True)
+                            self.http_port, self.htsp_port = pick_port_pair(avoid=ports)
+                            transport = self._replan_hdhomerun_transport(transport)
+                            owner = uuid.uuid4().hex
+                            name = 'tvhplayer-' + owner
+                            self._emit_log('Server ports were in use; retrying with different ports.\n')
                     break
                 except WslcError as exc:
-                    if attempt == 2 or not port_conflict(exc) or self._cancel.is_set():
+                    if (image_attempt or not getattr(self.runtime, 'skipped_image_inspect', False)
+                            or not image_absent(exc, image) or self._cancel.is_set()):
                         raise
-                    self.runtime.stop_owned(name, owner)
-                    launched = False
-                    record.unlink(missing_ok=True)
-                    self.http_port, self.htsp_port = pick_port_pair(avoid=ports)
-                    transport = self._replan_hdhomerun_transport(transport)
-                    owner = uuid.uuid4().hex
-                    name = 'tvhplayer-' + owner
-                    self._emit_log('Server ports were in use; retrying with different ports.\n')
-            readiness_started = time.monotonic()
+                    logging.getLogger(__name__).info(
+                        'Built-in startup: recorded image was missing; importing the offline bundle')
+                    if launched:
+                        try:
+                            self.runtime.stop_owned(name, owner)
+                        except WslcError:
+                            pass
+                        record.unlink(missing_ok=True)
+                        launched = False
+                    self._phase.emit('installing')
+            launch_returned = time.monotonic()
+            readiness_started = launch_returned
             deadline = readiness_started + 60
             self._progress('Waiting for Tvheadend to finish starting…')
+            verify_index = 0
+            http_answered = htsp_accepted = False
+            http_port_seen = htsp_port_seen = False
             while not self._cancel.is_set():
+                verify_index += 1
+                verify_started = time.monotonic()
                 self.runtime.verify_running(name, owner, ports, udp_ports)
-                if serverinfo_ok(self.http_port, username=self.username, password=self.password):
-                    if not htsp_ready(self.htsp_port, connect=socket.create_connection):
+                logging.getLogger(__name__).info(
+                    'Built-in startup: verify_running %d took %.3fs',
+                    verify_index, time.monotonic() - verify_started)
+                if not http_port_seen and tcp_accepts(self.http_port):
+                    http_port_seen = True
+                    logging.getLogger(__name__).info(
+                        'Built-in startup: HTTP port first accepted %.3fs after container launch',
+                        time.monotonic() - launch_returned)
+                if not htsp_port_seen and tcp_accepts(self.htsp_port):
+                    htsp_port_seen = True
+                    logging.getLogger(__name__).info(
+                        'Built-in startup: HTSP port first accepted %.3fs after container launch',
+                        time.monotonic() - launch_returned)
+                info_started = time.monotonic()
+                http_ok = serverinfo_ok(self.http_port, username=self.username, password=self.password)
+                logging.getLogger(__name__).info(
+                    'Built-in startup: HTTP serverinfo check %d %s in %.3fs',
+                    verify_index, 'answered' if http_ok else 'not ready',
+                    time.monotonic() - info_started)
+                if http_ok and not http_answered:
+                    http_answered = True
+                    logging.getLogger(__name__).info(
+                        'Built-in startup: HTTP serverinfo first answered %.3fs after container launch',
+                        time.monotonic() - launch_returned)
+                if http_ok:
+                    # Port accept is not an HTSP hello. The socket opens before
+                    # inputs finish loading; the hello below is measured once
+                    # the HTTP API has answered and does not decide readiness.
+                    port_started = time.monotonic()
+                    htsp_ok = htsp_ready(self.htsp_port, connect=socket.create_connection)
+                    logging.getLogger(__name__).info(
+                        'Built-in startup: HTSP port check %d %s in %.3fs',
+                        verify_index, 'accepted' if htsp_ok else 'not ready',
+                        time.monotonic() - port_started)
+                    if not htsp_ok:
                         if time.monotonic() >= deadline:
                             raise WslcError('The server HTSP connection did not answer in time.')
                         self._cancel.wait(.5)
                         continue
+                    if not htsp_accepted:
+                        htsp_accepted = True
+                        self._measure_htsp_hello(launch_returned)
                     self._progress('Applying server settings…')
                     logging.getLogger(__name__).info('Built-in startup: Connection readiness took %.3fs',
                                                      time.monotonic() - readiness_started)
@@ -472,6 +553,9 @@ class WslcBuiltinSupervisor(QObject):
                     self.guide_container = (name, owner)
                     logging.getLogger(__name__).info('Built-in startup completed in %.3fs',
                                                      time.monotonic() - startup_started)
+                    logging.getLogger(__name__).info(
+                        'Built-in startup: UI marked the server ready %.3fs after container launch',
+                        time.monotonic() - launch_returned)
                     self._started.emit()
                     break
                 if time.monotonic() > deadline:
@@ -527,6 +611,33 @@ class WslcBuiltinSupervisor(QObject):
                 except Exception as exc:
                     error = (error + '\n' if error else '') + f'Backend cleanup failed ({name}): {exc}'
             self._completed.emit(error)
+
+    def _measure_htsp_hello(self, launch_returned):
+        """Time one HTSP hello after the HTTP API has answered.
+
+        A refused or timed-out hello is recorded and does not fail startup.
+        The readiness decision remains the HTTP API plus a listening HTSP port.
+        """
+        started = time.monotonic()
+        try:
+            try:
+                from .core.htsp_connection import HtspConnection
+            except ImportError:
+                from core.htsp_connection import HtspConnection
+            connection = HtspConnection('127.0.0.1', self.htsp_port, timeout=2)
+            try:
+                connection.connect()
+                connection.hello()
+            finally:
+                connection.close()
+        except Exception as exc:
+            logging.getLogger(__name__).info(
+                'Built-in startup: HTSP hello did not answer in %.3fs: %s',
+                time.monotonic() - started, exc)
+            return
+        logging.getLogger(__name__).info(
+            'Built-in startup: HTSP hello answered in %.3fs (%.3fs after container launch)',
+            time.monotonic() - started, time.monotonic() - launch_returned)
 
     def _record_native_startup(self, name, owner):
         """Copy opt-in native stage lines into the app log once the server answers.

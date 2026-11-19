@@ -41,6 +41,24 @@ class WslcCommandError(WslcError):
         super().__init__(f'WSL container {command} failed: {output[-2000:]}')
 
 
+def image_absent(error, image):
+    """Whether WSLc rejected a command because this image id is not imported.
+
+    Port conflicts and other launch failures mention neither this id nor the
+    image-not-found code, so a skipped inspect is retried only for this case.
+    """
+    text = getattr(error, 'output', None)
+    if text is None:
+        text = str(error)
+    if not image or image not in text:
+        return False
+    lower = text.lower()
+    return ('wslc_e_image_not_found' in lower
+            or f'no such image: {image}'.lower() in lower
+            or f'object not found: {image}'.lower() in lower
+            or 'unable to find image' in lower)
+
+
 def object_missing(output, name):
     """Whether WSLc says ``name`` is already gone (old and current wording)."""
     text = (output or '').strip()
@@ -73,6 +91,7 @@ class WslcRuntimeAdapter:
         self.progress = None
         self.image_state = 'not_checked'
         self.archive_verified = False
+        self.skipped_image_inspect = False
         self.established = False
 
     def _progress(self, message):
@@ -187,21 +206,44 @@ class WslcRuntimeAdapter:
                 'hypervisor and system policy, or connect to an existing server.\n\n'
                 f'Diagnostic details:\n{exc}', 'diagnose') from exc
 
-    def provision(self, directory):
+    def provision(self, directory, trusted_image=None):
         self.image_state = 'not_checked'
         self.archive_verified = False
+        self.skipped_image_inspect = False
         self._progress('Checking the server image…')
         directory = Path(directory)
         started = time.monotonic()
         try:
+            read_started = time.monotonic()
             manifest = read_manifest(directory)
             image = manifest['image']
             self.image_state = 'available'
+            logging.getLogger(__name__).info(
+                'Built-in startup: image manifest read in %.3fs', time.monotonic() - read_started)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise WslcError(f'Install the matching offline backend bundle: {exc}') from exc
-        # WSLc checks the immutable imported image identity and architecture.
-        # The archive is only needed (and hashed) when that image is absent.
-        if not self.has_image(image):
+        # The last successful start already ran this image id. Inspecting it
+        # again costs seconds and is not repeated later in the same attempt.
+        # A deleted image fails the next image command and is imported then.
+        if isinstance(trusted_image, str) and trusted_image == image:
+            self.skipped_image_inspect = True
+            self.image_state = 'installed'
+            for row in self.setup_checks:
+                if row['key'] == 'image':
+                    row['status'] = 'passed'
+            logging.getLogger(__name__).info(
+                'Built-in startup: skipped image inspect; last start used this image (%.3fs)',
+                time.monotonic() - started)
+            return image
+        # One inspect per startup. check() has already talked to WSLc when
+        # established is set, so this cost is the image query itself. The
+        # archive is hashed only when that image is absent.
+        inspect_started = time.monotonic()
+        present = self.has_image(image)
+        logging.getLogger(__name__).info(
+            'Built-in startup: image inspect %s in %.3fs (WSLc already checked: %s)',
+            'hit' if present else 'miss', time.monotonic() - inspect_started, self.established)
+        if not present:
             self._progress('Verifying the server files…')
             try:
                 verify_bundle(directory, cancel=self.cancel)

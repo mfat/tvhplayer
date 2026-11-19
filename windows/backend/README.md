@@ -52,7 +52,10 @@ side effect. The app never downloads a backend at runtime.
 
 The connection-readiness stage waits for Tvheadend to finish loading its
 configuration and EPG, then checks both HTTP and HTSP. It has no fixed ten-second
-delay. The packaged fork includes native stage timers. To enable them for a
+delay. A startup whose recorded image id matches the manifest does not inspect
+that image again. If WSLc then reports that this image is missing, that attempt
+imports the offline bundle once and launches again. Other launch failures do
+not import the bundle. The packaged fork includes native stage timers. To enable them for a
 source launch from PowerShell:
 
 ```powershell

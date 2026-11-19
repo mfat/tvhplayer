@@ -1,6 +1,7 @@
 """Windows backend safety contracts, using a fake CLI (no WSL setup required)."""
 import hashlib
 import json
+import logging
 import subprocess
 import threading
 import sys
@@ -109,6 +110,63 @@ def test_offline_provision_uses_immutable_image(tmp_path):
     cli = Cli(json.dumps([{'Id': IMAGE, 'Architecture': 'amd64'}]))
     assert WslcRuntimeAdapter('wslc.exe', cli).provision(tmp_path) == IMAGE
     assert cli.calls == [['wslc.exe', 'inspect', '--type', 'image', IMAGE]]
+
+
+def test_matching_recorded_image_skips_inspect(tmp_path, monkeypatch, caplog):
+    bundle(tmp_path)
+    monkeypatch.setattr('tvhplayer.core.backend_bundle.file_digest',
+                        lambda *args, **kwargs: pytest.fail('A trusted image must not hash the archive'))
+    (tmp_path / 'tvheadend.tar').unlink()
+    cli = Cli(json.dumps([{'Id': IMAGE, 'Architecture': 'amd64'}]))
+    runtime = WslcRuntimeAdapter('wslc.exe', cli)
+    with caplog.at_level(logging.INFO):
+        assert runtime.provision(tmp_path, trusted_image=IMAGE) == IMAGE
+    assert cli.calls == []
+    assert runtime.skipped_image_inspect
+    assert runtime.image_state == 'installed'
+    assert not runtime.archive_verified
+    assert 'skipped image inspect' in caplog.text
+
+
+def test_different_recorded_image_still_inspects(tmp_path):
+    bundle(tmp_path)
+    cli = Cli(json.dumps([{'Id': IMAGE, 'Architecture': 'amd64'}]))
+    runtime = WslcRuntimeAdapter('wslc.exe', cli)
+    assert runtime.provision(tmp_path, trusted_image='sha256:' + 'a' * 64) == IMAGE
+    assert cli.calls == [['wslc.exe', 'inspect', '--type', 'image', IMAGE]]
+    assert not runtime.skipped_image_inspect
+
+
+@pytest.mark.parametrize('output', [
+    f'No such image: {IMAGE}\nError code: WSLC_E_IMAGE_NOT_FOUND\n',
+    f'Object not found: {IMAGE}',
+    f'Unable to find image "{IMAGE}" locally',
+])
+def test_image_absent_matches_only_this_image(output):
+    from tvhplayer.core.windows_wslc import WslcCommandError, image_absent
+    error = WslcCommandError('run', 1, output)
+    assert image_absent(error, IMAGE)
+    assert not image_absent(error, 'sha256:' + 'a' * 64)
+    assert not image_absent(WslcError('bind: Address already in use'), IMAGE)
+    assert not image_absent(WslcCommandError('run', 1, 'Object not found: tvhplayer-' + 'a' * 32), IMAGE)
+
+
+def test_cached_image_inspect_is_one_query_after_the_manifest(tmp_path, monkeypatch, caplog):
+    bundle(tmp_path)
+    monkeypatch.setattr('tvhplayer.core.backend_bundle.file_digest',
+                        lambda *args, **kwargs: pytest.fail('Cached image startup must not hash the offline archive'))
+    (tmp_path / 'tvheadend.tar').unlink()
+    cli = Cli(json.dumps([{'Id': IMAGE, 'Architecture': 'amd64'}]))
+    runtime = WslcRuntimeAdapter('wslc.exe', cli)
+    runtime.established = True
+    with caplog.at_level(logging.INFO):
+        assert runtime.provision(tmp_path) == IMAGE
+    assert cli.calls == [['wslc.exe', 'inspect', '--type', 'image', IMAGE]]
+    assert 'image manifest read in' in caplog.text
+    assert 'image inspect hit in' in caplog.text
+    assert 'WSLc already checked: True' in caplog.text
+    assert runtime.image_state == 'installed'
+    assert not runtime.archive_verified
 
 
 def test_cached_image_does_not_read_unused_archive(tmp_path, monkeypatch):
@@ -454,7 +512,7 @@ def test_cancel_before_provision_completes_never_launches(tmp_path, monkeypatch,
     class Runtime:
         def check(self):
             pass
-        def provision(self, folder):
+        def provision(self, folder, trusted_image=None):
             reached.set()
             release.wait(5)
             return IMAGE

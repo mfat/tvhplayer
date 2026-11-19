@@ -20,15 +20,20 @@ IMAGE = 'sha256:' + 'b' * 64
 
 class Runtime:
     config_generation = 'c' * 32
-    def __init__(self, collisions=0):
+    def __init__(self, collisions=0, missing_image=0):
         self.collisions = collisions
+        self.missing_image = missing_image
         self.starts = []
         self.stops = []
         self.backups = []
         self.log_tails = []
+        self.provision_calls = []
+        self.skipped_image_inspect = False
     def check(self):
         pass
-    def provision(self, folder):
+    def provision(self, folder, trusted_image=None):
+        self.provision_calls.append(trusted_image)
+        self.skipped_image_inspect = trusted_image == IMAGE
         return IMAGE
     def prepare_config(self, image, config):
         pass
@@ -42,6 +47,9 @@ class Runtime:
     def launch(self, image, name, owner, config, recordings, ports, udp_ports=(), dns_servers=()):
         self.starts.append((name, owner, ports, udp_ports))
         self.dns_servers = tuple(dns_servers)
+        if self.missing_image:
+            self.missing_image -= 1
+            raise WslcError(f'No such image: {image}\nError code: WSLC_E_IMAGE_NOT_FOUND')
         if len(self.starts) <= self.collisions:
             raise WslcError('bind: Address already in use')
     def verify_running(self, name, owner, ports, udp_ports=()):
@@ -58,6 +66,7 @@ class Runtime:
 
 def supervisor(tmp_path, monkeypatch, runtime):
     monkeypatch.delenv('TVHPLAYER_TRACE_STARTUP', raising=False)
+    monkeypatch.setattr(module, 'tcp_accepts', lambda port, timeout=0.05: False)
     monkeypatch.setattr(module, 'bind_mount', lambda *args: None)
     monkeypatch.setattr(module, 'protect_config', lambda path: path.mkdir(parents=True, exist_ok=True))
     monkeypatch.setattr(module, 'serverinfo_ok', lambda *args, **kwargs: True)
@@ -71,6 +80,46 @@ def supervisor(tmp_path, monkeypatch, runtime):
     s.recordings_dir = str(tmp_path / 'recordings')
     s.ready.connect(lambda *_ports: s.stop())
     return s
+
+
+def test_readiness_records_each_verification_and_the_first_answers(tmp_path, monkeypatch, caplog):
+    runtime = Runtime()
+    calls = {'info': 0, 'port': 0}
+    seen = {'http': 0, 'htsp': 0}
+
+    def serverinfo(*args, **kwargs):
+        calls['info'] += 1
+        return calls['info'] >= 2
+
+    def htsp_port(*args, **kwargs):
+        calls['port'] += 1
+        return calls['port'] >= 2
+
+    def accepts(port, timeout=0.05):
+        if int(port) == 24111:
+            seen['http'] += 1
+            return seen['http'] >= 2
+        seen['htsp'] += 1
+        return seen['htsp'] >= 2
+
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    monkeypatch.setattr(module, 'serverinfo_ok', serverinfo)
+    monkeypatch.setattr(module, 'htsp_ready', htsp_port)
+    monkeypatch.setattr(module, 'tcp_accepts', accepts)
+    with caplog.at_level(logging.INFO):
+        s._run()
+    assert 'verify_running 1 took' in caplog.text
+    assert 'verify_running 2 took' in caplog.text
+    assert 'HTTP serverinfo check 1 not ready' in caplog.text
+    assert 'HTTP serverinfo first answered' in caplog.text
+    assert 'HTTP port first accepted' in caplog.text
+    assert 'HTSP port first accepted' in caplog.text
+    assert 'HTSP hello did not answer' in caplog.text
+    assert 'UI marked the server ready' in caplog.text
+    http_port = caplog.text.index('HTTP port first accepted')
+    http_api = caplog.text.index('HTTP serverinfo first answered')
+    ui_ready = caplog.text.index('UI marked the server ready')
+    assert http_port < http_api < ui_ready
 
 
 def test_native_startup_observations_keep_stage_lines_only():
@@ -227,6 +276,64 @@ def test_hdhomerun_udp_ports_move_when_a_publish_conflicts(tmp_path, monkeypatch
     s._run()
     assert runtime.starts[0][3] == (('192.168.8.211', 30000), ('192.168.8.211', 30001))
     assert runtime.starts[1][3] == (('192.168.8.211', 31000), ('192.168.8.211', 31001))
+
+
+def test_missing_image_before_launch_imports_the_bundle_once(tmp_path, monkeypatch):
+    runtime = Runtime()
+    seen = []
+    def prepare(image, config):
+        seen.append(image)
+        if len(seen) == 1:
+            raise WslcError(f'No such image: {image}\nError code: WSLC_E_IMAGE_NOT_FOUND')
+    runtime.prepare_config = prepare
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    s.config_dir.mkdir()
+    (s.config_dir / '.tvhplayer-runtime.json').write_text(json.dumps({'image': IMAGE}))
+    s._run()
+    assert runtime.provision_calls == [IMAGE, None]
+    assert seen == [IMAGE, IMAGE]
+    assert len(runtime.starts) == 1
+    assert s.status == 'stopped'
+
+
+def test_recorded_image_skips_inspect_until_the_image_is_missing(tmp_path, monkeypatch, caplog):
+    runtime = Runtime(missing_image=1)
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    s.config_dir.mkdir()
+    (s.config_dir / '.tvhplayer-runtime.json').write_text(json.dumps({
+        'image': IMAGE, 'guest_ffmpeg': module.GUEST_FFMPEG_MIGRATION,
+        'config_generation': runtime.config_generation}))
+    with caplog.at_level(logging.INFO):
+        s._run()
+    assert runtime.provision_calls == [IMAGE, None]
+    assert len(runtime.starts) == 2
+    assert runtime.stops[0] == runtime.starts[0][:2]
+    assert 'recorded image was missing' in caplog.text
+    assert s.status == 'stopped'
+
+
+def test_skipped_inspect_does_not_import_on_an_unrelated_launch_failure(tmp_path, monkeypatch):
+    runtime = Runtime()
+    def fail_launch(*args, **kwargs):
+        runtime.starts.append(args)
+        raise WslcError('The Windows hypervisor could not start')
+    runtime.launch = fail_launch
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    s.config_dir.mkdir()
+    (s.config_dir / '.tvhplayer-runtime.json').write_text(json.dumps({'image': IMAGE}))
+    s._run()
+    assert runtime.provision_calls == [IMAGE]
+    assert s.status == 'failed'
+
+
+def test_port_conflict_still_retries_when_the_image_inspect_was_skipped(tmp_path, monkeypatch):
+    runtime = Runtime(collisions=1)
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    s.config_dir.mkdir()
+    (s.config_dir / '.tvhplayer-runtime.json').write_text(json.dumps({'image': IMAGE}))
+    s._run()
+    assert runtime.provision_calls == [IMAGE]
+    assert len(runtime.starts) == 2
 
 
 def test_image_upgrade_backs_up_config_without_recordings(tmp_path, monkeypatch):
