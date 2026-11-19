@@ -7,6 +7,19 @@ import pytest
 from tvhplayer.core.config import ConfigStore, default_config
 
 
+def test_window_placement_survives_a_reload(tmp_path):
+    path = tmp_path / 'tvhplayer.conf'
+    path.write_text(json.dumps({
+        'window_geometry': {'x': 12, 'y': 34, 'width': 800, 'height': 600},
+        'window_placement': 'abc+/==',
+    }), encoding='utf-8')
+    store = ConfigStore(path)
+    assert store.data['window_placement'] == 'abc+/=='
+    assert store.data['window_geometry'] == {'x': 12, 'y': 34, 'width': 800, 'height': 600}
+    store.save()
+    assert json.loads(path.read_text(encoding='utf-8'))['window_placement'] == 'abc+/=='
+
+
 def test_config_roundtrip_normalizes_servers(tmp_path):
     path = tmp_path / 'tvhplayer.conf'
     store = ConfigStore(path)

@@ -4279,13 +4279,8 @@ class TVHeadendClient(QMainWindow):
             if not app.desktopFileName():
                 app.setDesktopFileName("io.github.mfat.tvhplayer")
         geometry = self.config['window_geometry']
-        self.setGeometry(
-            geometry['x'],
-            geometry['y'],
-            geometry['width'],
-            geometry['height']
-        )
-        
+        saved_placement = self.config.get('window_placement')
+
         # Initialize servers from config. Without a packaged Tvheadend there is no built-in entry.
         self._builtin_binary = find_bundled_binary() if platform_supports_builtin() and not windows_backend_enabled() else None
         self.servers = ensure_builtin_server(
@@ -4462,6 +4457,7 @@ class TVHeadendClient(QMainWindow):
 
         # Then setup UI
         self.setup_ui()
+        window_frame.restore_window_placement(self, geometry, saved_placement)
         self._bind_chromecast()
         self._bind_playback_splash()
         self._check_disk_space()
@@ -7785,12 +7781,7 @@ class TVHeadendClient(QMainWindow):
         """Save current configuration"""
         try:
             if not self.is_fullscreen:
-                self.config['window_geometry'] = {
-                    'x': self.x(),
-                    'y': self.y(),
-                    'width': self.width(),
-                    'height': self.height()
-                }
+                window_frame.save_window_placement(self, self.config)
             self.config_store.servers = self.servers
             self.config['last_server'] = self.server_combo.currentIndex()
             self.config_store.data = self.config

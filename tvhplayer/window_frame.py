@@ -17,7 +17,7 @@ import os
 from configparser import ConfigParser
 from pathlib import Path
 
-from PyQt6.QtCore import QEvent, QMargins, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PyQt6.QtCore import QByteArray, QEvent, QMargins, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPalette, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractButton, QApplication, QDialog, QHBoxLayout, QLabel, QMainWindow, QMenu, QMenuBar, QWidget, QWizard,
@@ -887,3 +887,81 @@ def install(window, menubar, wanted, guard_path=None):
         return frame
     window.setMenuBar(menubar)
     return None
+
+
+def restore_window_placement(window, geometry, saved=None):
+    """Put the window back where it was last saved.
+
+    ``saved`` is ``QWidget.saveGeometry()`` in base64. Qt restores that byte
+    array itself, including a maximized window and a monitor that is gone.
+    Older configs only stored ``geometry``: ``x``/``y`` from ``QWidget.pos()``,
+    which include the frame, and the client ``width``/``height``.
+    ``setGeometry()`` reads ``x``/``y`` as the client position, so the title
+    bar moved up by the frame on every launch. ``move()`` uses the same
+    coordinates ``pos()`` saved.
+
+    Saving the position just applied and restoring it before the window is
+    shown does not stand in for that. The frame does not exist yet, and the
+    round trip places the client where the frame should be.
+    """
+    if isinstance(saved, str) and saved:
+        try:
+            blob = QByteArray.fromBase64(saved.encode('ascii'))
+        except (ValueError, UnicodeError):
+            blob = None
+        if blob is not None and not blob.isEmpty() and window.restoreGeometry(blob):
+            return
+    window.resize(geometry['width'], geometry['height'])
+    window.move(geometry['x'], geometry['y'])
+    _bring_frame_on_screen(window)
+
+
+def _bring_frame_on_screen(window):
+    """Move a frame whose top edge misses every screen onto the primary one.
+
+    Used for the old position pair. ``pos()`` is the frame's top-left, before
+    the window is shown as well as after.
+    """
+    screens = QGuiApplication.screens()
+    if not screens:
+        return
+    pos = window.pos()
+    size = window.size()
+    title = QRect(pos.x(), pos.y(), max(size.width(), 1), 1)
+    if any(screen.availableGeometry().intersects(title) for screen in screens):
+        return
+    area = (QGuiApplication.primaryScreen() or screens[0]).availableGeometry()
+    if area.isEmpty():
+        return
+    x = min(max(pos.x(), area.left()), max(area.left(), area.right() - size.width()))
+    y = min(max(pos.y(), area.top()), area.bottom())
+    window.move(x, y)
+
+
+def save_window_placement(window, config):
+    """Remember where the window opens next time.
+
+    Fullscreen and minimized are left out: a fullscreen byte array opens the
+    window fullscreen, and a minimized window can report the icon's rectangle.
+    While maximized, ``width()`` and ``height()`` are the screen. The normal
+    client rectangle is ``normalGeometry()``; ``pos()`` is the frame, so the
+    stored point is that rectangle shifted back out by the frame inset.
+    """
+    if window.isFullScreen() or window.isMinimized():
+        return
+    blob = window.saveGeometry()
+    if blob.isEmpty():
+        return
+    config['window_placement'] = bytes(blob.toBase64()).decode('ascii')
+    normal = window.normalGeometry()
+    if normal.isValid() and normal.width() > 0 and normal.height() > 0:
+        inset_x = window.geometry().x() - window.x()
+        inset_y = window.geometry().y() - window.y()
+        config['window_geometry'] = dict(
+            x=normal.x() - inset_x, y=normal.y() - inset_y,
+            width=normal.width(), height=normal.height(),
+        )
+    elif not window.isMaximized():
+        config['window_geometry'] = dict(
+            x=window.x(), y=window.y(), width=window.width(), height=window.height(),
+        )
