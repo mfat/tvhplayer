@@ -5,7 +5,7 @@
 
 
 # TVHplayer
-Watch live TV and record your favorite shows right on your PC or laptop. Supports IPTV, HDHomerun and more. 
+Watch live TV and record your favorite shows right on your PC or laptop. Supports Tvheadend, IPTV, HDHomerun and more. 
 
 
 
@@ -29,7 +29,7 @@ No, TVHplayer is a standalone IPTV/HDHomerun player, as comes with its own built
 **Watch**
 - Live TV and radio from one or more Tvheadend servers
 - Cast live channels to Chromecast and Cast-enabled televisions from the player bar
-- Timeshif
+- Client-side timeshif - rewind, watch and even record from the past
 
 **Built-in server (Linux and Windows)**
 - Optional bundled Tvheadend; existing remote servers remain available
