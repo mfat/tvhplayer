@@ -396,10 +396,6 @@ class WslcBuiltinSupervisor(QObject):
                     self._startup_step('Server storage', self.runtime.prepare_config, image, self.config_dir)
                     if self._cancel.is_set():
                         return
-                    if previous_state.get('image') and previous_state['image'] != image:
-                        self._progress('Backing up server settings…')
-                        snapshot = self.runtime.backup_config(upgrade=True)
-                        self._emit_log(f'Backing up backend settings to {snapshot}\n')
                     recordings = Path(self.recordings_dir) if self.recordings_dir else self.config_dir.parent / 'Recordings'
                     bind_mount(str(recordings), '/recordings')
                     recordings.mkdir(parents=True, exist_ok=True)
@@ -605,9 +601,8 @@ class WslcBuiltinSupervisor(QObject):
                 try:
                     self.runtime.stop_owned(name, owner)
                     record.unlink(missing_ok=True)
-                    # Settings live in a persistent Linux volume. Exporting
-                    # them here held every stop/quit open for a large archive
-                    # transfer. Required pre-upgrade backups happen above.
+                    # Settings live in a persistent Linux volume. Stop and an
+                    # image change leave that volume in place.
                 except Exception as exc:
                     error = (error + '\n' if error else '') + f'Backend cleanup failed ({name}): {exc}'
             self._completed.emit(error)

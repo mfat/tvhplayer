@@ -336,7 +336,7 @@ def test_port_conflict_still_retries_when_the_image_inspect_was_skipped(tmp_path
     assert len(runtime.starts) == 2
 
 
-def test_image_upgrade_backs_up_config_without_recordings(tmp_path, monkeypatch):
+def test_image_upgrade_starts_without_backing_up_settings(tmp_path, monkeypatch):
     runtime = Runtime()
     s = supervisor(tmp_path, monkeypatch, runtime)
     s.config_dir.mkdir()
@@ -345,7 +345,7 @@ def test_image_upgrade_backs_up_config_without_recordings(tmp_path, monkeypatch)
     Path(s.recordings_dir).mkdir()
     (Path(s.recordings_dir) / 'recording.ts').write_bytes(b'keep media')
     s._run()
-    assert runtime.backups == [True]
+    assert runtime.backups == []
     assert (s.config_dir / 'channels.json').read_text() == 'keep channels'
     assert (Path(s.recordings_dir) / 'recording.ts').read_bytes() == b'keep media'
     assert json.loads((s.config_dir / '.tvhplayer-runtime.json').read_text())['image'] == IMAGE

@@ -207,9 +207,9 @@ operations to finish, then removes the owned container; shutdown waits at most
 35 seconds. CLI operations are cancellable; cleanup ignores cancellation and uses
 bounded stop/remove commands. Port collisions retry with new ports and identities.
 If Windows kills the app before cleanup completes, verified orphan recovery occurs
-on the next backend start. Missing orphan containers are handled safely. Before an
-image change, config is backed up in the protected `backend-backups` directory;
-recordings are outside that archive and are never removed. Existing playlist FFmpeg
+on the next backend start. Missing orphan containers are handled safely. An
+image change starts the new server against the same Linux settings volume and
+does not archive it. Recordings stay in the Windows recording folder. Existing playlist FFmpeg
 wrappers are migrated idempotently to `/usr/bin/ffmpeg`.
 
 If prerequisites are missing, the nonmodal setup dialog explains installation,

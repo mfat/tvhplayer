@@ -22,10 +22,10 @@ Storage records and backups are under
 
 - `state.json` identifies the owned Linux volume. Keep this file.
 - `seed.tar` preserves the settings used for the initial migration.
-- `latest.tar.gz` is exported after a clean server stop; `previous.tar.gz` retains
-  the preceding backup. Only a completed and checked export replaces a backup.
-- `before-upgrade-*.tar.gz` snapshots the live Linux settings before a backend
-  image upgrade.
+- `latest.tar.gz` and `previous.tar.gz` are older shutdown copies, when present.
+  A server start, including one that changes the server image, does not create
+  a new copy. Older `before-upgrade-*.tar.gz` files are leftovers from that
+  removed step.
 
 These files contain server credentials and inherit the private settings folder's
 Windows permissions. Do not share them publicly.
