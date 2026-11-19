@@ -29,8 +29,7 @@ No, TVHplayer is a standalone IPTV/HDHomerun player, as comes with its own built
 **Watch**
 - Live TV and radio from one or more Tvheadend servers
 - Cast live channels to Chromecast and Cast-enabled televisions from the player bar
-- Client-side timeshif - rewind, watch and even record from the past
-
+- Client-side timeshif - rewind, watch and even record past moments
 **Built-in server (Linux and Windows)**
 - Optional bundled Tvheadend; existing remote servers remain available
 - Native Linux backend, or WSL Containers on Windows (no Docker or separate Ubuntu installation)
