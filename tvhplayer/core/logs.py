@@ -64,6 +64,18 @@ class SanitizingFormatter(logging.Formatter):
         return sanitize(super().format(record))
 
 
+class _ConsoleFilter(logging.Filter):
+    """Show warnings, and each built-in server startup step, on the terminal.
+
+    The other info messages stay in app.log.
+    """
+
+    def filter(self, record):
+        if record.levelno >= logging.WARNING:
+            return True
+        return record.getMessage().startswith('Built-in startup:')
+
+
 def _file_handler(path: Path) -> logging.Handler:
     handler = RotatingFileHandler(
         str(path),
@@ -255,7 +267,8 @@ def configure_logging(directory=None, capture_output=True) -> Path:
     # the capture does not copy them into app.log a second time.
     stream = os.fdopen(os.dup(terminal), 'w', buffering=1) if terminal is not None else sys.__stderr__
     console = logging.StreamHandler(stream)
-    console.setLevel(logging.WARNING)
+    console.setLevel(logging.INFO)
+    console.addFilter(_ConsoleFilter())
     console.setFormatter(SanitizingFormatter('%(levelname)s: %(name)s: %(message)s'))
     console._tvhplayer_managed = True
     root.addHandler(console)

@@ -1,3 +1,4 @@
+import io
 import logging
 import os
 import sys
@@ -95,6 +96,28 @@ def test_everything_the_process_writes_is_logged_and_hidden(tmp_path):
     for text in ('Debug: Stream URL: http://tvhplayer:***@', 'HTTP 401 error', 'child says hello'):
         assert text in app_log
     assert app_log.count('a warning') == 1
+
+
+def test_startup_steps_are_shown_on_the_terminal(tmp_path, restore_logging):
+    logs.configure_logging(tmp_path / 'logs', capture_output=False)
+    console = next(
+        handler for handler in logging.getLogger().handlers
+        if any(isinstance(item, logs._ConsoleFilter) for item in handler.filters)
+    )
+    shown = io.StringIO()
+    console.setStream(shown)
+    logging.getLogger('tvhplayer.wslc').info('Built-in startup: Server image took 0.200s')
+    logging.getLogger('tvhplayer.wslc').info('Reused offline backend image in 0.1s')
+    logging.getLogger('tvhplayer.wslc').warning('the settings volume is missing')
+    for handler in logging.getLogger().handlers:
+        handler.flush()
+    terminal = shown.getvalue()
+    assert 'Built-in startup: Server image took 0.200s' in terminal
+    assert 'Reused offline backend image' not in terminal
+    assert 'the settings volume is missing' in terminal
+    app_log = (tmp_path / 'logs' / logs.APP_LOG).read_text(encoding='utf-8')
+    assert 'Built-in startup: Server image took 0.200s' in app_log
+    assert 'Reused offline backend image' in app_log
 
 
 def test_unwritable_folder_keeps_the_console(tmp_path, restore_logging):
