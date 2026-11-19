@@ -41,6 +41,21 @@ class WslcCommandError(WslcError):
         super().__init__(f'WSL container {command} failed: {output[-2000:]}')
 
 
+def object_missing(output, name):
+    """Whether WSLc says ``name`` is already gone (old and current wording)."""
+    text = (output or '').strip()
+    if not text or not name:
+        return False
+    if text == f'Object not found: {name}':
+        return True
+    lower = text.lower()
+    if f"container '{name.lower()}' not found" in lower:
+        return True
+    if 'wslc_e_container_not_found' in lower and name in text:
+        return True
+    return False
+
+
 def port_conflict(error):
     message = str(error).lower()
     return any(text in message for text in ('address already in use', 'only one usage of each socket',
@@ -261,10 +276,10 @@ class WslcRuntimeAdapter:
                 output = self.command('inspect', '--type', 'container', name,
                                       timeout=5, cancellable=cancellable)
             except WslcCommandError as exc:
-                if missing_ok and exc.output.strip() == f'Object not found: {name}':
+                if missing_ok and object_missing(exc.output, name):
                     return None
                 raise
-            if missing_ok and output.strip() == f'Object not found: {name}':
+            if missing_ok and object_missing(output, name):
                 return None
             data = json.loads(output)
             if isinstance(data, list):
@@ -302,8 +317,19 @@ class WslcRuntimeAdapter:
         if data is None:
             return False
         if data.get('State', {}).get('Running'):
-            self.command('stop', '--time', '5', name, timeout=8, cancellable=False)
-        self.command('remove', name, timeout=5, cancellable=False)
+            try:
+                self.command('stop', '--time', '5', name, timeout=8, cancellable=False)
+            except WslcCommandError as exc:
+                # Stop can race with an exit that already deleted the container.
+                if not object_missing(exc.output, name):
+                    raise
+                return True
+        try:
+            self.command('remove', name, timeout=5, cancellable=False)
+        except WslcCommandError as exc:
+            # WSLc may delete on stop, or another cleanup may win the race.
+            if not object_missing(exc.output, name):
+                raise
         return True
 
     def logs_owned(self, name, owner):

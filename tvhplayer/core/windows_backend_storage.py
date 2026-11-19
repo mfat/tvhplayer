@@ -206,9 +206,12 @@ class NativeConfigStorage:
         if not self.volume or not self._volume_exists(cancellable=False):
             raise WslcError('The Linux settings volume is unavailable for backup.')
         temporary = self.folder / 'backup.tmp'
+        # Large IPTV configs write tens of megabytes across a Windows bind mount.
+        # The default helper timeout is only enough for small reads/writes.
         self._helper(
             'set -eu; umask 077; test -s /native/data/superuser; '
             'tar -czf /config/.tvhplayer-storage/backup.tmp -C /native/data .',
+            timeout=300,
             cancellable=False,
         )
         self._check_snapshot(temporary)

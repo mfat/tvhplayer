@@ -270,6 +270,32 @@ def test_verified_owned_backend_can_be_stopped():
     assert cli.calls[-2:] == [['wslc.exe', 'stop', '--time', '5', NAME], ['wslc.exe', 'remove', NAME]]
 
 
+def test_stop_owned_ignores_remove_when_container_already_gone():
+    # WSLc may delete on stop, or cleanup races; "not found" must not fail shutdown.
+    responses = [
+        json.dumps(state()),
+        '',
+        f"Container '{NAME}' not found.\nError code: WSLC_E_CONTAINER_NOT_FOUND\n",
+    ]
+    codes = [0, 0, 1]
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append(args)
+        output = responses.pop(0)
+        code = codes.pop(0)
+        return subprocess.CompletedProcess(args, code, output, output if code else '')
+
+    assert WslcRuntimeAdapter('wslc.exe', runner).stop_owned(NAME, OWNER) is True
+    assert calls[-1] == ['wslc.exe', 'remove', NAME]
+
+
+def test_inspect_owned_recognizes_wslc_container_not_found():
+    cli = Cli(f"Container '{NAME}' not found.\nError code: WSLC_E_CONTAINER_NOT_FOUND\n")
+    cli.code = 1
+    assert WslcRuntimeAdapter('wslc.exe', cli).inspect_owned(NAME, OWNER, missing_ok=True) is None
+
+
 def test_wslc_3_top_level_ports():
     data = state()
     data['Ports'] = data['NetworkSettings'].pop('Ports')
