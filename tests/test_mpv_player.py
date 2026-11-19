@@ -664,3 +664,26 @@ def test_a_late_start_of_the_previous_channel_is_ignored(engine):
     for callback in queued:
         callback()
     assert seen == ['playing']
+
+
+def test_media_info_requests_one_async_snapshot_without_property_reads(engine, monkeypatch):
+    player, mpv, _ = engine
+    future = Future()
+    calls = []
+
+    def command_async(*args):
+        calls.append(args)
+        return future
+
+    monkeypatch.setattr(mpv, 'command_async', command_async)
+    assert player.media_info() is future
+    assert not future.done()
+    assert len(calls) == 1
+    command, template = calls[0]
+    assert command == 'expand-text'
+    assert '${video-params/w:Unavailable}' in template
+    assert '${video-params/h:Unavailable}' in template
+    assert '${video-codec:Unavailable}' in template
+    assert '${audio-codec:Unavailable}' in template
+    assert '${audio-params/samplerate:Unavailable}' in template
+    assert not mpv.commands

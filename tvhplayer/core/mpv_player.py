@@ -415,6 +415,20 @@ class MpvPlayer(Player):
         print(f'Hardware decoding: {mpv.hwdec_current or "no"}')
         print(f'Dropped frames: {mpv.frame_drop_count} (decoder: {mpv.decoder_frame_drop_count})')
 
+    def media_info(self):
+        # One bounded snapshot on mpv's event thread. Synchronous property reads
+        # can wait for the decoder while a stream is opening or stopping.
+        return self._mpv.command_async('expand-text', '\n'.join((
+            'Resolution: ${video-params/w:Unavailable} × ${video-params/h:Unavailable}',
+            'Video codec: ${video-codec:Unavailable}',
+            'Pixel format: ${video-params/pixelformat:Unavailable}',
+            'Hardware decoding: ${hwdec-current:Unavailable}',
+            '',
+            'Audio codec: ${audio-codec:Unavailable}',
+            'Sample rate: ${audio-params/samplerate:Unavailable} Hz',
+            'Audio channels: ${audio-params/channels:Unavailable}',
+        )))
+
     def close(self):
         # Quiesce playback first; native callbacks must not reach a closing Qt window.
         self._on_playing = self._on_stopped = self._on_error = None

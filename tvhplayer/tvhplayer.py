@@ -101,6 +101,7 @@ try:
     from .playlist_dialogs import ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from .guide_dialogs import GuideJob, GuideSourcesDialog
     from .about_dialog import AboutDialog
+    from .media_info import MediaInfoDialog
     from .settings_dialog import SettingsDialog
     from .setup_wizard import SetupWizard
     from .sleep_inhibit import SleepInhibitor
@@ -206,6 +207,7 @@ except ImportError:
     from playlist_dialogs import ImportPlaylistDialog, PlaylistJob, PlaylistsDialog
     from guide_dialogs import GuideJob, GuideSourcesDialog
     from about_dialog import AboutDialog
+    from media_info import MediaInfoDialog
     from settings_dialog import SettingsDialog
     from setup_wizard import SetupWizard
     from sleep_inhibit import SleepInhibitor
@@ -7676,6 +7678,9 @@ class TVHeadendClient(QMainWindow):
                 elif item not in hidden:
                     menu.addAction(item)
         casting = self.cast_manager.is_connected
+        info = menu.addAction('Media &Information…')
+        info.setEnabled(self._media_info_available())
+        info.triggered.connect(self.show_media_info)
         self._add_stream_profile_menu(menu, cast=casting)
         if casting:
             return
@@ -7708,6 +7713,40 @@ class TVHeadendClient(QMainWindow):
             group.addAction(action)
             action.triggered.connect(lambda _checked=False, value=value: self.set_deinterlace(value))
         deinterlace.setToolTipsVisible(True)
+
+    def _media_info_available(self):
+        return (self._playback_active and not self._awaiting_playback
+                and not self.cast_manager.is_connected and not self._closing)
+
+    def show_media_info(self):
+        if not self._media_info_available():
+            return
+        player, stream = self.player, self._stream
+        dialog = getattr(self, '_media_info_dialog', None)
+        if dialog is not None:
+            old_player, old_stream = self._media_info_context
+            if old_player is player and old_stream is stream:
+                dialog.show()
+                dialog.raise_()
+                dialog.activateWindow()
+                return
+            dialog.close()
+        channel = self._playback_channel
+        dialog = MediaInfoDialog(
+            self, player.media_info,
+            lambda: (self._media_info_available() and self.player is player and self._stream is stream),
+            getattr(channel, 'name', ''),
+        )
+        self._media_info_dialog = dialog
+        self._media_info_context = (player, stream)
+
+        def closed(_result):
+            self._media_info_dialog = None
+            self._media_info_context = None
+            dialog.deleteLater()
+
+        dialog.finished.connect(closed)
+        dialog.show()
 
     def _add_track_choices(self, menu, tracks, current, choose):
         group = QActionGroup(menu)
@@ -8477,7 +8516,10 @@ class TVHeadendClient(QMainWindow):
     def closeEvent(self, event):
         """Save configuration when closing the application"""
         if self._closing:
-            event.accept()
+            if getattr(self, '_close_resources_done', False):
+                event.accept()
+            else:
+                event.ignore()
             return
         if self.background.close_to_background():
             event.ignore()
@@ -8491,6 +8533,9 @@ class TVHeadendClient(QMainWindow):
             event.ignore()
             return
         self._closing = True
+        media_info = getattr(self, '_media_info_dialog', None)
+        if media_info is not None:
+            media_info.close()
         self.background.shutdown()
         self._metadata_timer.stop()
         fetch, self._channel_fetch = self._channel_fetch, None
@@ -8515,7 +8560,30 @@ class TVHeadendClient(QMainWindow):
         for job in self._guide_jobs.values():
             job.cancel()
         if self.builtin is not None:
-            self.builtin.shut_down()
+            if getattr(self.builtin, 'uses_wslc', False):
+                self.builtin.shutdown_finished.connect(self._builtin_shutdown_finished)
+                if not self.builtin.shut_down():
+                    # Keep Qt and the supervisor alive while its worker stops
+                    # the container and backs up settings. Never join it here.
+                    event.ignore()
+                    return
+                self.builtin.shutdown_finished.disconnect(self._builtin_shutdown_finished)
+            else:
+                self.builtin.shut_down()
+        self._finish_close_resources()
+        super().closeEvent(event)
+        self._quit_after_close()
+
+    def _builtin_shutdown_finished(self):
+        self.builtin.shutdown_finished.disconnect(self._builtin_shutdown_finished)
+        self._finish_close_resources()
+        self.close()
+        self._quit_after_close()
+
+    def _finish_close_resources(self):
+        """Release remaining resources once the built-in backend is stopped."""
+        if getattr(self, '_close_resources_done', False):
+            return
         # With the server gone, a running stream test notices within seconds.
         for job in self._playlist_jobs:
             if not job.shutdown(10000):
@@ -8545,7 +8613,9 @@ class TVHeadendClient(QMainWindow):
             self.player.close()
         if not self.config_store.flush(timeout=30):
             print("Debug: The settings were still being saved when TVHplayer closed")
-        super().closeEvent(event)
+        self._close_resources_done = True
+
+    def _quit_after_close(self):
         # Hidden/transient windows must not keep an explicitly quit app alive.
         if getattr(QApplication.instance(), '_tvhplayer_instance', None) is not None:
             QApplication.instance().quit()

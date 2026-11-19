@@ -384,7 +384,8 @@ def test_container_stderr_logs_are_not_discarded():
     assert WslcRuntimeAdapter('wslc.exe', runner).command('logs', NAME) == 'backend log from stderr'
 
 
-def test_cancel_before_provision_completes_never_launches(tmp_path, monkeypatch):
+@pytest.mark.parametrize('operation', ['stop', 'shut_down'])
+def test_cancel_before_provision_completes_never_launches(tmp_path, monkeypatch, operation):
     pytest.importorskip('PyQt6')
     from PyQt6.QtCore import QCoreApplication
     from tvhplayer import wslc_builtin_supervisor as module
@@ -404,7 +405,7 @@ def test_cancel_before_provision_completes_never_launches(tmp_path, monkeypatch)
     supervisor = module.WslcBuiltinSupervisor(tmp_path / 'config', tmp_path, runtime=Runtime())
     supervisor.start()
     assert reached.wait(5)
-    supervisor.stop()
+    getattr(supervisor, operation)()
     release.set()
     supervisor._thread.join(5)
     app.processEvents()

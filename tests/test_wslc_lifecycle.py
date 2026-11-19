@@ -4,6 +4,8 @@ import io
 import json
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -183,6 +185,120 @@ def test_missing_orphan_does_not_block_restart():
     runtime = WslcRuntimeAdapter('wslc.exe', runner)
     assert runtime.stop_owned('tvhplayer-' + 'a' * 32, 'a' * 32) is False
     assert len(calls) == 1
+
+
+def test_shutdown_cancels_without_joining_and_notifies_after_cleanup(tmp_path, monkeypatch, qapp):
+    s = supervisor(tmp_path, monkeypatch, Runtime())
+
+    class Worker:
+        def join(self, *args, **kwargs):
+            pytest.fail('Shutdown must never join a worker on the Qt thread')
+
+    worker = Worker()
+    s._thread = worker
+    s._status = 'running'
+    completed, failures = [], []
+    s.shutdown_finished.connect(lambda: completed.append(True))
+    s.failed.connect(failures.append)
+    assert s.shut_down() is False
+    assert s.shut_down() is False
+    assert s._cancel.is_set() and s._closing
+    assert s._thread is worker and s.status == 'stopping'
+    assert not completed
+    # Late readiness/progress cannot restart a shutting-down backend.
+    s._started.emit()
+    s._phase.emit('running')
+    assert s.status == 'stopping'
+    s._completed.emit('Backend cleanup failed: command timed out')
+    assert s._thread is None and s.status == 'failed'
+    assert s.last_error == 'Backend cleanup failed: command timed out'
+    assert completed == [True] and not failures
+    assert s.shut_down() is True
+    assert completed == [True]
+
+
+def test_shutdown_without_a_worker_completes_immediately_and_prevents_restart(tmp_path, monkeypatch):
+    s = supervisor(tmp_path, monkeypatch, Runtime())
+    assert s.shut_down() is True
+    s.start()
+    assert s._thread is None and s._cancel.is_set()
+
+
+def test_shutdown_does_not_call_join(tmp_path, monkeypatch):
+    s = supervisor(tmp_path, monkeypatch, Runtime())
+    joins = []
+
+    class Worker:
+        def join(self, *args, **kwargs):
+            joins.append(kwargs)
+
+    s._thread = Worker()
+    s.shut_down()
+    assert not joins
+    s._completed.emit('')
+
+
+@pytest.mark.parametrize('failure', ['', 'stop', 'backup'])
+def test_slow_shutdown_keeps_qt_responsive_and_retains_ownership_until_cleanup(
+        tmp_path, monkeypatch, qapp, failure):
+    from PyQt6.QtCore import QTimer
+
+    entered, release = threading.Event(), threading.Event()
+
+    class SlowRuntime(Runtime):
+        def stop_owned(self, name, owner):
+            if failure == 'stop':
+                entered.set()
+                if not release.wait(5):
+                    raise WslcError('test cleanup gate timed out')
+                raise WslcError('stop command timed out')
+            super().stop_owned(name, owner)
+
+        def backup_config(self, *, upgrade=False):
+            entered.set()
+            if not release.wait(5):
+                raise WslcError('test cleanup gate timed out')
+            if failure == 'backup':
+                raise WslcError('backup command timed out')
+            return super().backup_config(upgrade=upgrade)
+
+    runtime = SlowRuntime()
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    monkeypatch.setattr(module, 'htsp_ready', lambda *args, **kwargs: True)
+    completed = []
+    s.shutdown_finished.connect(lambda: completed.append(True))
+    s.start()
+    worker = s._thread
+    try:
+        deadline = time.monotonic() + 3
+        while not entered.is_set() and time.monotonic() < deadline:
+            qapp.processEvents()
+            entered.wait(.005)
+        assert entered.is_set()
+        started = time.monotonic()
+        assert s.shut_down() is False
+        assert time.monotonic() - started < .1
+        assert s._thread is worker and worker.is_alive()
+        assert s._lock.isLocked() and not completed
+        pulses = []
+        QTimer.singleShot(0, lambda: pulses.append(True))
+        qapp.processEvents()
+        assert pulses and not completed
+        release.set()
+        worker.join(3)
+        assert not worker.is_alive()
+        qapp.processEvents()
+        assert completed == [True]
+        assert s._thread is None and not s._lock.isLocked()
+        assert s.status == ('failed' if failure else 'stopped')
+        assert bool(s.last_error) == bool(failure)
+        # Failed stop leaves the ownership record for recovery on next launch.
+        assert (s.config_dir / 'wslc-owner.json').exists() == (failure == 'stop')
+    finally:
+        release.set()
+        s.stop()
+        worker.join(3)
+        qapp.processEvents()
 
 
 def test_setup_commands_are_explicit_fixed_actions():

@@ -495,6 +495,7 @@ def test_video_context_menu_and_double_click(monkeypatch, tmp_path):
             'Show EPG',
             'Show in TV Guide',
             'Jump to Now Playing',
+            'Media &Information…',
             'Stream Pro&file',
             '&Audio Track',
             '&Subtitles',
@@ -4218,8 +4219,123 @@ def test_playback_menu_lists_tracks_and_deinterlace(monkeypatch, tmp_path):
         assert fake_player.deinterlace() == 'off'
         # Filled again when it opens, so the list follows the stream.
         window._fill_playback_menu(menu)
-        assert len(menu.actions()) == len(window.playback_actions) + 4
+        assert len(menu.actions()) == len(window.playback_actions) + 5
         assert menu.actions()[0] is window.playback_actions[0]
+    finally:
+        window.close()
+        app.processEvents()
+
+
+@pytest.mark.parametrize('entry', ['playback', 'video-context'])
+def test_media_information_is_reachable_and_reuses_its_pending_dialog(monkeypatch, tmp_path, entry):
+    from concurrent.futures import Future
+
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    requests = []
+
+    def request():
+        future = Future()
+        requests.append(future)
+        return future
+
+    monkeypatch.setattr(player, 'media_info', request, raising=False)
+    window._playback_active = True
+    window._stream = {'name': 'One'}
+    window._playback_channel = types.SimpleNamespace(name='One')
+    try:
+        if entry == 'playback':
+            menu = window.playback_menu
+            window._fill_playback_menu(menu)
+        else:
+            menu = window._video_context_menu()
+        action = next(a for a in menu.actions() if a.text() == 'Media &Information…')
+        assert action.isEnabled()
+        assert not requests  # Opening a menu never requests media properties.
+        action.trigger()
+        dialog = window._media_info_dialog
+        assert dialog.note.text() == 'One'
+        action.trigger()
+        assert window._media_info_dialog is dialog
+        assert len(requests) == 1
+        requests[0].set_result('Resolution: 1920 × 1080\nVideo codec: h264')
+        dialog._poll()
+        assert '1920 × 1080' in dialog.view.toPlainText()
+        dialog.close()
+        assert window._media_info_dialog is None
+        action.trigger()
+        assert len(requests) == 2
+        assert window._media_info_dialog is not dialog
+        # Shutdown cancels the read before the playback engine is released.
+        window.close()
+        assert requests[1].cancelled()
+        assert window._media_info_dialog is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
+@pytest.mark.parametrize('state', ['idle', 'starting', 'casting', 'playing'])
+def test_media_information_menu_follows_local_playback(monkeypatch, tmp_path, state):
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    try:
+        window._playback_active = state != 'idle'
+        window._awaiting_playback = state == 'starting'
+        monkeypatch.setattr(type(window.cast_manager), 'is_connected', property(lambda self: state == 'casting'))
+        window._fill_playback_menu(window.playback_menu)
+        info = next(a for a in window.playback_menu.actions() if a.text() == 'Media &Information…')
+        assert info.isEnabled() == (state == 'playing')
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_media_information_rejects_a_late_reply_after_switching_channels(monkeypatch, tmp_path):
+    from concurrent.futures import Future
+
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    future = Future()
+    monkeypatch.setattr(player, 'media_info', lambda: future, raising=False)
+    window._playback_active = True
+    window._stream = {'name': 'One'}
+    try:
+        window.show_media_info()
+        dialog = window._media_info_dialog
+        window._stream = {'name': 'Two'}
+        future.set_result('Resolution of One')
+        dialog._poll()
+        assert 'Playback changed' in dialog.view.toPlainText()
+        assert 'Resolution of One' not in dialog.view.toPlainText()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_opening_media_information_after_a_channel_switch_reads_the_new_stream(monkeypatch, tmp_path):
+    from concurrent.futures import Future
+
+    app, ui, window, player = _make_player(monkeypatch, tmp_path)
+    requests = []
+
+    def request():
+        future = Future()
+        requests.append(future)
+        return future
+
+    monkeypatch.setattr(player, 'media_info', request, raising=False)
+    window._playback_active = True
+    window._stream = {'name': 'One'}
+    try:
+        window.show_media_info()
+        first = window._media_info_dialog
+        window._stream = {'name': 'Two'}
+        window.show_media_info()
+        second = window._media_info_dialog
+        assert second is not first
+        assert requests[0].cancelled()
+        assert len(requests) == 2
+        requests[1].set_result('Video codec of Two')
+        second._poll()
+        assert second.view.toPlainText() == 'Video codec of Two'
     finally:
         window.close()
         app.processEvents()
@@ -5534,6 +5650,69 @@ def _make_background_player(monkeypatch, tmp_path):
         monkeypatch.setattr(ui.TVHeadendClient, '_new_video_surface', lambda self: ui.QWidget())
         monkeypatch.setattr(ui.TVHeadendClient, 'fetch_channels', lambda self, keep_place=False: None)
     return _make_player(monkeypatch, tmp_path, prepare=prepare)
+
+
+@pytest.mark.parametrize('error', ['', 'Backend cleanup failed: command timed out'])
+@pytest.mark.parametrize('primary_instance', [False, True])
+def test_close_waits_asynchronously_for_windows_backend_cleanup(
+        monkeypatch, tmp_path, error, primary_instance):
+    from PyQt6.QtCore import QTimer
+    from tvhplayer.wslc_builtin_supervisor import WslcBuiltinSupervisor
+
+    app, ui, window, player = _make_background_player(monkeypatch, tmp_path)
+    supervisor = WslcBuiltinSupervisor(tmp_path / 'backend', tmp_path, parent=window)
+
+    class Worker:
+        def join(self, *args, **kwargs):
+            pytest.fail('The window must not wait for the backend thread')
+
+    supervisor._thread = Worker()
+    supervisor._status = 'running'
+    window.builtin = supervisor
+    monkeypatch.setattr(window, '_confirm_quit', lambda: True)
+    closed = []
+    monkeypatch.setattr(player, 'close', lambda: closed.append('player'))
+    quits = []
+    monkeypatch.setattr(app, '_tvhplayer_instance', object() if primary_instance else None, raising=False)
+    monkeypatch.setattr(app, 'quit', lambda: quits.append(True))
+    window.show()
+    try:
+        assert not window.close()
+        assert window._closing and supervisor._cancel.is_set()
+        assert not closed and not quits
+        assert not window.close()  # Repeated close cannot bypass pending cleanup.
+        pulses = []
+        QTimer.singleShot(0, lambda: pulses.append(True))
+        app.processEvents()
+        assert pulses and not closed and not quits
+        supervisor._completed.emit(error)
+        app.processEvents()
+        assert closed == ['player']
+        assert supervisor.last_error == error
+        assert window._close_resources_done
+        assert quits == ([True] if primary_instance else [])
+        assert window.close()
+        assert closed == ['player']
+    finally:
+        if supervisor._thread is not None:
+            supervisor._completed.emit('')
+        window.close()
+        app.processEvents()
+
+
+def test_windows_backend_that_already_stopped_does_not_defer_close(monkeypatch, tmp_path):
+    from tvhplayer.wslc_builtin_supervisor import WslcBuiltinSupervisor
+
+    app, ui, window, player = _make_background_player(monkeypatch, tmp_path)
+    window.builtin = WslcBuiltinSupervisor(tmp_path / 'backend', tmp_path, parent=window)
+    monkeypatch.setattr(window, '_confirm_quit', lambda: True)
+    closed = []
+    monkeypatch.setattr(player, 'close', lambda: closed.append(True))
+    assert window.close()
+    assert window._close_resources_done and closed == [True]
+    assert window.close()
+    assert closed == [True]
+    app.processEvents()
 
 
 def test_background_close_preserves_server_and_recording_jobs(monkeypatch, tmp_path):

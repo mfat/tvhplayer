@@ -195,5 +195,16 @@ class Player(ABC):
     def log_stats(self):
         """Print engine-specific playback stats. The default does nothing."""
 
+    def media_info(self):
+        """Return a cancellable Future containing a plain-text media snapshot.
+
+        Submitting the request must not wait for the playback engine.
+        """
+        from concurrent.futures import Future
+
+        result = Future()
+        result.set_result(None)
+        return result
+
     def close(self):
         """Release the engine. The default does nothing."""

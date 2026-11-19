@@ -193,6 +193,8 @@ class WslcBuiltinSupervisor(QObject):
     log_output = pyqtSignal(str)
     setup_progress = pyqtSignal(str)
     recordings_dir_changed = pyqtSignal()
+    # Pending shut_down() calls complete only after owned-container cleanup.
+    shutdown_finished = pyqtSignal()
     _phase = pyqtSignal(str)
     _completed = pyqtSignal(str)
     _started = pyqtSignal()
@@ -599,6 +601,8 @@ class WslcBuiltinSupervisor(QObject):
         self.status_changed.emit(self._status)
         if error and not self._closing:
             self.failed.emit(error)
+        if self._closing:
+            self.shutdown_finished.emit()
 
     def stop(self):
         self._cancel.set()
@@ -610,12 +614,18 @@ class WslcBuiltinSupervisor(QObject):
             self.status_changed.emit('stopped')
 
     def shut_down(self):
+        """Cancel permanently without waiting on the Qt thread.
+
+        Return True if already finished. Otherwise the owner must retain this
+        QObject and keep the event loop alive until shutdown_finished arrives.
+        The worker's finally block still stops the owned container and backs
+        up its settings, which can take longer than a short join timeout.
+        """
+        if self._closing:
+            return self._thread is None
         self._closing = True
         self.stop()
-        # Keep the QObject alive while bounded CLI cleanup finishes. If image import
-        # is still running, cancellation is observed before a container is created.
-        if self._thread:
-            self._thread.join(timeout=35)
+        return self._thread is None
 
     def set_recordings_dir(self, folder):
         if self._thread is not None and folder != self.recordings_dir:
