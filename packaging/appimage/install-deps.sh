@@ -8,7 +8,7 @@ apt-get install -y --no-install-recommends \
     ca-certificates curl file patchelf \
     python3.12 python3.12-dev python3-pip \
     build-essential pkgconf gettext bzip2 cmake \
-    libssl-dev zlib1g-dev libpcre2-dev libdbus-1-dev \
+    libssl-dev zlib1g-dev libpcre2-dev libdbus-1-dev libsqlite3-dev \
     libmpv2 ffmpeg \
     libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
     libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \

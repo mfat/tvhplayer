@@ -8,6 +8,7 @@ RUN set -eu; n=0; \
     until apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         build-essential pkg-config gettext bzip2 curl ca-certificates python3 \
         libssl-dev zlib1g-dev libpcre2-dev libdbus-1-dev libdvbcsa-dev \
+        libsqlite3-dev \
         && rm -rf /var/lib/apt/lists/*; do \
       n=$((n + 1)); \
       if [ "$n" -ge 6 ]; then exit 1; fi; \
@@ -26,6 +27,7 @@ COPY windows/backend/debian.sources /etc/apt/sources.list.d/debian.sources
 RUN set -eu; n=0; \
     until apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
         ca-certificates ffmpeg libssl3 zlib1g libpcre2-8-0 libdbus-1-3 libdvbcsa1 \
+        libsqlite3-0 \
         && rm -rf /var/lib/apt/lists/*; do \
       n=$((n + 1)); \
       if [ "$n" -ge 6 ]; then exit 1; fi; \

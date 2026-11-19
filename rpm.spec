@@ -38,6 +38,7 @@ BuildRequires:  pkgconfig(openssl)
 BuildRequires:  pkgconfig(zlib)
 BuildRequires:  pkgconfig(libpcre2-8)
 BuildRequires:  pkgconfig(dbus-1)
+BuildRequires:  pkgconfig(sqlite3)
 BuildRequires:  desktop-file-utils
 # Tvheadend's configure finds its tools with which.
 BuildRequires:  which
@@ -51,6 +52,7 @@ Requires:       python3-psutil
 Requires:       python3-chromecast
 Requires:       qt6-qtsvg
 Requires:       /usr/bin/ffmpeg
+Requires:       sqlite-libs
 Requires:       mpv-libs
 
 Provides:       bundled(tvheadend) = %{tvh_version}
