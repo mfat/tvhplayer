@@ -40,8 +40,9 @@ The deb and rpm builds download `<repo>/archive/<commit>.tar.gz`, and the deb bu
 | `d3b99a1f5` | prop: look up saved fields through a hash while loading an object | not yet |
 | `21bc3036d` | settings: free large loaded settings trees on a background thread | not yet |
 | `f89c949bc` | mpegts: create several muxes in one mux_create request | not yet |
+| `4e32746e5` | settings: transactional SQLite storage, recoverable imports, and safe early channel startup with bounded HTSP updates | not yet |
 
-Base: upstream `51ec612fa`. Packages pin `f89c949bc`, the `tvhplayer` branch tip, which includes these fixes.
+Base: upstream `51ec612fa`. Packages pin `4e32746e5`, tagged `tvhplayer-2026-11-20-sqlite`, which includes these fixes.
 
 For startup investigation, enable the existing stderr/main trace with `-d --trace main`
 on a disposable, disk-backed copy of the configuration. Stage timing is emitted

@@ -13,6 +13,7 @@ Build-Depends: debhelper-compat (= 13),
                zlib1g-dev,
                libpcre2-dev,
                libdbus-1-dev,
+               libsqlite3-dev,
                libdvbcsa-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/mfat/tvhplayer

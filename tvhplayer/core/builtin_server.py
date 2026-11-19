@@ -458,14 +458,18 @@ def _direct_opener(url, username, password):
 
 
 def serverinfo_ok(http_port: int, timeout: float = 0.4, username='', password='') -> bool:
-    """With access control on, Tvheadend answers ``/api`` only after a login."""
+    """Wait for input restoration before configuring the server.
+
+    Older servers omit ``inputs_loaded`` and retain their existing readiness
+    behavior. Authentication is still required when access control is enabled.
+    """
     url = f'http://127.0.0.1:{int(http_port)}/api/serverinfo'
     try:
         with _direct_opener(url, username, password).open(url, timeout=timeout) as response:
             payload = json.loads(response.read().decode('utf-8', errors='replace'))
     except (OSError, urllib.error.URLError, json.JSONDecodeError, ValueError):
         return False
-    return isinstance(payload, dict) and any(
+    return isinstance(payload, dict) and payload.get('inputs_loaded', True) is True and any(
         key in payload for key in ('sw_version', 'api_version', 'name')
     )
 
