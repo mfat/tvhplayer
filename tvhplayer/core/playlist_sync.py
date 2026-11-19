@@ -24,7 +24,7 @@ import uuid as uuid_module
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 
-from .errors import PlaylistError, TvhAuthError, TvhConnectionError
+from .errors import PlaylistError, TvhAuthError, TvhConnectionError, TvhError
 from .ffmpeg_starter import install_starter
 from .tvh_admin import SAVE_BATCH
 from urllib.parse import quote
@@ -721,6 +721,7 @@ def sync_playlist(
     total = len(plans) + len(stale)
     done = 0
     changes = []
+    pending_creates = []
     # A new address may work where the old one failed, or fail where it worked.
     retest = []
     created_since_checkpoint = 0
@@ -739,6 +740,21 @@ def sync_playlist(
             admin.scan_muxes(retest)
             retest.clear()
 
+    def flush_creates():
+        nonlocal created_since_checkpoint
+        while pending_creates:
+            batch = pending_creates[:SAVE_BATCH]
+            del pending_creates[:SAVE_BATCH]
+            uuids = admin.create_muxes(source.network_uuid, [conf for _plan, conf in batch])
+            for (plan, _conf), uuid in zip(batch, uuids):
+                source.muxes[plan.key] = uuid
+            result.added += len(uuids)
+            created_since_checkpoint += len(uuids)
+            if len(uuids) < len(batch):
+                raise TvhError(
+                    f'The server created {len(uuids)} of {len(batch)} muxes'
+                )
+
     for plan in plans:
         if cancelled():
             result.cancelled = True
@@ -751,25 +767,34 @@ def sync_playlist(
                 if check and _stream_source(conf['iptv_url']) != _stream_source(rows[uuid].get('iptv_url', '')):
                     retest.append(uuid)
         else:
-            source.muxes[plan.key] = admin.create_mux(source.network_uuid, conf)
-            result.added += 1
-            created_since_checkpoint += 1
+            pending_creates.append((plan, conf))
         done += 1
         now = clock()
+        if len(pending_creates) >= SAVE_BATCH:
+            flush_creates()
         if created_since_checkpoint and now - last_checkpoint >= CHECKPOINT_SECONDS:
             checkpoint()
             created_since_checkpoint = 0
             last_checkpoint = now
         # Flush edits by size even when processing is slow. Report completed
         # work separately: a partial edit batch must not suppress progress
-        # while genuinely new channels are being created one at a time.
+        # while new channels are still queued for create.
         flushed = len(changes) >= SAVE_BATCH
         if flushed:
+            flush_creates()
             save_changes()
-        completed = done - len(changes)
-        if completed > reported and (flushed or now - last_progress >= PROGRESS_SECONDS):
+        due_progress = now - last_progress >= PROGRESS_SECONDS
+        # A short playlist on a slow server must not sit at 0 until the end:
+        # flush whatever creates are queued when it is time to report.
+        if pending_creates and due_progress:
+            flush_creates()
+        completed = done - len(changes) - len(pending_creates)
+        if completed > reported and (flushed or due_progress):
             progress(completed, total)
             last_progress, reported = clock(), completed
+    # Plans accepted before cancel still need their create requests sent so the
+    # saved map matches the server.
+    flush_creates()
     if created_since_checkpoint:
         checkpoint()
 

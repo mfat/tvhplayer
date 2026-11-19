@@ -41,6 +41,8 @@ class TvhAdmin:
         self._session = requests.Session()
         configure_session(self._session, self._base)
         self._timeout = DEFAULT_TIMEOUT
+        # Stock Tvheadend rejects a JSON list in mux_create conf (HTTP 400).
+        self._mux_create_lists = True
 
     def close(self):
         self._session.close()
@@ -180,6 +182,33 @@ class TvhAdmin:
         self.save([{'uuid': uuid, 'scan_state': SCAN_PENDING} for uuid in uuids])
 
     def create_mux(self, network_uuid: str, conf: dict) -> str:
+        return self.create_muxes(network_uuid, [conf])[0]
+
+    def create_muxes(self, network_uuid: str, confs: List[dict]) -> List[str]:
+        """Create muxes; one request when the server accepts a conf list.
+
+        Returns the new UUIDs in order. A mid-batch server stop may return
+        fewer UUIDs than ``confs``; the caller records those and treats the
+        rest as not created. Stock servers that reject a list fall back to
+        one create each for the rest of this admin session.
+        """
+        if not confs:
+            return []
+        if len(confs) == 1 or not self._mux_create_lists:
+            return [self._create_one_mux(network_uuid, conf) for conf in confs]
+        try:
+            data = self._request(
+                'api/mpegts/network/mux_create',
+                data={'uuid': network_uuid, 'conf': json.dumps(confs)},
+            )
+        except TvhError as exc:
+            if 'HTTP 400' not in str(exc):
+                raise
+            self._mux_create_lists = False
+            return [self._create_one_mux(network_uuid, conf) for conf in confs]
+        return _uuids(data, 'mux')
+
+    def _create_one_mux(self, network_uuid: str, conf: dict) -> str:
         data = self._request(
             'api/mpegts/network/mux_create',
             data={'uuid': network_uuid, 'conf': json.dumps(conf)},
@@ -365,10 +394,21 @@ def _plain_text(value: str) -> bool:
 
 
 def _uuid(data, what) -> str:
-    uuid = data.get('uuid') if isinstance(data, dict) else None
-    if not uuid:
+    uuids = _uuids(data, what)
+    if len(uuids) != 1:
         raise TvhError(f'The server did not return the new {what}')
-    return uuid
+    return uuids[0]
+
+
+def _uuids(data, what) -> List[str]:
+    value = data.get('uuid') if isinstance(data, dict) else None
+    if isinstance(value, list):
+        if not value or any(not item for item in value):
+            raise TvhError(f'The server did not return the new {what}')
+        return [str(item) for item in value]
+    if not value:
+        raise TvhError(f'The server did not return the new {what}')
+    return [str(value)]
 
 
 def _only(fields) -> dict:

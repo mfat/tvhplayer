@@ -59,6 +59,7 @@ class FakeAdmin:
         self.deleted = []
         self.mapped = []
         self.scanned = []
+        self.created_batches = []
         self.orphans_cleared = []
         self.dead = set(dead)
         self._next = 0
@@ -116,6 +117,10 @@ class FakeAdmin:
         self.muxes[uuid] = dict(conf, network_uuid=network_uuid, name=conf['iptv_sname'], scan_state=1, scan_result=0)
         self.services[f's{uuid}'] = {'multiplex_uuid': uuid, 'enabled': True, 'channel': [f'c{uuid}']}
         return uuid
+
+    def create_muxes(self, network_uuid, confs):
+        self.created_batches.append(len(confs))
+        return [self.create_mux(network_uuid, conf) for conf in confs]
 
     def mux_state(self, uuid):
         return dict(self.muxes.get(uuid) or {})
@@ -226,6 +231,68 @@ def test_a_big_import_saves_its_channel_map_every_few_seconds_not_every_few_chan
     during = [count for count in checkpoints if 0 < count < 2000]
     # About 20 seconds of creating: a save every 5 seconds or so.
     assert 2 <= len(during) <= 5
+
+
+def test_first_import_creates_muxes_in_save_batches():
+    from tvhplayer.core.tvh_admin import SAVE_BATCH
+
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    count = SAVE_BATCH * 2 + 3
+    text = '#EXTM3U\n' + ''.join(f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://x/{i}.ts\n' for i in range(count))
+    result = sync_playlist(admin, source, _plans(text), check=False)
+    assert result.added == count
+    assert len(source.muxes) == count
+    assert admin.created_batches == [SAVE_BATCH, SAVE_BATCH, 3]
+
+
+def test_partial_create_batch_keeps_created_muxes_then_fails():
+    from tvhplayer.core.errors import TvhError
+    from tvhplayer.core.tvh_admin import SAVE_BATCH
+
+    admin = FakeAdmin()
+    source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')
+    count = SAVE_BATCH + 1
+    text = '#EXTM3U\n' + ''.join(f'#EXTINF:-1 tvg-id="c{i}",C{i}\nhttp://x/{i}.ts\n' for i in range(count))
+    real = admin.create_muxes
+
+    def partial(network_uuid, confs):
+        if len(confs) == SAVE_BATCH:
+            return real(network_uuid, confs[:2])
+        return real(network_uuid, confs)
+
+    admin.create_muxes = partial
+    with pytest.raises(TvhError, match='created 2 of'):
+        sync_playlist(admin, source, _plans(text), check=False)
+    assert set(source.muxes) == {'id:c0', 'id:c1'}
+
+
+def test_create_muxes_falls_back_when_server_rejects_a_list():
+    from tvhplayer.core.errors import TvhError
+
+    admin = TvhAdmin({'url': 'http://127.0.0.1:9'})
+    calls = []
+
+    def request(path, data=None, params=None):
+        conf = data['conf']
+        calls.append(conf)
+        parsed = json.loads(conf)
+        if isinstance(parsed, list):
+            raise TvhError(f'HTTP 400 for {path}: bad request')
+        return {'uuid': f'u{len(calls)}'}
+
+    admin._request = request
+    assert admin.create_muxes('net', [{'a': 1}, {'b': 2}]) == ['u2', 'u3']
+    assert admin._mux_create_lists is False
+    calls.clear()
+    assert admin.create_muxes('net', [{'c': 3}, {'d': 4}]) == ['u1', 'u2']
+    assert all(not conf.startswith('[') for conf in calls)
+
+
+def test_create_muxes_returns_partial_uuid_list():
+    admin = TvhAdmin({'url': 'http://127.0.0.1:9'})
+    admin._request = lambda path, data=None, params=None: {'uuid': ['a', 'b']}
+    assert admin.create_muxes('net', [{}, {}, {}]) == ['a', 'b']
 
 
 def test_first_import_creates_network_and_muxes():
@@ -409,7 +476,7 @@ def test_partial_update_batch_does_not_hide_progress_during_new_channel_creation
     assert progress[-1] == 22
 
 def test_a_slow_small_import_shows_progress_while_it_adds_channels():
-    # Each channel is a request of its own; on a slow server a list shorter
+    # Creates flush on the progress timer; on a slow server a list shorter
     # than one save batch must not sit at nothing until the end.
     admin = FakeAdmin()
     source = PlaylistSource('List', 'http://x/list.m3u', 'builtin')

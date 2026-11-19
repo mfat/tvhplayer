@@ -58,6 +58,9 @@ class FakeAdmin:
         self.muxes[uuid] = dict(conf, scan_state=0, scan_result=1)
         return uuid
 
+    def create_muxes(self, network_uuid, confs):
+        return [self.create_mux(network_uuid, conf) for conf in confs]
+
     def list_services(self, _mux_uuids, fields=None, network_uuid=""):
         return []
 

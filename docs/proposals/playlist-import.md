@@ -155,7 +155,7 @@ One **mux** per included entry:
 
 `epg` 0 turns off over-the-air guide grabbing for the mux. With the default on, Tvheadend re-tunes every watched IPTV stream at 02:04 and 14:04 for up to 10 minutes (issue 1925).
 
-Updates are sent in batches: `api/idnode/save` accepts a list of nodes, which a test confirmed. New muxes need one `api/mpegts/network/mux_create` call each.
+Updates are sent in batches: `api/idnode/save` accepts a list of nodes, which a test confirmed. New muxes use `api/mpegts/network/mux_create` with a JSON list of confs (the built-in fork); stock servers that reject a list fall back to one create each.
 
 ## Matching entries on refresh
 
