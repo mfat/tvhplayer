@@ -50,3 +50,4 @@ windows/backend/release-bundle/
 # The C decoder built by packaging/build-native.py
 /tvhplayer/core/_htsmsg*.so
 /tvhplayer/core/_htsmsg*.pyd
+/pytest-of-Mehdi
