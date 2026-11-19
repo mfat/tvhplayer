@@ -8761,12 +8761,8 @@ class TVHeadendClient(QMainWindow):
         if supervisor is None or not supervisor.is_running():
             self.statusbar.showMessage("The built-in server is not running.")
             return
-        # The page asks for a login. Hand over the password without putting it in the URL.
-        QApplication.clipboard().setText(supervisor.password)
+        # Access control is off (--noacl); the loopback URL needs no login.
         QDesktopServices.openUrl(QUrl(f"http://127.0.0.1:{supervisor.http_port}/"))
-        self.statusbar.showMessage(
-            f"Log in as \"{supervisor.username}\". The password is on the clipboard."
-        )
 
     def show_setup_wizard(self):
         """Add channels from a tuner or a playlist to the selected server, starting the built-in one if needed."""

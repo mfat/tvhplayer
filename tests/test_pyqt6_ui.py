@@ -2772,6 +2772,27 @@ def test_quit_asks_while_recording_to_this_computer(monkeypatch, tmp_path):
     app.processEvents()
 
 
+def test_opening_builtin_web_ui_does_not_copy_a_password(monkeypatch, tmp_path):
+    # Built-in uses --noacl on loopback, so the web UI needs no login handoff.
+    app, ui, window, _player = _make_player(monkeypatch, tmp_path)
+    password = 'secret-secret-secret'
+    window.builtin = types.SimpleNamespace(
+        is_running=lambda: True, http_port=24111,
+        username='tvhplayer', password=password,
+    )
+    opened = []
+    monkeypatch.setattr(ui.QDesktopServices, 'openUrl', lambda url: opened.append(url.toString()))
+    clipboard = ui.QApplication.clipboard()
+    clipboard.setText('keep-me')
+    window.open_builtin_web()
+    assert opened == ['http://127.0.0.1:24111/']
+    assert clipboard.text() == 'keep-me'
+    assert password not in window.statusbar.currentMessage()
+    assert 'clipboard' not in window.statusbar.currentMessage().lower()
+    window.close()
+    app.processEvents()
+
+
 def test_quit_asks_the_builtin_server_even_when_another_is_selected(monkeypatch, tmp_path):
     app, ui, window, _player = _make_player(monkeypatch, tmp_path)
     from tvhplayer.core.models import DvrEntry
