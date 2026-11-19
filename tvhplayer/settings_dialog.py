@@ -123,8 +123,7 @@ UPDATES_NOW_HELP = 'Ask GitHub now. A version you skipped is shown again.'
 DNS_HELP = (
     'Uses this DNS server first inside the built-in WSLc container, followed '
     'by Windows DNS servers. Windows DNS settings are unchanged. Restart the '
-    'built-in server to apply this. A public DNS server may not resolve '
-    'private IPTV, local, or VPN names; disable this option if they stop working.'
+    'app to apply.'
 )
 DNS_ADDRESS_HELP = 'An IPv4 or IPv6 address, for example 1.1.1.1. Preferred inside this container; Windows DNS follows.'
 
@@ -403,10 +402,10 @@ class SettingsDialog(QDialog):
     def _builtin_network_page(self, host):
         page = SettingsPage('Built-in server')
         group = page.add(SettingsGroup('Network'))
-        self.dns_check = ToggleSwitch('Use additional DNS server')
+        self.dns_check = ToggleSwitch('Custom DNS server')
         self.dns_check.setChecked(host.extra_dns_enabled())
         describe(self.dns_check, description=DNS_HELP)
-        group.add_row(SettingRow('Use additional DNS server', DNS_HELP, self.dns_check))
+        group.add_row(SettingRow('Custom DNS server', DNS_HELP, self.dns_check))
         self.dns_edit = QLineEdit(host.extra_dns_address())
         self.dns_edit.setPlaceholderText('1.1.1.1')
         self.dns_edit.setEnabled(self.dns_check.isChecked())

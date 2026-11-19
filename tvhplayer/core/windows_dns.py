@@ -34,7 +34,7 @@ NETWORK_CONNECTIVITY_HIDDEN = 5
 DISCOVERY_FAILED = (
     'Could not read the DNS servers Windows would give the built-in server. '
     'The additional DNS server was not applied, because using it alone would replace those servers. '
-    'Turn off Use additional DNS server, or check that a network adapter has DNS servers, '
+    'Turn off Custom DNS server, or check that a network adapter has DNS servers, '
     'then start the built-in server again.'
 )
 
