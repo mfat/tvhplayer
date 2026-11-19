@@ -368,11 +368,11 @@ def test_background_saves_are_read_back_in_order(tmp_path):
     assert len(data['playlists'][0]['muxes']) == 20
 
 
-@pytest.mark.parametrize('mode', ['auto-safe', 'auto-copy', 'no'])
+@pytest.mark.parametrize('mode', ['no', 'auto-safe', 'auto-copy', 'd3d11va', 'vaapi', 'videotoolbox'])
 def test_hardware_decoding_roundtrip(tmp_path, mode):
     path = tmp_path / 'tvhplayer.conf'
     store = ConfigStore(path)
-    assert store.data['hardware_decoding'] == 'auto-safe'
+    assert store.data['hardware_decoding'] == 'no'
     store.data['hardware_decoding'] = mode
     store.save()
     assert ConfigStore(path).data['hardware_decoding'] == mode
@@ -382,4 +382,20 @@ def test_hardware_decoding_roundtrip(tmp_path, mode):
 def test_invalid_hardware_decoding_uses_default(tmp_path, value):
     path = tmp_path / 'tvhplayer.conf'
     path.write_text(json.dumps({'hardware_decoding': value}), encoding='utf-8')
-    assert ConfigStore(path).data['hardware_decoding'] == 'auto-safe'
+    assert ConfigStore(path).data['hardware_decoding'] == 'no'
+
+
+def test_hardware_decoding_choices_are_platform_specific():
+    from tvhplayer.core.player import hardware_decoding_choices
+
+    common = {'no', 'auto-safe', 'auto-unsafe', 'auto-copy'}
+    windows = {mode for _, mode in hardware_decoding_choices('win32')}
+    linux = {mode for _, mode in hardware_decoding_choices('linux')}
+    mac = {mode for _, mode in hardware_decoding_choices('darwin')}
+    assert common <= windows
+    assert common <= linux
+    assert common <= mac
+    assert 'd3d11va' in windows and 'd3d11va' not in linux and 'd3d11va' not in mac
+    assert 'vaapi' in linux and 'vaapi' not in windows and 'vaapi' not in mac
+    assert 'videotoolbox' in mac and 'videotoolbox' not in windows and 'videotoolbox' not in linux
+    assert hardware_decoding_choices('win32')[0] == ('Disabled', 'no')

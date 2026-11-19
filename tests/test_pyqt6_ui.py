@@ -3107,11 +3107,11 @@ def test_last_channel_plays_at_start_when_asked(monkeypatch, tmp_path):
         window.set_plays_on_start(True)
         assert window.plays_on_start()
 
-        assert window.hardware_decoding() == 'auto-safe'
-        assert window.player.hardware_decoding == 'auto-safe'
-        window.set_hardware_decoding('no')
-        assert window.config['hardware_decoding'] == 'no'
+        assert window.hardware_decoding() == 'no'
         assert window.player.hardware_decoding == 'no'
+        window.set_hardware_decoding('auto-safe')
+        assert window.config['hardware_decoding'] == 'auto-safe'
+        assert window.player.hardware_decoding == 'auto-safe'
 
         assert not window.starts_channels_fast()
         assert window.player.fast_start is False

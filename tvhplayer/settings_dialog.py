@@ -34,6 +34,7 @@ try:
     from .core.config import (
         SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER, TIMESHIFT_MAX_GB,
     )
+    from .core.player import hardware_decoding_choices
     from .ui_theme import accent_choices, accent_swatch, style_names, window_color_choices, window_swatch
     from .settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, ToggleSwitch
 except ImportError:
@@ -42,6 +43,7 @@ except ImportError:
     from core.config import (
         SCHEME_CHOICES, SCHEME_DARK, SCHEME_LIGHT, SCHEME_SYSTEM, THEME_ORGANIC, THEME_TVHPLAYER, TIMESHIFT_MAX_GB,
     )
+    from core.player import hardware_decoding_choices
     from ui_theme import accent_choices, accent_swatch, style_names, window_color_choices, window_swatch
     from settings_widgets import SettingRow, SettingsGroup, SettingsNav, SettingsPage, ToggleSwitch
 
@@ -66,8 +68,8 @@ FAST_START_HELP = (
     'Applies the next time a channel starts.'
 )
 HARDWARE_DECODING_HELP = (
-    'Auto uses the graphics processor when available. Copy-back uses a more compatible path. '
-    'Try Disabled if video has artifacts; it uses more CPU. Applies the next time a stream starts.'
+    'Disabled uses the CPU (the default). Auto picks a safe GPU decoder; Copy-back is more '
+    'compatible with this window. Named APIs force one backend. Applies the next time a stream starts.'
 )
 TIMESHIFT_HELP = (
     'Sets mpv --cache-on-disk, so you can pause and go back much further. '
@@ -245,10 +247,14 @@ class SettingsDialog(QDialog):
         channels.add_row(SettingRow('Start channels &faster', FAST_START_HELP, self.fast_start_check))
         video = page.add(SettingsGroup('Video'))
         self.hardware_decoding_combo = QComboBox()
-        for label, mode in (('Auto', 'auto-safe'), ('Copy-back', 'auto-copy'), ('Disabled', 'no')):
+        choices = list(hardware_decoding_choices())
+        current = host.hardware_decoding()
+        if current not in {mode for _, mode in choices}:
+            choices.append((current, current))
+        for label, mode in choices:
             self.hardware_decoding_combo.addItem(label, mode)
         self.hardware_decoding_combo.setCurrentIndex(
-            self.hardware_decoding_combo.findData(host.hardware_decoding()))
+            self.hardware_decoding_combo.findData(current))
         describe(self.hardware_decoding_combo, 'Hardware decoding', HARDWARE_DECODING_HELP)
         video.add_row(SettingRow('&Hardware decoding', HARDWARE_DECODING_HELP, self.hardware_decoding_combo))
         timeshift = page.add(SettingsGroup('Timeshift'))

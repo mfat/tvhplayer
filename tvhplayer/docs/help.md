@@ -175,7 +175,7 @@ While a channel plays, the bar's seek bar, pause, and ±10 s buttons move within
 
 **Settings → Playback → Start channels faster** sets mpv's `--demuxer-lavf-analyzeduration=0.5`, for a slightly quicker picture. Turn it off if sound or a sound track goes missing. Applies the next time a channel starts.
 
-**Settings → Playback → Hardware decoding** offers Auto (the default), Copy-back, and Disabled. If video has artifacts, try Disabled, then reopen the channel. If that helps, try Copy-back to use hardware decoding through a more compatible path. Disabled uses the CPU and may increase power use. Changes apply when the next stream starts; Playback Statistics shows the decoder actually in use.
+**Settings → Playback → Hardware decoding** defaults to Disabled (CPU). Auto picks a safe GPU decoder for this system; Copy-back and the `(copy)` APIs decode on the GPU then copy frames back into system memory, which is often more reliable inside TVHplayer. Named APIs (for example D3D11VA on Windows, VA-API on Linux, VideoToolbox on macOS) force one backend. If video has artifacts, switch back to Disabled and reopen the channel. Changes apply when the next stream starts; Playback Statistics shows the decoder actually in use.
 
 ## Keyboard shortcuts
 

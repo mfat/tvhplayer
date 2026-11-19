@@ -5,15 +5,88 @@ The window owns the video widget. An engine opens a URL in that widget.
 
 from __future__ import annotations
 
+import sys
 from abc import ABC, abstractmethod
-from typing import Callable, List, NamedTuple, Optional, Tuple
+from typing import Callable, List, NamedTuple, Optional, Sequence, Tuple
 
 # Deinterlacing: the engine decides from the stream, always on, or off.
 DEINTERLACE_AUTO = 'auto'
 DEINTERLACE_ON = 'on'
 DEINTERLACE_OFF = 'off'
 DEINTERLACE_MODES = (DEINTERLACE_AUTO, DEINTERLACE_ON, DEINTERLACE_OFF)
-HARDWARE_DECODING_MODES = ('auto-safe', 'auto-copy', 'no')
+
+# mpv --hwdec. Software decoding is the default for reliability with vo=libmpv.
+HARDWARE_DECODING_DEFAULT = 'no'
+_HARDWARE_DECODING_COMMON: Tuple[Tuple[str, str], ...] = (
+    ('Disabled', 'no'),
+    ('Auto', 'auto-safe'),
+    ('Auto (unsafe)', 'auto-unsafe'),
+    ('Copy-back', 'auto-copy'),
+)
+# API-specific values from the mpv manual, by sys.platform family.
+_HARDWARE_DECODING_APIS = {
+    'win32': (
+        ('D3D11VA', 'd3d11va'),
+        ('D3D11VA (copy)', 'd3d11va-copy'),
+        ('DXVA2', 'dxva2'),
+        ('DXVA2 (copy)', 'dxva2-copy'),
+        ('NVDEC', 'nvdec'),
+        ('NVDEC (copy)', 'nvdec-copy'),
+        ('CUDA', 'cuda'),
+        ('CUDA (copy)', 'cuda-copy'),
+        ('Vulkan', 'vulkan'),
+        ('Vulkan (copy)', 'vulkan-copy'),
+        ('VA-API (copy)', 'vaapi-copy'),
+        ('Crystal HD', 'crystalhd'),
+    ),
+    'linux': (
+        ('VA-API', 'vaapi'),
+        ('VA-API (copy)', 'vaapi-copy'),
+        ('NVDEC', 'nvdec'),
+        ('NVDEC (copy)', 'nvdec-copy'),
+        ('CUDA', 'cuda'),
+        ('CUDA (copy)', 'cuda-copy'),
+        ('VDPAU', 'vdpau'),
+        ('VDPAU (copy)', 'vdpau-copy'),
+        ('DRM', 'drm'),
+        ('DRM (copy)', 'drm-copy'),
+        ('Vulkan', 'vulkan'),
+        ('Vulkan (copy)', 'vulkan-copy'),
+        ('Crystal HD', 'crystalhd'),
+        ('Rockchip MPP', 'rkmpp'),
+    ),
+    'darwin': (
+        ('VideoToolbox', 'videotoolbox'),
+        ('VideoToolbox (copy)', 'videotoolbox-copy'),
+        ('NVDEC', 'nvdec'),
+        ('NVDEC (copy)', 'nvdec-copy'),
+        ('CUDA', 'cuda'),
+        ('CUDA (copy)', 'cuda-copy'),
+        ('Vulkan', 'vulkan'),
+        ('Vulkan (copy)', 'vulkan-copy'),
+        ('Crystal HD', 'crystalhd'),
+    ),
+}
+HARDWARE_DECODING_MODES = tuple(dict.fromkeys(
+    mode
+    for choices in (_HARDWARE_DECODING_COMMON, *_HARDWARE_DECODING_APIS.values())
+    for _, mode in choices
+))
+
+
+def hardware_decoding_choices(platform: Optional[str] = None) -> Sequence[Tuple[str, str]]:
+    """Labels and mpv ``hwdec`` values for Settings on this platform."""
+    platform = sys.platform if platform is None else platform
+    if platform == 'win32':
+        apis = _HARDWARE_DECODING_APIS['win32']
+    elif platform == 'darwin':
+        apis = _HARDWARE_DECODING_APIS['darwin']
+    else:
+        # Linux and other Unix-like hosts share the VA-API / DRM set.
+        apis = _HARDWARE_DECODING_APIS['linux']
+    return _HARDWARE_DECODING_COMMON + apis
+
+
 # The track id that turns subtitles off.
 NO_TRACK = -1
 

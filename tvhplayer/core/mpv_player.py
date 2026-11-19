@@ -19,7 +19,7 @@ from .proxy import hide_http_proxy, stream_proxy
 
 MPV_OPTIONS = {
     'vo': 'libmpv',
-    'hwdec': 'auto-safe',
+    'hwdec': 'no',
     # A player inside the app: no mpv keys, controls, scripts or config files.
     'input_default_bindings': False,
     'input_vo_keyboard': False,
