@@ -687,3 +687,36 @@ def test_media_info_requests_one_async_snapshot_without_property_reads(engine, m
     assert '${audio-codec:Unavailable}' in template
     assert '${audio-params/samplerate:Unavailable}' in template
     assert not mpv.commands
+
+
+@pytest.mark.parametrize('reply', ['pending', 'success', 'failure'])
+def test_begin_shutdown_stops_asynchronously_and_rejects_late_playback(engine, monkeypatch, reply):
+    player, mpv, seen = engine
+    queued = []
+    player.set_handlers(on_playing=lambda: seen.append('playing'), schedule=queued.append)
+    player.play('http://example.test/stream')
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    pending = Future()
+    calls = []
+
+    def command_async(*args):
+        calls.append(args)
+        return pending
+
+    monkeypatch.setattr(mpv, 'command_async', command_async)
+    player.begin_shutdown()
+    player.begin_shutdown()
+    assert calls == [('stop',)]
+    assert not pending.done() and not mpv.commands
+    for callback in queued:
+        callback()
+    player.play('http://example.test/obsolete-stream')
+    mpv.fire(_event(_EventID.PLAYBACK_RESTART))
+    mpv.fire(_event(_EventID.END_FILE, _EndFile.EOF))
+    assert len(mpv.loaded) == 1 and not seen
+    if reply == 'success':
+        pending.set_result(None)
+    elif reply == 'failure':
+        pending.set_exception(RuntimeError('decoder already stopped'))
+    player.close()
+    assert mpv.terminated

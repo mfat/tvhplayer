@@ -499,7 +499,9 @@ class WslcBuiltinSupervisor(QObject):
                 try:
                     self.runtime.stop_owned(name, owner)
                     record.unlink(missing_ok=True)
-                    self.runtime.backup_config()
+                    # Settings live in a persistent Linux volume. Exporting
+                    # them here held every stop/quit open for a large archive
+                    # transfer. Required pre-upgrade backups happen above.
                 except Exception as exc:
                     error = (error + '\n' if error else '') + f'Backend cleanup failed ({name}): {exc}'
             self._completed.emit(error)
@@ -618,8 +620,8 @@ class WslcBuiltinSupervisor(QObject):
 
         Return True if already finished. Otherwise the owner must retain this
         QObject and keep the event loop alive until shutdown_finished arrives.
-        The worker's finally block still stops the owned container and backs
-        up its settings, which can take longer than a short join timeout.
+        The worker's finally block stops the owned container. Its persistent
+        settings volume and existing backups are retained.
         """
         if self._closing:
             return self._thread is None

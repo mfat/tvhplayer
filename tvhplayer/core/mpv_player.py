@@ -71,6 +71,7 @@ class MpvPlayer(Player):
         self._buffer_recorder = None
         # Set by play(); the first picture of that stream reports playback started.
         self._waiting_for_picture = False
+        self._shutting_down = False
         # The proxy goes to mpv per stream, so a local or LAN server is reached directly.
         hide_http_proxy()
         # QApplication sets the numeric locale from the desktop; libmpv refuses anything but C.
@@ -137,6 +138,8 @@ class MpvPlayer(Player):
         self._emit(report)
 
     def play(self, url: str):
+        if self._shutting_down:
+            return
         self._stop_buffer_recording()
         self._stream_serial += 1
         self._configure_timeshift_store()
@@ -429,8 +432,19 @@ class MpvPlayer(Player):
             'Audio channels: ${audio-params/channels:Unavailable}',
         )))
 
+    def begin_shutdown(self):
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        super().begin_shutdown()
+        self._stream_serial += 1
+        self._waiting_for_picture = False
+        if self._mpv is not None:
+            self._mpv.command_async('stop')
+
     def close(self):
         # Quiesce playback first; native callbacks must not reach a closing Qt window.
+        self._shutting_down = True
         self._on_playing = self._on_stopped = self._on_error = None
         self._stop_buffer_recording()
         player = self._mpv

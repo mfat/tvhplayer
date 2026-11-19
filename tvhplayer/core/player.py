@@ -206,5 +206,9 @@ class Player(ABC):
         result.set_result(None)
         return result
 
+    def begin_shutdown(self):
+        """Quiesce playback without waiting; close() releases native resources later."""
+        self._on_playing = self._on_stopped = self._on_error = None
+
     def close(self):
         """Release the engine. The default does nothing."""

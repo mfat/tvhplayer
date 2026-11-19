@@ -1152,6 +1152,8 @@ class TasksPanel(QFrame):
         The server's answer redraws the rows when it arrives. A failed server
         fetch keeps the rows already shown.
         """
+        if getattr(self._host, '_closing', False):
+            return
         if server:
             self._fetch_server_tasks()
         self._redraw()
@@ -1357,6 +1359,9 @@ class TasksPanel(QFrame):
             error = exc
             # Connect again next time; the connection may be broken.
             self._close_backend()
+        if getattr(self._host, '_closing', False):
+            self._close_backend()
+            return
         try:
             self._server_fetched.emit(generation, entries, error)
         except RuntimeError:
@@ -1373,6 +1378,8 @@ class TasksPanel(QFrame):
 
     def _on_server_fetched(self, generation, entries, error):
         self._fetching = False
+        if getattr(self._host, '_closing', False):
+            return
         if generation != self._generation:
             # The server changed while this one was answering.
             self._fetch_server_tasks()
@@ -6877,6 +6884,8 @@ class TVHeadendClient(QMainWindow):
             self.player.show_message(text)
 
     def _on_playback_started(self, casting=False):
+        if self._closing:
+            return
         if self.cast_manager.is_connected and not casting:
             return
         stream = getattr(self, '_stream', None)
@@ -8533,6 +8542,20 @@ class TVHeadendClient(QMainWindow):
             event.ignore()
             return
         self._closing = True
+        # Stop foreground work before waiting for the backend. A queued stream
+        # URL or playback-start callback must not revive it during shutdown.
+        self._play_generation += 1
+        self._play_on_start = False
+        self._playback_active = self._awaiting_playback = False
+        for name in ('hw_check_timer', 'hw_check_late_timer', '_now_next_timer', '_conversion_timer'):
+            timer = getattr(self, name, None)
+            if timer is not None:
+                timer.stop()
+        self.tasks_pane.update_timer.stop()
+        try:
+            self.player.begin_shutdown()
+        except (OSError, RuntimeError) as error:
+            print(f'Debug: Could not request playback shutdown: {error}')
         media_info = getattr(self, '_media_info_dialog', None)
         if media_info is not None:
             media_info.close()
@@ -8564,7 +8587,7 @@ class TVHeadendClient(QMainWindow):
                 self.builtin.shutdown_finished.connect(self._builtin_shutdown_finished)
                 if not self.builtin.shut_down():
                     # Keep Qt and the supervisor alive while its worker stops
-                    # the container and backs up settings. Never join it here.
+                    # the container. Never join it here.
                     event.ignore()
                     return
                 self.builtin.shutdown_finished.disconnect(self._builtin_shutdown_finished)

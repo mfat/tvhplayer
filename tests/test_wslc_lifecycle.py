@@ -160,7 +160,7 @@ def test_image_upgrade_backs_up_config_without_recordings(tmp_path, monkeypatch)
     Path(s.recordings_dir).mkdir()
     (Path(s.recordings_dir) / 'recording.ts').write_bytes(b'keep media')
     s._run()
-    assert runtime.backups == [True, False]
+    assert runtime.backups == [True]
     assert (s.config_dir / 'channels.json').read_text() == 'keep channels'
     assert (Path(s.recordings_dir) / 'recording.ts').read_bytes() == b'keep media'
     assert json.loads((s.config_dir / '.tvhplayer-runtime.json').read_text())['image'] == IMAGE
@@ -238,7 +238,7 @@ def test_shutdown_does_not_call_join(tmp_path, monkeypatch):
     s._completed.emit('')
 
 
-@pytest.mark.parametrize('failure', ['', 'stop', 'backup'])
+@pytest.mark.parametrize('failure', [False, True])
 def test_slow_shutdown_keeps_qt_responsive_and_retains_ownership_until_cleanup(
         tmp_path, monkeypatch, qapp, failure):
     from PyQt6.QtCore import QTimer
@@ -247,20 +247,12 @@ def test_slow_shutdown_keeps_qt_responsive_and_retains_ownership_until_cleanup(
 
     class SlowRuntime(Runtime):
         def stop_owned(self, name, owner):
-            if failure == 'stop':
-                entered.set()
-                if not release.wait(5):
-                    raise WslcError('test cleanup gate timed out')
-                raise WslcError('stop command timed out')
-            super().stop_owned(name, owner)
-
-        def backup_config(self, *, upgrade=False):
             entered.set()
             if not release.wait(5):
                 raise WslcError('test cleanup gate timed out')
-            if failure == 'backup':
-                raise WslcError('backup command timed out')
-            return super().backup_config(upgrade=upgrade)
+            if failure:
+                raise WslcError('stop command timed out')
+            super().stop_owned(name, owner)
 
     runtime = SlowRuntime()
     s = supervisor(tmp_path, monkeypatch, runtime)
@@ -293,12 +285,35 @@ def test_slow_shutdown_keeps_qt_responsive_and_retains_ownership_until_cleanup(
         assert s.status == ('failed' if failure else 'stopped')
         assert bool(s.last_error) == bool(failure)
         # Failed stop leaves the ownership record for recovery on next launch.
-        assert (s.config_dir / 'wslc-owner.json').exists() == (failure == 'stop')
+        assert (s.config_dir / 'wslc-owner.json').exists() == failure
+        assert runtime.backups == []
     finally:
         release.set()
         s.stop()
         worker.join(3)
         qapp.processEvents()
+
+
+@pytest.mark.parametrize('quitting', [False, True])
+def test_stopping_the_container_preserves_settings_without_creating_a_backup(
+        tmp_path, monkeypatch, quitting):
+    runtime = Runtime()
+    s = supervisor(tmp_path, monkeypatch, runtime)
+    s.config_dir.mkdir()
+    storage = s.config_dir / '.tvhplayer-storage'
+    storage.mkdir()
+    snapshot = storage / 'latest.tar.gz'
+    snapshot.write_bytes(b'existing backup')
+    (s.config_dir / 'channels.json').write_text('keep channels')
+    if quitting:
+        s.ready.connect(lambda *_: s.shut_down())
+    s._run()
+    assert s.status == 'stopped' and not s.last_error
+    assert runtime.stops == [runtime.starts[0][:2]]
+    assert runtime.backups == []
+    assert snapshot.read_bytes() == b'existing backup'
+    assert (s.config_dir / 'channels.json').read_text() == 'keep channels'
+    assert not (s.config_dir / 'wslc-owner.json').exists()
 
 
 def test_setup_commands_are_explicit_fixed_actions():

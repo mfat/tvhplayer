@@ -138,7 +138,7 @@ def test_backups_use_live_native_data_and_retain_previous(tmp_path):
     assert s.latest.read_bytes() == current
 
 
-def test_shutdown_backup_ignores_startup_cancellation(tmp_path):
+def test_explicit_backup_ignores_startup_cancellation(tmp_path):
     s, runtime = storage(tmp_path)
     s.prepare()
     runtime.cancel.set()

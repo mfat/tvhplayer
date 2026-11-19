@@ -245,6 +245,10 @@ class _FakePlayer:
     def log_stats(self):
         return None
 
+    def begin_shutdown(self):
+        self._playing = False
+        self._on_playing = self._on_stopped = self._on_error = None
+
     def close(self):
         self._playing = False
 
@@ -5675,11 +5679,26 @@ def test_close_waits_asynchronously_for_windows_backend_cleanup(
     quits = []
     monkeypatch.setattr(app, '_tvhplayer_instance', object() if primary_instance else None, raising=False)
     monkeypatch.setattr(app, 'quit', lambda: quits.append(True))
+    window._on_playback_started()
+    assert window.hw_check_timer.isActive() and window.hw_check_late_timer.isActive()
+    assert window.tasks_pane.update_timer.isActive()
+    tasks = []
+    monkeypatch.setattr(window.tasks_pane, '_fetch_server_tasks', lambda: tasks.append('fetch'))
+    monkeypatch.setattr(window.tasks_pane, '_redraw', lambda: tasks.append('redraw'))
     window.show()
     try:
         assert not window.close()
         assert window._closing and supervisor._cancel.is_set()
         assert not closed and not quits
+        assert not player._playing and not window._playback_active
+        assert not window.hw_check_timer.isActive() and not window.hw_check_late_timer.isActive()
+        assert not window.tasks_pane.update_timer.isActive()
+        # Already-queued timer and server results cannot restart work while
+        # the supervisor is still stopping its container.
+        window._on_playback_started()
+        window.tasks_pane.refresh()
+        window.tasks_pane._on_server_fetched(window.tasks_pane._generation, [], None)
+        assert not tasks and not window.hw_check_timer.isActive()
         assert not window.close()  # Repeated close cannot bypass pending cleanup.
         pulses = []
         QTimer.singleShot(0, lambda: pulses.append(True))
@@ -5696,6 +5715,31 @@ def test_close_waits_asynchronously_for_windows_backend_cleanup(
     finally:
         if supervisor._thread is not None:
             supervisor._completed.emit('')
+        window.close()
+        app.processEvents()
+
+
+def test_late_tasks_read_closes_its_backend_on_the_worker_during_quit(monkeypatch, tmp_path):
+    import threading
+
+    app, ui, window, player = _make_background_player(monkeypatch, tmp_path)
+    panel = window.tasks_pane
+    closed, delivered = [], []
+    panel._backend_key = []
+    panel._backend = types.SimpleNamespace(
+        list_dvr_entries=lambda: [], close=lambda: closed.append(threading.current_thread()))
+    panel._server_fetched.connect(lambda *_: delivered.append(True))
+    window._closing = True
+    worker = threading.Thread(target=panel._read_server_entries, args=(panel._generation, {}), daemon=True)
+    try:
+        worker.start()
+        worker.join(2)
+        assert not worker.is_alive()
+        app.processEvents()
+        assert closed == [worker] and not delivered
+        assert panel._backend is None
+    finally:
+        window._closing = False
         window.close()
         app.processEvents()
 
