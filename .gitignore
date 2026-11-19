@@ -6,6 +6,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+# Local pytest basetemp directories and captured test logs
+/artifacts/
 
 # Debian package build output
 /debian/tvhplayer/
