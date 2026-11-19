@@ -509,8 +509,9 @@ class WslcBuiltinSupervisor(QObject):
             raise WslcError(str(exc)) from exc
         if len(servers) > 3:
             self._emit_log(
-                'The built-in server uses the first three DNS servers. '
-                'The additional server is after those and may not be asked.\n')
+                'The configured DNS server is first. The container resolver uses only '
+                'the first three DNS servers; later inherited Windows DNS servers '
+                'may not be consulted.\n')
         return servers
 
     @staticmethod
