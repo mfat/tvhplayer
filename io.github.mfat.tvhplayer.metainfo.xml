@@ -46,7 +46,7 @@
     <release version="4.7.6" date="2026-11-19">
       <description>
         <ul>
-          <li>Added more limpv decoder options</li>
+          <li>Added more libmpv decoder options</li>
           <li>Added custom DNS settings</li>
           <li>Fixed XMLTV guide imports into the Windows WSLc container</li>
           <li>Bug fixes and improvements</li>
